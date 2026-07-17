@@ -11,7 +11,6 @@ export interface RunnerCapacity {
 
 export interface RunnerActiveWorkIssueRef {
   projectId: string
-  issueId: string
   issueNumber: number
 }
 

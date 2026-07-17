@@ -11,19 +11,19 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Active A", status: "in_progress", health: "active"),
-            Issue("issue_2", number: 2, title: "Blocked B", status: "in_progress", health: "blocked"),
-            Issue("issue_3", number: 3, title: "Pending C", status: "backlog", health: "queued"),
+            Issue(number: 1, title: "Active A", status: "in_progress", health: "active"),
+            Issue(number: 2, title: "Blocked B", status: "in_progress", health: "blocked"),
+            Issue(number: 3, title: "Pending C", status: "backlog", health: "queued"),
         };
 
         var progress = EpicProgress.Build(linked);
 
         Assert.Single(progress.ActiveIssues);
-        Assert.Single(progress.ActiveIssues, e => e.Id == "issue_1");
+        Assert.Single(progress.ActiveIssues, e => e.Number == 1);
         Assert.Single(progress.BlockedIssues);
-        Assert.Single(progress.BlockedIssues, e => e.Id == "issue_2");
-        Assert.DoesNotContain(progress.ActiveIssues, e => e.Id == "issue_3");
-        Assert.DoesNotContain(progress.BlockedIssues, e => e.Id == "issue_3");
+        Assert.Single(progress.BlockedIssues, e => e.Number == 2);
+        Assert.DoesNotContain(progress.ActiveIssues, e => e.Number == 3);
+        Assert.DoesNotContain(progress.BlockedIssues, e => e.Number == 3);
     }
 
     [Fact]
@@ -31,20 +31,18 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 11, title: "In flight", status: "in_progress", health: "active"),
-            Issue("issue_2", number: 12, title: "Stuck", status: "in_progress", health: "blocked"),
+            Issue(number: 11, title: "In flight", status: "in_progress", health: "active"),
+            Issue(number: 12, title: "Stuck", status: "in_progress", health: "blocked"),
         };
 
         var progress = EpicProgress.Build(linked);
 
         var active = Assert.Single(progress.ActiveIssues);
-        Assert.Equal("issue_1", active.Id);
         Assert.Equal(11, active.Number);
         Assert.Equal("In flight", active.Title);
         Assert.Equal("active", active.Health);
 
         var blocked = Assert.Single(progress.BlockedIssues);
-        Assert.Equal("issue_2", blocked.Id);
         Assert.Equal(12, blocked.Number);
         Assert.Equal("Stuck", blocked.Title);
         Assert.Equal("blocked", blocked.Health);
@@ -55,15 +53,15 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_low", number: 1, title: "P4 startable", priority: "p4", canStart: true),
-            Issue("issue_high", number: 2, title: "P0 startable", priority: "p0", canStart: true),
-            Issue("issue_mid", number: 3, title: "P2 startable", priority: "p2", canStart: true),
+            Issue(number: 1, title: "P4 startable", priority: "p4", canStart: true),
+            Issue(number: 2, title: "P0 startable", priority: "p0", canStart: true),
+            Issue(number: 3, title: "P2 startable", priority: "p2", canStart: true),
         };
 
         var progress = EpicProgress.Build(linked);
 
         Assert.NotNull(progress.NextIssue);
-        Assert.Equal("issue_high", progress.NextIssue!.Id);
+        Assert.Equal(2, progress.NextIssue!.Number);
         Assert.Null(progress.NextIssueReason);
     }
 
@@ -72,16 +70,16 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_blocked", number: 1, title: "Blocked by #99", priority: "p0",
+            Issue(number: 1, title: "Blocked by #99", priority: "p0",
                 canStart: false, blocker: WaitingFor(99)),
-            Issue("issue_startable", number: 2, title: "Startable P4", priority: "p4",
+            Issue(number: 2, title: "Startable P4", priority: "p4",
                 canStart: true),
         };
 
         var progress = EpicProgress.Build(linked);
 
         Assert.NotNull(progress.NextIssue);
-        Assert.Equal("issue_startable", progress.NextIssue!.Id);
+        Assert.Equal(2, progress.NextIssue!.Number);
         Assert.Null(progress.NextIssueReason);
     }
 
@@ -90,9 +88,9 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_draft", number: 1, title: "Draft issue", priority: "p3",
+            Issue(number: 1, title: "Draft issue", priority: "p3",
                 canStart: false, blocker: new IssueStartBlockerDto.DraftBlocker()),
-            Issue("issue_waiting", number: 2, title: "Waiting issue", priority: "p0",
+            Issue(number: 2, title: "Waiting issue", priority: "p0",
                 canStart: false, blocker: WaitingFor(42)),
         };
 
@@ -108,9 +106,9 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_low_blocker", number: 1, title: "Low pri blocked", priority: "p4",
+            Issue(number: 1, title: "Low pri blocked", priority: "p4",
                 canStart: false, blocker: WaitingFor(7)),
-            Issue("issue_high_blocker", number: 2, title: "High pri blocked", priority: "p0",
+            Issue(number: 2, title: "High pri blocked", priority: "p0",
                 canStart: false, blocker: WaitingFor(8)),
         };
 
@@ -126,8 +124,8 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Done A", status: "done"),
-            Issue("issue_2", number: 2, title: "Done B", status: "done"),
+            Issue(number: 1, title: "Done A", status: "done"),
+            Issue(number: 2, title: "Done B", status: "done"),
         };
 
         var progress = EpicProgress.Build(linked);
@@ -146,8 +144,8 @@ public class EpicProgressBuildSpecs
         // but never counts as delivered.
         var linked = new[]
         {
-            Issue("issue_done", number: 1, title: "Done A", status: "done"),
-            Issue("issue_cancelled", number: 2, title: "Cancelled B", status: "cancelled"),
+            Issue(number: 1, title: "Done A", status: "done"),
+            Issue(number: 2, title: "Cancelled B", status: "cancelled"),
         };
 
         var progress = EpicProgress.Build(linked);
@@ -162,8 +160,8 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Cancelled A", status: "cancelled"),
-            Issue("issue_2", number: 2, title: "Cancelled B", status: "cancelled"),
+            Issue(number: 1, title: "Cancelled A", status: "cancelled"),
+            Issue(number: 2, title: "Cancelled B", status: "cancelled"),
         };
 
         var progress = EpicProgress.Build(linked);
@@ -180,8 +178,8 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Done A", status: "done"),
-            Issue("issue_2", number: 2, title: "Open but blocked", status: "in_progress",
+            Issue(number: 1, title: "Done A", status: "done"),
+            Issue(number: 2, title: "Open but blocked", status: "in_progress",
                 canStart: false, blocker: WaitingFor(99)),
         };
 
@@ -211,8 +209,8 @@ public class EpicProgressBuildSpecs
     {
         var grainPathLinked = new[]
         {
-            Issue("issue_1", number: 1, title: "Done", status: "done"),
-            Issue("issue_2", number: 2, title: "Still in_progress", status: "in_progress", canStart: false),
+            Issue(number: 1, title: "Done", status: "done"),
+            Issue(number: 2, title: "Still in_progress", status: "in_progress", canStart: false),
         };
 
         var progress = EpicProgress.Build(grainPathLinked);
@@ -229,8 +227,8 @@ public class EpicProgressBuildSpecs
         // change readiness — the rule is purely on terminal/open status.
         var grainPathLinked = new[]
         {
-            Issue("issue_1", number: 1, title: "Done A", status: "done"),
-            Issue("issue_2", number: 2, title: "Done B", status: "done"),
+            Issue(number: 1, title: "Done A", status: "done"),
+            Issue(number: 2, title: "Done B", status: "done"),
         };
 
         var progress = EpicProgress.Build(grainPathLinked);
@@ -245,19 +243,19 @@ public class EpicProgressBuildSpecs
     {
         var withoutPrereqs = new[]
         {
-            Issue("issue_1", number: 1, title: "Done A", status: "done"),
-            Issue("issue_2", number: 2, title: "Done B", status: "done"),
+            Issue(number: 1, title: "Done A", status: "done"),
+            Issue(number: 2, title: "Done B", status: "done"),
         };
         var withPrereqs = new[]
         {
-            Issue("issue_1", number: 1, title: "Done A", status: "done",
+            Issue(number: 1, title: "Done A", status: "done",
                 prerequisiteNumbers: [42, 43],
                 externalPrerequisites:
                 [
                     new IssuePrerequisiteRefDto { Number = 42, Title = "External 42", Stage = "in_progress", Status = "active" },
                     new IssuePrerequisiteRefDto { Number = 43, Title = "External 43", Stage = "done", Status = "done" },
                 ]),
-            Issue("issue_2", number: 2, title: "Done B", status: "done",
+            Issue(number: 2, title: "Done B", status: "done",
                 prerequisiteNumbers: [99]),
         };
 
@@ -267,7 +265,7 @@ public class EpicProgressBuildSpecs
         Assert.Equal(baseline.DeliveredCount, withData.DeliveredCount);
         Assert.Equal(baseline.TotalIssueCount, withData.TotalIssueCount);
         Assert.Equal(baseline.ReadyToMarkDone, withData.ReadyToMarkDone);
-        Assert.Equal(baseline.NextIssue?.Id, withData.NextIssue?.Id);
+        Assert.Equal(baseline.NextIssue?.Number, withData.NextIssue?.Number);
         Assert.Equal(baseline.NextIssue?.Number, withData.NextIssue?.Number);
         Assert.Equal(baseline.NextIssue?.Title, withData.NextIssue?.Title);
         Assert.Equal(baseline.NextIssueReason, withData.NextIssueReason);
@@ -275,14 +273,14 @@ public class EpicProgressBuildSpecs
         Assert.Equal(baseline.BlockedIssues.Count, withData.BlockedIssues.Count);
         for (var i = 0; i < baseline.ActiveIssues.Count; i++)
         {
-            Assert.Equal(baseline.ActiveIssues[i].Id, withData.ActiveIssues[i].Id);
+            Assert.Equal(baseline.ActiveIssues[i].Number, withData.ActiveIssues[i].Number);
             Assert.Equal(baseline.ActiveIssues[i].Number, withData.ActiveIssues[i].Number);
             Assert.Equal(baseline.ActiveIssues[i].Title, withData.ActiveIssues[i].Title);
             Assert.Equal(baseline.ActiveIssues[i].Health, withData.ActiveIssues[i].Health);
         }
         for (var i = 0; i < baseline.BlockedIssues.Count; i++)
         {
-            Assert.Equal(baseline.BlockedIssues[i].Id, withData.BlockedIssues[i].Id);
+            Assert.Equal(baseline.BlockedIssues[i].Number, withData.BlockedIssues[i].Number);
             Assert.Equal(baseline.BlockedIssues[i].Number, withData.BlockedIssues[i].Number);
             Assert.Equal(baseline.BlockedIssues[i].Title, withData.BlockedIssues[i].Title);
             Assert.Equal(baseline.BlockedIssues[i].Health, withData.BlockedIssues[i].Health);
@@ -294,14 +292,14 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_low", number: 1, title: "P4 startable", priority: "p4", health: "active", canStart: true,
+            Issue(number: 1, title: "P4 startable", priority: "p4", health: "active", canStart: true,
                 prerequisiteNumbers: [10],
                 externalPrerequisites: [new IssuePrerequisiteRefDto { Number = 10, Title = "Upstream", Stage = "in_progress", Status = "active" }]),
-            Issue("issue_blocked", number: 2, title: "Blocked by #99", priority: "p0", health: "blocked",
+            Issue(number: 2, title: "Blocked by #99", priority: "p0", health: "blocked",
                 canStart: false, blocker: WaitingFor(99),
                 prerequisiteNumbers: [99],
                 externalPrerequisites: [new IssuePrerequisiteRefDto { Number = 99, Title = "Missing", Stage = "", Status = "" }]),
-            Issue("issue_draft", number: 3, title: "Draft", priority: "p2", health: "active",
+            Issue(number: 3, title: "Draft", priority: "p2", health: "active",
                 canStart: false, blocker: new IssueStartBlockerDto.DraftBlocker(),
                 prerequisiteNumbers: [50, 60]),
         };
@@ -311,7 +309,6 @@ public class EpicProgressBuildSpecs
         Assert.Equal(0, progress.DeliveredCount);
         Assert.Equal(3, progress.TotalIssueCount);
         Assert.NotNull(progress.NextIssue);
-        Assert.Equal("issue_low", progress.NextIssue!.Id);
         Assert.Equal(1, progress.NextIssue.Number);
         Assert.Null(progress.NextIssueReason);
         Assert.False(progress.ReadyToMarkDone);
@@ -324,8 +321,8 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_running", number: 1, title: "In progress P0", status: "in_progress", priority: "p0", canStart: true),
-            Issue("issue_next", number: 2, title: "Next P1", priority: "p1", canStart: true),
+            Issue(number: 1, title: "In progress P0", status: "in_progress", priority: "p0", canStart: true),
+            Issue(number: 2, title: "Next P1", priority: "p1", canStart: true),
         };
 
         var progress = EpicProgress.Build(linked);
@@ -334,7 +331,7 @@ public class EpicProgressBuildSpecs
         Assert.NotNull(progress.NextIssueReason);
         Assert.Contains("Waiting for #1 to complete", progress.NextIssueReason!);
         Assert.Single(progress.ActiveIssues);
-        Assert.Equal("issue_running", progress.ActiveIssues[0].Id);
+        Assert.Equal(1, progress.ActiveIssues[0].Number);
     }
 
     [Fact]
@@ -342,9 +339,9 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Done", status: "done"),
-            Issue("issue_2", number: 2, title: "Cancelled", status: "cancelled"),
-            Issue("issue_3", number: 3, title: "Active", status: "in_progress", health: "active"),
+            Issue(number: 1, title: "Done", status: "done"),
+            Issue(number: 2, title: "Cancelled", status: "cancelled"),
+            Issue(number: 3, title: "Active", status: "in_progress", health: "active"),
         };
 
         var progress = EpicProgress.Build(linked);
@@ -352,7 +349,7 @@ public class EpicProgressBuildSpecs
         Assert.Equal(1, progress.DeliveredCount);
         Assert.Equal(3, progress.TotalIssueCount);
         Assert.Single(progress.ActiveIssues);
-        Assert.Equal("issue_3", progress.ActiveIssues[0].Id);
+        Assert.Equal(3, progress.ActiveIssues[0].Number);
         Assert.Null(progress.NextIssue);
     }
 
@@ -361,29 +358,28 @@ public class EpicProgressBuildSpecs
     {
         var linked = new[]
         {
-            Issue("issue_1", number: 1, title: "Backlog active", status: "backlog", health: "active", canStart: true),
-            Issue("issue_2", number: 2, title: "In progress", status: "in_progress", health: "active"),
-            Issue("issue_3", number: 3, title: "Backlog blocked-ish", status: "backlog", health: "blocked"),
+            Issue(number: 1, title: "Backlog active", status: "backlog", health: "active", canStart: true),
+            Issue(number: 2, title: "In progress", status: "in_progress", health: "active"),
+            Issue(number: 3, title: "Backlog blocked-ish", status: "backlog", health: "blocked"),
         };
 
         var progress = EpicProgress.Build(linked);
 
         Assert.Single(progress.ActiveIssues);
-        Assert.Equal("issue_2", progress.ActiveIssues[0].Id);
+        Assert.Equal(2, progress.ActiveIssues[0].Number);
         Assert.Empty(progress.BlockedIssues);
     }
 
     [Fact]
     public void Build_EmptyPrerequisiteFieldsAreTheDefault()
     {
-        var issue = Issue("issue_x", number: 7, title: "Plain", canStart: true);
+        var issue = Issue(number: 7, title: "Plain", canStart: true);
 
         Assert.Empty(issue.PrerequisiteNumbers);
         Assert.Empty(issue.ExternalPrerequisites);
     }
 
     private static LinkedIssueDto Issue(
-        string id,
         int number,
         string title,
         string status = "backlog",
@@ -394,7 +390,6 @@ public class EpicProgressBuildSpecs
         int[]? prerequisiteNumbers = null,
         IReadOnlyList<IssuePrerequisiteRefDto>? externalPrerequisites = null) =>
         new(
-            Id: id,
             Number: number,
             Title: title,
             Status: status,

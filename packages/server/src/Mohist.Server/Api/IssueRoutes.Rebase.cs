@@ -19,11 +19,10 @@ public static partial class IssueRoutes
             int number,
             RebaseRequest? req,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, project.Id, number);
+            var wrId = await ResolveWorkflowRunIdAsync(grains, issuesQuery, project.Id, number);
             if (wrId is null) return ApiResults.NotFound("No workflow run");
 
             var issue = await issuesQuery.GetAsync(project.Id, number);

@@ -23,7 +23,6 @@ public class EpicIdleRenameMigrationSpecs
         {
             setup.Epics.Add(new EpicRow
             {
-                Id = "epic_legacy_active",
                 ProjectId = "project_1",
                 Number = 1,
                 Title = "Legacy active epic",
@@ -73,7 +72,6 @@ public class EpicIdleRenameMigrationSpecs
         {
             setup.Epics.Add(new EpicRow
             {
-                Id = "epic_round_trip",
                 ProjectId = "project_1",
                 Number = 1,
                 Title = "Round trip",

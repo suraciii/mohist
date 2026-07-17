@@ -26,7 +26,8 @@ public class IssueDerivedColumnsSpecs
 
         var issue = new IssueRow
         {
-            IssueId = "issue_001",
+            ProjectId = "proj_1",
+            Number = 1,
             State = """{"projectId":"proj_1","number":1,"title":"Old title","priority":"p2","isDraft":false,"prerequisiteNumbers":[2,3]}"""
         };
         db.Issues.Add(issue);
@@ -35,7 +36,7 @@ public class IssueDerivedColumnsSpecs
         issue.State = """{"projectId":"proj_1","number":1,"title":"New title","priority":"p1","isDraft":true,"prerequisiteNumbers":[4]}""";
         await db.SaveChangesAsync();
 
-        var read = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_001");
+        var read = await db.Issues.AsNoTracking().SingleAsync(i => i.ProjectId == "proj_1" && i.Number == 1);
 
         Assert.Equal("New title", read.Title);
         Assert.Equal("p1", read.Priority);
@@ -60,12 +61,14 @@ public class IssueDerivedColumnsSpecs
 
         var legacyIssue = new IssueRow
         {
-            IssueId = "issue_legacy",
+            ProjectId = "proj_1",
+            Number = 2,
             State = """{"ProjectId":"proj_1","Number":2,"Status":"backlog","Title":"Legacy title","Priority":"P0"}"""
         };
         var sparseIssue = new IssueRow
         {
-            IssueId = "issue_sparse",
+            ProjectId = "proj_1",
+            Number = 3,
             State = """{"projectId":"proj_1","number":3,"status":"backlog"}"""
         };
 
@@ -73,8 +76,8 @@ public class IssueDerivedColumnsSpecs
         db.Issues.Add(sparseIssue);
         await db.SaveChangesAsync();
 
-        var legacyRead = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_legacy");
-        var sparseRead = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_sparse");
+        var legacyRead = await db.Issues.AsNoTracking().SingleAsync(i => i.ProjectId == "proj_1" && i.Number == 2);
+        var sparseRead = await db.Issues.AsNoTracking().SingleAsync(i => i.ProjectId == "proj_1" && i.Number == 3);
 
         Assert.Equal("Legacy title", legacyRead.Title);
         Assert.Equal("P0", legacyRead.Priority);

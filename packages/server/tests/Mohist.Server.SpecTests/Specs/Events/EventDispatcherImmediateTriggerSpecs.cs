@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -90,7 +91,6 @@ public class EventDispatcherImmediateTriggerSpecs
         // before the reminder cadence elapses. The IssueCreated event
         // type matches the catch-all DispatcherCatchAllHandler
         // subscription (Type = "*").
-        var issueId = $"issue_poke_{Guid.NewGuid():N}";
         var beforeCatchAll = 0;
         lock (_fixture.CatchAllInvocations)
             beforeCatchAll = _fixture.CatchAllInvocations.Count;
@@ -98,8 +98,11 @@ public class EventDispatcherImmediateTriggerSpecs
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
             var issueStore = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Data.Issue.IIssueStore>();
-            var issue = BuildIssue(issueId);
-            await issueStore.SaveAsync(issue.Id, issue, [new IssueCreated("poke", "p2", new Dictionary<string, string>(), null, null)]);
+            var issue = BuildIssue();
+            await issueStore.SaveAsync(
+                GrainKey.Issue(new IssueKey(issue.ProjectId, issue.Number)),
+                issue,
+                [new IssueCreated("poke", "p2", new Dictionary<string, string>(), null, null)]);
         }
 
         await TestWait.ForAsync(
@@ -238,21 +241,18 @@ public class EventDispatcherImmediateTriggerSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: EventTime,
-                Annotations: issueId is null
-                    ? null
-                    : new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = "proj_poke",
-                        ["issueId"] = issueId,
-                        ["issueNumber"] = "1",
-                    }),
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = "proj_poke",
+                    ["issueId"] = issueId ?? string.Empty,
+                    ["issueNumber"] = issueId is null ? string.Empty : "1",
+                }),
             Stages = [],
         };
     }
 
-    private static Mohist.Server.Issue.Domain.Issue BuildIssue(string id) => new()
+    private static Mohist.Server.Issue.Domain.Issue BuildIssue() => new()
     {
-        Id = id,
         ProjectId = "proj_poke",
         Number = 1,
         Title = "Immediate trigger poke",
@@ -266,6 +266,11 @@ public class EventDispatcherImmediateTriggerSpecs
             Id = id,
             Runtime = new Mohist.Server.Sessions.Domain.AgentSessionRuntime("runner-1", null),
             Settings = new Mohist.Server.Sessions.Domain.AgentSessionSettings("opencode"),
+            Metadata = new Mohist.Server.Sessions.Domain.AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [Mohist.Server.Sessions.Services.AgentSessionQueryMetadataKeys.ProjectId] = "proj_poke",
+                }),
         };
         session.Status = session.Status with
         {

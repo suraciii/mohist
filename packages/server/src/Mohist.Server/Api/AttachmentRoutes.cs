@@ -68,7 +68,7 @@ public static class AttachmentRoutes
 
             try
             {
-                var content = await attachments.OpenIssueContentAsync(project.Id, issue.Id, attachmentId, ctx.RequestAborted);
+                var content = await attachments.OpenIssueContentAsync(project.Id, number, attachmentId, ctx.RequestAborted);
                 return content is null ? ApiResults.NotFound("Attachment not found") : StreamAttachment(ctx, content);
             }
             catch (AttachmentNotFoundException)
@@ -114,14 +114,13 @@ public static class AttachmentRoutes
             int number,
             string attachmentId,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             AttachmentService attachments) =>
         {
             var project = IssueRoutes.GetRequiredProject(ctx);
             var issue = await issuesQuery.GetDomainAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-            var grain = await IssueRoutes.GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await IssueRoutes.GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
 
             try

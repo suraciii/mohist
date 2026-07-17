@@ -27,7 +27,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 14,
     title: 'Control workspace test',
     body: 'Long body that should remain in reading-flow below the control region.',
@@ -42,7 +41,6 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
     comments: [
       {
         id: 'c1',
-        issueId: 'issue-1',
         author: 'tester',
         body: 'A reviewer comment that must remain below the control region.',
         createdAt: '2026-01-02T00:00:00Z',
@@ -53,7 +51,7 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
     blocker: null,
     model: 'sonnet',
     prerequisites: [
-      { number: 9, title: 'Prerequisite issue', completed: true, issueId: 'prereq-9', status: 'done', health: 'done' },
+      { number: 9, title: 'Prerequisite issue', completed: true, status: 'done', health: 'done' },
     ],
     repository: {
       name: 'master',

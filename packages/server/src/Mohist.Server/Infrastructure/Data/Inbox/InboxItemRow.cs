@@ -4,7 +4,6 @@ public class InboxItemRow
 {
     public string Id { get; set; } = null!;
     public string ProjectId { get; set; } = null!;
-    public string IssueId { get; set; } = null!;
     public int IssueNumber { get; set; }
     public string IssueTitle { get; set; } = string.Empty;
     public string NotificationKind { get; set; } = null!;

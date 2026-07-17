@@ -5,7 +5,6 @@ namespace Mohist.Server.Issue.Domain;
 public sealed partial class Issue
 {
     public static Issue Create(
-        string id,
         string projectId,
         int number,
         string title,
@@ -21,7 +20,6 @@ public sealed partial class Issue
         var createdAt = now ?? DateTime.UtcNow;
         var issue = new Issue
         {
-            Id = id,
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -166,6 +164,30 @@ public sealed partial class Issue
         if (_workflowRunId != workflowRunId) return;
         _workflowRunId = null;
         Touch(now);
+    }
+
+    public bool AssignEpic(int epicNumber, DateTime? now = null)
+    {
+        if (epicNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(epicNumber));
+        return ChangeEpic(epicNumber, now);
+    }
+
+    public bool RemoveEpic(int expectedEpicNumber, DateTime? now = null)
+    {
+        if (expectedEpicNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedEpicNumber));
+        return _epicNumber == expectedEpicNumber && ChangeEpic(null, now);
+    }
+
+    private bool ChangeEpic(int? epicNumber, DateTime? now)
+    {
+        if (_epicNumber == epicNumber) return false;
+        var previous = _epicNumber;
+        _epicNumber = epicNumber;
+        Touch(now);
+        RecordEvent(new IssueEpicChanged(previous, epicNumber));
+        return true;
     }
 
     public bool Complete(string workflowRunId, DateTime? now = null)

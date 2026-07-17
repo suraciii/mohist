@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
@@ -34,10 +35,14 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        await workflow.RefreshIssueContextAsync(new WorkflowIssueContext(
+            TestProjectId(work.WorkflowRunId),
+            TestIssueNumber(work.WorkflowRunId),
+            1));
 
         await ReportAsync(runnerId, work.WorkId, new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         var status = await workflow.GetRunStatusAsync();
         Assert.Equal("Completed", status);
 
@@ -48,6 +53,42 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Single(artifacts);
         Assert.Equal("review.md", artifacts[0].Path);
         Assert.Equal("task-1.1", artifacts[0].TaskRunId);
+
+        var events = (await EventStore.ListAsync(work.WorkflowRunId)).ToList();
+        var artifactIndex = events.FindIndex(entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowArtifactRecorded);
+        var completedIndex = events.FindIndex(entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.TaskCompleted);
+        Assert.True(artifactIndex >= 0);
+        Assert.True(completedIndex > artifactIndex);
+        Assert.Equal(work.WorkflowRunId, events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
+        Assert.Equal(TestProjectId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal(TestIssueNumber(work.WorkflowRunId).ToString(), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal("1", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        Assert.False(events[artifactIndex].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RefreshIssueContextAsync_OverwritesTheCurrentEpicWithoutARevision()
+    {
+        await StartWorkflowAsync(SingleStage(tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")], checks: []));
+        var (work, _) = await PollWorkAnyAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var context = new WorkflowIssueContext(
+            TestProjectId(work.WorkflowRunId),
+            TestIssueNumber(work.WorkflowRunId),
+            1);
+        await workflow.RefreshIssueContextAsync(context);
+        await workflow.RefreshIssueContextAsync(context with { EpicNumber = 2 });
+        await workflow.RefreshIssueContextAsync(context with { EpicNumber = 2 });
+
+        await workflow.PauseAsync("lineage assertion");
+
+        var paused = Assert.Single((await EventStore.ListAsync(work.WorkflowRunId)), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunPaused);
+        Assert.Equal("2", paused.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -99,7 +99,6 @@ function makeSessionDetail(turns: SessionTurn[]): CoderSessionDetail {
     title: 'Test Session',
     metadata: {
       sessionId: 'session-1',
-      issueId: 'issue-1',
       runtimeSessionId: 'acp-1',
       executionId: 'exec-1',
       title: 'Test Session',

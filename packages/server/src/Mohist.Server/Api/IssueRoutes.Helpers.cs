@@ -18,12 +18,14 @@ public static partial class IssueRoutes
 {
     internal static async Task<IIssueGrain?> GetIssueGrainAsync(
         IGrainFactory grains,
-        IssueIdentityResolver issueIdentityResolver,
+        IssueQuerier issuesQuery,
         string projectId,
         int number)
     {
-        var issueId = await issueIdentityResolver.GetIdAsync(projectId, number);
-        return issueId is null ? null : grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var issue = await issuesQuery.GetAsync(projectId, number);
+        return issue is null
+            ? null
+            : grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
     }
 
     /// <summary>
@@ -74,7 +76,6 @@ public static partial class IssueRoutes
 
     internal static async Task<string?> ResolveWorkflowRunIdAsync(
         IGrainFactory grains,
-        IssueIdentityResolver issueIdentityResolver,
         IssueQuerier issuesQuery,
         string projectId,
         int number)
@@ -83,7 +84,7 @@ public static partial class IssueRoutes
         if (!string.IsNullOrWhiteSpace(wrId))
             return wrId;
 
-        var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, projectId, number);
+        var grain = await GetIssueGrainAsync(grains, issuesQuery, projectId, number);
         return grain is null ? null : (await grain.GetWorkflowStatusAsync())?.WorkflowRunId;
     }
 
@@ -106,7 +107,7 @@ public static partial class IssueRoutes
 
         try
         {
-            await issueProfileManager.UpdateTemplateAsync(issue.Id, new IssueTemplateUpdateRequest(
+            await issueProfileManager.UpdateTemplateAsync(projectId, number, new IssueTemplateUpdateRequest(
                 ProjectTemplateId: req.ProjectTemplateId,
                 Template: yaml));
         }
@@ -176,7 +177,7 @@ public static partial class IssueRoutes
         var info = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
         if (info is null) return null;
 
-        var state = await issueProfileManager.GetStateAsync(info.Id);
+        var state = await issueProfileManager.GetStateAsync(projectId, number);
         var variables = state.Variables;
         var template = state.Template;
         var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
@@ -197,7 +198,6 @@ public static partial class IssueRoutes
         return new IssueWorkflowProfileResponse(
             IssueNumber: number,
             ProjectId: projectId,
-            IssueId: info.Id,
             SourceTemplateId: state.SourceTemplateId,
             HasCustomTemplate: state.HasCustomTemplate,
             Yaml: yaml,

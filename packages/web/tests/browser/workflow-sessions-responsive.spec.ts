@@ -21,7 +21,6 @@ function apiResponse(data: unknown) {
 
 function makeIssue() {
   return {
-    id: 'issue-responsive',
     number: issueNumber,
     title: 'Session row responsive layout',
     body: 'Verify the real workflow sessions panel at narrow widths.',

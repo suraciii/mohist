@@ -13,7 +13,7 @@ import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let approveRequests: string[] = []
-let feedbackRequests: Array<{ issueNumber: string; stage: string; body: string }> = []
+let feedbackRequests: Array<{ issueNumber: number; stage: string; body: string }> = []
 let artifactRequests: string[] = []
 let timelineRequests: string[] = []
 let timelineData: WorkflowTimeline | null | undefined
@@ -27,7 +27,6 @@ useMswServer(
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Implement workflow naming',
     body: '',
@@ -55,7 +54,7 @@ const requestChangesHook: StepListDependencies['requestChangesHook'] = () =>
   useMutation<ApprovalFeedback, Error, { issueNumber: number; data: { stage: string; body: string } }>({
     mutationFn: async ({ issueNumber, data }) => {
       feedbackRequests.push({
-        issueNumber: String(issueNumber),
+        issueNumber,
         stage: data.stage,
         body: data.body,
       })
@@ -454,7 +453,7 @@ describe('WorkflowView', () => {
 
       await waitFor(() => {
         expect(feedbackRequests).toEqual([{
-          issueNumber: '1',
+          issueNumber: 1,
           stage: 'plan',
           body: 'Please address the security findings',
         }])

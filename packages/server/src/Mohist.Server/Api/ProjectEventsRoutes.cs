@@ -72,6 +72,7 @@ public sealed record ProjectEventDto(
     JsonElement Data,
     string? RunnerId,
     int? IssueNumber,
+    int? EpicNumber,
     string? SessionSourceKind,
     string? WorkflowRunId,
     string? AgentId,
@@ -93,6 +94,7 @@ public sealed record ProjectEventDto(
             ActivityData(envelope.Data),
             envelope.RunnerId,
             envelope.IssueNumber,
+            envelope.EpicNumber,
             envelope.SessionSourceKind,
             envelope.WorkflowRunId,
             envelope.AgentId,
@@ -101,7 +103,7 @@ public sealed record ProjectEventDto(
     private static readonly HashSet<string> ActivityDataFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "agentId", "agentName", "checkName", "failureCategory",
-        "failureReason", "issueNo", "issueNumber", "issue_number", "message", "reason",
+        "failureReason", "issueNumber", "message", "reason",
         "runnerId", "sessionId", "stage", "stageName", "status", "taskId", "title",
     };
 

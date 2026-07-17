@@ -5,7 +5,6 @@ namespace Mohist.Server.Epic.Domain;
 public sealed partial class Epic
 {
     public static Epic Create(
-        string id,
         string projectId,
         int number,
         string title,
@@ -18,7 +17,6 @@ public sealed partial class Epic
         var resolvedDescription = description ?? "";
         var epic = new Epic
         {
-            Id = id,
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -75,7 +73,7 @@ public sealed partial class Epic
         EnsureNotTerminal(EpicStatus.Running);
         if (_status is EpicStatus.Running) return;
         if (_status is not EpicStatus.Idle)
-            throw new EpicStartRequiresIdleException(Id, EpicStatusName.ToName(_status));
+            throw new EpicStartRequiresIdleException(Number, EpicStatusName.ToName(_status));
         var oldStatus = _status;
         _status = EpicStatus.Running;
         Touch(now);
@@ -87,7 +85,7 @@ public sealed partial class Epic
         EnsureNotTerminal(EpicStatus.Paused);
         if (_status is EpicStatus.Paused) return;
         if (_status is not EpicStatus.Running)
-            throw new EpicPauseRequiresRunningException(Id, EpicStatusName.ToName(_status));
+            throw new EpicPauseRequiresRunningException(Number, EpicStatusName.ToName(_status));
         var oldStatus = _status;
         _status = EpicStatus.Paused;
         _pauseReason = reason;
@@ -100,7 +98,7 @@ public sealed partial class Epic
         EnsureNotTerminal(EpicStatus.Running);
         if (_status is EpicStatus.Running) return;
         if (_status is not EpicStatus.Paused)
-            throw new EpicResumeRequiresPausedException(Id, EpicStatusName.ToName(_status));
+            throw new EpicResumeRequiresPausedException(Number, EpicStatusName.ToName(_status));
         var oldStatus = _status;
         _status = EpicStatus.Running;
         _pauseReason = null;
@@ -111,10 +109,10 @@ public sealed partial class Epic
     public void MarkDone(IReadOnlySet<int> openLinkedNumbers, DateTime? now = null)
     {
         if (_status is EpicStatus.Paused)
-            throw new EpicPausedCannotMarkDoneException(Id);
+            throw new EpicPausedCannotMarkDoneException(Number);
         EnsureNotTerminal(EpicStatus.Done);
         if (openLinkedNumbers.Count > 0)
-            throw new EpicNotReadyToMarkDoneException(Id, openLinkedNumbers.Count);
+            throw new EpicNotReadyToMarkDoneException(Number, openLinkedNumbers.Count);
         var oldStatus = _status;
         _status = EpicStatus.Done;
         Touch(now);
@@ -134,7 +132,7 @@ public sealed partial class Epic
     public void Reopen(DateTime? now = null)
     {
         if (_status is not (EpicStatus.Done or EpicStatus.Closed))
-            throw new EpicNotTerminalException(Id, EpicStatusName.ToName(_status));
+            throw new EpicNotTerminalException(Number, EpicStatusName.ToName(_status));
         var oldStatus = _status;
         _status = EpicStatus.Idle;
         _pauseReason = null;
@@ -153,32 +151,10 @@ public sealed partial class Epic
         RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
-    public void LinkIssue(string issueId, int issueNumber, DateTime? now = null)
-    {
-        if (string.IsNullOrWhiteSpace(issueId))
-            throw new ArgumentException("Issue id is required", nameof(issueId));
-        if (_status is EpicStatus.Closed)
-            throw new EpicClosedCannotLinkException(Id);
-        if (_linkedIssueNumbers.ContainsKey(issueId)) return;
-        if (_linkedIssueNumbers.ContainsValue(issueNumber))
-            throw new EpicDuplicateLinkedIssueException(issueNumber);
-        _linkedIssueNumbers[issueId] = issueNumber;
-        Touch(now);
-        RecordEvent(new EpicIssueLinked(issueId, issueNumber));
-    }
-
-    public void UnlinkIssue(string issueId, DateTime? now = null)
-    {
-        if (!_linkedIssueNumbers.TryGetValue(issueId, out var issueNumber)) return;
-        _linkedIssueNumbers.Remove(issueId);
-        Touch(now);
-        RecordEvent(new EpicIssueUnlinked(issueId, issueNumber));
-    }
-
-    public void RecordStartAttemptFailure(string issueId, int issueNumber, string reason, DateTime? now = null)
+    public void RecordStartAttemptFailure(int issueNumber, string reason, DateTime? now = null)
     {
         Touch(now);
-        RecordEvent(new EpicStartAttemptFailed(issueId, issueNumber, reason));
+        RecordEvent(new EpicStartAttemptFailed(issueNumber, reason));
     }
 
     private void EnsureNotTerminal(EpicStatus requested)

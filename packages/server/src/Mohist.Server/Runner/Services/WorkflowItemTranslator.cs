@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
@@ -106,7 +107,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
             AgentJobId: null,
             Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null,
-            RecoveryRemaining: item.RecoveryRemaining);
+            RecoveryRemaining: item.RecoveryRemaining,
+            EpicNumber: ReadEpicNumber(run));
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -157,7 +159,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Title: "Stage checks",
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
-            AgentJobId: null);
+            AgentJobId: null,
+            EpicNumber: ReadEpicNumber(run));
     }
 
     private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
@@ -291,6 +294,20 @@ public sealed class WorkflowItemTranslator : IScopedService
         return run.Metadata?.Annotations?.TryGetValue(key, out value!) == true;
     }
 
+    private static int? ReadIssueNumber(WorkflowRun run) =>
+        TryGetAnnotation(run, "issueNumber", out var raw)
+        && int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+        && number > 0
+            ? number
+            : null;
+
+    private static int? ReadEpicNumber(WorkflowRun run) =>
+        TryGetAnnotation(run, "epicNumber", out var raw)
+        && int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+        && number > 0
+            ? number
+            : null;
+
     private static TaskRun? FindFailedTask(WorkflowRun run, string taskId)
     {
         foreach (var stage in run.Stages)
@@ -343,7 +360,7 @@ public sealed class WorkflowItemTranslator : IScopedService
                 item.Artifacts,
                 variables: await ResolveBindVariablesAsync(workflowRunId, run, item.Stage),
                 projectId: run.Metadata?.Annotations?.GetValueOrDefault("projectId"),
-                issueId: run.Metadata?.Annotations?.GetValueOrDefault("issueId"));
+                issueNumber: ReadIssueNumber(run));
 
             if (!bindResult.IsSuccess)
             {

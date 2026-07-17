@@ -17,11 +17,10 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
@@ -33,11 +32,10 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
@@ -50,11 +48,10 @@ public static partial class IssueRoutes
             int number,
             RejectRequest? req,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             if (string.IsNullOrWhiteSpace(req?.Message))
@@ -68,11 +65,10 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
@@ -84,20 +80,19 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             try
             {
-                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
                 if (control.Result is not null) return control.Result;
                 var wrId = control.WorkflowRunId!;
                 await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
             }
             catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issueIdentityResolver, project.Id, number);
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issuesQuery, project.Id, number);
             }
             return ApiResults.Ok();
         });
@@ -108,7 +103,6 @@ public static partial class IssueRoutes
             int number,
             RerunFromStageRequest? req,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
@@ -116,7 +110,7 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("Stage is required for rerun-from-stage");
             try
             {
-                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.RetryOrRerun);
                 if (control.Result is not null) return control.Result;
                 var wrId = control.WorkflowRunId!;
                 var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
@@ -132,7 +126,7 @@ public static partial class IssueRoutes
             }
             catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issueIdentityResolver, project.Id, number);
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issuesQuery, project.Id, number);
             }
             return ApiResults.Ok();
         });
@@ -144,11 +138,10 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-force-stop");
@@ -162,11 +155,10 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             try
@@ -185,7 +177,6 @@ public static partial class IssueRoutes
         string projectId,
         int number,
         IssueQuerier issuesQuery,
-        IssueIdentityResolver issueIdentityResolver,
         IGrainFactory grains,
         WorkflowControlAction action)
     {
@@ -195,7 +186,7 @@ public static partial class IssueRoutes
         if (issue.Status is not "in_progress" and not "in-progress")
             return new(null, ApiResults.Conflict("Workflow is not active for this issue"));
 
-        var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, projectId, number);
+        var issueGrain = await GetIssueGrainAsync(grains, issuesQuery, projectId, number);
         if (issueGrain is null) return new(null, ApiResults.NotFound($"Issue #{number} not found"));
 
         var workflow = await issueGrain.GetWorkflowStatusAsync();

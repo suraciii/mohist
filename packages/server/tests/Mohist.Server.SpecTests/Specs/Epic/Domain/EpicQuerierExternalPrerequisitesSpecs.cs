@@ -110,7 +110,6 @@ public class EpicQuerierExternalPrerequisitesSpecs
         int[]? prerequisiteNumbers = null) =>
         new()
         {
-            Id = $"issue_{number}",
             Number = number,
             Title = title,
             Status = status,

@@ -487,11 +487,10 @@ public class CliRunnerCommandSpecs
         };
     }
 
-    private static object IssueRef(int issueNumber, string projectId = "proj_test", string? issueId = null) =>
+    private static object IssueRef(int issueNumber, string projectId = "proj_test") =>
         new
         {
             projectId,
-            issueId = issueId ?? $"issue_{issueNumber:000}",
             issueNumber,
         };
 

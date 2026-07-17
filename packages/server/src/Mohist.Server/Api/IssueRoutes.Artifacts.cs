@@ -18,13 +18,12 @@ public static partial class IssueRoutes
             bool? history,
             string? taskRunId,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             IWorkflowArtifactQuerier artifactsQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, project.Id, number);
+            var wrId = await ResolveWorkflowRunIdAsync(grains, issuesQuery, project.Id, number);
             if (wrId is null)
                 return ApiResults.Ok(Array.Empty<WorkflowArtifactDto>());
 
@@ -61,14 +60,13 @@ public static partial class IssueRoutes
             string artifactId,
             string? file,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             IWorkflowArtifactQuerier artifactsQuery,
             IWorkflowArtifactStorage storage) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, project.Id, number);
+            var wrId = await ResolveWorkflowRunIdAsync(grains, issuesQuery, project.Id, number);
             if (wrId is null)
                 return ApiResults.NotFound($"Issue #{number} has no workflow run");
 

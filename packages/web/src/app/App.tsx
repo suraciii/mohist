@@ -77,7 +77,7 @@ export function AppContent() {
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="archived" element={<ArchivedPage />} />
                 <Route path="epics" element={<EpicListPage />} />
-                <Route path="epics/:id" element={<EpicDetailPage />} />
+                <Route path="epics/:number" element={<EpicDetailPage />} />
                 <Route path="inbox" element={<InboxPage />} />
                 <Route path="insights" element={<InsightsPage />} />
                 <Route path="runners/:runnerId" element={<RunnerDetailPage />} />

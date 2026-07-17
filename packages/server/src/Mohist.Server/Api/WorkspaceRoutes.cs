@@ -269,7 +269,7 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(pid, number)));
             var workflow = await grain.GetWorkflowStatusAsync();
             if (IsWorkflowActive(workflow))
             {

@@ -22,7 +22,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
 
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
     return {
-      id: 'epic-12345678',
+      projectId: 'proj-1',
       number: 26,
       title: 'Epic title',
       description: LONG_DESCRIPTION,
@@ -172,10 +172,10 @@ describe('EpicDetailPage summary-first information architecture', () => {
   describe('advancement copy kinds', () => {
     it('renders waiting-for-in-progress copy with nav link to the in-progress issue', async () => {
       mockEpic(makeEpic({
-        progress: { deliveredCount: 0, totalIssueCount: 2, blockedIssues: [], activeIssues: [{ id: 'issue-2', number: 2, title: 'Active', health: 'active' }], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
+        progress: { deliveredCount: 0, totalIssueCount: 2, blockedIssues: [], activeIssues: [{ number: 2, title: 'Active', health: 'active' }], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Backlog', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: true, startBlocker: null }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Active', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1', canStart: false }),
+          linkedIssue({ number: 1, title: 'Backlog', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: true, startBlocker: null }),
+          linkedIssue({ number: 2, title: 'Active', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1', canStart: false }),
         ],
       }))
       await renderPageReady()
@@ -191,7 +191,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
         status: EpicStatus.Idle,
         progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-8', number: 8, title: 'Draft candidate', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'draft' } }),
+          linkedIssue({ number: 8, title: 'Draft candidate', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'draft' } }),
         ],
       }))
       await renderPageReady()
@@ -209,7 +209,6 @@ describe('EpicDetailPage summary-first information architecture', () => {
         progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
           linkedIssue({
-            id: 'issue-9',
             number: 9,
             title: 'Blocked by externals',
             status: IssueStatus.Backlog,
@@ -241,7 +240,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
         status: EpicStatus.Running,
         progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Waiting on', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } }),
+          linkedIssue({ number: 1, title: 'Waiting on', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } }),
         ],
       }))
       await renderPageReady()
@@ -255,9 +254,9 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('renders has-next nav link without additional advancement copy when a server-provided next issue exists', async () => {
       mockEpic(makeEpic({
         status: EpicStatus.Idle,
-        progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: { id: 'issue-3', number: 3, title: 'Candidate' }, nextIssueReason: null, readyToMarkDone: false },
+        progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: { number: 3, title: 'Candidate' }, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate' }),
+          linkedIssue({ number: 3, title: 'Candidate' }),
         ],
       }))
       await renderPageReady()
@@ -270,10 +269,9 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('does not render external-blocker copy below a startable next issue with prerequisite metadata', async () => {
       mockEpic(makeEpic({
         status: EpicStatus.Idle,
-        progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: { id: 'issue-3', number: 3, title: 'Candidate' }, nextIssueReason: null, readyToMarkDone: false },
+        progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: { number: 3, title: 'Candidate' }, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
           linkedIssue({
-            id: 'issue-3',
             number: 3,
             title: 'Candidate',
             status: IssueStatus.Backlog,
@@ -296,10 +294,10 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('does not show a lower-priority draft blocker under a server-provided next issue', async () => {
       mockEpic(makeEpic({
         status: EpicStatus.Idle,
-        progress: { deliveredCount: 0, totalIssueCount: 2, blockedIssues: [], activeIssues: [], nextIssue: { id: 'issue-9', number: 9, title: 'Priority candidate' }, nextIssueReason: null, readyToMarkDone: false },
+        progress: { deliveredCount: 0, totalIssueCount: 2, blockedIssues: [], activeIssues: [], nextIssue: { number: 9, title: 'Priority candidate' }, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-4', number: 4, title: 'Older draft', priority: 'p3', canStart: false, startBlocker: { kind: 'draft' } }),
-          linkedIssue({ id: 'issue-9', number: 9, title: 'Priority candidate', priority: 'p0', canStart: true, startBlocker: null }),
+          linkedIssue({ number: 4, title: 'Older draft', priority: 'p3', canStart: false, startBlocker: { kind: 'draft' } }),
+          linkedIssue({ number: 9, title: 'Priority candidate', priority: 'p0', canStart: true, startBlocker: null }),
         ],
       }))
       await renderPageReady()
@@ -317,7 +315,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
         status: EpicStatus.Idle,
         progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Waiting on', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } }),
+          linkedIssue({ number: 1, title: 'Waiting on', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } }),
         ],
       }))
       await renderPageReady()
@@ -344,7 +342,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
         status: EpicStatus.Idle,
         progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-7', number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          linkedIssue({ number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
         ],
       }))
       await renderPageReady()
@@ -360,8 +358,8 @@ describe('EpicDetailPage summary-first information architecture', () => {
         status: EpicStatus.Idle,
         progress: { deliveredCount: 1, totalIssueCount: 2, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
-          linkedIssue({ id: 'issue-7', number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+          linkedIssue({ number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
         ],
       }))
       await renderPageReady()
@@ -378,21 +376,21 @@ describe('EpicDetailPage summary-first information architecture', () => {
           label: 'running-but-idle',
           epic: makeEpic({
             status: EpicStatus.Running,
-            linkedIssues: [linkedIssue({ id: 'i1', number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } })],
+            linkedIssues: [linkedIssue({ number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } } })],
           }),
         },
         {
           label: 'draft-blocker',
           epic: makeEpic({
             status: EpicStatus.Idle,
-            linkedIssues: [linkedIssue({ id: 'i1', number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } })],
+            linkedIssues: [linkedIssue({ number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } })],
           }),
         },
         {
           label: 'external-prerequisite-blocker',
           epic: makeEpic({
             status: EpicStatus.Idle,
-            linkedIssues: [linkedIssue({ id: 'i1', number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: null, externalPrerequisites: [{ number: 99, title: 'X', stage: 'plan', status: 'backlog' }] })],
+            linkedIssues: [linkedIssue({ number: 1, status: IssueStatus.Backlog, canStart: false, startBlocker: null, externalPrerequisites: [{ number: 99, title: 'X', stage: 'plan', status: 'backlog' }] })],
           }),
         },
       ]
@@ -438,8 +436,8 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('keeps the Linked Issues listing reachable with linked-issue nav links and Remove buttons', async () => {
       mockEpic(makeEpic({
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Backlog', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: true, startBlocker: null }),
+          linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ number: 2, title: 'Backlog', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, canStart: true, startBlocker: null }),
         ],
       }))
       await renderPageReady()
@@ -456,7 +454,7 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('keeps the add-issue selector reachable and functional after the summary restructure', async () => {
       mockEpic(makeEpic({
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }))
       await renderPageReady()
@@ -482,8 +480,8 @@ describe('EpicDetailPage summary-first information architecture', () => {
     it('keeps the list/graph toggle reachable when there are 2+ linked issues', async () => {
       mockEpic(makeEpic({
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'A' }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'B', prerequisiteNumbers: [1] }),
+          linkedIssue({ number: 1, title: 'A' }),
+          linkedIssue({ number: 2, title: 'B', prerequisiteNumbers: [1] }),
         ],
       }))
       await renderPageReady()

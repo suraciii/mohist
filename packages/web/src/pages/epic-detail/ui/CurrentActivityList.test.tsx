@@ -10,8 +10,8 @@ import { issues, linkedIssue, renderPage } from './_epicDetailPageTestUtils'
 describe('EpicDetailPage current activity listing', () => {
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
     return {
-      id: 'epic-12345678',
-      number: null,
+      projectId: 'proj-1',
+      number: 7,
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
@@ -21,15 +21,15 @@ describe('EpicDetailPage current activity listing', () => {
       progress: {
         deliveredCount: 0,
         totalIssueCount: 2,
-        blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
-        activeIssues: [{ id: 'issue-1', number: 1, title: 'Active issue', health: 'active' }],
+        blockedIssues: [{ number: 2, title: 'Blocked issue', health: 'blocked' }],
+        activeIssues: [{ number: 1, title: 'Active issue', health: 'active' }],
         nextIssue: null,
         nextIssueReason: null,
         readyToMarkDone: false,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p2' }),
       ],
       ...overrides,
     } as EpicDetail
@@ -68,11 +68,11 @@ describe('EpicDetailPage current activity listing', () => {
           deliveredCount: 0,
           totalIssueCount: 3,
           blockedIssues: [
-            { id: 'issue-3', number: 3, title: 'Stuck issue', health: 'blocked' },
+            { number: 3, title: 'Stuck issue', health: 'blocked' },
           ],
           activeIssues: [
-            { id: 'issue-1', number: 1, title: 'Active issue', health: 'active' },
-            { id: 'issue-2', number: 2, title: 'Another active issue', health: 'active' },
+            { number: 1, title: 'Active issue', health: 'active' },
+            { number: 2, title: 'Another active issue', health: 'active' },
           ],
           nextIssue: null,
           nextIssueReason: null,
@@ -105,7 +105,7 @@ describe('EpicDetailPage current activity listing', () => {
           readyToMarkDone: true,
         },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       issues,

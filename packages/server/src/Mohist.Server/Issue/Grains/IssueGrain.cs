@@ -15,6 +15,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -32,7 +33,6 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
-    private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
@@ -47,7 +47,6 @@ public class IssueGrain : Grain, IIssueGrain
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
-        IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
@@ -61,7 +60,6 @@ public class IssueGrain : Grain, IIssueGrain
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
-        _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
@@ -90,6 +88,30 @@ public class IssueGrain : Grain, IIssueGrain
     {
         DeactivateOnIdle();
         return Task.CompletedTask;
+    }
+
+    public async Task<bool> AssignEpicAsync(int epicNumber)
+    {
+        EnsureIssue();
+        if (!_issue!.AssignEpic(epicNumber)) return false;
+        await SaveIssueAsync();
+        return true;
+    }
+
+    public async Task<bool> RemoveEpicAsync(int expectedEpicNumber)
+    {
+        EnsureIssue();
+        if (!_issue!.RemoveEpic(expectedEpicNumber)) return false;
+        await SaveIssueAsync();
+        return true;
+    }
+
+    public async Task<bool> TryStartFromEpicAsync(int expectedEpicNumber)
+    {
+        EnsureIssue();
+        if (_issue!.EpicNumber != expectedEpicNumber) return false;
+        await StartWorkAsync();
+        return true;
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -149,6 +171,18 @@ public class IssueGrain : Grain, IIssueGrain
         RepositoryInfo repo,
         IReadOnlySet<int>? undeliveredPrerequisites)
     {
+        await PrepareWorkflowStartContextAsync(project, wrId, repo);
+        _issue!.Start(wrId, undeliveredPrerequisites);
+        await SaveIssueAsync();
+        _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
+        return wrId;
+    }
+
+    private async Task PrepareWorkflowStartContextAsync(
+        WorkflowProjectContext? project,
+        string wrId,
+        RepositoryInfo repo)
+    {
         var issue = _issue!;
 
         var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
@@ -165,7 +199,7 @@ public class IssueGrain : Grain, IIssueGrain
         // mohist/local), so the resolver's own fallback handles projects
         // without a configured default.
 
-        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id);
+        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
         var definition = resolvedTemplate.Structure
             ?? throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
 
@@ -206,48 +240,13 @@ public class IssueGrain : Grain, IIssueGrain
             issue,
             projectContext,
             workspace);
-        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.Id);
+        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
-        await _issueProfileManager.SetVariablesAsync(issue.Id, mergedVariables);
+        await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
 
         foreach (var (key, body) in mergedPrompts)
-            await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
+            await _issueProfileManager.SetPromptAsync(issue.ProjectId, issue.Number, key, body);
 
-        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.StartAsync(input:
-            new WorkflowStartInput(
-                Metadata: new WorkflowRunMetadata(
-                    Name: null,
-                    CreatedAt: DateTimeOffset.UtcNow,
-                    Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = projectContext.Id,
-                        ["issueId"] = issue.Id,
-                        ["issueNumber"] = issue.Number.ToString(),
-                    }),
-                Workspace: workspace));
-
-        _issue!.Start(wrId, undeliveredPrerequisites);
-        try
-        {
-            await SaveIssueAsync();
-        }
-        catch
-        {
-            // The workflow run was already committed, but the issue state/event
-            // transaction rolled back. A retry would mint a new wrId and leave
-            // this run orphaned. Compensate by stopping the run so it does not
-            // linger as active work the issue no longer references.
-            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
-            catch (Exception compEx)
-            {
-                _log.LogWarning(compEx,
-                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
-            }
-            throw;
-        }
-        _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
-        return wrId;
     }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
@@ -259,6 +258,12 @@ public class IssueGrain : Grain, IIssueGrain
         try
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            var status = await workflow.GetRunStatusAsync();
+            if (status is null)
+            {
+                _log.LogInformation("Issue {IssueKey} awaits durable workflow start for {WorkflowRunId}", GrainKey, workflowRunId);
+                return workflowRunId;
+            }
             if (await workflow.IsStoppedOrTerminalAsync())
             {
                 issue.ClearStoppedWorkflow(workflowRunId);
@@ -266,14 +271,14 @@ public class IssueGrain : Grain, IIssueGrain
                 return null;
             }
 
-            _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
+            _log.LogInformation("Issue {IssueKey} reusing workflow run {WorkflowRunId}", GrainKey, workflowRunId);
             return workflowRunId;
         }
         catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
         {
             _log.LogWarning(ex,
-                "Issue {IssueId} workflow run {WorkflowRunId} cannot be loaded while starting; clearing workflow run reference",
-                issue.Id,
+                "Issue {IssueKey} workflow run {WorkflowRunId} cannot be loaded while starting; clearing workflow run reference",
+                GrainKey,
                 workflowRunId);
             issue.ClearStoppedWorkflow(workflowRunId);
             await SaveIssueAsync();
@@ -335,7 +340,7 @@ public class IssueGrain : Grain, IIssueGrain
         // the run is not stopped/terminal — a Done or archived issue that
         // preserved its reference is not a running workflow, and Close()
         // already rejects Done/archived itself.
-        // The new WorkflowRunStatus state machine splits the old single
+        // The WorkflowRunStatus state machine splits the old single
         // "running" into Created/Pending/Ready/Running; all four
         // represent a non-terminal, controllable workflow that the user
         // must explicitly stop before closing the issue.
@@ -426,7 +431,7 @@ public class IssueGrain : Grain, IIssueGrain
         var presentAttachmentsNull = hasAttachments && data.AttachmentIds is null;
         if (hasAttachments && !presentAttachmentsNull)
         {
-            await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Id, data.AttachmentIds);
+            await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Number, data.AttachmentIds);
         }
 
         // Workflow profile selection is an execution-template fact: it cannot
@@ -474,11 +479,11 @@ public class IssueGrain : Grain, IIssueGrain
             // Three-state: present-and-null = unbind all attachments. The
             // ValidateBindAsync/BindAsync pair above would be a no-op for an
             // empty id list, so we go through the dedicated clear path.
-            await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Id);
+            await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Number);
         }
         else if (hasAttachments)
         {
-            await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, data.AttachmentIds!);
+            await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Number, data.AttachmentIds!);
         }
     }
 
@@ -495,7 +500,6 @@ public class IssueGrain : Grain, IIssueGrain
         var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
 
         return new IssueWorkflowStatus(
-            _issue.Id,
             _issue.Number,
             _issue.Title,
             projection.IssueStatus,
@@ -506,14 +510,15 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
+    public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
     {
+        var key = ParseIssueKey();
+        EnsureIdentityMatches(key, projectId, number);
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
-        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
-        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
+        var resolvedRef = await ResolveRepositoryRefAsync(key.ProjectId, repositoryRef);
+        await _attachmentService.ValidateIssueBindAsync(key.ProjectId, key.IssueNumber, attachmentIds);
 
         if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
@@ -521,9 +526,8 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         var issue = Domain.Issue.Create(
-            resolvedIssueId,
-            projectId,
-            number,
+            key.ProjectId,
+            key.IssueNumber,
             title,
             body,
             labels,
@@ -553,7 +557,7 @@ public class IssueGrain : Grain, IIssueGrain
             {
                 foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
                 {
-                    if (prerequisiteNumber == number)
+                    if (prerequisiteNumber == key.IssueNumber)
                         throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
                     if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
                         throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
@@ -570,8 +574,8 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
-        return issue.Id;
+        await _attachmentService.BindIssueAsync(key.ProjectId, issue.Number, attachmentIds);
+        return issue.Number;
     }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
@@ -661,7 +665,7 @@ public class IssueGrain : Grain, IIssueGrain
         var pending = _issue.PendingEvents.ToList();
         try
         {
-            await _issueStore.SaveAsync(_issue.Id, _issue, pending);
+            await _issueStore.SaveAsync(GrainKey, _issue, pending);
         }
         catch
         {
@@ -704,9 +708,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null) return null;
         try
         {
-            var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
-            if (issueId is null) return null;
-            var issue = await _issueStore.LoadAsync(issueId);
+            var issue = await _issueStore.LoadAsync(new IssueKey(_issue.ProjectId, issueNumber).ToGrainKeyString());
             return issue is null ? null : IssuePrerequisiteSummary.FromDomain(issue);
         }
         catch (InvalidOperationException)
@@ -742,12 +744,26 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null) return null;
         try
         {
-            var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
-            return issueId is null ? null : await _issueStore.LoadAsync(issueId);
+            return await _issueStore.LoadAsync(new IssueKey(_issue.ProjectId, issueNumber).ToGrainKeyString());
         }
         catch (InvalidOperationException)
         {
             return null;
+        }
+    }
+
+    private IssueKey ParseIssueKey()
+    {
+        ScopedGrainKeyCodec.Parse(GrainKey, out var projectId, out var issueNumber);
+        return new IssueKey(projectId, issueNumber);
+    }
+
+    private static void EnsureIdentityMatches(IssueKey key, string projectId, int number)
+    {
+        if (key.ProjectId != projectId || key.IssueNumber != number)
+        {
+            throw new InvalidOperationException(
+                $"Issue command identity '{projectId}#{number}' does not match grain identity '{key.ProjectId}#{key.IssueNumber}'.");
         }
     }
 
@@ -760,7 +776,6 @@ public class IssueGrain : Grain, IIssueGrain
         {
             Id = $"cmt_{Guid.NewGuid():N}",
             ProjectId = _issue.ProjectId,
-            IssueId = _issue.Id,
             IssueNumber = _issue.Number,
             Body = body,
         };

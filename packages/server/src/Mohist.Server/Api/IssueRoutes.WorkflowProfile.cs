@@ -53,7 +53,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.UpdateTemplateAsync(issue.Id, new IssueTemplateUpdateRequest());
+            await issueProfileManager.UpdateTemplateAsync(project.Id, number, new IssueTemplateUpdateRequest());
             var response = await BuildIssueWorkflowProfileResponseAsync(project.Id, number, issueProfileManager, issuesQuery, projectsQuery);
             return ApiResults.Ok(response!);
         });
@@ -70,7 +70,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(issue.Id));
+            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(project.Id, number));
         });
 
         group.MapPut("/{number:int}/workflow-profile/variables", async (
@@ -86,7 +86,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(issue.Id, bundle));
+            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(project.Id, number, bundle));
         });
 
         group.MapPatch("/{number:int}/workflow-profile/variables", async (
@@ -102,7 +102,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(issue.Id, patch));
+            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(project.Id, number, patch));
         });
 
         group.MapGet("/{number:int}/workflow-profile/prompts", async (
@@ -117,7 +117,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.GetPromptsAsync(issue.Id));
+            return ApiResults.Ok(await issueProfileManager.GetPromptsAsync(project.Id, number));
         });
 
         group.MapPut("/{number:int}/workflow-profile/prompts/{key}", async (
@@ -139,7 +139,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.SetPromptAsync(issue.Id, key, req.Body);
+            await issueProfileManager.SetPromptAsync(project.Id, number, key, req.Body);
             return ApiResults.Ok(new { key, body = req.Body });
         });
 
@@ -159,7 +159,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.DeletePromptAsync(issue.Id, key);
+            await issueProfileManager.DeletePromptAsync(project.Id, number, key);
             return ApiResults.Ok();
         });
 
@@ -177,7 +177,7 @@ public static partial class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            var prompts = await issueProfileManager.GetPromptsAsync(issue.Id);
+            var prompts = await issueProfileManager.GetPromptsAsync(project.Id, number);
             if (!prompts.TryGetValue(key, out var body))
                 return ApiResults.NotFound($"Prompt '{key}' not found");
 
@@ -186,7 +186,7 @@ public static partial class IssueRoutes
                 variables = raw;
             else
             {
-                var configured = await issueProfileManager.GetVariablesAsync(issue.Id);
+                var configured = await issueProfileManager.GetVariablesAsync(project.Id, number);
                 if (configured.Vars.HasValue && configured.Vars.Value.ValueKind == JsonValueKind.Object)
                 {
                     variables = configured.Vars.Value.Clone();
@@ -209,12 +209,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {

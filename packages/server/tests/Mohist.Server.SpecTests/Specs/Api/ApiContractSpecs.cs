@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationApi")]
 public class ApiContractSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -408,7 +408,6 @@ public class ApiContractSpecs
         var issueResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues", new { title = "Needs rebase", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
-        var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
 
         await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{number}/start", new { });
 
@@ -422,7 +421,7 @@ public class ApiContractSpecs
 
         try
         {
-            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId!, number)));
             var issueStatus = await issueGrain.GetWorkflowStatusAsync();
             var wrId = issueStatus!.WorkflowRunId!;
 

@@ -90,48 +90,70 @@ describe('LiveTaskProvider transcript routing', () => {
 })
 
 describe('LiveTaskProvider timeline forwarding', () => {
-  it('builds a TimelineLiveEvent from the CloudEvents envelope (issueNumber, time, eventId from rawData)', () => {
+  it('routes a TimelineLiveEvent by the canonical envelope issue while preserving payload', () => {
     const envelope = {
       id: 'evt-abc-123',
       type: 'com.mohist.workflow.run.started',
       source: '/mohist/test',
       specVersion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42, issueId: 'iss-1' },
+      payload: { issueNumber: 42, },
+      extensions: { issue: '99' },
     }
+    const parsed = __testing__.unwrapEnvelope(envelope)
 
     const event = __testing__.buildTimelineLiveEvent(
       'com.mohist.workflow.run.started',
       envelope,
-      { issueNumber: 42, issueId: 'iss-1' },
+      parsed,
     )
 
-    expect(event.issueNumber).toBe(42)
-    expect(event.issueId).toBe('iss-1')
+    expect(event.issueNumber).toBe(99)
     expect(event.type).toBe('com.mohist.workflow.run.started')
     expect(event.time).toBe('2026-06-18T00:00:00.000Z')
     expect(event.eventId).toBe('evt-abc-123')
-    expect(event.payload).toEqual({ issueNumber: 42, issueId: 'iss-1' })
+    expect(event.payload).toEqual({ issueNumber: 42, })
   })
 
-  it('does not use CloudEvents id as issueId when payload omits issueId', () => {
+  it('takes CloudEvents issue lineage without changing the timeline payload', () => {
+    const envelope = {
+      id: 'evt-issue-lineage',
+      type: 'com.mohist.workflow.run.started',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      time: '2026-06-18T00:00:00.000Z',
+      payload: { stage: 'build' },
+      extensions: { issue: '42' },
+    }
+    const parsed = __testing__.unwrapEnvelope(envelope)
+
+    const event = __testing__.buildTimelineLiveEvent(
+      'com.mohist.workflow.run.started',
+      envelope,
+      parsed,
+    )
+
+    expect(event.issueNumber).toBe(42)
+    expect(event.payload).toEqual({ stage: 'build' })
+  })
+
+  it('does not use the CloudEvents event id as issue context', () => {
     const envelope = {
       id: 'evt-abc-123',
       type: 'com.mohist.workflow.run.started',
       source: '/mohist/test',
       specVersion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42 },
+      payload: { issueNumber: 42, },
     }
 
     const event = __testing__.buildTimelineLiveEvent(
       'com.mohist.workflow.run.started',
       envelope,
-      { issueNumber: 42 },
+      { issueNumber: 42, },
     )
 
     expect(event.issueNumber).toBe(42)
-    expect(event.issueId).toBeNull()
     expect(event.eventId).toBe('evt-abc-123')
   })
 
@@ -165,8 +187,8 @@ describe('LiveTaskProvider timeline forwarding', () => {
 
     const event = __testing__.buildTimelineLiveEvent(
       'rebase_conflict',
-      { id: 'rc-1', payload: { issueNumber: 99 } },
-      { issueNumber: 99 },
+      { id: 'rc-1', payload: { issueNumber: 99, } },
+      { issueNumber: 99, },
     )
     dispatchTimelineEvent(event)
 
@@ -188,7 +210,7 @@ describe('LiveTaskProvider timeline forwarding', () => {
       source: '/mohist/test',
       specVersion: '1.0',
       time: '2026-06-18T00:00:00.000Z',
-      payload: { issueNumber: 42, issueId: 'iss-1' },
+      payload: { issueNumber: 42,},
     }
 
     const event = __testing__.buildTimelineLiveEvent(
@@ -231,7 +253,6 @@ describe('LiveTaskProvider timeline forwarding', () => {
     const handleEvent = eventsConnectionCalls[0][1]
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved, {
-        issueId: 'issue-1',
         issueNumber: 42,
       })
     })

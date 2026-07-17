@@ -8,6 +8,7 @@ public union IssueEvent(
     IssuePrerequisiteAdded,
     IssuePrerequisiteRemoved,
     IssueWorkflowProfileChanged,
+    IssueEpicChanged,
     IssueWorkStarted,
     IssueCompleted,
     IssueCancelled,
@@ -43,6 +44,10 @@ public sealed record IssuePrerequisiteRemoved(
 public sealed record IssueWorkflowProfileChanged(
     string? WorkflowProfileId);
 
+public sealed record IssueEpicChanged(
+    int? PreviousEpicNumber,
+    int? EpicNumber);
+
 public sealed record IssueWorkStarted(
     string WorkflowRunId);
 
@@ -57,4 +62,3 @@ public sealed record IssueArchived;
 public sealed record IssueUnarchived;
 
 public sealed record IssueReopened;
-

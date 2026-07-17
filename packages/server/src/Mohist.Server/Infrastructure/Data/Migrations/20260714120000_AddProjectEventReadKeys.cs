@@ -12,8 +12,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations;
 [Migration("20260714120000_AddProjectEventReadKeys")]
 public partial class AddProjectEventReadKeys : Migration
 {
-    protected override void BuildTargetModel(ModelBuilder modelBuilder) =>
+    protected override void BuildTargetModel(ModelBuilder modelBuilder)
+    {
         MohistDbContextModelSnapshot.BuildModelCore(modelBuilder);
+        modelBuilder.SharedTypeEntity<Dictionary<string, object>>(typeof(IssueEventRow).FullName!)
+            .Ignore(nameof(IssueEventRow.TimelineSource));
+        modelBuilder.SharedTypeEntity<Dictionary<string, object>>(typeof(EpicEventRow).FullName!)
+            .Ignore(nameof(EpicEventRow.TimelineSource));
+    }
 
     protected override void Up(MigrationBuilder migrationBuilder)
     {

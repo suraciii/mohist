@@ -78,8 +78,8 @@ export type WorkDispatchResponse = {
   stage?: string | null
   title?: string | null
   projectId?: string | null
-  issueId?: string | null
   issueNumber?: number | null
+  epicNumber?: number | null
   artifacts?: string | null
   outputs?: string | null
   setVars?: string | null
@@ -146,6 +146,7 @@ export interface RenderedWorkItem {
   variables?: JsonObject | null
   projectId?: string | null
   issueNumber?: number | null
+  epicNumber?: number | null
   artifacts?: JsonObject | null
   outputs?: Array<{ name: string; from: string }> | null
   setVars?: Record<string, string> | null
@@ -199,6 +200,7 @@ export interface ActionContext {
   recovery?: JsonObject | null
   projectId?: string | null
   issueNumber?: number | null
+  epicNumber?: number | null
   ownerKind?: string | null
   agentJobId?: string | null
   agentSessionId?: string | null

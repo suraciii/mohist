@@ -11,7 +11,7 @@ import { EpicDetailPage } from './EpicDetailPage'
 import { createDependencyGraphTestComponents, LocationProbe } from './_epicDetailPageTestUtils'
 import { useMswServer } from '../../../../tests/support/msw'
 
-function linkedIssue(overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>): LinkedIssue {
+function linkedIssue(overrides: Pick<LinkedIssue, 'number'> & Partial<Omit<LinkedIssue, 'number'>>): LinkedIssue {
   return {
     title: 'Issue one',
     status: IssueStatus.Backlog,
@@ -53,49 +53,49 @@ let _updateEpicError: { status: number; error: string } | null = null
 let _addEpicIssueError: { status: number; error: string; code: string; details: unknown } | null = null
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber', () =>
     HttpResponse.json({ success: true, data: _epicData }),
   ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: _issuesData }),
   ),
-  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request, params }) => {
-    const body = await request.json() as { issueId: string }
-    _addEpicIssueHandler({ epicId: params.epicId, issueId: body.issueId })
+  http.post('*/api/projects/:projectId/epics/:epicNumber/issues', async ({ request, params }) => {
+    const body = await request.json() as { issueNumber: number }
+    _addEpicIssueHandler({ epicNumber: Number(params.epicNumber), issueNumber: body.issueNumber })
     if (_addEpicIssueError) {
       return HttpResponse.json(
         { success: false, error: _addEpicIssueError.error, code: _addEpicIssueError.code, details: _addEpicIssueError.details },
         { status: _addEpicIssueError.status },
       )
     }
-    return HttpResponse.json({ success: true, data: { epicId: params.epicId, issueId: body.issueId } })
+    return HttpResponse.json({ success: true, data: { epicNumber: Number(params.epicNumber), issueNumber: body.issueNumber } })
   }),
-  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
-    _removeEpicIssueHandler({ epicId: params.epicId, issueId: params.issueId })
+  http.delete('*/api/projects/:projectId/epics/:epicNumber/issues/:issueNumber', ({ params }) => {
+    _removeEpicIssueHandler({ epicNumber: Number(params.epicNumber), issueNumber: Number(params.issueNumber) })
     return HttpResponse.json({ success: true, data: {} })
   }),
   http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
     _startIssueHandler(Number(params.issueNumber))
     return HttpResponse.json({ success: true, data: { issue: {}, message: '' } })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
-    _startEpicHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/start', ({ params }) => {
+    _startEpicHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
-    _doneHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/done', ({ params }) => {
+    _doneHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/close', ({ params }) => {
-    _closeHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/close', ({ params }) => {
+    _closeHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.patch('*/api/projects/:projectId/epics/:epicId', async ({ request, params }) => {
+  http.patch('*/api/projects/:projectId/epics/:epicNumber', async ({ request, params }) => {
     const body = await request.json() as Record<string, unknown>
-    _updateEpicHandler(params.epicId, body)
+    _updateEpicHandler(Number(params.epicNumber), body)
     if (_blockUpdate) return new Promise(() => {})
     if (_updateEpicError) {
       return HttpResponse.json(
@@ -105,14 +105,14 @@ useMswServer(
     }
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+  http.post('*/api/projects/:projectId/epics/:epicNumber/pause', async ({ request, params }) => {
     let reason: string | null = null
     try { const body = await request.json() as Record<string, unknown>; reason = (body.reason as string) ?? null } catch { /* empty body */ }
-    _pauseHandler({ id: params.epicId, reason })
+    _pauseHandler({ number: Number(params.epicNumber), reason })
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
-    _resumeHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/resume', ({ params }) => {
+    _resumeHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
 )
@@ -124,7 +124,8 @@ const widgetBehavior = {
 const components = createDependencyGraphTestComponents(() => widgetBehavior.mode)
 
 const epic = {
-  id: 'epic-12345678',
+  projectId: 'proj-1',
+  number: 123,
   title: 'Epic title',
   description: 'Epic description',
   priority: 'p1',
@@ -134,22 +135,22 @@ const epic = {
   progress: {
     deliveredCount: 1,
     totalIssueCount: 2,
-    blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+    blockedIssues: [{ number: 2, title: 'Blocked issue', health: 'blocked' }],
     activeIssues: [],
-    nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+    nextIssue: { number: 2, title: 'Blocked issue' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-    linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
+    linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+    linkedIssue({ number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
   ],
 }
 
 const issues = [
-  issue({ id: 'issue-1', number: 1, title: 'Done issue', canStart: false, status: 'done', health: 'done' }),
-  issue({ id: 'issue-2', number: 2, title: 'Blocked issue', canStart: false, status: 'in_progress', health: 'blocked' }),
-  issue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+  issue({ number: 1, title: 'Done issue', canStart: false, status: 'done', health: 'done' }),
+  issue({ number: 2, title: 'Blocked issue', canStart: false, status: 'in_progress', health: 'blocked' }),
+  issue({ number: 3, title: 'Candidate issue' }),
 ]
 
 function renderPage() {
@@ -157,10 +158,10 @@ function renderPage() {
   const ui = () => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1">
-        <MemoryRouter initialEntries={['/epic/epic-12345678']}>
+        <MemoryRouter initialEntries={['/epic/123']}>
           <LocationProbe />
           <Routes>
-            <Route path="/epic/:id" element={<EpicDetailPage components={components} />} />
+            <Route path="/epic/:number" element={<EpicDetailPage components={components} />} />
             <Route path="/epics" element={<div>Epics</div>} />
             <Route path="/issues/:number" element={<div>Issue</div>} />
             <Route path="/agent-sessions/new" element={<div>Agent Session Composer</div>} />
@@ -211,7 +212,7 @@ describe('EpicDetailPage', () => {
 
     await waitFor(() => {
       expect(_addEpicIssueHandler).toHaveBeenCalledWith(
-        { epicId: 'epic-12345678', issueId: 'issue-3' },
+        { epicNumber: 123, issueNumber: 3, },
       )
     })
   })
@@ -221,7 +222,7 @@ describe('EpicDetailPage', () => {
       status: 409,
       error: 'Issue already belongs to Epic "Runtime model"',
       code: 'DUPLICATE_EPIC_MEMBERSHIP',
-      details: { existingEpicId: 'epic-runtime', existingEpicTitle: 'Runtime model' },
+      details: { existingEpicNumber: 9, existingEpicTitle: 'Runtime model' },
     }
 
     renderPage()
@@ -234,7 +235,7 @@ describe('EpicDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Issue' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Issue already belongs to Epic #epic-run Runtime model.')).toBeTruthy()
+      expect(screen.getByText('Issue already belongs to Epic #9 Runtime model.')).toBeTruthy()
     })
   })
 
@@ -250,12 +251,12 @@ describe('EpicDetailPage', () => {
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
     await waitFor(() => {
-      expect(_removeEpicIssueHandler).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
+      expect(_removeEpicIssueHandler).toHaveBeenCalledWith({ epicNumber: 123, issueNumber: 1, })
     })
   })
 })
 const numberedEpic = {
-  id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
+  projectId: 'proj-1',
   number: 12,
   title: 'Numbered Epic',
   description: 'Has a number',
@@ -273,7 +274,7 @@ progress: {
           readyToMarkDone: false,
         },
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+    linkedIssue({ number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
   ],
 }
 
@@ -298,30 +299,20 @@ describe('EpicDetailPage numbered display', () => {
     expect(label).toHaveTextContent('#12')
   })
 
-  it('does not display a truncated UUID as the primary epic identifier when number is present', async () => {
+  it('does not display a surrogate identifier when number is present', async () => {
     renderPage()
 
     const label = await screen.findByTestId('epic-number')
     const text = label.textContent ?? ''
-    expect(text).not.toContain('epic-uuid-')
-    expect(text).not.toContain('aaaa-bbbb')
-    expect(text).not.toContain('cccccccccccc')
-  })
-
-  it('falls back to the truncated UUID when epic number is null', async () => {
-    _epicData = { ...epic, number: null }
-    renderPage()
-
-    const label = await screen.findByTestId('epic-number')
-    expect(label).toHaveTextContent('#epic-123')
+    expect(text).toBe('#12')
   })
 })
 
 describe('EpicDetailPage edit flow', () => {
   function defaultEpic() {
     return {
-      id: 'epic-12345678',
-      number: null,
+      projectId: 'proj-1',
+      number: 123,
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
@@ -332,13 +323,13 @@ progress: {
     deliveredCount: 0,
     totalIssueCount: 1,
     blockedIssues: [],
-    activeIssues: [{ id: 'issue-1', number: 1, title: 'Active issue', health: 'active' }],
-    nextIssue: { id: 'issue-1', number: 1, title: 'Active issue' },
+    activeIssues: [{ number: 1, title: 'Active issue', health: 'active' }],
+    nextIssue: { number: 1, title: 'Active issue' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Member issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Member issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p2' }),
       ],
     }
   }
@@ -396,7 +387,7 @@ progress: {
     await waitFor(() => {
       expect(_updateEpicHandler).toHaveBeenCalledTimes(1)
       const [callId, callBody] = _updateEpicHandler.mock.calls[0]
-      expect(callId).toBe('epic-12345678')
+      expect(callId).toBe(123)
       expect(callBody).toEqual({
         title: 'Renamed Epic',
         description: 'Updated description',
@@ -490,8 +481,7 @@ describe('EpicDetailPage markdown description', () => {
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
-      id: 'epic-12345678',
-      number: null,
+      projectId: 'proj-1', number: 123,
       title: 'Epic title',
       description: markdownDescription,
       priority: 'p1',
@@ -562,7 +552,6 @@ describe('EpicDetailPage markdown description', () => {
 describe('EpicDetailPage Ask Agent entry', () => {
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
-      id: 'epic-12345678',
       number: 7,
       title: 'Epic title',
       description: 'Epic description',
@@ -573,9 +562,9 @@ describe('EpicDetailPage Ask Agent entry', () => {
       progress: {
         deliveredCount: 1,
         totalIssueCount: 2,
-        blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+        blockedIssues: [{ number: 2, title: 'Blocked issue', health: 'blocked' }],
         activeIssues: [],
-        nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+        nextIssue: { number: 2, title: 'Blocked issue' },
         nextIssueReason: null,
         readyToMarkDone: false,
       },
@@ -606,8 +595,8 @@ describe('EpicDetailPage Ask Agent entry', () => {
     expect(button.textContent).toContain('Ask Agent')
   })
 
-  it('navigates to the composer with ?epic=<id> on click', async () => {
-    _epicData = makeEpic({ id: 'epic-12345678' })
+  it('navigates to the composer with the epic number on click', async () => {
+    _epicData = makeEpic({ number: 123 })
 
     renderPage()
 
@@ -617,14 +606,14 @@ describe('EpicDetailPage Ask Agent entry', () => {
     expect(screen.getByTestId('current-path').textContent).toContain('/agent-sessions/new?epic=')
   })
 
-  it('includes the epic id in the navigation URL', async () => {
-    _epicData = makeEpic({ id: 'epic-abc-def' })
+  it('includes the epic number in the navigation URL', async () => {
+    _epicData = makeEpic({ number: 321 })
 
     renderPage()
 
     const button = await screen.findByTestId('ask-agent-epic')
     fireEvent.click(button)
 
-    expect(screen.getByTestId('current-path').textContent).toContain('epic=epic-abc-def')
+    expect(screen.getByTestId('current-path').textContent).toContain('epic=321')
   })
 })

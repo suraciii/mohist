@@ -337,7 +337,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             WorkId: request.WorkId,
             TaskRunId: active.TaskRunId,
             ProjectId: active.ProjectId,
-            IssueId: active.IssueId));
+            IssueNumber: active.IssueNumber));
     }
 
     private readonly struct ResolvedWork
@@ -361,7 +361,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         string WorkId,
         string TaskRunId,
         string? ProjectId,
-        string? IssueId);
+        int? IssueNumber);
 }
 
 /// <summary>

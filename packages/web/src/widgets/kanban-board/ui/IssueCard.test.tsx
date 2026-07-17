@@ -10,7 +10,6 @@ import type { AgentStatus } from '../../../entities/agent'
 
 const mockAgentStatus: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 2 },
@@ -18,7 +17,6 @@ const mockAgentStatus: AgentStatus = {
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-card-1',
     number: 201,
     title: 'Implement feature',
     status: IssueStatus.Backlog,
@@ -309,9 +307,8 @@ function renderCardWithAgent(issue: Issue, agentStatus: AgentStatus) {
 function runningAgentStatusFor(issueNumber: number): AgentStatus {
   return {
     running: true,
-    issueId: null,
     issueNumber,
-    activeAgents: [{ issueId: 'i1', issueNumber, projectId: 'proj-1' }],
+    activeAgents: [{ issueNumber, projectId: 'proj-1' }],
     capacity: { active: 1, max: 2 },
   }
 }

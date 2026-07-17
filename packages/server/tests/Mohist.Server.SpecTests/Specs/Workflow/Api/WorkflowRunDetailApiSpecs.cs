@@ -3,10 +3,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
@@ -59,7 +61,7 @@ public class WorkflowRunDetailApiSpecs
     [Fact]
     public async Task Get_ReturnsFullDetailWithAssociatedIssue()
     {
-        var (_, _, issueId, issueNumber, wrId) = await SeedActiveWorkflowAsync();
+        var (projectId, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
 
         var response = await _client.GetAsync($"/api/workflow-runs/{wrId}");
 
@@ -79,11 +81,9 @@ public class WorkflowRunDetailApiSpecs
         // Associated issue joins through IssueQuerier.GetIssueRefForWorkflowRunAsync.
         var issueRef = data.GetProperty("issueRef");
         Assert.Equal(JsonValueKind.Object, issueRef.ValueKind);
+        Assert.Equal(projectId, issueRef.GetProperty("projectId").GetString());
         Assert.Equal(issueNumber, issueRef.GetProperty("number").GetInt32());
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
-        // Marker: the issueId is bound during seed; we explicitly check number
-        // + title here (per design Decision 2) and leave the issueId aside.
-        _ = issueId;
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -91,7 +91,7 @@ public class WorkflowRunDetailApiSpecs
     [Fact]
     public async Task Get_WhenIssueRowIsTerminal_IssueRefStillCarriesCorrelationContext()
     {
-        var (_, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
+        var (projectId, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
         await ForceIssueStatusAsync(wrId, terminal: true);
 
         var response = await _client.GetAsync($"/api/workflow-runs/{wrId}");
@@ -108,6 +108,7 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal(wrId, data.GetProperty("status").GetProperty("workflowRunId").GetString());
         var issueRef = data.GetProperty("issueRef");
         Assert.Equal(JsonValueKind.Object, issueRef.ValueKind);
+        Assert.Equal(projectId, issueRef.GetProperty("projectId").GetString());
         Assert.Equal(issueNumber, issueRef.GetProperty("number").GetInt32());
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
@@ -185,14 +186,15 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal(before.Stages.Count, after.Stages.Count);
     }
 
-    private async Task<(string projectId, string projectName, string issueId, int issueNumber, string wrId)> SeedActiveWorkflowAsync()
+    private async Task<(string projectId, string projectName, string issueKey, int issueNumber, string wrId)> SeedActiveWorkflowAsync()
     {
         var (projectId, projectName) = await SeedProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
         await SeedWorkflowTemplateAsync(projectId);
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        return (projectId, projectName, issueId, issueNumber, wrId);
+        await DispatchEventsAsync();
+        return (projectId, projectName, issueKey, issueNumber, wrId);
     }
 
     private async Task<(string projectId, string projectName)> SeedProjectAsync()
@@ -210,14 +212,17 @@ public class WorkflowRunDetailApiSpecs
         return (id, name);
     }
 
-    private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
+    private async Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, null, issueId, isDraft: false);
-        return (issueId, number);
+        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
+        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, isDraft: false);
+        return (issueKey, number);
     }
+
+    private Task DispatchEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
     {
@@ -299,7 +304,7 @@ public class WorkflowRunDetailApiSpecs
             .FirstOrDefaultAsync();
         if (row is null) return;
 
-        var tracked = await db.Issues.FindAsync(row.IssueId);
+        var tracked = await db.Issues.FindAsync(row.ProjectId, row.Number);
         if (tracked is null) return;
         using var doc = JsonDocument.Parse(tracked.State);
         var state = doc.RootElement.Deserialize<Dictionary<string, JsonElement>>()!;
@@ -327,7 +332,7 @@ public class WorkflowRunDetailApiSpecs
             .FirstOrDefaultAsync();
         if (row is null) return;
 
-        var tracked = await db.Issues.FindAsync(row.IssueId);
+        var tracked = await db.Issues.FindAsync(row.ProjectId, row.Number);
         if (tracked is null) return;
         using var doc = JsonDocument.Parse(tracked.State);
         var state = doc.RootElement.Deserialize<Dictionary<string, JsonElement>>()!;

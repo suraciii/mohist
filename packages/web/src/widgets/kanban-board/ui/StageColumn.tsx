@@ -98,7 +98,7 @@ export function StageColumn({
         )}
         {visibleIssues.map((issue) => (
           <IssueCard
-            key={issue.id}
+            key={`${issue.projectId}:${issue.number}`}
             issue={issue}
             agentStatus={agentStatus}
             showArchiveButton={isDone}

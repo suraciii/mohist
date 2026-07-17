@@ -4,7 +4,6 @@ import { isRunningIssue } from './running'
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Issue title',
     status: IssueStatus.InProgress,

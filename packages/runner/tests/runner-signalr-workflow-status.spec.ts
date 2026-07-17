@@ -95,7 +95,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnCompletedPush_TransitionsActiveEntryToEligible", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "issue-42", issueNumber: 42, workflowRunId: "wr-123", workspacePath: join(root, "wks") })
+    await registry.register({ issueNumber: 42, workflowRunId: "wr-123", workspacePath: join(root, "wks") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-123", status: "Completed" })
@@ -108,7 +108,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnStoppedPush_TransitionsActiveEntryToEligible", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-1", status: "Stopped" })
@@ -122,7 +122,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     // eligible — reclaims mid-retry lose the run branch.
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-1", status: "Failed" })
@@ -137,7 +137,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     // is idempotent: it must NOT re-stamp an already-eligible entry.
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
     await registry.markEligible("wr-1")
     const firstTerminal = registry.get("wr-1")?.terminalAt
     expect(firstTerminal).toBeTruthy()
@@ -162,7 +162,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnNonTerminalPush_LeavesEntryActive", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     // Server only pushes terminal statuses today (per RunnerWorkflowStatusRouter),
@@ -190,7 +190,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnNullPayload_DoesNotThrow", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await expect(handler(null)).resolves.toBeUndefined()
@@ -202,7 +202,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnPayloadWithMissingWorkflowRunId_DoesNotThrow", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await expect(handler({ status: "Completed" })).resolves.toBeUndefined()
@@ -214,7 +214,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnPush_PersistsRegistryOnDisk", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-persist", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-persist", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-persist", status: "Completed" })
@@ -227,8 +227,8 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
   it("OnTerminalPush_TwoIndependentRuns_BothTransitionIndependently", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
-    await registry.register({ issueId: "i2", issueNumber: 2, workflowRunId: "wr-2", workspacePath: join(root, "w2") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 2, workflowRunId: "wr-2", workspacePath: join(root, "w2") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-1", status: "Completed" })
@@ -244,7 +244,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     vi.setSystemTime(at)
     const registry = new WorkspaceRegistry(root)
     await registry.load()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-1", status: "Completed" })

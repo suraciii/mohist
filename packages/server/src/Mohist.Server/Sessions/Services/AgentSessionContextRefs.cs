@@ -19,7 +19,7 @@ internal static class AgentSessionContextRefs
 {
     public readonly record struct ContextRefs(
         int? IssueNumber,
-        string? EpicNumber,
+        int? EpicNumber,
         string? Repository,
         string? WorkspacePath);
 
@@ -36,12 +36,12 @@ internal static class AgentSessionContextRefs
     public static ContextRefs? TryBuild(AgentSessionRecord record)
     {
         var issueNumberText = record.Label(GenericAgentSessionMetadata.IssueNumber);
-        var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
-        var epicNumber = record.Label(GenericAgentSessionMetadata.EpicNumber);
+        var issueNumber = TryReadPositiveNumber(issueNumberText);
+        var epicNumber = TryReadPositiveNumber(record.Label(GenericAgentSessionMetadata.EpicNumber));
         var repository = record.Label(GenericAgentSessionMetadata.Repository);
         var workspacePath = record.Label(GenericAgentSessionMetadata.WorkspacePath);
 
-        if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
+        if (issueNumber is null && epicNumber is null
             && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
         {
             return null;
@@ -49,4 +49,7 @@ internal static class AgentSessionContextRefs
 
         return new ContextRefs(issueNumber, epicNumber, repository, workspacePath);
     }
+
+    private static int? TryReadPositiveNumber(string? value) =>
+        int.TryParse(value, out var number) && number > 0 ? number : null;
 }

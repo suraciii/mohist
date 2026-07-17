@@ -23,8 +23,9 @@ public class EpicEventQuerier : IScopedService
     }
 
     public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(
-        string epicId,
+        string projectId,
+        int epicNumber,
         int limit = 200,
         CancellationToken ct = default) =>
-        _eventStore.ListEpicEventsAsync(epicId, limit, ct);
+        _eventStore.ListEpicEventsAsync(projectId, epicNumber, limit, ct);
 }

@@ -373,13 +373,12 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
-            INSERT INTO Issues (IssueId, State)
-            VALUES ($id, $state);
+            INSERT INTO Issues (ProjectId, Number, State)
+            VALUES (
+                COALESCE(json_extract($state, '$.projectId'), json_extract($state, '$.ProjectId'), 'migration-test'),
+                CAST(COALESCE(json_extract($state, '$.number'), json_extract($state, '$.Number')) AS INTEGER),
+                $state);
             """;
-        var idParam = command.CreateParameter();
-        idParam.ParameterName = "$id";
-        idParam.Value = issueId;
-        command.Parameters.Add(idParam);
         var stateParam = command.CreateParameter();
         stateParam.ParameterName = "$state";
         stateParam.Value = stateJson;
@@ -441,7 +440,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     private static async Task<string> ReadStateAsync(MohistDbContext ctx, string issueId)
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT State FROM Issues WHERE IssueId = $id";
+        command.CommandText = "SELECT State FROM Issues WHERE json_extract(State, '$.id') = $id";
         var param = command.CreateParameter();
         param.ParameterName = "$id";
         param.Value = issueId;

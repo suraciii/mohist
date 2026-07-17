@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
@@ -41,6 +42,12 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         using var _ = await _client.PostAsync($"/api/projects/{_projectId}/issues/{_issueNumber}/stop", null);
     }
 
+    private async Task StartIssueAsync(string projectId, int issueNumber)
+    {
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issueNumber}/start");
+        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
@@ -54,7 +61,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"product-loop-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
@@ -120,7 +127,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
@@ -180,7 +187,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"project-variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
@@ -240,7 +247,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"live-propagate-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
@@ -286,7 +293,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"project-stage-variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
@@ -334,7 +341,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
         _runnerId = $"global-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         await _client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 16 });
@@ -362,7 +369,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await StartIssueAsync(project.Id, issue.Number);
 
         var current = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.False(string.IsNullOrWhiteSpace(current.WorkflowRunId));

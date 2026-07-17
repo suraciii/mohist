@@ -82,7 +82,6 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
-        Assert.Equal($"agent_{agentId}", card.IssueId);
         Assert.Equal(7, card.IssueNumber);
         Assert.Equal("Issue #7", card.IssueTitle);
         Assert.Equal(agentId, card.AgentId);
@@ -103,8 +102,8 @@ public class AgentActivityFeedAssemblerSpecs
 
         var waiting = new List<ActivityWaitingCardDto>
         {
-            new(IssueId: "issue-1", IssueNumber: 1, IssueTitle: "Issue #1", Stage: "approval", Label: "Needs Approval", RequestedAt: "2026-06-30T00:00:00Z", Preview: null),
-            new(IssueId: "issue-2", IssueNumber: 2, IssueTitle: "Issue #2", Stage: "approval", Label: "Needs Approval", RequestedAt: null, Preview: null),
+            new(IssueNumber: 1, IssueTitle: "Issue #1", Stage: "approval", Label: "Needs Approval", RequestedAt: "2026-06-30T00:00:00Z", Preview: null),
+            new(IssueNumber: 2, IssueTitle: "Issue #2", Stage: "approval", Label: "Needs Approval", RequestedAt: null, Preview: null),
         };
 
         var assembler = ResolveAssembler();
@@ -163,7 +162,7 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
-        Assert.Equal($"issue_{project.Id}_42", card.IssueId);
+        Assert.Equal(42, card.IssueNumber);
         Assert.Null(card.AgentId);
         Assert.Null(card.AgentName);
     }

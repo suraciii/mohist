@@ -85,20 +85,14 @@ public class InboxItemsMigrationSpecs
         await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
 
-        context.InboxItems.Add(new InboxItemRow
-        {
-            Id = "inb_invalid",
-            ProjectId = "proj_a",
-            IssueId = "issue_1",
-            IssueNumber = 1,
-            IssueTitle = "Issue 1",
-            NotificationKind = "unsupported",
-            SourceEventSource = "/mohist/issues/issue_1",
-            SourceEventId = "evt_invalid",
-            CreatedAt = TestTime.UtcNow,
-        });
-
-        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+        await Assert.ThrowsAsync<SqliteException>(() => context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "InboxItems" (
+                "Id", "ProjectId", "IssueId", "IssueNumber", "IssueTitle", "NotificationKind",
+                "SourceEventSource", "SourceEventId", "CreatedAt")
+            VALUES (
+                'inb_invalid', 'proj_a', 'issue_1', 1, 'Issue 1', 'unsupported',
+                '/mohist/issues/issue_1', 'evt_invalid', '2026-06-30T00:00:00.0000000+00:00')
+            """));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

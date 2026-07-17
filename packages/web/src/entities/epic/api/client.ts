@@ -15,8 +15,8 @@ function buildEpicListQuery(params?: { search?: string; sort?: string; dir?: str
   return qs.length === 0 ? '' : `?${qs}`
 }
 
-export function getEpic(id: string, params?: { projectId?: string }) {
-  return request<EpicDetail>(projectApiPath(params?.projectId, `/epics/${encodeURIComponent(id)}`))
+export function getEpic(number: number, params?: { projectId?: string }) {
+  return request<EpicDetail>(projectApiPath(params?.projectId, `/epics/${number}`))
 }
 
 export function createEpic(data: { title: string; description: string; priority: string; projectId?: string }) {
@@ -27,15 +27,15 @@ export function createEpic(data: { title: string; description: string; priority:
   })
 }
 
-export function addEpicIssue(epicId: string, issueId: string, projectId?: string | null) {
-  return request<{ epicId: string; issueId: string }>(projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues`), {
+export function addEpicIssue(epicNumber: number, issueNumber: number, projectId?: string | null) {
+  return request<{ epicNumber: number; issueNumber: number }>(projectApiPath(projectId, `/epics/${epicNumber}/issues`), {
     method: 'POST',
-    body: JSON.stringify({ issueId }),
+    body: JSON.stringify({ issueNumber }),
   })
 }
 
-export function removeEpicIssue(epicId: string, issueId: string, projectId?: string | null) {
-  return request<{ epicId: string; issueId: string }>(projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`), {
+export function removeEpicIssue(epicNumber: number, issueNumber: number, projectId?: string | null) {
+  return request<{ epicNumber: number; issueNumber: number }>(projectApiPath(projectId, `/epics/${epicNumber}/issues/${issueNumber}`), {
     method: 'DELETE',
   })
 }
@@ -43,9 +43,8 @@ export function removeEpicIssue(epicId: string, issueId: string, projectId?: str
 export interface BatchMembershipOutcome {
   identifier: string
   status: 'linked' | 'already-linked' | 'conflict' | 'not-found' | 'unlinked' | 'was-not-a-member'
-  issueId?: string | null
   issueNumber?: number | null
-  owningEpicId?: string | null
+  owningEpicNumber?: number | null
   owningEpicTitle?: string | null
 }
 
@@ -54,39 +53,39 @@ export interface BatchMembershipResponse {
 }
 
 export function batchAddEpicIssues(
-  epicId: string,
-  issueIds: string[],
+  epicNumber: number,
+  issueNumbers: number[],
   projectId?: string | null,
 ) {
   return request<BatchMembershipResponse>(
-    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch`),
+    projectApiPath(projectId, `/epics/${epicNumber}/issues:batch`),
     {
       method: 'POST',
-      body: JSON.stringify({ issueIds }),
+      body: JSON.stringify({ issueNumbers }),
     },
   )
 }
 
 export function batchRemoveEpicIssues(
-  epicId: string,
-  issueIds: string[],
+  epicNumber: number,
+  issueNumbers: number[],
   projectId?: string | null,
 ) {
   return request<BatchMembershipResponse>(
-    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch-unlink`),
+    projectApiPath(projectId, `/epics/${epicNumber}/issues:batch-unlink`),
     {
       method: 'POST',
-      body: JSON.stringify({ issueIds }),
+      body: JSON.stringify({ issueNumbers }),
     },
   )
 }
 
-export function markEpicDone(id: string, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/done`), { method: 'POST' })
+export function markEpicDone(number: number, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/done`), { method: 'POST' })
 }
 
-export function closeEpic(id: string, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/close`), { method: 'POST' })
+export function closeEpic(number: number, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/close`), { method: 'POST' })
 }
 
 export interface UpdateEpicInput {
@@ -95,32 +94,32 @@ export interface UpdateEpicInput {
   priority?: string
 }
 
-export function updateEpic(id: string, data: UpdateEpicInput, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}`), {
+export function updateEpic(number: number, data: UpdateEpicInput, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}`), {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
-export function pauseEpic(id: string, reason?: string | null, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/pause`), {
+export function pauseEpic(number: number, reason?: string | null, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/pause`), {
     method: 'POST',
     body: reason != null ? JSON.stringify({ reason }) : undefined,
   })
 }
 
-export function resumeEpic(id: string, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/resume`), { method: 'POST' })
+export function resumeEpic(number: number, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/resume`), { method: 'POST' })
 }
 
-export function startEpic(id: string, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/start`), { method: 'POST' })
+export function startEpic(number: number, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/start`), { method: 'POST' })
 }
 
-export function reopenEpic(id: string, projectId?: string | null) {
-  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/reopen`), { method: 'POST' })
+export function reopenEpic(number: number, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${number}/reopen`), { method: 'POST' })
 }
 
-export function getEpicEvents(id: string, projectId?: string | null) {
-  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/events`))
+export function getEpicEvents(number: number, projectId?: string | null) {
+  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/epics/${number}/events`))
 }

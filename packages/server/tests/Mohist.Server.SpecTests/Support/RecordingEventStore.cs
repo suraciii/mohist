@@ -45,11 +45,11 @@ public class RecordingEventStore : IEventStore
         }
     }
 
-    public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default)
+    public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default)
     {
         lock (_gate)
         {
-            var source = $"/mohist/issues/{issueId}";
+            var source = $"/mohist/projects/{projectId}/issues/{issueNumber}";
             return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
                 .Where(e => e.Envelope.Source.ToString() == source)
                 .TakeLast(limit)
@@ -58,11 +58,11 @@ public class RecordingEventStore : IEventStore
         }
     }
 
-    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default)
+    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default)
     {
         lock (_gate)
         {
-            var source = $"/mohist/epics/{epicId}";
+            var source = $"/mohist/projects/{projectId}/epics/{epicNumber}";
             return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
                 .Where(e => e.Envelope.Source.ToString() == source)
                 .TakeLast(limit)

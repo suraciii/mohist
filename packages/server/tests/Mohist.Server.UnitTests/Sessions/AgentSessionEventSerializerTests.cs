@@ -35,12 +35,12 @@ public class AgentSessionEventSerializerTests
     [Fact]
     public void EventCatalog_IncludesTranscriptRuntimeEventTypes()
     {
-        Assert.Contains("message.delta", EventCatalog.All);
-        Assert.Contains("reasoning.delta", EventCatalog.All);
-        Assert.Contains("tool_call.started", EventCatalog.All);
-        Assert.Contains("session.closed", EventCatalog.All);
-        Assert.Contains("usage.updated", EventCatalog.All);
-        Assert.Contains("model.resolved", EventCatalog.All);
+        Assert.Contains("message.delta", EventCatalog.TranscriptTypes);
+        Assert.Contains("reasoning.delta", EventCatalog.TranscriptTypes);
+        Assert.Contains("tool_call.started", EventCatalog.TranscriptTypes);
+        Assert.Contains("session.closed", EventCatalog.TranscriptTypes);
+        Assert.Contains("usage.updated", EventCatalog.TranscriptTypes);
+        Assert.Contains("model.resolved", EventCatalog.TranscriptTypes);
     }
 
     [Fact]

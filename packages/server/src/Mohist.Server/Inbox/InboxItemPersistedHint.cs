@@ -11,5 +11,4 @@ public sealed record InboxItemPersistedHint(
     string ItemId,
     string ProjectId,
     string Kind,
-    string IssueId,
     int IssueNumber);

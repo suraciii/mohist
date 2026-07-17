@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -72,7 +73,7 @@ public class AgentSessionSpecs
     public async Task IssueSessionMetadataEndpoint_ReturnsMetadataOnlyWithoutTurnsOrRawEvents()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-only", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -184,7 +185,7 @@ public class AgentSessionSpecs
     public async Task IssueSessionMetadataEndpoint_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
         var (project, issue, work, _) = await CreateStartedAgentSessionAsync("metadata-order", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -260,7 +261,7 @@ public class AgentSessionSpecs
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequence()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -382,7 +383,7 @@ public class AgentSessionSpecs
     public async Task RunnerAppendsManyChunks_PersistsAggregatedTranscriptSegmentsOnly()
     {
         var (project, issue, work, _) = await CreateStartedAgentSessionAsync("chunk-aggregation", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -419,7 +420,7 @@ public class AgentSessionSpecs
     public async Task DeferredPersistence_SessionDetailTranscriptContainsAllTextAndToolParts()
     {
         var (project, issue, work, _) = await CreateStartedAgentSessionAsync("deferred-transcript", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -1142,7 +1143,6 @@ public class AgentSessionSpecs
         });
         var issueState = JsonSerializer.Serialize(new
         {
-            Id = issue.Id,
             ProjectId = project.Id,
             Number = issue.Number,
             WorkflowRunId = work.WorkflowRunId,
@@ -1155,8 +1155,8 @@ public class AgentSessionSpecs
                 "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
                 work.WorkflowRunId, runState);
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO Issues (IssueId, State) VALUES ({0}, {1})",
-                issue.Id, issueState);
+                "INSERT OR REPLACE INTO Issues (ProjectId, Number, State) VALUES ({0}, {1}, {2})",
+                project.Id, issue.Number, issueState);
         }
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
@@ -1220,7 +1220,6 @@ public class AgentSessionSpecs
         });
         var issueState = JsonSerializer.Serialize(new
         {
-            Id = issue.Id,
             ProjectId = project.Id,
             Number = issue.Number,
             WorkflowRunId = work.WorkflowRunId,
@@ -1233,8 +1232,8 @@ public class AgentSessionSpecs
                 "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
                 work.WorkflowRunId, runState);
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO Issues (IssueId, State) VALUES ({0}, {1})",
-                issue.Id, issueState);
+                "INSERT OR REPLACE INTO Issues (ProjectId, Number, State) VALUES ({0}, {1}, {2})",
+                project.Id, issue.Number, issueState);
         }
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
@@ -1302,7 +1301,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             WorkType: "task",
             Stage: "Build",
             Title: issueTitle,
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
         sessionName ??= work.WorkId;
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(

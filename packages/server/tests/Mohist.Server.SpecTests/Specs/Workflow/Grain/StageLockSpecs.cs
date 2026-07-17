@@ -353,7 +353,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
                 var list = await events.ListAsync(workflowRunId);
                 return list.FirstOrDefault(e =>
                     e.Envelope.Type == type &&
-                    WorkflowStageLockReleaseHandler.ExtractStage(e.Envelope.Data) == stage);
+                    e.Envelope.Extensions.TryGetValue(EventCatalog.Lineage.Stage, out var stampedStage)
+                    && stampedStage == stage);
             },
             envelope => envelope is not null,
             TimeSpan.FromSeconds(3),

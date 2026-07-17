@@ -24,7 +24,6 @@ import { DashboardZone } from './DashboardZone'
 
 const defaultAgentStatus: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 0 },

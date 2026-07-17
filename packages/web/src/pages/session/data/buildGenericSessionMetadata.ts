@@ -27,7 +27,6 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
   return {
     sessionId: summary.sessionId,
     sessionName: summary.agentName,
-    issueId: '',
     runtimeSessionId: summary.runtimeSessionId ?? '',
     runtime: summary.runtime,
     executionId: null,

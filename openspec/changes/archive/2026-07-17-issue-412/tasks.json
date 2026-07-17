@@ -1,0 +1,220 @@
+{
+  "project": "mohist-local",
+  "description": "Replace dual Issue/Epic identity and Epic-owned membership with typed Project-scoped number identities, canonical persisted references, Issue-owned affiliation, one-aggregate durable coordination, and number-only event lineage.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Introduce typed scoped identities and one GrainKey codec",
+      "spec": "specs/scoped-work-item-identity/spec.md#actor-and-resource-keys-derive-from-domain-identity",
+      "description": "Introduce validated IssueKey(ProjectId, IssueNumber) and EpicKey(ProjectId, EpicNumber) value types plus one lossless scoped GrainKey codec. Add GrainKey overloads that accept only the typed values for new Issue/Epic access. Keep the existing random-id Issue entry point unchanged as an explicitly private transition seam for T-004; do not add a data migration or claim persisted-reference conversion in this task.",
+      "acceptanceCriteria": [
+        "IssueKey and EpicKey reject blank ProjectId, separator-containing ProjectId, and non-positive numbers at construction rather than allowing invalid default-like identities into runtime use.",
+        "One codec formats the exact canonical string length with invariant number text and parses/try-parses both components losslessly; output contains no padding or NUL characters.",
+        "Equal numbers in different Projects produce unequal typed identities and unequal actor keys.",
+        "GrainKey typed Issue/Epic entry points delegate to the shared codec; no new call site hand-concatenates project and number.",
+        "Tests cover round-trip, malformed/empty input, separator ambiguity, largest positive int, exact output, no NUL padding, and cross-Project same-number isolation.",
+        "Comments are limited to the temporary legacy overload reason/removal task; type and method names explain normal behavior.",
+        "Focused unit tests, server build, and architecture tests pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Small typed IssueKey/EpicKey primitives, exact shared ScopedGrainKeyCodec, typed GrainKey entry points, and focused unit/architecture tests only.",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "This task intentionally does not touch EF migrations. The rejected first attempt mixed codec and an incomplete old-id backfill; do not recreate 20260716120000_AdoptScopedIssueEpicIdentity here. Preserve existing callers until T-004."
+    },
+    {
+      "id": "T-002",
+      "title": "Add and backfill canonical Issue references for every current-state owner",
+      "spec": "specs/scoped-work-item-identity/spec.md#references-use-the-owning-resources-canonical-identity",
+      "description": "Inventory every production current-state owner of Issue identity and give it a canonical ProjectId + IssueNumber reference. Known owners include IssueRow, IssueCommentRow, IssuePrerequisiteRow, IssueWorkflowProfile, InboxItemRow, WorkflowRun metadata/indexes, WorkIssueRef-related persisted shapes, workflow artifacts/pending uploads, attachment ownership where Issue is the owner, AgentSession origin labels, and server read projections. Add missing row/model columns and indexes, then backfill them from legacy IssueId through one real EF migration. Existing canonical columns must be verified, not backfilled in the reverse direction. Legacy id columns may remain temporarily for T-004 runtime cutover but are not the target reference.",
+      "acceptanceCriteria": [
+        "The task records a concrete owner inventory in progress.txt and accounts for every production IssueId reference as current owner, historical envelope/migration, independently identified resource, or later removal target.",
+        "Every current-state owner has ProjectId + IssueNumber persisted or derivable from its own canonical owning state; profiles/artifacts/inbox/comments and any discovered owner lacking one receive real schema/model columns.",
+        "A migration starts from the immediate previous migration schema, seeds legacy rows before the target migration, then applies the actual target migration through IMigrator; it does not use a fully migrated template followed by a no-op Migrate call.",
+        "Migration specs seed all discovered row owners plus two Projects with Issue 42, prove relationships remain attached to the correct Project, and verify no rows are silently deleted.",
+        "Idempotency is proved by executing a shared guarded reconciliation operation twice or by an equivalent real data-convergence path; EF declining to re-run an applied migration is not accepted as the proof.",
+        "Unresolvable legacy references cause an explicit migration/convergence failure with evidence rather than silent deletion or reassignment.",
+        "IssuePrerequisite and Session number-shaped references are verified for Project scope even if no schema change is needed.",
+        "Focused row mapping, migration, profile/artifact/inbox/comment/session/query specs and server build pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Complete Issue-reference owner inventory, canonical scoped columns/indexes, real idempotent backfill migration/reconciler, model snapshot/designer updates, and exhaustive owner migration specs.",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "Do not populate missing legacy IssueId values and call that canonical adoption. Historical CloudEvent envelope JSON is not rewritten, but current event-query/index ownership must be accounted for. Schema/data migration is operational; runtime aggregate transactions remain untouched."
+    },
+    {
+      "id": "T-003",
+      "title": "Add and backfill canonical Epic references and affiliation cutover data",
+      "spec": "specs/scoped-work-item-identity/spec.md#current-state-migrates-without-a-compatibility-model",
+      "description": "Give every production current-state owner of Epic identity a canonical ProjectId + EpicNumber reference. Inventory EpicRow, retained/current membership and active rows, Issue/Workflow copied affiliation from the superseded candidate, session/agent-launch origin metadata, event/query projections, and API/read shapes. Add missing columns/indexes and backfill from legacy EpicId. Prepare the exact current-affiliation dataset T-005 will move into Issue.EpicNumber; do not change runtime membership authority yet and do not delete orphan rows silently.",
+      "acceptanceCriteria": [
+        "A concrete EpicId owner inventory is recorded and every production reference is classified.",
+        "All current owners needed for cutover have ProjectId + EpicNumber; relation rows temporarily retained for T-005 carry EpicNumber and IssueNumber scoped by Project.",
+        "The real EF migration is tested from the immediate previous schema with two Projects sharing Epic 7 and preserves every resolvable relationship.",
+        "Unresolvable references fail explicitly; no migration deletes membership, active, Issue, Epic, or projection rows to manufacture consistency.",
+        "The backfill/convergence operation is idempotent under real second execution and never crosses Projects on equal numbers.",
+        "Historical envelope JSON remains unchanged; current query/index metadata is accounted for.",
+        "Focused Epic row/query/migration/session-origin specs and server build pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Canonical Epic-reference columns/indexes, owner inventory, affiliation cutover dataset, real idempotent migration and cross-Project preservation specs.",
+      "dependsOn": ["T-002"],
+      "passes": true,
+      "notes": "Membership rows are temporary migration input only and are deleted in T-005 after Issue.EpicNumber is authoritative. Do not introduce another generic relation/owner aggregate."
+    },
+    {
+      "id": "T-004",
+      "title": "Cut the server domain and API to number-only Issue/Epic identity",
+      "spec": "specs/scoped-work-item-identity/spec.md#issue-and-epic-have-one-project-scoped-identity",
+      "description": "Switch Issue/Epic domain entities, grains, repositories, queriers, API routes/DTOs, profiles, current-state commands/events, and server projections to IssueKey/EpicKey. Creation allocates only the Project-local number. Remove random-id creation, IssueIdentityResolver/id alias paths, id-based Grain access, and dual id/number server contracts. Drop legacy id columns only after all owners prepared in T-002/T-003 read canonical references.",
+      "acceptanceCriteria": [
+        "Issue/Epic creation generates no random IssueId/EpicId and responses/domain state expose only Project + number.",
+        "All server command/query/grain/resource entry points use IssueKey/EpicKey; resource and new event source paths contain ProjectId + number.",
+        "Current profiles, comments, prerequisites, inbox, artifacts, sessions, projections, and other owners resolve through canonical references after old id columns are dropped.",
+        "IssueIdentityResolver, number-to-hidden-id lookup, random-id fields, and id-or-number API contracts are removed rather than retained as fallbacks.",
+        "Two Projects with equal Issue/Epic numbers remain isolated across API, grain, cache/query, and persistence tests.",
+        "Historical migration classes/envelopes may mention old ids, but production server paths and current DTOs do not.",
+        "Focused Issue/Epic API/grain/query/profile tests, migration validation, and server build pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Number-only Issue/Epic server domain, actors, persistence keys, routes/contracts, profiles/projections and removal of legacy identity runtime/schema.",
+      "dependsOn": ["T-003"],
+      "passes": true,
+      "notes": "Keep WorkflowRunId, SessionId, AgentId, RunnerId, ProjectId, EventId, attachment id, and other independently owned identities unchanged. This task removes the temporary GrainKey legacy seam from T-001."
+    },
+    {
+      "id": "T-005",
+      "title": "Move Epic membership authority into Issue and rebuild progression",
+      "spec": "specs/issue-owned-epic-membership/spec.md#issue-is-the-sole-authority-for-current-epic-affiliation",
+      "description": "Add nullable EpicNumber to Issue as the only current affiliation fact. Implement idempotent AssignEpic and expected-number RemoveEpic with IssueEpicChanged(previous,current). Rewrite link/unlink/move so Epic validates and commands Issue without sharing a transaction. Migrate the T-003 affiliation dataset into Issue, then delete Epic membership/active rows and all dual writes. Rebuild Epic members/progress/candidates over Issue state and guarded Issue.TryStartFromEpic commands; durable Issue reactions recompute affected Epics and refresh current Workflow context.",
+      "acceptanceCriteria": [
+        "Issue commits EpicNumber and IssueEpicChanged in an Issue-only transaction; no Epic/Workflow state participates.",
+        "Link is idempotent after lost reply/later closure; closed rejects new link; expected unlink cannot clear a newer move; A-to-B move is one Issue commit.",
+        "Current affiliation migration preserves every resolvable member and then removes EpicIssueRow/EpicActiveIssue plus runtime reads/writes.",
+        "Epic membership/progress/start candidates derive from Issue; stale candidates are rejected by target Issue.",
+        "done revival, closed/reopen, completion, sequential advance, prerequisites and sub-Issue exclusions retain product behavior in separate Epic transactions.",
+        "Repeated/out-of-order reactions re-read Issue and never regress Epic or Workflow context.",
+        "Focused membership/lifecycle/progression/transaction/redelivery specs pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue-owned EpicNumber model, affiliation events/reactions, derived Epic progression, relation-table removal and recovery specs.",
+      "dependsOn": ["T-004"],
+      "passes": true,
+      "notes": "No replacement membership aggregate or OwnerRef. Epic -> Issue may be synchronous; reverse progress is after-commit durable event only."
+    },
+    {
+      "id": "T-006",
+      "title": "Replace Workflow binding and lineage revision with durable EnsureStarted",
+      "spec": "specs/aggregate-coordination/spec.md#durable-issueworkstarted-creates-workflowrun-idempotently",
+      "description": "Reduce Issue -> Workflow coordination to IssueWorkStarted. Issue stores its allocated WorkflowRunId and event in an Issue-only transaction; a handler re-reads current Issue and calls WorkflowRun.EnsureStarted(runId,{ProjectId,IssueNumber,EpicNumber?}). Workflow creates/starts idempotently in its own transaction and stores only that context. Remove AwaitingBinding, WorkflowBindingPending, binding confirmation, lineage revisions, special control/runner/web statuses, migrations and obsolete tests. Preserve RejectIfRunReloadRequired before WorkflowGrain.Start mutation.",
+      "acceptanceCriteria": [
+        "Issue start never creates/locks WorkflowRun in its transaction; EnsureStarted creates exactly the allocated run and tolerates duplicate delivery/lost reply.",
+        "Delayed start for a superseded run no-ops; result commands carry expected WorkflowRunId and cannot terminate a newer run.",
+        "Workflow context is exactly ProjectId, IssueNumber, EpicNumber? and refreshes from current Issue without revisions.",
+        "AwaitingBinding/pending/confirmation/revision and their API/runner/web handling are absent.",
+        "Crash specs cover before creation, after creation before reply, redelivery, context ordering and stale result.",
+        "Dirty-activation Start guard regression remains green; focused Workflow/Issue/runner/server tests pass."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueWorkStarted + EnsureStarted process, minimal Workflow context, expected-run guards, old binding protocol deletion and recovery specs.",
+      "dependsOn": ["T-005"],
+      "passes": true,
+      "notes": "Temporary absence of WorkflowRun after Issue commit is a normal process interval, not a persisted Workflow status."
+    },
+    {
+      "id": "T-007",
+      "title": "Adopt canonical lineage extensions and producer-family conformance",
+      "spec": "specs/event-lineage-stamping/spec.md#every-producer-stamps-its-locally-committed-business-context",
+      "description": "Replace issueid/epicid/issueno/epicno with projectid + issue/epic numbers at WorkflowRun, Issue, Epic, AgentSession, Runner and inbox producers. Stamp only producer-owned state/metadata and derive Stage structurally. Reduce EventCatalog to stable type names; replace RequiredAttributes/EnvelopeConformance/CatalogOnlyTypes with producer-family conformance exercised through real append/synthesis paths.",
+      "acceptanceCriteria": [
+        "All producer matrices match the delta spec; optional context is omitted, never empty; no append queries another aggregate.",
+        "New producers emit no issueid/epicid/issueno/epicno; sources use canonical scoped identity where applicable.",
+        "EventCatalog has no lineage matrix or catalog-only bypass; reserved unproduced types are not presented as producer conformance.",
+        "Every real producer and serializable event variant has production-path coverage, including negative missing/empty cases.",
+        "Stage follows event structure, including feedback and excluding non-stage artifacts/run events.",
+        "Focused append/synthesis/conformance tests and server build pass."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Canonical lineage builders, structural Stage, simplified catalog, producer-family conformance and obsolete registry removal.",
+      "dependsOn": ["T-006"],
+      "passes": true,
+      "notes": "Historical envelope JSON is immutable and not required to match the new shape. Test actual producer paths, not only helpers."
+    },
+    {
+      "id": "T-008",
+      "title": "Reconcile server consumers and current-state integrations",
+      "spec": "specs/event-lineage-stamping/spec.md#issue-and-epic-have-no-legacy-lineage-aliases",
+      "description": "Update server subscriptions, Epic reactions, Inbox, Hermes, Session origin metadata, Workflow profile/context lookup and all current consumers to Project + issue/epic number and canonical envelope context. Routing uses envelope extensions; payload remains unchanged display/audit data. Remove legacy key/id fallbacks. Domain reactions may re-read Issue before commands; matcher/dispatcher selection stays envelope-only.",
+      "acceptanceCriteria": [
+        "Server handlers resolve scoped identity from canonical envelope context and do not route from payload.",
+        "Inbox carries canonical context without IssueId; Hermes exposes issueNumber and optional epicNumber only.",
+        "Workflow-origin Sessions carry issue/epic numbers where present; independent agent/session ids remain.",
+        "Payload/envelope disagreement routes by envelope without mutating payload.",
+        "No current server consumer retains legacy lineage/id fallback; focused subscription/Inbox/Hermes/Session/profile tests pass."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Canonical server consumers/integrations, envelope-first routing and disagreement/redelivery specs.",
+      "dependsOn": ["T-007"],
+      "passes": true,
+      "notes": "Do not move current-state routing identity into payload for client convenience."
+    },
+    {
+      "id": "T-009",
+      "title": "Cut CLI and Web to scoped numbers and envelope-first routing",
+      "spec": "specs/scoped-work-item-identity/spec.md#references-use-the-owning-resources-canonical-identity",
+      "description": "Update CLI/Web Issue/Epic contracts, query keys, routes, forms, fixtures and displays to explicit Project + number only. Remove id-or-number inputs/id fields. Epic link/unlink/lifecycle/reopen use Epic and Issue numbers. Web timeline routes from canonical extensions while preserving payload.",
+      "acceptanceCriteria": [
+        "CLI Issue/Epic commands use Project-scoped numbers only and Epic reopen is available.",
+        "Web clients/entities/query keys/routes/forms use ProjectId + number without random ids.",
+        "Cross-Project same-number tests isolate routes and caches.",
+        "Timeline uses extensions.issue/epic before payload and payload is unchanged.",
+        "No current CLI/Web production/fixture path uses legacy identity/lineage keys; CLI tests, Web typecheck/tests pass."
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Number-only CLI/Web contracts, Project-scoped routes/cache keys, reopen CLI and envelope-first timeline tests.",
+      "dependsOn": ["T-008"],
+      "passes": true,
+      "notes": "Completed on 2026-07-17. No dual client cache keys or id compatibility aliases remain; Project scope remains explicit because numbers are not global. Web and CLI full suites pass."
+    },
+    {
+      "id": "T-010",
+      "title": "Remove superseded model and verify aggregate recovery end to end",
+      "spec": "specs/aggregate-coordination/spec.md#one-transaction-commits-one-aggregate-and-its-events",
+      "description": "Audit and delete any remaining random Issue/Epic identity, relation/active rows, copied affiliation, AwaitingBinding/pending/confirmation/revision, per-type catalog registry/bypasses, legacy extensions and temporary migration adapters. Add end-to-end dispatcher/transaction specs for link/move/start/complete failure and ordering. Validate current-state migrations and all server/CLI/Web/runner contracts.",
+      "acceptanceCriteria": [
+        "Production audit finds no superseded concept outside explicit historical migration/event descriptions; no exclusions hide leftovers.",
+        "Transaction specs prove each Epic/Issue/Workflow command writes only receiver state + its events.",
+        "Dispatcher specs cover lost link reply, failed recompute, out-of-order affiliation, Issue start before run, lost EnsureStarted reply and delayed result without dead letter/regression.",
+        "Migrations are idempotent, preserve all resolvable references and leave no orphan current-state owner; historical envelopes are untouched.",
+        "git diff --check, server build/test, CLI, Web typecheck/tests, runner typecheck/tests, architecture tests and full npm test pass.",
+        "progress/self-review describe the implemented target, not rejected attempts."
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Clean target model, final recovery/transaction proof, migration audit and full validation record.",
+      "dependsOn": ["T-009"],
+      "passes": false,
+      "notes": "Do not mark complete by adding audit exclusions. Preserve unrelated reviewer guard fixes and user work."
+    }
+  ]
+}

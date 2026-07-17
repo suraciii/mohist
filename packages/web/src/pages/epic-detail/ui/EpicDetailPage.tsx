@@ -129,7 +129,7 @@ function LinkedIssueRow({
   hasInProgress,
 }: {
   issue: LinkedIssue
-  onRemove: (issueId: string) => void
+  onRemove: (issueNumber: number) => void
   onStart: (issueNumber: number) => void
   disabled: boolean
   startPending: boolean
@@ -144,7 +144,7 @@ function LinkedIssueRow({
 
   function handleConfirmRemove() {
     setRemoveConfirmOpen(false)
-    onRemove(issue.id)
+    onRemove(issue.number)
   }
 
   return (
@@ -235,9 +235,9 @@ function LinkedIssueRow({
 
 function formatAddIssueError(error: unknown): string {
   if (error instanceof ApiError && error.code === 'DUPLICATE_EPIC_MEMBERSHIP') {
-    const details = error.details as { existingEpicId?: string; existingEpicTitle?: string } | undefined
+    const details = error.details as { existingEpicNumber?: number; existingEpicTitle?: string } | undefined
     if (details?.existingEpicTitle) {
-      const epicLabel = details.existingEpicId ? `#${details.existingEpicId.slice(0, 8)} ${details.existingEpicTitle}` : details.existingEpicTitle
+      const epicLabel = details.existingEpicNumber ? `#${details.existingEpicNumber} ${details.existingEpicTitle}` : details.existingEpicTitle
       return `Issue already belongs to Epic ${epicLabel}.`
     }
   }
@@ -270,7 +270,7 @@ function graphInputKey(linkedIssues: LinkedIssue[]): string {
       const externals = (issue.externalPrerequisites ?? [])
         .map(external => `${external.number}:${external.status}:${external.title}`)
         .join(',')
-      return `${issue.id}:${issue.number}:${prerequisites}:${externals}`
+      return `${issue.number}:${prerequisites}:${externals}`
     })
     .join('|')
 }
@@ -329,7 +329,7 @@ function CurrentActivityList({
       data-blocked-count={blocked.length}
     >
       {[...blocked, ...active].map(issue => (
-        <li key={issue.id}>
+        <li key={issue.number}>
           <CurrentActivityEntry issue={issue} toProjectPath={toProjectPath} />
         </li>
       ))}
@@ -379,8 +379,8 @@ function NextIssueAdvancementCopy({ advancement, copy, toProjectPath }: NextIssu
 
 interface EpicIssueSelectorProps {
   candidates: Issue[]
-  value: string | null
-  onChange: (issueId: string | null) => void
+  value: number | null
+  onChange: (issueNumber: number | null) => void
   hasSelectableCandidate: boolean
   disabled?: boolean
 }
@@ -389,7 +389,7 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const selected = candidates.find(candidate => candidate.id === value) ?? null
+  const selected = candidates.find(candidate => candidate.number === value) ?? null
   const isDisabled = disabled || (!hasSelectableCandidate && !selected)
 
   useEffect(() => {
@@ -423,7 +423,7 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
         : 'No selectable issues'
 
   function handleSelect(candidate: Issue) {
-    onChange(candidate.id)
+    onChange(candidate.number)
     setOpen(false)
   }
 
@@ -488,18 +488,18 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
               const selectable = reason === null
               return (
                 <button
-                  key={candidate.id}
+                  key={candidate.number}
                   type="button"
                   role="option"
-                  aria-selected={candidate.id === value}
+                  aria-selected={candidate.number === value}
                   aria-disabled={!selectable}
                   disabled={!selectable}
                   data-testid="epic-issue-option"
-                  data-issue-id={candidate.id}
+                  data-issue-number={candidate.number}
                   data-unavailable={selectable ? undefined : 'true'}
                   onClick={() => handleSelect(candidate)}
                   className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors ${
-                    candidate.id === value
+                    candidate.number === value
                       ? 'bg-blue-50 text-blue-700'
                       : selectable
                         ? 'text-foreground hover:bg-muted'
@@ -536,11 +536,12 @@ export function EpicDetailPage({
     DependencyGraphErrorBoundary,
     DependencyGraphWidget,
   } = { ...defaultComponents, ...components }
-  const { id = '' } = useParams()
+  const { number: numberParam } = useParams()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { projectId } = useProject()
-  const { data: epic, isLoading } = useEpic(id)
+  const epicNumber = Number(numberParam)
+  const { data: epic, isLoading } = useEpic(Number.isInteger(epicNumber) && epicNumber > 0 ? epicNumber : null)
   const { data: issues } = useIssues(projectId ? { projectId } : undefined)
   const addEpicIssue = useAddEpicIssue()
   const removeEpicIssueHook = dependencies?.removeEpicIssueHook ?? useRemoveEpicIssue
@@ -553,7 +554,7 @@ export function EpicDetailPage({
   const resumeEpic = useResumeEpic()
   const startEpic = useStartEpic()
   const reopenEpic = useReopenEpic()
-  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
+  const [selectedIssueNumber, setSelectedIssueNumber] = useState<number | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
@@ -579,8 +580,8 @@ export function EpicDetailPage({
 
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
-    const linkedIds = new Set(epic.linkedIssues.map(issue => issue.id))
-    return issues.filter(issue => !linkedIds.has(issue.id))
+    const linkedNumbers = new Set(epic.linkedIssues.map(issue => issue.number))
+    return issues.filter(issue => !linkedNumbers.has(issue.number))
   }, [epic, issues])
 
   const hasSelectableCandidate = useMemo(
@@ -644,8 +645,7 @@ export function EpicDetailPage({
   const progressPercent = epic.progress.totalIssueCount > 0
     ? (epic.progress.deliveredCount / epic.progress.totalIssueCount) * 100
     : 0
-  const epicId = epic.id
-  const submitDisabled = !selectedIssueId || addEpicIssue.isPending
+  const submitDisabled = selectedIssueNumber === null || addEpicIssue.isPending
   const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
   const isPaused = epic.status === EpicStatus.Paused
   const isTerminal = epic.status === EpicStatus.Done || epic.status === EpicStatus.Closed
@@ -670,14 +670,16 @@ export function EpicDetailPage({
   const linkedIssueCount = epic.linkedIssues.length
 
   function handleConfirmClose() {
-    closeEpic.mutate(epicId, {
+    if (!epic) return
+    closeEpic.mutate(epic.number, {
       onSettled: () => setCloseConfirmOpen(false),
     })
   }
 
   function handleConfirmPause() {
+    if (!epic) return
     pauseEpic.mutate(
-      { id: epicId, reason: pauseReason.trim() || null },
+      { number: epic.number, reason: pauseReason.trim() || null },
       {
         onSettled: () => {
           setPauseConfirmOpen(false)
@@ -689,10 +691,10 @@ export function EpicDetailPage({
 
   function handleAddIssue(event: FormEvent) {
     event.preventDefault()
-    if (!selectedIssueId) return
+    if (!epic || selectedIssueNumber === null) return
     addEpicIssue.mutate(
-      { epicId, issueId: selectedIssueId },
-      { onSuccess: () => setSelectedIssueId(null) },
+      { epicNumber: epic.number, issueNumber: selectedIssueNumber },
+      { onSuccess: () => setSelectedIssueNumber(null) },
     )
   }
 
@@ -703,7 +705,7 @@ export function EpicDetailPage({
     })
   }
 
-  const inProgressIssueId = epic.linkedIssues.find(i => i.status === IssueStatus.InProgress)?.id ?? null
+  const inProgressIssueNumber = epic.linkedIssues.find(i => i.status === IssueStatus.InProgress)?.number ?? null
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
@@ -723,7 +725,7 @@ export function EpicDetailPage({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span data-testid="epic-number">
-                {epic.number != null ? `#${epic.number}` : `#${epic.id.slice(0, 8)}`}
+                #{epic.number}
               </span>
               <StatusBadge status={epic.status} />
               <PriorityBadge priority={epic.priority} />
@@ -750,7 +752,7 @@ export function EpicDetailPage({
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate(toProjectPath('/agent-sessions/new?epic=' + encodeURIComponent(epic.id)))}
+              onClick={() => navigate(toProjectPath('/agent-sessions/new?epic=' + epic.number))}
               data-testid="ask-agent-epic"
             >
               <BotIcon className="size-4 mr-2" />
@@ -759,7 +761,7 @@ export function EpicDetailPage({
             {primaryAction?.kind === 'start-epic' && (
               <Button
                 type="button"
-                onClick={() => startEpic.mutate(epicId)}
+      onClick={() => startEpic.mutate(epic.number)}
                 disabled={startEpic.isPending}
                 data-testid="start-epic-trigger"
               >
@@ -779,7 +781,7 @@ export function EpicDetailPage({
             {primaryAction?.kind === 'resume-epic' && (
               <Button
                 type="button"
-                onClick={() => resumeEpic.mutate(epicId)}
+                onClick={() => resumeEpic.mutate(epic.number)}
                 disabled={resumeEpic.isPending}
                 data-testid="resume-epic-trigger"
               >
@@ -789,7 +791,7 @@ export function EpicDetailPage({
             {primaryAction?.kind === 'mark-done' && (
               <Button
                 type="button"
-                onClick={() => markEpicDone.mutate(epic.id)}
+                onClick={() => markEpicDone.mutate(epic.number)}
                 disabled={markEpicDone.isPending}
                 data-testid="mark-epic-done"
               >
@@ -799,7 +801,7 @@ export function EpicDetailPage({
             {primaryAction?.kind === 'reopen-epic' && (
               <Button
                 type="button"
-                onClick={() => reopenEpic.mutate(epicId)}
+                onClick={() => reopenEpic.mutate(epic.number)}
                 disabled={reopenEpic.isPending}
                 data-testid="reopen-epic-trigger"
               >
@@ -989,8 +991,8 @@ export function EpicDetailPage({
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
           <EpicIssueSelector
             candidates={availableIssues}
-            value={selectedIssueId}
-            onChange={setSelectedIssueId}
+            value={selectedIssueNumber}
+            onChange={setSelectedIssueNumber}
             hasSelectableCandidate={hasSelectableCandidate}
           />
           <Button
@@ -1076,12 +1078,12 @@ export function EpicDetailPage({
               </div>
             ) : (
               epic.linkedIssues.map(issue => {
-                const hasInProgressSibling = inProgressIssueId !== null && inProgressIssueId !== issue.id
+                const hasInProgressSibling = inProgressIssueNumber !== null && inProgressIssueNumber !== issue.number
                 return (
                   <LinkedIssueRow
-                    key={issue.id}
+                    key={issue.number}
                     issue={issue}
-                    onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
+                    onRemove={(issueNumber) => removeEpicIssue.mutate({ epicNumber: epic.number, issueNumber })}
                     onStart={handleStartIssue}
                     disabled={removeEpicIssue.isPending}
                     startPending={pendingStartIssueNumber === issue.number}
@@ -1100,7 +1102,7 @@ export function EpicDetailPage({
         )}
       </Card>
 
-      <EpicActivityTimelineSection epicId={epic.id} />
+      <EpicActivityTimelineSection epicNumber={epic.number} />
 
       <EditEpicDialog
         open={editDialogOpen}

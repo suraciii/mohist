@@ -21,17 +21,17 @@ const _startIssueHandler = vi.fn()
 let _blockStart = false
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber', () =>
     HttpResponse.json({ success: true, data: _epicData }),
   ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: _issuesData }),
   ),
-  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
-    _removeIssueHandler(params.issueId)
+  http.delete('*/api/projects/:projectId/epics/:epicNumber/issues/:issueNumber', ({ params }) => {
+    _removeIssueHandler(Number(params.issueNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
   http.post('*/api/projects/:projectId/issues/:number/start', ({ params }) => {
@@ -43,8 +43,8 @@ useMswServer(
 
 function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'epic-12345678',
-    number: null,
+    projectId: 'proj-1',
+    number: 123,
     title: 'Epic title',
     description: 'Epic description',
     priority: 'p1',
@@ -80,7 +80,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('renders a Start button on a startable backlog row while keeping Remove and navigation', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -101,7 +101,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button on an in_progress linked issue row', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], priority: 'p1', health: 'blocked' as LinkedIssue['health'], canStart: false }),
+        linkedIssue({ number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], priority: 'p1', health: 'blocked' as LinkedIssue['health'], canStart: false }),
       ],
     })
 
@@ -115,7 +115,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button on a blocked linked issue row even when canStart is true', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', priority: 'p1', health: 'blocked' as LinkedIssue['health'], startBlocker: { kind: 'waiting-for', issue: { number: 1, title: 'Done issue' } } }),
+        linkedIssue({ number: 2, title: 'Blocked issue', priority: 'p1', health: 'blocked' as LinkedIssue['health'], startBlocker: { kind: 'waiting-for', issue: { number: 1, title: 'Done issue' } } }),
       ],
     })
 
@@ -129,7 +129,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button on a done linked issue row', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
+        linkedIssue({ number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
       ],
     })
 
@@ -143,7 +143,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button on a cancelled linked issue row', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-4', number: 4, title: 'Cancelled issue', status: 'cancelled' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'cancelled' as LinkedIssue['health'], canStart: false }),
+        linkedIssue({ number: 4, title: 'Cancelled issue', status: 'cancelled' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'cancelled' as LinkedIssue['health'], canStart: false }),
       ],
     })
 
@@ -157,7 +157,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button when canStart is false even with backlog status', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Draft issue', canStart: false, startBlocker: { kind: 'draft' } }),
+        linkedIssue({ number: 3, title: 'Draft issue', canStart: false, startBlocker: { kind: 'draft' } }),
       ],
     })
 
@@ -170,7 +170,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('invokes the start mutation with the issue number when Start is clicked', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -187,7 +187,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
     _blockStart = true
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -203,8 +203,8 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   it('hides the Start button on all backlog issues when any sibling is in_progress', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Running', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'active' as LinkedIssue['health'] }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Next candidate' }),
+        linkedIssue({ number: 1, title: 'Running', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'active' as LinkedIssue['health'] }),
+        linkedIssue({ number: 2, title: 'Next candidate' }),
       ],
     })
 
@@ -235,7 +235,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('uses a vertical flex-col container instead of the old horizontal two-column layout', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -253,7 +253,6 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
     _epicData = makeEpic({
       linkedIssues: [
         linkedIssue({
-          id: 'issue-7',
           number: 7,
           title: 'Blocked item',
           status: IssueStatus.Backlog,
@@ -285,7 +284,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
 
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: LONG_TITLE }),
+        linkedIssue({ number: 3, title: LONG_TITLE }),
       ],
     })
 
@@ -302,7 +301,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('uses flex-wrap on the metadata row so health/status/priority badges wrap at narrow widths', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -317,7 +316,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('places the number link and the title on the same primary reading row', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -334,7 +333,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('does NOT show the blocker reason when the issue is inline-startable', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -348,7 +347,6 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
     _epicData = makeEpic({
       linkedIssues: [
         linkedIssue({
-          id: 'issue-3',
           number: 3,
           title: 'Draft candidate',
           canStart: false,
@@ -368,7 +366,6 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
     _epicData = makeEpic({
       linkedIssues: [
         linkedIssue({
-          id: 'issue-3',
           number: 3,
           title: 'Waiting on upstream',
           canStart: false,
@@ -388,7 +385,6 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
     _epicData = makeEpic({
       linkedIssues: [
         linkedIssue({
-          id: 'issue-3',
           number: 3,
           title: 'Blocked by upstream issue',
           canStart: false,
@@ -407,8 +403,8 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('shows the "Another issue is in progress" reason only on rows blocked by a running sibling', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Running', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Active }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Next candidate' }),
+        linkedIssue({ number: 1, title: 'Running', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Active }),
+        linkedIssue({ number: 2, title: 'Next candidate' }),
       ],
     })
 
@@ -424,7 +420,6 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
     _epicData = makeEpic({
       linkedIssues: [
         linkedIssue({
-          id: 'issue-3',
           number: 3,
           title: 'Done-ish issue',
           status: IssueStatus.Done,
@@ -445,9 +440,8 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   it('keeps Start button gated by canInlineStartRow: present only when inline-startable', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Startable candidate' }),
+        linkedIssue({ number: 3, title: 'Startable candidate' }),
         linkedIssue({
-          id: 'issue-4',
           number: 4,
           title: 'Non-startable',
           canStart: false,

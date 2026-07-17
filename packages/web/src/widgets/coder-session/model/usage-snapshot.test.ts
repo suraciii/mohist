@@ -4,7 +4,6 @@ import type { AgentActivitySession } from '../../../entities/agent'
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
-    issueId: 'issue-1',
     issueNumber: 1,
     issueTitle: 'Test',
     issueStage: 'build',

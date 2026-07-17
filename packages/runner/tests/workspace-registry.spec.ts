@@ -28,13 +28,11 @@ describe("WorkspaceRegistry", () => {
 
     await registry.load()
     const entry = await registry.register({
-      issueId: "issue-42",
       issueNumber: 42,
       workflowRunId: "wr-123",
       workspacePath: join(root, "mohist-local/workspaces/issue-42"),
     })
 
-    expect(entry.issueId).toBe("issue-42")
     expect(entry.issueNumber).toBe(42)
     expect(entry.workflowRunId).toBe("wr-123")
     expect(entry.workspacePath).toBe(join(root, "mohist-local/workspaces/issue-42"))
@@ -45,7 +43,6 @@ describe("WorkspaceRegistry", () => {
     const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
     expect(persisted.version).toBe(1)
     expect(persisted.entries["wr-123"]).toMatchObject({
-      issueId: "issue-42",
       issueNumber: 42,
       workflowRunId: "wr-123",
       phase: "active",
@@ -62,7 +59,6 @@ describe("WorkspaceRegistry", () => {
       version: 1,
       entries: {
         "wr-existing": {
-          issueId: "issue-7",
           issueNumber: 7,
           workflowRunId: "wr-existing",
           workspacePath: join(root, "workspaces/issue-7"),
@@ -71,7 +67,6 @@ describe("WorkspaceRegistry", () => {
           terminalAt: null,
         },
         "wr-done": {
-          issueId: "issue-9",
           issueNumber: 9,
           workflowRunId: "wr-done",
           workspacePath: join(root, "workspaces/issue-9"),
@@ -112,7 +107,6 @@ describe("WorkspaceRegistry", () => {
     expect(registry.list()).toHaveLength(0)
 
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
@@ -131,7 +125,6 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
@@ -139,7 +132,6 @@ describe("WorkspaceRegistry", () => {
 
     now.mockReturnValue(second)
     const updated = await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
@@ -160,7 +152,6 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
@@ -188,7 +179,6 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
@@ -220,13 +210,11 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),
     })
     await registry.register({
-      issueId: "issue-2",
       issueNumber: 2,
       workflowRunId: "wr-2",
       workspacePath: join(root, "workspaces/issue-2"),
@@ -251,7 +239,6 @@ describe("WorkspaceRegistry", () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({
-      issueId: "issue-7",
       issueNumber: 7,
       workflowRunId: "wr-7",
       workspacePath: join(root, "workspaces/issue-7"),
@@ -265,7 +252,6 @@ describe("WorkspaceRegistry", () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({
-      issueId: "issue-1",
       issueNumber: 1,
       workflowRunId: "wr-1",
       workspacePath: join(root, "workspaces/issue-1"),

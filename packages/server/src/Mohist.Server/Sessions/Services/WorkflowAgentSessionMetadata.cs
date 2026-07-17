@@ -10,7 +10,8 @@ public sealed record WorkflowAgentSessionContext(
     string? WorkId = null,
     string? WorkType = null,
     string? Stage = null,
-    string? Title = null);
+    string? Title = null,
+    int? EpicNumber = null);
 
 public static class WorkflowAgentSessionMetadata
 {
@@ -29,8 +30,10 @@ public static class WorkflowAgentSessionMetadata
             [AgentSessionQueryMetadataKeys.SessionName] = context.SessionName,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
         };
-        if (context.IssueNumber is not null)
+        if (context.IssueNumber is > 0)
             labels[AgentSessionQueryMetadataKeys.IssueNumber] = context.IssueNumber.Value.ToString();
+        if (context.EpicNumber is > 0)
+            labels[AgentSessionQueryMetadataKeys.EpicNumber] = context.EpicNumber.Value.ToString();
         if (!string.IsNullOrWhiteSpace(context.WorkId))
             labels[AgentSessionQueryMetadataKeys.WorkId] = context.WorkId;
         if (!string.IsNullOrWhiteSpace(context.WorkType))

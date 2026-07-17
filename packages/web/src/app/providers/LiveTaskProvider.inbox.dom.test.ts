@@ -64,7 +64,6 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
         itemId: 'inb-1',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -86,7 +85,6 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
         itemId: 'inb-b',
         projectId: 'proj-b',
         kind: 'workflow_failed',
-        issueId: 'issue-99',
         issueNumber: 99,
       })
     })
@@ -108,7 +106,6 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
         itemId: 'inb-1',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
         // The hint payload is untrusted for inbox content. The Web never
         // synthesises an InboxItem from it. We attach the fields a careless
@@ -131,7 +128,7 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.InboxItemPersisted, {
         itemId: 'inb-1',
-        // missing projectId / kind / issueId / issueNumber
+        // missing projectId / kind / issueNumber
       })
     })
 
@@ -167,7 +164,6 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
         itemId: 'inb-late',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-7',
         issueNumber: 7,
       })
     })
@@ -212,7 +208,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-err',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -231,7 +226,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-app',
         projectId: TEST_PROJECT.id,
         kind: 'approval_requested',
-        issueId: 'issue-99',
         issueNumber: 99,
       })
     })
@@ -250,7 +244,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-started',
         projectId: TEST_PROJECT.id,
         kind: 'issue_started',
-        issueId: 'issue-100',
         issueNumber: 100,
       })
     })
@@ -268,7 +261,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-completed',
         projectId: TEST_PROJECT.id,
         kind: 'issue_completed',
-        issueId: 'issue-101',
         issueNumber: 101,
       })
     })
@@ -286,7 +278,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-other',
         projectId: 'proj-other',
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -307,7 +298,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-inbox',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -329,7 +319,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-same',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -349,7 +338,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-unrel',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })
@@ -372,7 +360,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
         itemId: 'inb-inapp',
         projectId: TEST_PROJECT.id,
         kind: 'workflow_failed',
-        issueId: 'issue-42',
         issueNumber: 42,
       })
     })

@@ -131,11 +131,20 @@ function issueHandler(ctx: HandlerContext): void {
   if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
     return
   }
-  const { issueId } = ctx.parsed as { issueId: string; projectId: string }
+  const { issueNumber } = ctx.parsed as { issueNumber?: number }
   ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
-  if (issueId) {
-    ctx.queryClient.invalidateQueries({ queryKey: ['issues', 'detail', issueId] })
+  if (typeof issueNumber === 'number') {
+    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
   }
+}
+
+function issueEpicChangedHandler(ctx: HandlerContext): void {
+  const { issueNumber } = ctx.parsed as { issueNumber?: number }
+  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
+  if (typeof issueNumber === 'number') {
+    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
+  }
+  ctx.queryClient.invalidateQueries({ queryKey: ['epics'] })
 }
 
 function workflowRunHandler(ctx: HandlerContext): void {
@@ -150,20 +159,31 @@ function workflowRunHandler(ctx: HandlerContext): void {
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
   }
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused) {
-    const evt = ctx.parsed as { issueId: string }
-    notifyRunLifecycleToast(ctx.queryClient, ctx.viewedIssue, evt.issueId, 'pause')
+    const evt = ctx.parsed as { issueNumber?: number }
+    if (typeof evt.issueNumber === 'number') notifyRunLifecycleToast(ctx.viewedIssue, evt.issueNumber, 'pause')
   } else if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed) {
-    const evt = ctx.parsed as { issueId: string }
-    notifyRunLifecycleToast(ctx.queryClient, ctx.viewedIssue, evt.issueId, 'error')
+    const evt = ctx.parsed as { issueNumber?: number }
+    if (typeof evt.issueNumber === 'number') notifyRunLifecycleToast(ctx.viewedIssue, evt.issueNumber, 'error')
+  }
+}
+
+function agentSessionHandler(ctx: HandlerContext): void {
+  workflowRunHandler(ctx)
+  const { sessionId, agentId } = ctx.parsed as { sessionId?: string, agentId?: string }
+  if (typeof sessionId !== 'string' || !sessionId) return
+  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId], exact: true })
+  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId, 'transcript'], exact: true })
+  if (typeof agentId === 'string' && agentId) {
+    ctx.queryClient.invalidateQueries({ queryKey: ['agents', ctx.projectId, agentId, 'sessions'] })
   }
 }
 
 function approvalHandler(ctx: HandlerContext): void {
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.StageApprovalRequested) {
-    const evt = ctx.parsed as { issueId: string; projectId: string; issueNumber?: number }
+    const evt = ctx.parsed as { issueNumber?: number }
     ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-    notifyApprovalRequestedToast(ctx.queryClient, ctx.viewedIssue, evt)
+    notifyApprovalRequestedToast(ctx.viewedIssue, evt)
     return
   }
   // StageApprovalResolved
@@ -220,6 +240,7 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
   [REVERSE_DNS_EVENT_TYPES.StageFailed]: stageHandler,
 
   [REVERSE_DNS_EVENT_TYPES.IssueCreated]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueEpicChanged]: issueEpicChangedHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueCancelled]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueArchived]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueUnarchived]: issueHandler,
@@ -239,9 +260,12 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed]: workflowRunHandler,
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying]: workflowRunHandler,
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: workflowRunHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated]: agentSessionHandler,
 
   [REVERSE_DNS_EVENT_TYPES.StageApprovalRequested]: approvalHandler,
   [REVERSE_DNS_EVENT_TYPES.StageApprovalResolved]: approvalHandler,

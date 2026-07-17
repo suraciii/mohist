@@ -30,7 +30,6 @@ public class IssueLabelsTests
         };
 
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -46,7 +45,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_AddsNewKey_AndEmitsLabelsChanged()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         issue.ClearPendingEvents();
 
         issue.SetLabel("stream", "frontend", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
@@ -63,7 +62,6 @@ public class IssueLabelsTests
     public void SetLabel_OnExistingKey_ReplacesValue_AndEmitsEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -84,7 +82,6 @@ public class IssueLabelsTests
     public void SetLabel_NoOpChange_DoesNotEmitEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -103,7 +100,6 @@ public class IssueLabelsTests
     public void RemoveLabel_ExistingKey_EmitsEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -124,7 +120,6 @@ public class IssueLabelsTests
     public void RemoveLabel_MissingKey_IsIdempotentAndEmitsNoEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -140,7 +135,6 @@ public class IssueLabelsTests
     public void ReplaceLabels_FullReplace_EmitsEventWithBeforeAndAfter()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -170,7 +164,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_InvalidKey_ThrowsArgumentException()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         Assert.Throws<ArgumentException>(() => issue.SetLabel("Stream", "frontend"));
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream frontend", "frontend"));
@@ -182,7 +176,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_EmptyValue_ThrowsArgumentException()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream", ""));
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream", "   "));
@@ -191,7 +185,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_ValidKey_Accepts()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         issue.SetLabel("stream", "frontend");
         issue.SetLabel("module-auth", "core");
@@ -210,7 +204,7 @@ public class IssueLabelsTests
         var labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["Stream"] = "frontend" };
 
         Assert.Throws<ArgumentException>(() =>
-            Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Bad", labels: labels));
+            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels));
     }
 
     [Fact]
@@ -219,14 +213,13 @@ public class IssueLabelsTests
         var labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "  " };
 
         Assert.Throws<ArgumentException>(() =>
-            Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Bad", labels: labels));
+            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels));
     }
 
     [Fact]
     public void Update_LabelsFullReplacement_RecordsChange()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -253,7 +246,6 @@ public class IssueLabelsTests
     {
         var labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" };
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",
@@ -278,7 +270,6 @@ public class IssueLabelsTests
     {
         var legacyJson = """
         {
-          "id": "issue_legacy",
           "projectId": "project-1",
           "number": 1,
           "title": "Legacy issue",
@@ -303,7 +294,6 @@ public class IssueLabelsTests
     {
         var json = """
         {
-          "id": "issue_obj",
           "projectId": "project-1",
           "number": 1,
           "title": "Object labels",
@@ -331,7 +321,6 @@ public class IssueLabelsTests
     public void Serialize_Labels_WritesObject()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1",
             "project-1",
             1,
             "Build the feature",

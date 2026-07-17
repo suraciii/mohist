@@ -20,9 +20,8 @@ export const TEST_PROJECT = {
   repositories: [{ name: 'main', gitUrl: 'https://example.com/test.git', baseBranch: 'main', isDefault: true }],
 }
 
-export function makeBaseIssue(id: string, number: number): Issue {
+export function makeBaseIssue(_id: string, number: number): Issue {
   return {
-    id,
     number,
     title: `Issue ${number}`,
     status: IssueStatus.Backlog,

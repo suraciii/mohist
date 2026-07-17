@@ -84,15 +84,14 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId, string? issueId = null)
+    private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId)
     {
         var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["projectId"] = projectId,
+            ["issueNumber"] = "42",
+            ["epicNumber"] = "7",
         };
-        if (!string.IsNullOrWhiteSpace(issueId))
-            annotations["issueId"] = issueId;
-
         var run = WorkflowRunExtensions.Create(
             workflowRunId,
             new WorkflowDefinition("spec/workflow",
@@ -104,11 +103,11 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             DateTimeOffset.UnixEpoch,
             new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, Annotations: annotations));
 
-        await SeedProfileAsync(projectId, issueId, workflowRunId, run);
+        await SeedProfileAsync(projectId, workflowRunId, run);
         return run;
     }
 
-    private async Task SeedProfileAsync(string projectId, string? issueId, string workflowRunId, WorkflowRun run)
+    private async Task SeedProfileAsync(string projectId, string workflowRunId, WorkflowRun run)
     {
         await using var db = new MohistDbContext(_options);
         var definitionJson = JsonSerializer.Serialize(
@@ -137,21 +136,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             WorkflowRunId = workflowRunId,
             State = JsonSerializer.Serialize(run),
         });
-
-        if (!string.IsNullOrWhiteSpace(issueId))
-        {
-            db.Issues.Add(new IssueRow
-            {
-                IssueId = issueId,
-                State = JsonSerializer.Serialize(new
-                {
-                    Id = issueId,
-                    ProjectId = projectId,
-                    Number = 1,
-                    WorkflowRunId = workflowRunId,
-                }),
-            });
-        }
 
         await db.SaveChangesAsync();
     }
@@ -185,6 +169,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.NotNull(dispatch.Variables);
         Assert.NotNull(dispatch.Artifacts);
         Assert.NotNull(dispatch.SetVars);
+        Assert.Equal(7, dispatch.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -231,6 +216,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("build", dispatch.Stage);
         Assert.Equal("Stage checks", dispatch.Title);
         Assert.NotNull(dispatch.With);
+        Assert.Equal(7, dispatch.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

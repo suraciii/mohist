@@ -124,7 +124,6 @@ public class InboxQuerierSpecs
         var store = new InboxStore(database.Factory);
         await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Render me client-side",
             NotificationKind: NotificationKinds.ApprovalRequested,
@@ -138,7 +137,6 @@ public class InboxQuerierSpecs
         Assert.Equal(NotificationKinds.ApprovalRequested, item.NotificationKind);
         Assert.Equal(42, item.IssueNumber);
         Assert.Equal("Render me client-side", item.IssueTitle);
-        Assert.Equal("issue_42", item.IssueId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -157,7 +155,6 @@ public class InboxQuerierSpecs
             {
                 Id = "inb_first",
                 ProjectId = "proj_a",
-                IssueId = "issue_1",
                 IssueNumber = 1,
                 IssueTitle = "First",
                 NotificationKind = NotificationKinds.WorkflowFailed,
@@ -169,7 +166,6 @@ public class InboxQuerierSpecs
             {
                 Id = "inb_second",
                 ProjectId = "proj_a",
-                IssueId = "issue_2",
                 IssueNumber = 2,
                 IssueTitle = "Second",
                 NotificationKind = NotificationKinds.WorkflowFailed,
@@ -200,7 +196,6 @@ public class InboxQuerierSpecs
     {
         return await store.InsertAsync(new InboxItemDraft(
             ProjectId: projectId,
-            IssueId: $"issue_{issueNumber}",
             IssueNumber: issueNumber,
             IssueTitle: issueTitle,
             NotificationKind: NotificationKinds.WorkflowFailed,

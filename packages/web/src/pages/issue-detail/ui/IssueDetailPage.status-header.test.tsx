@@ -20,7 +20,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 14,
     title: 'Test Issue',
     body: '',
@@ -190,7 +189,6 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
 
   it('reflects the done situation with no active workflow controls for an archived done issue', async () => {
     mockIssue(makeIssue({
-      id: 'issue-264',
       number: 264,
       status: 'done',
       workflowStage: 'done',
@@ -265,7 +263,6 @@ describe('IssueDetailPage status-header — adjudicated situation variants', () 
 
   it('reflects the done situation for an archived done issue', async () => {
     mockIssue(makeIssue({
-      id: 'issue-264',
       number: 264,
       status: 'done',
       workflowStage: 'done',

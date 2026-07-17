@@ -68,7 +68,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_UsesIssueCustomWithoutRunProfileBinding()
     {
         var runId = "wr_snap01";
-        await SeedAsync(projectId: "proj1", issueId: "issue_1", runId: runId,
+        await SeedAsync(projectId: "proj1", issueNumber: 1, runId: runId,
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
@@ -85,7 +85,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_Priority2_ReturnsIssueCustomTemplate()
     {
         var runId = "wr_issue01";
-        await SeedAsync(projectId: "proj2", issueId: "issue_2", runId: runId,
+        await SeedAsync(projectId: "proj2", issueNumber: 1, runId: runId,
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
@@ -102,7 +102,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_Priority3_ReturnsIssueReferencedTemplate()
     {
         var runId = "wr_ref01";
-        await SeedAsync(projectId: "proj3", issueId: "issue_3", runId: runId,
+        await SeedAsync(projectId: "proj3", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: "my-tmpl",
             projectTemplateJson: SerializeDefinition("my-tmpl", stageCount: 4));
@@ -120,7 +120,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_ProjectDefaultCustomTemplate_NoIssueSelection_UsesProjectDefault()
     {
         var runId = "wr_default01";
-        await SeedAsync(projectId: "proj4", issueId: "issue_4", runId: runId,
+        await SeedAsync(projectId: "proj4", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "default-tmpl",
@@ -139,7 +139,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_ProjectDefaultSystemTemplate_FallsBackToSystemTemplate()
     {
         var runId = "wr_system_default01";
-        await SeedAsync(projectId: "proj-sys", issueId: "issue_sys", runId: runId,
+        await SeedAsync(projectId: "proj-sys", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/local");
@@ -157,13 +157,13 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_DisabledProjectDefaultSystemTemplate_UsesFirstEnabledProfile()
     {
         var runId = "wr_disabled_default01";
-        await SeedWithoutRunAsync(projectId: "proj-disabled-default", issueId: "issue_disabled_default",
+        await SeedWithoutRunAsync(projectId: "proj-disabled-default", issueNumber: 1,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local"]);
 
-        var result = await _manager.LoadTemplateAsync(runId, "proj-disabled-default", "issue_disabled_default");
+        var result = await _manager.LoadTemplateAsync(runId, "proj-disabled-default", 1);
 
         Assert.NotNull(result.Structure);
         Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
@@ -178,14 +178,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
     {
         var runId = "wr_all_disabled_template";
-        await SeedWithoutRunAsync(projectId: "proj-all-disabled-template", issueId: "issue_all_disabled_template",
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-template", issueNumber: 1,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-template", "issue_all_disabled_template"));
+            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-template", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -196,14 +196,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsBeforeIssueCustomTemplate()
     {
         var runId = "wr_all_disabled_custom_template";
-        await SeedWithoutRunAsync(projectId: "proj-all-disabled-custom-template", issueId: "issue_all_disabled_custom_template",
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-custom-template", issueNumber: 1,
             issueTemplateJson: SerializeDefinition("issue-custom-disabled", stageCount: 1),
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-custom-template", "issue_all_disabled_custom_template"));
+            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-custom-template", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -214,7 +214,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_ExistingRunIgnoresLaterDisabledProfiles()
     {
         var runId = "wr_existing_disabled_template";
-        await SeedAsync(projectId: "proj-existing-disabled-template", issueId: "issue_existing_disabled_template", runId: runId,
+        await SeedAsync(projectId: "proj-existing-disabled-template", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -236,7 +236,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_IssuePrProfile_NoOverrides_UsesPrSystemTemplate()
     {
         var runId = "wr_issue_pr";
-        await SeedAsync(projectId: "proj-issue-pr", issueId: "issue_pr", runId: runId,
+        await SeedAsync(projectId: "proj-issue-pr", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -258,7 +258,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_IssueDefaultProfile_NoOverrides_UsesDefaultSystemTemplate()
     {
         var runId = "wr_issue_default";
-        await SeedAsync(projectId: "proj-issue-default", issueId: "issue_default", runId: runId,
+        await SeedAsync(projectId: "proj-issue-default", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -279,7 +279,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_UsesIssueProfile()
     {
         var runId = "wr_issue_pr_proj_default";
-        await SeedAsync(projectId: "proj-issue-pr-proj-default", issueId: "issue_pr_proj", runId: runId,
+        await SeedAsync(projectId: "proj-issue-pr-proj-default", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/local",
@@ -301,7 +301,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadTemplate_IssuePrProfile_CustomYamlOverride_TakesPrecedence()
     {
         var runId = "wr_issue_pr_custom";
-        await SeedAsync(projectId: "proj-pr-custom", issueId: "issue_pr_custom", runId: runId,
+        await SeedAsync(projectId: "proj-pr-custom", issueNumber: 1, runId: runId,
             issueTemplateJson: SerializeDefinition("custom-override", stageCount: 1),
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -322,7 +322,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var runId = "wr_vars01";
         await SeedAsync(
             projectId: "proj5",
-            issueId: "issue_5",
+            issueNumber: 1,
             runId: runId,
             issueTemplateJson: SerializeDefinition("empty-vars-template"));
 
@@ -345,7 +345,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { b = "issue-b", c = "issue-c", d = "issue-d" })));
 
-        await SeedAllLayersAsync("proj6", "issue_6", runId, proj, issue);
+        await SeedAllLayersAsync("proj6", 1, runId, proj, issue);
 
         var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
@@ -373,7 +373,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { issueContext = true })));
 
-        await SeedAllLayersAsync("proj_snap", "issue_snap", runId, proj, issue);
+        await SeedAllLayersAsync("proj_snap", 1, runId, proj, issue);
 
         await using (var db = new MohistDbContext(_options))
         {
@@ -407,7 +407,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { agent = new { model = "issue/override" } })));
 
-        await SeedAllLayersAsync("proj_override", "issue_override", runId, proj, issue);
+        await SeedAllLayersAsync("proj_override", 1, runId, proj, issue);
 
         var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
@@ -443,7 +443,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 issue = new { number = 122 }
             })));
 
-        await SeedAllLayersAsync("proj_project_stage", "issue_project_stage", runId, project, issue);
+        await SeedAllLayersAsync("proj_project_stage", 1, runId, project, issue);
 
         var result = await _manager.ResolveEffectiveVariablesAsync(runId, "check");
 
@@ -478,7 +478,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                     })))
             });
 
-        await SeedIssueOnlyAsync("proj_stage", "issue_stage", runId, issue);
+        await SeedIssueOnlyAsync("proj_stage", 1, runId, issue);
 
         var result = await _manager.ResolveEffectiveVariablesAsync(runId, "build");
 
@@ -522,7 +522,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 github = new { pr = new { number = 249, url = "https://example.test/pr/249" } },
             })));
 
-        await SeedAllLayersAsync("proj_effective", "issue_effective", runId, project, issue,
+        await SeedAllLayersAsync("proj_effective", 1, runId, project, issue,
             issueTemplateJson: templateJson,
             runtime: runtime);
 
@@ -570,7 +570,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 issueOnly = true,
             })));
 
-        await SeedAllLayersAsync("proj_effective_stage", "issue_effective_stage", runId, project, issue,
+        await SeedAllLayersAsync("proj_effective_stage", 1, runId, project, issue,
             issueTemplateJson: templateJson);
 
         var result = await _manager.ResolveEffectiveVariablesAsync(runId, "build");
@@ -792,7 +792,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             }, Array.Empty<CheckDefinition>(), requiresApproval: false));
 
         await SeedIssueOverProjectTemplateAsync(
-            "iss_proj", "iss_issue", runId,
+            "iss_proj", 1, runId,
             issueTemplateJson: issueJson,
             projectDefaultTemplateId: "project-tmpl",
             projectTemplateJson: projectJson);
@@ -860,14 +860,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadStageSpecsAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
     {
         var runId = "wr_all_disabled_stage_specs";
-        await SeedWithoutRunAsync(projectId: "proj-all-disabled-stage-specs", issueId: "issue_all_disabled_stage_specs",
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-stage-specs", issueNumber: 1,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _manager.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", "issue_all_disabled_stage_specs"));
+            () => _manager.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -878,7 +878,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadStageSpecsAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
     {
         var runId = "wr_existing_disabled_stage_specs";
-        await SeedAsync(projectId: "proj-existing-disabled-stage-specs", issueId: "issue_existing_disabled_stage_specs", runId: runId,
+        await SeedAsync(projectId: "proj-existing-disabled-stage-specs", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -957,7 +957,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             });
             db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
             {
-                IssueId = "explicit_issue",
+                ProjectId = "explicit_proj",
+                IssueNumber = 1,
                 Variables = "{}",
             });
             await db.SaveChangesAsync();
@@ -966,7 +967,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         // The run is not in the DB; only the explicit context will find the
         // project template.
         var structure = await _manager.LoadStructureAsync(
-            runId, projectId: "explicit_proj", issueId: "explicit_issue");
+            runId, projectId: "explicit_proj", issueNumber: 1);
 
         Assert.Equal("explicit-tmpl", structure.Id);
         Assert.Equal(new[] { "plan" }, structure.Stages.Select(s => s.Stage).ToArray());
@@ -992,14 +993,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadStructureAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
     {
         var runId = "wr_all_disabled_structure";
-        await SeedWithoutRunAsync(projectId: "proj-all-disabled-structure", issueId: "issue_all_disabled_structure",
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-structure", issueNumber: 1,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _manager.LoadStructureAsync(runId, "proj-all-disabled-structure", "issue_all_disabled_structure"));
+            () => _manager.LoadStructureAsync(runId, "proj-all-disabled-structure", 1));
 
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -1010,7 +1011,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadStructureAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
     {
         var runId = "wr_existing_disabled_structure";
-        await SeedAsync(projectId: "proj-existing-disabled-structure", issueId: "issue_existing_disabled_structure", runId: runId,
+        await SeedAsync(projectId: "proj-existing-disabled-structure", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -1029,13 +1030,13 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task WorkflowQuerier_ExistingRunYamlAndStatusUseOriginalProfileAfterItIsDisabled()
     {
         var runId = "wr_existing_disabled_query";
-        await SeedAsync(projectId: "proj-existing-disabled-query", issueId: "issue_existing_disabled_query", runId: runId,
+        await SeedAsync(projectId: "proj-existing-disabled-query", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
             issueWorkflowProfileId: "mohist/local",
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
-        await ReplaceRunStateAsync(runId, "proj-existing-disabled-query", "issue_existing_disabled_query", "mohist/local");
+        await ReplaceRunStateAsync(runId, "proj-existing-disabled-query", 1, "mohist/local");
         var querier = new WorkflowQuerier(
             new TestDbContextFactory(_options),
             _manager,
@@ -1061,7 +1062,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var runId = "wr_legacy_claim_status_query";
         await SeedAsync(
             projectId: "proj-legacy-claim-status-query",
-            issueId: "issue_legacy_claim_status_query",
+            issueNumber: 1,
             runId: runId,
             issueTemplateJson: null,
             issueWorkflowProfileId: "mohist/local");
@@ -1100,7 +1101,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task LoadApprovalConfigAsync_ExistingRunIgnoresLaterDisabledProfiles()
     {
         var runId = "wr_existing_disabled_approval";
-        await SeedAsync(projectId: "proj-existing-disabled-approval", issueId: "issue_existing_disabled_approval", runId: runId,
+        await SeedAsync(projectId: "proj-existing-disabled-approval", issueNumber: 1, runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
@@ -1210,7 +1211,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     private async Task SeedProjectTemplateAsync(string projectId, string runId, string templateId, string templateJson)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, runId, runId);
+        SeedRunContext(db, projectId, 1, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1226,7 +1227,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = runId,
+            ProjectId = projectId,
+            IssueNumber = 1,
             Variables = "{}",
         });
 
@@ -1245,14 +1247,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task SeedIssueOverProjectTemplateAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         string runId,
         string issueTemplateJson,
         string projectDefaultTemplateId,
         string projectTemplateJson)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId);
+        SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1268,7 +1270,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             Template = issueTemplateJson,
             Variables = "{}",
         });
@@ -1277,7 +1280,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     private async Task SeedAsync(
-        string projectId, string issueId, string runId,
+        string projectId, int issueNumber, string runId,
         string? issueTemplateJson,
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
@@ -1286,7 +1289,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string[]? disabledWorkflowProfileIds = null)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId, issueWorkflowProfileId);
+        SeedRunContext(db, projectId, issueNumber, runId, issueWorkflowProfileId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1317,7 +1320,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             SourceTemplateId = issueSourceTemplateId,
             Template = issueTemplateJson,
             Variables = "{}",
@@ -1327,7 +1331,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     private async Task SeedWithoutRunAsync(
-        string projectId, string issueId,
+        string projectId, int issueNumber,
         string? issueTemplateJson,
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
@@ -1365,7 +1369,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             SourceTemplateId = issueSourceTemplateId,
             Template = issueTemplateJson,
             Variables = "{}",
@@ -1374,7 +1379,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    private async Task ReplaceRunStateAsync(string runId, string projectId, string issueId, string systemProfileId)
+    private async Task ReplaceRunStateAsync(string runId, string projectId, int issueNumber, string systemProfileId)
     {
         await using var db = new MohistDbContext(_options);
         var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
@@ -1390,7 +1395,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = projectId,
-                    ["issueId"] = issueId,
+                    ["issueNumber"] = issueNumber.ToString(),
                 }));
         row.State = JSON.Serialize(run);
         await db.SaveChangesAsync();
@@ -1405,10 +1410,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     private async Task SeedRunOnlyAsync(
-        string projectId, string issueId, string runId)
+        string projectId, int issueNumber, string runId)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId);
+        SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1417,7 +1422,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             Variables = "{}",
         });
 
@@ -1425,14 +1431,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     private async Task SeedAllLayersAsync(
-        string projectId, string issueId, string runId,
+        string projectId, int issueNumber, string runId,
         VariableBundle project,
         VariableBundle issue,
         string? issueTemplateJson = null,
         VariableBundle? runtime = null)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId);
+        SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1441,7 +1447,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             Template = issueTemplateJson,
             Variables = issue.ToJson(),
         });
@@ -1458,14 +1465,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     private async Task SeedIssueOnlyAsync(
-        string projectId, string issueId, string runId, VariableBundle issue)
+        string projectId, int issueNumber, string runId, VariableBundle issue)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId);
+        SeedRunContext(db, projectId, issueNumber, runId);
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             Variables = issue.ToJson(),
         });
 
@@ -1475,7 +1483,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     private static void SeedRunContext(
         MohistDbContext db,
         string projectId,
-        string issueId,
+        int issueNumber,
         string runId,
         string? issueWorkflowProfileId = null)
     {
@@ -1488,7 +1496,11 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 Metadata = new
                 {
                     CreatedAt = TestTime.UtcNow,
-                    Annotations = new Dictionary<string, string> { ["issueId"] = issueId },
+                    Annotations = new Dictionary<string, string>
+                    {
+                        ["projectId"] = projectId,
+                        ["issueNumber"] = issueNumber.ToString(),
+                    },
                 },
                 Status = "Failed",
                 Stages = Array.Empty<object>(),
@@ -1496,12 +1508,12 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
             State = JSON.Serialize(new
             {
-                Id = issueId,
                 ProjectId = projectId,
-                Number = 1,
+                Number = issueNumber,
                 Title = "Seeded issue",
                 Priority = "p2",
                 WorkflowRunId = runId,

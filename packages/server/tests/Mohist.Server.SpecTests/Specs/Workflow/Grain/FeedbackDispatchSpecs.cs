@@ -83,7 +83,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         var command = feedbackEl.GetProperty("command").GetString();
         Assert.NotNull(command);
         Assert.Equal(
-            $"mo issue feedback show <number> --feedback {feedbackId} --project-id {TestProjectId(_workflowId!)} --output json",
+            $"mo issue feedback show {TestIssueNumber(_workflowId!)} --feedback {feedbackId} --project-id {TestProjectId(_workflowId!)} --output json",
             command);
 
         Assert.DoesNotContain("body", feedbackEl.EnumerateObject().Select(p => p.Name));

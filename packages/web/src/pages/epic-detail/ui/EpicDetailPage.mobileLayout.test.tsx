@@ -16,7 +16,7 @@ describe('EpicDetailPage mobile layout structural contract', () => {
 
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
     return {
-      id: 'epic-12345678',
+      projectId: 'proj-1',
       number: 7,
       title: 'Epic title',
       description: 'Epic description',
@@ -232,7 +232,7 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     mockEpic(makeEpic({
       status: EpicStatus.Running,
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     }))
     await renderPageReady()

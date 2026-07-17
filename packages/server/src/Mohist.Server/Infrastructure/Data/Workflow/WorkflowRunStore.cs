@@ -42,26 +42,31 @@ public class WorkflowRunStore : IWorkflowRunStore
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await StageRunAsync(db, run, ct);
+        var epicNumber = WorkflowRunLineage.EpicAffiliationOf(run);
+        await StageRunAsync(db, run, epicNumber, ct);
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
+    public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
+        await SaveEventsAsync(run, events, ct);
+
+    private async Task SaveEventsAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        CancellationToken ct)
     {
         var source = WorkflowEventSource(run.Id);
-        var annotations = run.Metadata?.Annotations;
-        var projectId = annotations?.GetValueOrDefault("projectId");
-        var issueId = annotations?.GetValueOrDefault("issueId");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var epicNumber = WorkflowRunLineage.EpicAffiliationOf(run);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageRunAsync(db, run, ct);
+            await StageRunAsync(db, run, epicNumber, ct);
             foreach (var evt in events)
             {
                 if (evt is null) continue;
-                var envelope = ToCloudEvent(evt, source, projectId, issueId);
+                var envelope = ToCloudEvent(evt, source, run);
                 await _eventStore.AppendAsync(db, envelope, ct);
             }
             await db.SaveChangesAsync(ct);
@@ -78,19 +83,19 @@ public class WorkflowRunStore : IWorkflowRunStore
     private void PokeDispatcherBestEffort() =>
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore));
 
-    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId, string? issueId)
+    /// <summary>
+    /// Build the CloudEvent envelope for a workflow domain event, stamping its
+    /// full business lineage onto <c>extensions</c> from the producing run's own
+    /// metadata annotations (no cross-aggregate query). <c>workflowrunid</c> is
+    /// stamped unconditionally because the run itself is the producer. <c>stage</c>
+    /// is stamped when the unwrapped <see cref="WorkflowEvent"/> variant exposes
+    /// a <c>Stage</c> member — see <c>WorkflowRunLineage.StageOf</c>.
+    /// </summary>
+    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, WorkflowRun run)
     {
         var type = WorkflowEventSerializer.BusType(evt);
         var data = WorkflowEventSerializer.ToData(evt);
-        Dictionary<string, string>? extensions = null;
-        var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
-        var hasIssueId = !string.IsNullOrWhiteSpace(issueId);
-        if (hasProjectId || hasIssueId)
-        {
-            extensions = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (hasProjectId) extensions["projectid"] = projectId!;
-            if (hasIssueId) extensions["issueid"] = issueId!;
-        }
+        var extensions = WorkflowRunLineage.BuildExtensions(run, evt);
         return new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),
@@ -107,23 +112,35 @@ public class WorkflowRunStore : IWorkflowRunStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
         if (entity is null) return null;
-        return Deserialize(entity.State);
+        var run = Deserialize(entity.State);
+        if (run is not null)
+            WorkflowRunLineage.RestoreStoredEpicNumber(run, entity.EpicNumber);
+        return run;
     }
 
-    private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)
+    private static async Task StageRunAsync(
+        MohistDbContext db,
+        WorkflowRun run,
+        int? epicNumber,
+        CancellationToken ct)
     {
-        var json = JSON.Serialize(run);
         var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
 
         if (entity is null)
         {
-            var newEntity = new WorkflowRunRow { WorkflowRunId = run.Id, State = json };
+            var newEntity = new WorkflowRunRow
+            {
+                WorkflowRunId = run.Id,
+                State = JSON.Serialize(run),
+                EpicNumber = epicNumber,
+            };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
             return;
         }
 
-        entity.State = json;
+        entity.EpicNumber = epicNumber;
+        entity.State = JSON.Serialize(run);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
     }
@@ -266,6 +283,9 @@ public class WorkflowRunStore : IWorkflowRunStore
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
         {
+            if (string.Equals(property.Name, "dispatchActivated", StringComparison.Ordinal))
+                continue;
+
             if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
             {
                 if (!root.TryGetProperty("assignment", out _))

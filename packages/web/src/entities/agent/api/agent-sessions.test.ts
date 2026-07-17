@@ -86,14 +86,14 @@ describe('launchAgentSession (client fn)', () => {
 
     await launchAgentSession('proj-1', 'agent-foo', {
       prompt: 'Hello',
-      context: { issueNumber: 42 },
+      context: { issueNumber: 42, },
     })
 
     expect(captured).toEqual([
       {
         url: '/api/projects/proj-1/agents/agent-foo/sessions',
         method: 'POST',
-        body: { prompt: 'Hello', context: { issueNumber: 42 } },
+        body: { prompt: 'Hello', context: { issueNumber: 42, } },
       },
     ])
   })

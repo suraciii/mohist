@@ -54,7 +54,7 @@ export function EditEpicDialog({
 
     updateEpic.mutate(
       {
-        id: epic.id,
+        number: epic.number,
         data: {
           title: title.trim(),
           description,

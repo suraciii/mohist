@@ -12,6 +12,8 @@ public class WorkflowRunRow
     [Required]
     public string State { get; set; } = "{}";
 
+    public int? EpicNumber { get; set; }
+
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? MetadataProjectId { get; set; }
 
@@ -46,4 +48,7 @@ public class WorkflowRunRow
     /// </summary>
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? Status { get; set; }
+
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public int? IssueNumber { get; set; }
 }

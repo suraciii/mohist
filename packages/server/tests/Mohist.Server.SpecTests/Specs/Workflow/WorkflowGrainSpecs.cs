@@ -7,7 +7,9 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -25,6 +27,7 @@ using Orleans;
 using System.Text.Json;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
 
@@ -121,14 +124,14 @@ public abstract class WorkflowGrainSpecs
         return workflow;
     }
 
-    protected WorkflowStartInput TestInput(string? projectId = null, string? issueId = null)
+    protected WorkflowStartInput TestInput(string? projectId = null, int? issueNumber = null)
     {
         projectId ??= _workflowId is null ? "test-project" : TestProjectId(_workflowId);
-        issueId ??= _workflowId is null ? "test-issue" : TestIssueId(_workflowId);
+        issueNumber ??= 1;
         var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["projectId"] = projectId,
-            ["issueId"] = issueId,
+            ["issueNumber"] = issueNumber.Value.ToString(),
         };
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
@@ -138,7 +141,7 @@ public abstract class WorkflowGrainSpecs
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
 
-    protected static string TestIssueId(string workflowId) => $"test-issue-{workflowId}";
+    protected static int TestIssueNumber(string workflowId) => 1;
 
     protected async Task DeactivateWorkflowAsync(string workflowId)
     {
@@ -391,14 +394,32 @@ public abstract class WorkflowGrainSpecs
         await manager.PatchVariablesAsync(projectId, patch);
     }
 
-    protected async Task PatchIssueVariablesAsync(string issueId, VariableBundle patch)
+    protected async Task PatchIssueVariablesAsync(int issueNumber, VariableBundle patch)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
             .Options;
+        var projectId = TestProjectId(_workflowId!);
+        await using (var db = new MohistDbContext(options))
+        {
+            if (!await db.Issues.AnyAsync(row => row.ProjectId == projectId && row.Number == issueNumber))
+            {
+                db.Issues.Add(new IssueRow
+                {
+                    State = IssueStore.Serialize(new DomainIssue
+                    {
+                        ProjectId = projectId,
+                        Number = issueNumber,
+                        Title = $"Issue {issueNumber}",
+                        Priority = "p2",
+                    }),
+                });
+                await db.SaveChangesAsync();
+            }
+        }
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var manager = new IssueWorkflowProfileManager(factory);
-        await manager.PatchVariablesAsync(issueId, patch);
+        await manager.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 
     protected static WorkflowDefinition TwoStages()

@@ -6,17 +6,15 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 
 /// <summary>
-/// Specs for issue-94 T-005: <c>GET /api/projects/{projectRef}/epics/{id}/events</c>.
+/// Specs for issue-94 T-005: <c>GET /api/projects/{projectRef}/epics/{number}/events</c>.
 /// Verifies the route:
 /// <list type="bullet">
-/// <item>accepts either the internal id or the epic number on the
-///   <c>{id}</c> segment;</item>
+/// <item>accepts the project-scoped epic number on the route segment;</item>
 /// <item>returns HTTP 200 with the events ordered chronologically for an
 ///   epic with persisted events;</item>
 /// <item>returns HTTP 200 with an empty list when no events have been
 ///   persisted for the epic;</item>
-/// <item>returns HTTP 404 for a missing epic (unknown id or unassigned
-///   number);</item>
+/// <item>returns HTTP 404 for an unassigned number;</item>
 /// <item>honours the <c>?limit=</c> query parameter.</item>
 /// </list>
 /// </summary>
@@ -41,7 +39,7 @@ public class EpicEventsApiSpecs
         var epic = await CreateEpicAsync(project.Id, "Brand new epic");
 
         var events = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events");
 
         // The T-001 EpicEventPublishSpecs guarantee EpicCreated is
         // persisted on epic creation. So a freshly-created epic has
@@ -61,7 +59,7 @@ public class EpicEventsApiSpecs
         var epic = await CreateEpicAsync(project.Id, "Status shape epic");
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -77,7 +75,7 @@ public class EpicEventsApiSpecs
         // Drive persisted transitions. Each persists its own envelope; the
         // read endpoint should expose them in chronological order.
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/start", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/start", null);
 
         // An epic with no open linked members auto-marks-done via the
         // status-changed→recompute trigger. If that happens, the pause
@@ -85,16 +83,16 @@ public class EpicEventsApiSpecs
         // settled state for this chronology spec.
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         var pauseResponse = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/pause",
+            $"/api/projects/{project.Id}/epics/{epic.Number}/pause",
             new { reason = "waiting on review" });
         if (pauseResponse.IsSuccessStatusCode)
         {
             _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-            await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/resume", null);
+            await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/resume", null);
         }
 
         var events = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events");
 
         Assert.NotEmpty(events);
         Assert.Equal("com.mohist.epic.created", events[0].Type);
@@ -113,34 +111,25 @@ public class EpicEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task GetEvents_AcceptsEpicNumberOnIdSegment()
+    public async Task GetEvents_AcceptsEpicNumber()
     {
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "By number");
 
-        // By id
-        var byId = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
-        Assert.NotEmpty(byId);
-
-        // By number — must produce the same body as by id
-        Assert.NotNull(epic.Number);
-        var byNumber = await _client.GetDataAsync<StoredEventDto[]>(
+        var events = await _client.GetDataAsync<StoredEventDto[]>(
             $"/api/projects/{project.Id}/epics/{epic.Number}/events");
-        Assert.Equal(byId.Length, byNumber.Length);
-        for (var i = 0; i < byId.Length; i++)
-            Assert.Equal(byId[i].Id, byNumber[i].Id);
+        Assert.NotEmpty(events);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task GetEvents_OnUnknownEpicId_Returns404()
+    public async Task GetEvents_OnUnknownEpicNumber_Returns404()
     {
         var project = await CreateProjectAsync();
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/epics/epic_nonexistent/events");
+            $"/api/projects/{project.Id}/epics/99999/events");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -176,22 +165,22 @@ public class EpicEventsApiSpecs
         // event the test produced last, so we assert against the actual
         // tail of the recorded stream rather than a specific type.
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/start", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/start", null);
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
             new { priority = "p0" });
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
             new { priority = "p1" });
 
         var unlimited = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events");
         Assert.True(unlimited.Length >= 3, $"expected at least 3 events but got {unlimited.Length}");
 
         var limited = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events?limit=1");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events?limit=1");
 
         var single = Assert.Single(limited);
         Assert.Equal(unlimited[^1].Id, single.Id);
@@ -210,11 +199,11 @@ public class EpicEventsApiSpecs
         // the wire format (no discriminator field is required by the
         // contract — type-specific payload is read directly from `data`).
         await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
             new { priority = "p0" });
 
         var events = await _client.GetDataAsync<StoredEventDto[]>(
-            $"/api/projects/{project.Id}/epics/{epic.Id}/events");
+            $"/api/projects/{project.Id}/epics/{epic.Number}/events");
 
         var priorityChanged = Assert.Single(events, e => e.Type == "com.mohist.epic.priority-changed");
         Assert.Equal("p2", priorityChanged.Data.GetProperty("oldPriority").GetString());
@@ -222,7 +211,7 @@ public class EpicEventsApiSpecs
         Assert.False(string.IsNullOrWhiteSpace(priorityChanged.Time));
         Assert.False(string.IsNullOrWhiteSpace(priorityChanged.EventId));
         Assert.Equal("1.0", priorityChanged.SpecVersion);
-        Assert.Equal($"/mohist/epics/{epic.Id}", priorityChanged.Source);
+        Assert.Equal($"/mohist/projects/{project.Id}/epics/{epic.Number}", priorityChanged.Source);
         Assert.Equal(project.Id, priorityChanged.Extensions["projectid"]);
     }
 
@@ -248,7 +237,7 @@ public class EpicEventsApiSpecs
     }
 
     private sealed record ProjectDto(string Id);
-    private sealed record EpicRowDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
+    private sealed record EpicRowDto(int Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
     private sealed record StoredEventDto(
         long Id,
         string EventId,

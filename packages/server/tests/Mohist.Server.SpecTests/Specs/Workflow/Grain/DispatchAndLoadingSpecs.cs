@@ -323,7 +323,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "old-coding/legacy" })
         }));
 
-        await PatchIssueVariablesAsync(TestIssueId(_workflowId!), new VariableBundle(
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
             Vars: JsonSerializer.SerializeToElement(new
             {
                 agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" }
@@ -369,7 +369,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         ]));
 
         var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
-        await PatchIssueVariablesAsync(TestIssueId(_workflowId!), new VariableBundle(Stages: new Dictionary<string, StageVariables>
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(Stages: new Dictionary<string, StageVariables>
         {
             ["build"] = new(JsonSerializer.SerializeToElement(new { agent = updatedAgent }))
         }));

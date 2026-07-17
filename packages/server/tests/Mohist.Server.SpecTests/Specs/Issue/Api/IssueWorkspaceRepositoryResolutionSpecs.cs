@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
@@ -226,14 +229,13 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             new { title, repositoryName, isDraft });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new IssueDto(
-            json.GetProperty("data").GetProperty("id").GetString()!,
-            json.GetProperty("data").GetProperty("number").GetInt32());
+        return new IssueDto(json.GetProperty("data").GetProperty("number").GetInt32());
     }
 
     private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
     {
         await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
+        await DispatchEventsAsync();
 
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -244,7 +246,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         });
 
         var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;
 
@@ -255,5 +257,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     }
 
-    private sealed record IssueDto(string Id, int Number);
+    private async Task DispatchEventsAsync()
+    {
+        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+    }
+
+    private sealed record IssueDto(int Number);
 }

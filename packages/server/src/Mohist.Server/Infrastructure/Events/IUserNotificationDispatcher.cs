@@ -33,7 +33,7 @@ namespace Mohist.Server.Infrastructure.Events;
 ///   <item>Receives an event from <see cref="IEventBridge"/>.</item>
 ///   <item>Asks a <c>UserSubscriptionGrain</c> (or any durable store)
 ///         which users are interested in this event's
-///         <c>projectid</c> / <c>issueno</c> / event-type.</item>
+///         <c>projectid</c> / <c>issue</c> / event-type.</item>
 ///   <item>Filters the event against each user's
 ///         <c>subscribedEventTypes</c> set.</item>
 ///   <item>Returns the set of SignalR connection IDs that should

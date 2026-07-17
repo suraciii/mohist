@@ -5,7 +5,6 @@ import type { LinkedIssue } from '../../../entities/epic/model/types'
 
 function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: `i-${overrides.number ?? 0}`,
     number: 1,
     title: 'Issue',
     status: IssueStatus.Backlog,
@@ -22,8 +21,8 @@ function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
 
 describe('buildGraphEdges', () => {
   it('emits a directed edge from prereq to dependent (A→B where B declares A)', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeLinkedIssue({ number: 1 })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] })
     const result = buildGraphEdges([a, b])
     expect(result.edges).toHaveLength(1)
     expect(result.edges[0]).toEqual({
@@ -35,9 +34,9 @@ describe('buildGraphEdges', () => {
   })
 
   it('emits edges from each prerequisite to the dependent (one dependent, multiple prereqs)', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
-    const b = makeLinkedIssue({ number: 2, id: 'b' })
-    const c = makeLinkedIssue({ number: 3, id: 'c', prerequisiteNumbers: [1, 2] })
+    const a = makeLinkedIssue({ number: 1 })
+    const b = makeLinkedIssue({ number: 2 })
+    const c = makeLinkedIssue({ number: 3, prerequisiteNumbers: [1, 2] })
     const result = buildGraphEdges([a, b, c])
     expect(result.edges).toHaveLength(2)
     const pairs = result.edges.map(e => `${e.source}->${e.target}`).sort()
@@ -45,7 +44,7 @@ describe('buildGraphEdges', () => {
   })
 
   it('marks edges whose source is not in epic membership as external', () => {
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [99] })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [99] })
     const result = buildGraphEdges([b])
     expect(result.edges[0]).toEqual({
       source: 99,
@@ -58,7 +57,6 @@ describe('buildGraphEdges', () => {
   it('builds a ghost node summary for external prereqs referenced from issue.externalPrerequisites', () => {
     const b = makeLinkedIssue({
       number: 2,
-      id: 'b',
       prerequisiteNumbers: [99],
       externalPrerequisites: [{ number: 99, title: 'Out-of-epic task', stage: 'plan', status: 'active' }],
     })
@@ -75,7 +73,7 @@ describe('buildGraphEdges', () => {
   })
 
   it('builds an unresolved ghost node when the prereq number is not in any external summary', () => {
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [404] })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [404] })
     const result = buildGraphEdges([b])
     expect(result.externalGhosts).toHaveLength(1)
     expect(result.externalGhosts[0].number).toBe(404)
@@ -85,22 +83,22 @@ describe('buildGraphEdges', () => {
   })
 
   it('emits no ghost when all prereqs are in-epic', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeLinkedIssue({ number: 1 })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] })
     const result = buildGraphEdges([a, b])
     expect(result.externalGhosts).toHaveLength(0)
   })
 
   it('records multiple referrers when several linked issues share an external prereq', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a', prerequisiteNumbers: [99] })
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [99] })
+    const a = makeLinkedIssue({ number: 1, prerequisiteNumbers: [99] })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [99] })
     const result = buildGraphEdges([a, b])
     expect(result.externalGhosts).toHaveLength(1)
     expect(result.externalGhosts[0].referencedBy).toEqual([1, 2])
   })
 
   it('tolerates undefined prerequisiteNumbers by treating them as an empty list', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
+    const a = makeLinkedIssue({ number: 1 })
     const result = buildGraphEdges([a])
     expect(result.edges).toHaveLength(0)
     expect(result.externalGhosts).toHaveLength(0)
@@ -110,19 +108,19 @@ describe('buildGraphEdges', () => {
 describe('detectCycle', () => {
   it('returns false for a simple linear chain A→B→C', () => {
     const result = buildGraphEdges([
-      makeLinkedIssue({ number: 1, id: 'a' }),
-      makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] }),
-      makeLinkedIssue({ number: 3, id: 'c', prerequisiteNumbers: [2] }),
+      makeLinkedIssue({ number: 1 }),
+      makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 3, prerequisiteNumbers: [2] }),
     ])
     expect(detectCycle(result.edges)).toBe(false)
   })
 
   it('returns false for a DAG with diamond shape (no cycle)', () => {
     const result = buildGraphEdges([
-      makeLinkedIssue({ number: 1, id: 'a' }),
-      makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] }),
-      makeLinkedIssue({ number: 3, id: 'c', prerequisiteNumbers: [1] }),
-      makeLinkedIssue({ number: 4, id: 'd', prerequisiteNumbers: [2, 3] }),
+      makeLinkedIssue({ number: 1 }),
+      makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 3, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 4, prerequisiteNumbers: [2, 3] }),
     ])
     expect(detectCycle(result.edges)).toBe(false)
   })
@@ -155,8 +153,8 @@ describe('detectCycle', () => {
 
   it('returns false for an isolated node with no edges', () => {
     const result = buildGraphEdges([
-      makeLinkedIssue({ number: 1, id: 'a' }),
-      makeLinkedIssue({ number: 2, id: 'b' }),
+      makeLinkedIssue({ number: 1 }),
+      makeLinkedIssue({ number: 2 }),
     ])
     expect(detectCycle(result.edges)).toBe(false)
   })

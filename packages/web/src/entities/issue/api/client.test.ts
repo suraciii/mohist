@@ -16,7 +16,6 @@ function requestPath(request: Request) {
 
 function issueResponse(labels: Record<string, string>) {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'T',
     status: 'backlog',
@@ -58,7 +57,7 @@ describe('getIssueEvents', () => {
         subject: null,
         time: '2026-06-18T00:00:00.0000000Z',
         dataContentType: 'application/json',
-        data: { issueNumber: 42 },
+        data: { issueNumber: 42, },
         extensions: {},
       },
     ]

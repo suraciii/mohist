@@ -8,6 +8,8 @@ namespace Mohist.Server.Workflow.Grains;
 public interface IWorkflowGrain : IGrainWithStringKey
 {
     Task StartAsync(WorkflowStartInput? input = null);
+    Task EnsureStartedAsync(WorkflowIssueContext context);
+    Task RefreshIssueContextAsync(WorkflowIssueContext context);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);
@@ -45,6 +47,12 @@ public sealed record WorkflowStartInput(
     [property: Id(2)] Dictionary<string, string>? Annotations = null,
     [property: Id(3)] WorkflowRunMetadata? Metadata = null,
     [property: Id(4)] WorkspaceIdentity? Workspace = null);
+
+[GenerateSerializer]
+public sealed record WorkflowIssueContext(
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] int IssueNumber,
+    [property: Id(2)] int? EpicNumber);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskInput(
@@ -133,8 +141,7 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(3)] string TaskRunId,
     [property: Id(4)] string? Title,
     [property: Id(5)] string? ProjectId = null,
-    [property: Id(6)] string? IssueId = null,
-    [property: Id(7)] int? IssueNumber = null);
+    [property: Id(6)] int? IssueNumber = null);
 
 [GenerateSerializer]
 public sealed record WorkflowFeedbackRecord(

@@ -238,7 +238,6 @@ describe("RunnerHost converges active workflow runs", () => {
       version: 1,
       entries: {
         [workflowRunId]: {
-          issueId: "issue-1",
           issueNumber: 1,
           workflowRunId,
           workspacePath,
@@ -301,7 +300,6 @@ describe("RunnerHost converges active workflow runs", () => {
       version: 1,
       entries: {
         "wr-active": {
-          issueId: "issue-1",
           issueNumber: 1,
           workflowRunId: "wr-active",
           workspacePath: wsPathA,
@@ -310,7 +308,6 @@ describe("RunnerHost converges active workflow runs", () => {
           terminalAt: null,
         },
         "wr-eligible": {
-          issueId: "issue-2",
           issueNumber: 2,
           workflowRunId: "wr-eligible",
           workspacePath: wsPathB,
@@ -349,12 +346,12 @@ describe("RunnerHost converges active workflow runs", () => {
       version: 1,
       entries: {
         "wr-1": {
-          issueId: "issue-1", issueNumber: 1, workflowRunId: "wr-1",
+          issueNumber: 1, workflowRunId: "wr-1",
           workspacePath: wsPath1, phase: "active",
           materializedAt: FIXED_TIME, terminalAt: null,
         },
         "wr-2": {
-          issueId: "issue-2", issueNumber: 2, workflowRunId: "wr-2",
+          issueNumber: 2, workflowRunId: "wr-2",
           workspacePath: wsPath2, phase: "active",
           materializedAt: FIXED_TIME, terminalAt: null,
         },

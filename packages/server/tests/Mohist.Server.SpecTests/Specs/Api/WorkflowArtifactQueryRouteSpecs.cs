@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Storage;
@@ -44,13 +45,13 @@ public class WorkflowArtifactQueryRouteSpecs
             new { title = "artifact query test", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
-        var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
 
         using var startResp = await _fixture.Client.PostAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/start", null);
         Assert.Equal(HttpStatusCode.OK, startResp.StatusCode);
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(
+            GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var workflowRunId = issueStatus!.WorkflowRunId!;
         Assert.False(string.IsNullOrEmpty(workflowRunId));
@@ -72,7 +73,7 @@ public class WorkflowArtifactQueryRouteSpecs
                 ContentType = "text/markdown",
                 Size = 100,
                 ProjectId = projectId,
-                IssueId = issueId,
+                IssueNumber = issueNumber,
                 DisplayName = "proposal.md",
             },
             new WorkflowArtifactRow
@@ -87,7 +88,7 @@ public class WorkflowArtifactQueryRouteSpecs
                 ContentType = "text/markdown",
                 Size = 200,
                 ProjectId = projectId,
-                IssueId = issueId,
+                IssueNumber = issueNumber,
                 DisplayName = "review.md",
             },
             new WorkflowArtifactRow
@@ -102,7 +103,7 @@ public class WorkflowArtifactQueryRouteSpecs
                 ContentType = "text/markdown",
                 Size = 300,
                 ProjectId = projectId,
-                IssueId = issueId,
+                IssueNumber = issueNumber,
                 DisplayName = "review.md",
             },
             new WorkflowArtifactRow
@@ -116,7 +117,7 @@ public class WorkflowArtifactQueryRouteSpecs
                 Kind = "directory",
                 Size = 500,
                 ProjectId = projectId,
-                IssueId = issueId,
+                IssueNumber = issueNumber,
                 DisplayName = "specs",
             });
         await db.SaveChangesAsync();

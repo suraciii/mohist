@@ -42,7 +42,6 @@ export enum IssueHealth {
 
 export interface Comment {
   id: string
-  issueId: string
   body: string
   createdAt: string
   attachments?: AttachmentInfo[]
@@ -56,7 +55,6 @@ export interface AttachmentInfo {
 }
 
 export interface IssuePrerequisiteSummary {
-  issueId: string
   number: number
   title: string
   completed: boolean
@@ -79,7 +77,6 @@ export interface WorkflowStageProgress {
 }
 
 export interface Issue {
-  id: string
   number: number
   title: string
   body?: string
@@ -115,7 +112,7 @@ export interface Issue {
   canStart: boolean
   blocker: IssueStartBlocker | null
   drift?: BaseDriftInfo | null
-  primaryEpic?: { id: string; number: number | null; title: string; status: string; priority: string } | null
+  primaryEpic?: { number: number | null; title: string; status: string; priority: string } | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
   feedback?: ApprovalFeedback[] | null
@@ -126,7 +123,6 @@ export interface Issue {
 export interface IssueWorkflowProfileYamlResponse {
   issueNumber: number
   projectId: string
-  issueKey: string
   sourceTemplateId?: string | null
   hasCustomTemplate: boolean
   yaml: string | null

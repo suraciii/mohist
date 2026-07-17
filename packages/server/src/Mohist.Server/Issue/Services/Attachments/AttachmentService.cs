@@ -112,10 +112,28 @@ public sealed class AttachmentService : IScopedService
 
     public async Task BindIssueAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         IReadOnlyCollection<string>? attachmentIds,
-        CancellationToken cancellationToken = default) =>
-        await BindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        CancellationToken cancellationToken = default)
+    {
+        var ids = await ValidateIssueBindCoreAsync(projectId, issueNumber, attachmentIds, cancellationToken).ConfigureAwait(false);
+        if (ids.Length == 0) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Attachments.Where(a =>
+                a.ProjectId == projectId
+                && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            row.OwnerKind = OwnerKindIssue;
+            row.OwnerId = null;
+            row.OwnerIssueNumber = issueNumber;
+            row.ExpiresAt = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Unbinds every attachment currently owned by the given issue. Used by
@@ -125,14 +143,14 @@ public sealed class AttachmentService : IScopedService
     /// </summary>
     public async Task UnbindAllIssueAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var rows = await db.Attachments.Where(a =>
                 a.ProjectId == projectId
                 && a.OwnerKind == OwnerKindIssue
-                && a.OwnerId == issueId)
+                && a.OwnerIssueNumber == issueNumber)
             .ToListAsync(cancellationToken).ConfigureAwait(false);
         if (rows.Count == 0) return;
 
@@ -140,6 +158,7 @@ public sealed class AttachmentService : IScopedService
         {
             row.OwnerKind = null;
             row.OwnerId = null;
+            row.OwnerIssueNumber = null;
             row.ExpiresAt = _time.GetUtcNow().Add(PendingTtl);
         }
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -154,11 +173,11 @@ public sealed class AttachmentService : IScopedService
     /// </summary>
     public async Task ReplaceIssueAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         IReadOnlyCollection<string> attachmentIds,
         CancellationToken cancellationToken = default)
     {
-        var ids = await ValidateBindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        var ids = await ValidateIssueBindCoreAsync(projectId, issueNumber, attachmentIds, cancellationToken).ConfigureAwait(false);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         if (ids.Length > 0)
@@ -170,7 +189,8 @@ public sealed class AttachmentService : IScopedService
             foreach (var row in rows)
             {
                 row.OwnerKind = OwnerKindIssue;
-                row.OwnerId = issueId;
+                row.OwnerId = null;
+                row.OwnerIssueNumber = issueNumber;
                 row.ExpiresAt = null;
             }
         }
@@ -183,7 +203,7 @@ public sealed class AttachmentService : IScopedService
         var stale = await db.Attachments
             .Where(a => a.ProjectId == projectId
                 && a.OwnerKind == OwnerKindIssue
-                && a.OwnerId == issueId
+                && a.OwnerIssueNumber == issueNumber
                 && !keepSet.Contains(a.Id))
             .ToListAsync(cancellationToken).ConfigureAwait(false);
         if (stale.Count > 0)
@@ -193,6 +213,7 @@ public sealed class AttachmentService : IScopedService
             {
                 row.OwnerKind = null;
                 row.OwnerId = null;
+                row.OwnerIssueNumber = null;
                 row.ExpiresAt = pendingExpiry;
             }
         }
@@ -202,31 +223,58 @@ public sealed class AttachmentService : IScopedService
 
     public async Task ValidateIssueBindAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken = default) =>
-        await ValidateBindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        await ValidateIssueBindCoreAsync(projectId, issueNumber, attachmentIds, cancellationToken).ConfigureAwait(false);
 
     public async Task BindCommentAsync(
         string projectId,
         string commentId,
         IReadOnlyCollection<string>? attachmentIds,
-        CancellationToken cancellationToken = default) =>
-        await BindAsync(projectId, OwnerKindComment, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        CancellationToken cancellationToken = default)
+    {
+        var ids = await ValidateCommentBindCoreAsync(projectId, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        if (ids.Length == 0) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Attachments.Where(a =>
+                a.ProjectId == projectId
+                && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var row in rows)
+        {
+            row.OwnerKind = OwnerKindComment;
+            row.OwnerId = commentId;
+            row.OwnerIssueNumber = null;
+            row.ExpiresAt = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task ValidateCommentBindAsync(
         string projectId,
         string commentId,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken = default) =>
-        await ValidateBindAsync(projectId, OwnerKindComment, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        await ValidateCommentBindCoreAsync(projectId, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
 
     public async Task<AttachmentContentResult?> OpenIssueContentAsync(
         string projectId,
-        string issueId,
+        int issueNumber,
         string attachmentId,
-        CancellationToken cancellationToken = default) =>
-        await OpenContentAsync(projectId, OwnerKindIssue, issueId, attachmentId, cancellationToken).ConfigureAwait(false);
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.Attachments.AsNoTracking().FirstOrDefaultAsync(a =>
+            a.ProjectId == projectId
+            && a.Id == attachmentId
+            && a.OwnerKind == OwnerKindIssue
+            && a.OwnerIssueNumber == issueNumber,
+            cancellationToken).ConfigureAwait(false);
+        return row is null ? null : OpenContent(row);
+    }
 
     public async Task<AttachmentContentResult?> OpenCommentContentAsync(
         string projectId,
@@ -237,7 +285,14 @@ public sealed class AttachmentService : IScopedService
     {
         if (await LoadCommentAsync(projectId, issueNumber, commentId, cancellationToken).ConfigureAwait(false) is null)
             return null;
-        return await OpenContentAsync(projectId, OwnerKindComment, commentId, attachmentId, cancellationToken).ConfigureAwait(false);
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.Attachments.AsNoTracking().FirstOrDefaultAsync(a =>
+            a.ProjectId == projectId
+            && a.Id == attachmentId
+            && a.OwnerKind == OwnerKindComment
+            && a.OwnerId == commentId,
+            cancellationToken).ConfigureAwait(false);
+        return row is null ? null : OpenContent(row);
     }
 
     public async Task<AttachmentRemovalResult> RemoveIssueAttachmentAsync(
@@ -255,7 +310,7 @@ public sealed class AttachmentService : IScopedService
             a.ProjectId == projectId
             && a.Id == attachmentId
             && a.OwnerKind == OwnerKindIssue
-            && a.OwnerId == issue.Id,
+            && a.OwnerIssueNumber == issue.Number,
             cancellationToken).ConfigureAwait(false);
         if (row is null) return AttachmentRemovalResult.NotFound;
 
@@ -286,7 +341,7 @@ public sealed class AttachmentService : IScopedService
     {
         var comment = await LoadCommentAsync(projectId, issueNumber, commentId, cancellationToken).ConfigureAwait(false);
         if (comment is null) return AttachmentRemovalResult.NotFound;
-        if (!await IsIssueEditableAsync(projectId, comment.IssueId, cancellationToken).ConfigureAwait(false))
+        if (!await IsIssueEditableAsync(projectId, comment.IssueNumber, cancellationToken).ConfigureAwait(false))
             throw new AttachmentEditabilityException("Attachment cannot be removed because the comment owner is no longer editable.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -327,53 +382,64 @@ public sealed class AttachmentService : IScopedService
         return expired.Count;
     }
 
-    private async Task BindAsync(
+    private async Task<string[]> ValidateIssueBindCoreAsync(
         string projectId,
-        string ownerKind,
-        string ownerId,
+        int issueNumber,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken)
     {
-        var ids = await ValidateBindAsync(projectId, ownerKind, ownerId, attachmentIds, cancellationToken).ConfigureAwait(false);
-        if (ids.Length == 0) return;
-
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await db.Attachments.Where(a =>
-                a.ProjectId == projectId
-                && ids.Contains(a.Id))
-            .ToListAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var row in rows)
-        {
-            row.OwnerKind = ownerKind;
-            row.OwnerId = ownerId;
-            row.ExpiresAt = null;
-        }
-
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<string[]> ValidateBindAsync(
-        string projectId,
-        string ownerKind,
-        string ownerId,
-        IReadOnlyCollection<string>? attachmentIds,
-        CancellationToken cancellationToken)
-    {
-        var ids = attachmentIds?
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray() ?? [];
+        var ids = NormalizeAttachmentIds(attachmentIds);
         if (ids.Length == 0) return [];
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var existingCount = await db.Attachments.CountAsync(a =>
             a.ProjectId == projectId
-            && a.OwnerKind == ownerKind
-            && a.OwnerId == ownerId,
+            && a.OwnerKind == OwnerKindIssue
+            && a.OwnerIssueNumber == issueNumber,
             cancellationToken).ConfigureAwait(false);
-        if (existingCount + ids.Length > _options.MaxCountPerOwner)
-            throw new AttachmentLimitException($"Attachment count exceeds the configured per-owner limit of {_options.MaxCountPerOwner}.");
+        EnsureAttachmentLimit(existingCount, ids.Length);
+        await ValidateAvailableAsync(db, projectId, ids, cancellationToken).ConfigureAwait(false);
+        return ids;
+    }
 
+    private async Task<string[]> ValidateCommentBindCoreAsync(
+        string projectId,
+        string commentId,
+        IReadOnlyCollection<string>? attachmentIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = NormalizeAttachmentIds(attachmentIds);
+        if (ids.Length == 0) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existingCount = await db.Attachments.CountAsync(a =>
+            a.ProjectId == projectId
+            && a.OwnerKind == OwnerKindComment
+            && a.OwnerId == commentId,
+            cancellationToken).ConfigureAwait(false);
+        EnsureAttachmentLimit(existingCount, ids.Length);
+        await ValidateAvailableAsync(db, projectId, ids, cancellationToken).ConfigureAwait(false);
+        return ids;
+    }
+
+    private static string[] NormalizeAttachmentIds(IReadOnlyCollection<string>? attachmentIds) =>
+        attachmentIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+
+    private void EnsureAttachmentLimit(int existingCount, int newCount)
+    {
+        if (existingCount + newCount > _options.MaxCountPerOwner)
+            throw new AttachmentLimitException($"Attachment count exceeds the configured per-owner limit of {_options.MaxCountPerOwner}.");
+    }
+
+    private static async Task ValidateAvailableAsync(
+        MohistDbContext db,
+        string projectId,
+        string[] ids,
+        CancellationToken cancellationToken)
+    {
         var rows = await db.Attachments.AsNoTracking().Where(a =>
                 a.ProjectId == projectId
                 && ids.Contains(a.Id))
@@ -386,37 +452,21 @@ public sealed class AttachmentService : IScopedService
             if (row.OwnerKind is not null)
                 throw new AttachmentValidationException($"Attachment '{row.Id}' is already bound to an owner.");
         }
-
-        return ids;
     }
 
-    private async Task<AttachmentContentResult?> OpenContentAsync(
-        string projectId,
-        string ownerKind,
-        string ownerId,
-        string attachmentId,
-        CancellationToken cancellationToken)
+    private AttachmentContentResult OpenContent(AttachmentRow row)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var row = await db.Attachments.AsNoTracking().FirstOrDefaultAsync(a =>
-            a.ProjectId == projectId
-            && a.Id == attachmentId
-            && a.OwnerKind == ownerKind
-            && a.OwnerId == ownerId,
-            cancellationToken).ConfigureAwait(false);
-        if (row is null) return null;
-
         var stream = _storage.OpenFileContent(row.StoragePath);
         var contentType = NormalizeContentType(row.ContentType) ?? "application/octet-stream";
         var dispositionType = InlineImageContentTypes.Contains(contentType) ? "inline" : "attachment";
         return new AttachmentContentResult(stream, contentType, BuildContentDisposition(dispositionType, row.OriginalFileName));
     }
 
-    private async Task<bool> IsIssueEditableAsync(string projectId, string issueId, CancellationToken cancellationToken)
+    private async Task<bool> IsIssueEditableAsync(string projectId, int issueNumber, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Issues.AsNoTracking()
-            .FirstOrDefaultAsync(i => i.ProjectId == projectId && i.IssueId == issueId, cancellationToken)
+            .FirstOrDefaultAsync(i => i.ProjectId == projectId && i.Number == issueNumber, cancellationToken)
             .ConfigureAwait(false);
         if (row is null) return false;
         var issue = IssueStore.Deserialize(row.State);

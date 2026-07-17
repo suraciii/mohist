@@ -131,7 +131,6 @@ export class WorkspaceManager {
     await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
     if (this.registry) {
       await this.registry.register({
-        issueId: marker.issueId,
         issueNumber: marker.issueNumber,
         workflowRunId: runId ?? "",
         workspacePath,
@@ -330,14 +329,12 @@ function runBranchName(runId: string | null | undefined) {
 }
 
 interface IssueWorkspaceMarker {
-  issueId: string | null
   issueNumber: number
   workflowRunId: string | null
 }
 
 function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
   return {
-    issueId: stringAt(variables, ["issue", "id"]) ?? null,
     issueNumber: numberAt(variables, ["issue", "number"]) ?? 0,
     workflowRunId: stringAt(variables, ["mohist", "runId"]) ?? null,
   }
@@ -365,33 +362,12 @@ export async function readMarkerWorkflowRunId(workspacePath: string): Promise<st
 }
 
 function markerMatches(actual: Partial<IssueWorkspaceMarker>, expected: IssueWorkspaceMarker): boolean {
-  return actual.issueId === expected.issueId
-    && actual.issueNumber === expected.issueNumber
+  return actual.issueNumber === expected.issueNumber
     && actual.workflowRunId === expected.workflowRunId
 }
 
-function isSameIssueDifferentRun(actual: Partial<IssueWorkspaceMarker> | null, expected: IssueWorkspaceMarker): boolean {
-  if (!actual) return false
-  return actual.issueId === expected.issueId
-    && actual.issueNumber === expected.issueNumber
-    && actual.workflowRunId !== expected.workflowRunId
-}
-
 function formatIdentity(marker: Partial<IssueWorkspaceMarker> | IssueWorkspaceMarker): string {
-  return `issueId=${marker.issueId ?? "<null>"}, issueNumber=${marker.issueNumber ?? "<null>"}, workflowRunId=${marker.workflowRunId ?? "<null>"}`
-}
-
-async function hasSameMarker(workspacePath: string, expected: IssueWorkspaceMarker) {
-  const path = markerPath(workspacePath)
-  if (!exists(path)) return false
-  try {
-    const actual = JSON.parse(await readText(path)) as Partial<IssueWorkspaceMarker>
-    return actual.issueId === expected.issueId
-      && actual.issueNumber === expected.issueNumber
-      && actual.workflowRunId === expected.workflowRunId
-  } catch {
-    return false
-  }
+  return `issueNumber=${marker.issueNumber ?? "<null>"}, workflowRunId=${marker.workflowRunId ?? "<null>"}`
 }
 
 async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal, log: TaskLogger | null = null) {

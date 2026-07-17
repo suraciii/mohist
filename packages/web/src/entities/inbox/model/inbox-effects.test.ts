@@ -13,7 +13,6 @@ function makeHint(overrides: Partial<InboxItemPersistedHintPayload> = {}): Inbox
     itemId: 'inb-1',
     projectId: 'proj-1',
     kind: 'workflow_failed',
-    issueId: 'issue-42',
     issueNumber: 42,
     ...overrides,
   }
@@ -49,8 +48,8 @@ describe('parseInboxItemPersistedHint', () => {
     expect(parseInboxItemPersistedHint(makeHint({ kind: '' }))).toBeNull()
   })
 
-  it('returns null when issueId is missing or empty', () => {
-    expect(parseInboxItemPersistedHint(makeHint({ issueId: '' }))).toBeNull()
+  it('returns null when issueNumber is non-positive', () => {
+    expect(parseInboxItemPersistedHint(makeHint({ issueNumber: 0, }))).toBeNull()
   })
 
   it('returns null when issueNumber is not a finite number', () => {
@@ -191,37 +190,37 @@ describe('isHighAttentionKind', () => {
 
 describe('shouldSuppressInAppNotice', () => {
   it('suppresses when the user is on the inbox page', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/inbox', null)).toBe(true)
   })
 
   it('suppresses when the user is on the inbox page with trailing slash', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/inbox/', null)).toBe(true)
   })
 
   it('suppresses when the user is viewing the same issue', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/issues/42', 42)).toBe(true)
   })
 
   it('does NOT suppress when viewing an unrelated issue number', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/issues/99', 99)).toBe(false)
   })
 
   it('does NOT suppress when on an unrelated page (not inbox, not issue)', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/dashboard', null)).toBe(false)
   })
 
   it('does NOT suppress when pathname is empty', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '', null)).toBe(false)
   })
 
   it('does NOT suppress when viewedIssueNumber is null even if issue matches nothing', () => {
-    const hint = makeHint({ issueNumber: 42 })
+    const hint = makeHint({ issueNumber: 42, })
     expect(shouldSuppressInAppNotice(hint, '/proj-1/issues/42', null)).toBe(false)
   })
 })

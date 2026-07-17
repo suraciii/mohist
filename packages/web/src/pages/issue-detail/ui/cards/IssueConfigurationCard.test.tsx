@@ -13,7 +13,6 @@ const ISSUE_NUMBER = 10
 
 function buildIssue(overrides: Partial<Issue> & Pick<Issue, 'number' | 'title'>): Issue {
   return {
-    id: `issue_${overrides.number}`,
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: PROJECT_ID,
@@ -184,7 +183,7 @@ describe('IssueConfigurationCard', () => {
     it('excludes already-selected prerequisites from the candidate list', async () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
-        prerequisites: [{ issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active }],
+        prerequisites: [{ number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active }],
       })
 
       openPicker()
@@ -215,8 +214,8 @@ describe('IssueConfigurationCard', () => {
       const user = userEvent.setup()
       renderCard({
         prerequisites: [
-          { issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
-          { issueId: 'issue_7', number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
+          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          { number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -276,7 +275,7 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
         ],
         mutations: buildMutations({
           addPrerequisite: vi.fn(),
@@ -294,7 +293,7 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -309,7 +308,7 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { issueId: 'issue_7', number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
+          { number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
         ],
         canStart: true,
         blocker: null,
@@ -324,7 +323,7 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -339,7 +338,7 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { issueId: 'issue_5', number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
         ],
       })
 

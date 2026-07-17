@@ -14,8 +14,7 @@ export interface ActivityPreview {
 }
 
 export interface WaitingCard {
-  issueId: string
-  issueNumber: string
+  issueNumber: number
   issueTitle: string
   issueStage: string | null
   label: 'Needs Approval' | 'Blocked'
@@ -35,8 +34,7 @@ export interface WaitingCard {
 export type SessionCardUsageHistoryEntry = ContextUsageHistoryEntry
 
 export interface SessionCard {
-  issueId: string
-  issueNumber: string
+  issueNumber: number
   issueTitle: string
   issueStage: string
   sessionId: string
@@ -89,8 +87,7 @@ export function sessionToCard(s: AgentActivitySession): SessionCard {
   const rawHistory = usage?.contextUsageHistory
   const contextUsageHistory = rawHistory == null || rawHistory.length === 0 ? null : rawHistory
   return {
-    issueId: s.issueId,
-    issueNumber: String(s.issueNumber),
+    issueNumber: s.issueNumber,
     issueTitle: s.issueTitle,
     issueStage: s.issueStage,
     sessionId: s.sessionId,
@@ -124,8 +121,7 @@ export function sessionToCard(s: AgentActivitySession): SessionCard {
 
 function waitingToCard(w: AgentActivityWaiting): WaitingCard {
   return {
-    issueId: w.issueId,
-    issueNumber: String(w.issueNumber),
+    issueNumber: w.issueNumber,
     issueTitle: w.issueTitle,
     issueStage: w.stage,
     label: w.label,

@@ -66,7 +66,6 @@ beforeEach(() => {
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Implement workflow artifacts',
     body: '',

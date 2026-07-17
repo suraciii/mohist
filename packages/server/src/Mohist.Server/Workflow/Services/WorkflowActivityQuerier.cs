@@ -53,7 +53,6 @@ public class WorkflowActivityQuerier : IScopedService
                 var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
                 result.Add(new ActiveAgentDto(
                     session.Runtime.RunnerId,
-                    $"agent_{agentId}",
                     issueNumber,
                     recordProjectId,
                     workflowRunId ?? string.Empty,
@@ -87,7 +86,6 @@ public class WorkflowActivityQuerier : IScopedService
 
             result.Add(new ActiveAgentDto(
                 session.Runtime.RunnerId,
-                $"issue_{recordProjectId}_{issueNumber}",
                 issueNumber,
                 recordProjectId,
                 workflowRunId,
@@ -136,7 +134,7 @@ public class WorkflowActivityQuerier : IScopedService
     }
 }
 
-public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress, string? AgentId, string? AgentName);
+public sealed record ActiveAgentDto(string RunnerId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress, string? AgentId, string? AgentName);
 public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto? TaskProgress, string LastActivityAt);
 public sealed record ActiveWorkItemDto(string Type, string Id, string Title);
 public sealed record TaskProgressDto(int Completed, int Total);

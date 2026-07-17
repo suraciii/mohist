@@ -3,6 +3,7 @@ using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using System.Net.Http.Json;
 
@@ -26,57 +27,49 @@ public static class EpicRoutes
             if (string.IsNullOrWhiteSpace(req.Title)) return ApiResults.BadRequest("title is required");
             var pid = context.GetResolvedProject().Id;
 
-            var tempId = $"epic_{Guid.NewGuid():N}";
-            var grain = grains.GetGrain<IEpicGrain>($"{pid}:{tempId}");
-            var dto = await grain.CreateAsync(pid, req.Title, req.Description, req.Priority);
+            var number = await grains.GetGrain<IEpicCounterGrain>(GrainKey.EpicCounter(pid)).NextAsync();
+            var grain = GetEpicGrain(grains, pid, number);
+            var dto = await grain.CreateAsync(pid, number, req.Title, req.Description, req.Priority);
             return Results.Json(new ApiResponse<EpicDto>(true, dto), statusCode: 201);
         });
 
-        group.MapGet("/{id}", async (HttpContext context, string id, EpicQuerier queryService) =>
+        group.MapGet("/{number:int}", async (HttpContext context, int number, EpicQuerier queryService) =>
         {
             var pid = context.GetResolvedProject().Id;
-            var result = int.TryParse(id, out var number)
-                ? await queryService.GetByNumberAsync(pid, number)
-                : await queryService.GetAsync(pid, id);
-            return result is null ? ApiResults.NotFound($"Epic {id} not found") : ApiResults.Ok(result);
+            var result = await queryService.GetAsync(pid, number);
+            return result is null ? ApiResults.NotFound($"Epic #{number} not found") : ApiResults.Ok(result);
         });
 
-        group.MapPatch("/{id}", async (HttpContext context, string id, UpdateEpicRequest req, EpicQuerier queryService, IGrainFactory grains) =>
+        group.MapPatch("/{number:int}", async (HttpContext context, int number, UpdateEpicRequest req, EpicQuerier queryService, IGrainFactory grains) =>
         {
             var pid = context.GetResolvedProject().Id;
 
-            var resolved = int.TryParse(id, out var number)
-                ? await queryService.GetByNumberAsync(pid, number)
-                : await queryService.GetAsync(pid, id);
-            if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+            var resolved = await queryService.GetAsync(pid, number);
+            if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-            var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+            var grain = GetEpicGrain(grains, pid, number);
             var updated = await grain.UpdateAsync(req.Title, req.Description, req.Priority);
-            return updated is null ? ApiResults.NotFound($"Epic {id} not found") : ApiResults.Ok(updated);
+            return updated is null ? ApiResults.NotFound($"Epic #{number} not found") : ApiResults.Ok(updated);
         });
 
-        group.MapPost("/{id}/issues", async (HttpContext context, string id, EpicIssueRequest req, IGrainFactory grains, IssueQuerier issuesQuery, EpicQuerier queryService) =>
+        group.MapPost("/{number:int}/issues", async (HttpContext context, int number, EpicIssueRequest req, IGrainFactory grains, IssueQuerier issuesQuery, EpicQuerier queryService) =>
         {
             var pid = context.GetResolvedProject().Id;
 
-            var resolved = int.TryParse(id, out var number)
-                ? await queryService.GetByNumberAsync(pid, number)
-                : await queryService.GetAsync(pid, id);
-            if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
-            var resolvedId = resolved.Id;
+            var resolved = await queryService.GetAsync(pid, number);
+            if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-            var issues = await issuesQuery.ListAsync(pid, all: true);
-            var issue = issues.FirstOrDefault(i => i.Id == req.IssueId || i.Number.ToString() == req.IssueId);
+            var issue = await issuesQuery.GetAsync(pid, req.IssueNumber);
             if (issue is null) return ApiResults.Fail("Issue not found", 404, "ISSUE_NOT_FOUND");
 
-            var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolvedId}");
+            var grain = GetEpicGrain(grains, pid, number);
             try
             {
-                await grain.LinkIssueAsync(issue.Id, issue.Number, pid);
+                await grain.LinkIssueAsync(issue.Number, pid);
             }
             catch (EpicClosedCannotLinkException ex)
             {
-                return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
+                return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicNumber = ex.EpicNumber });
             }
             catch (InvalidOperationException ex)
             {
@@ -84,72 +77,62 @@ public static class EpicRoutes
                     return ApiResults.Conflict(ex.Message, "DUPLICATE_EPIC_MEMBERSHIP");
                 throw;
             }
-            return ApiResults.Ok(new { epicId = resolvedId, issueId = issue.Id });
+            return ApiResults.Ok(new { epicNumber = number, issueNumber = issue.Number });
         });
 
-        group.MapDelete("/{id}/issues/{issueId}", async (HttpContext context, string id, string issueId, IGrainFactory grains, EpicQuerier queryService, IssueQuerier issuesQuery) =>
+        group.MapDelete("/{number:int}/issues/{issueNumber:int}", async (HttpContext context, int number, int issueNumber, IGrainFactory grains, EpicQuerier queryService, IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
-            var resolved = int.TryParse(id, out var number)
-                ? await queryService.GetByNumberAsync(pid, number)
-                : await queryService.GetAsync(pid, id);
-            if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+            var resolved = await queryService.GetAsync(pid, number);
+            if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
+            if (await issuesQuery.GetAsync(pid, issueNumber) is null)
+                return ApiResults.NotFound($"Issue #{issueNumber} not found");
 
-            // Resolve issueId the same way the link endpoint does: accept either the
-            // internal id (issue_xxx) or the issue number. Without this, unlink by
-            // number silently no-ops because UnlinkIssueAsync matches on internal id.
-            var resolvedIssueId = await ResolveIssueIdAsync(issuesQuery, pid, issueId);
-            if (resolvedIssueId is null) return ApiResults.NotFound($"Issue {issueId} not found");
-
-            var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
-            await grain.UnlinkIssueAsync(resolvedIssueId, pid);
-            return ApiResults.Ok(new { epicId = resolved.Id, issueId = resolvedIssueId });
+            var grain = GetEpicGrain(grains, pid, number);
+            await grain.UnlinkIssueAsync(issueNumber, pid);
+            return ApiResults.Ok(new { epicNumber = number, issueNumber });
         });
 
-        group.MapPost("/{id}/issues:batch", BatchLinkRouteAsync);
-        group.MapPost("/{id}/issues:batch-unlink", BatchUnlinkRouteAsync);
+        group.MapPost("/{number:int}/issues:batch", BatchLinkRouteAsync);
+        group.MapPost("/{number:int}/issues:batch-unlink", BatchUnlinkRouteAsync);
 
-        group.MapPost("/{id}/done", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
-            await SetStatusRouteAsync(context, id, "done", grains, queryService));
-        group.MapPost("/{id}/close", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
-            await SetStatusRouteAsync(context, id, "closed", grains, queryService));
-        group.MapPost("/{id}/start", StartRouteAsync);
-        group.MapPost("/{id}/pause", PauseRouteAsync);
-        group.MapPost("/{id}/resume", ResumeRouteAsync);
-        group.MapPost("/{id}/reopen", ReopenRouteAsync);
+        group.MapPost("/{number:int}/done", async (HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService) =>
+            await SetStatusRouteAsync(context, number, "done", grains, queryService));
+        group.MapPost("/{number:int}/close", async (HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService) =>
+            await SetStatusRouteAsync(context, number, "closed", grains, queryService));
+        group.MapPost("/{number:int}/start", StartRouteAsync);
+        group.MapPost("/{number:int}/pause", PauseRouteAsync);
+        group.MapPost("/{number:int}/resume", ResumeRouteAsync);
+        group.MapPost("/{number:int}/reopen", ReopenRouteAsync);
 
-        group.MapGet("/{id}/events", ListEventsRouteAsync);
+        group.MapGet("/{number:int}/events", ListEventsRouteAsync);
 
         return app;
     }
 
     private static async Task<IResult> ListEventsRouteAsync(
         HttpContext context,
-        string id,
+        int number,
         int? limit,
         EpicQuerier queryService,
         EpicEventQuerier eventQuery)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-        var events = await eventQuery.ListAsync(resolved.Id, limit ?? 200, context.RequestAborted);
+        var events = await eventQuery.ListAsync(pid, number, limit ?? 200, context.RequestAborted);
         var response = events.Select(StoredCloudEventDto.From).ToList();
         return ApiResults.Ok(response);
     }
 
-    private static async Task<IResult> SetStatusRouteAsync(HttpContext context, string id, string status, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> SetStatusRouteAsync(HttpContext context, int number, string status, IGrainFactory grains, EpicQuerier queryService)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         try
         {
             var dto = await grain.SetStatusAsync(status);
@@ -173,15 +156,13 @@ public static class EpicRoutes
         }
     }
 
-    private static async Task<IResult> StartRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> StartRouteAsync(HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         try
         {
             var dto = await grain.StartAsync();
@@ -201,16 +182,14 @@ public static class EpicRoutes
         }
     }
 
-    private static async Task<IResult> PauseRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> PauseRouteAsync(HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
         var body = await ReadPauseRequestAsync(context);
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         try
         {
             var dto = await grain.PauseAsync(body?.Reason);
@@ -230,15 +209,13 @@ public static class EpicRoutes
         }
     }
 
-    private static async Task<IResult> ResumeRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> ResumeRouteAsync(HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         try
         {
             var dto = await grain.ResumeAsync();
@@ -258,15 +235,13 @@ public static class EpicRoutes
         }
     }
 
-    private static async Task<IResult> ReopenRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> ReopenRouteAsync(HttpContext context, int number, IGrainFactory grains, EpicQuerier queryService)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         try
         {
             var dto = await grain.ReopenAsync();
@@ -284,50 +259,25 @@ public static class EpicRoutes
 
     private static async Task<IResult> BatchLinkRouteAsync(
         HttpContext context,
-        string id,
+        int number,
         IGrainFactory grains,
         EpicQuerier queryService,
         IssueQuerier issuesQuery)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
         var req = await ReadBatchRequestAsync(context);
-        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueIds[] array");
-        if (req.IssueIds is null || req.IssueIds.Count == 0)
+        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueNumbers[] array");
+        if (req.IssueNumbers is null || req.IssueNumbers.Count == 0)
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
         var issues = await issuesQuery.ListAsync(pid, all: true);
-        // Resolve each identifier exactly the way the single-issue
-        // route does today: by exact internal-id match, or by issue-number
-        // string match. Unresolved identifiers flow through as not-found
-        // outcomes. The grain receives each resolved issue at most once;
-        // MergeBatchOutcomes expands the result back to one outcome per
-        // requested identifier.
-        var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
-        var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var identifier in req.IssueIds)
-        {
-            if (string.IsNullOrWhiteSpace(identifier)) continue;
-            var match = issues.FirstOrDefault(i =>
-                i.Id == identifier || i.Number.ToString() == identifier);
-            if (match is null)
-            {
-                perIdentifier[identifier] = new BatchMembershipRequestItem(
-                    Identifier: identifier, IssueId: "", IssueNumber: 0);
-                continue;
-            }
-            var item = new BatchMembershipRequestItem(
-                Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
-            perIdentifier[identifier] = item;
-            if (seenIssueIds.Add(match.Id)) resolvedItems.Add(item);
-        }
+        var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
+        var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
         try
         {
@@ -335,59 +285,38 @@ public static class EpicRoutes
         }
         catch (EpicClosedCannotLinkException ex)
         {
-            // Per spec: a batch link to a `closed` epic is rejected as a
-            // whole — no per-item outcomes are produced.
-            return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
+            return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicNumber = ex.EpicNumber });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes, isUnlink: false);
+        var outcomes = MergeBatchOutcomes(requestedIdentifiers, perIdentifier, grainOutcomes, isUnlink: false);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
     }
 
     private static async Task<IResult> BatchUnlinkRouteAsync(
         HttpContext context,
-        string id,
+        int number,
         IGrainFactory grains,
         EpicQuerier queryService,
         IssueQuerier issuesQuery)
     {
         var pid = context.GetResolvedProject().Id;
-        var resolved = int.TryParse(id, out var number)
-            ? await queryService.GetByNumberAsync(pid, number)
-            : await queryService.GetAsync(pid, id);
-        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+        var resolved = await queryService.GetAsync(pid, number);
+        if (resolved is null) return ApiResults.NotFound($"Epic #{number} not found");
 
         var req = await ReadBatchRequestAsync(context);
-        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueIds[] array");
-        if (req.IssueIds is null || req.IssueIds.Count == 0)
+        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueNumbers[] array");
+        if (req.IssueNumbers is null || req.IssueNumbers.Count == 0)
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
         var issues = await issuesQuery.ListAsync(pid, all: true);
-        var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
-        var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var identifier in req.IssueIds)
-        {
-            if (string.IsNullOrWhiteSpace(identifier)) continue;
-            var match = issues.FirstOrDefault(i =>
-                i.Id == identifier || i.Number.ToString() == identifier);
-            if (match is null)
-            {
-                perIdentifier[identifier] = new BatchMembershipRequestItem(
-                    Identifier: identifier, IssueId: "", IssueNumber: 0);
-                continue;
-            }
-            var item = new BatchMembershipRequestItem(
-                Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
-            perIdentifier[identifier] = item;
-            if (seenIssueIds.Add(match.Id)) resolvedItems.Add(item);
-        }
+        var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
+        var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
 
-        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        var grain = GetEpicGrain(grains, pid, number);
         IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
         try
         {
@@ -398,8 +327,28 @@ public static class EpicRoutes
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes, isUnlink: true);
+        var outcomes = MergeBatchOutcomes(requestedIdentifiers, perIdentifier, grainOutcomes, isUnlink: true);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
+    }
+
+    private static (List<BatchMembershipRequestItem> Resolved, Dictionary<string, BatchMembershipRequestItem> ByIdentifier)
+        ResolveBatchItems(IReadOnlyList<IssueReadModel> issues, IReadOnlyList<int> requestedNumbers)
+    {
+        var byNumber = issues.ToDictionary(i => i.Number);
+        var resolved = new List<BatchMembershipRequestItem>(requestedNumbers.Count);
+        var byIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
+        var seenNumbers = new HashSet<int>();
+        foreach (var issueNumber in requestedNumbers)
+        {
+            var identifier = issueNumber.ToString();
+            var item = byNumber.ContainsKey(issueNumber)
+                ? new BatchMembershipRequestItem(identifier, issueNumber)
+                : new BatchMembershipRequestItem(identifier, 0);
+            byIdentifier[identifier] = item;
+            if (item.IssueNumber > 0 && seenNumbers.Add(item.IssueNumber))
+                resolved.Add(item);
+        }
+        return (resolved, byIdentifier);
     }
 
     private static IReadOnlyList<BatchMembershipOutcome> MergeBatchOutcomes(
@@ -408,40 +357,29 @@ public static class EpicRoutes
         IReadOnlyList<BatchMembershipOutcome> grainOutcomes,
         bool isUnlink)
     {
-        var byIssueId = grainOutcomes
-            .Where(o => !string.IsNullOrEmpty(o.IssueId))
-            .GroupBy(o => o.IssueId ?? string.Empty, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var notFoundByIdentifier = grainOutcomes
-            .Where(o => o.Status == "not-found" && string.IsNullOrEmpty(o.IssueId))
-            .GroupBy(o => o.Identifier, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var byIssueNumber = grainOutcomes
+            .Where(o => o.IssueNumber.HasValue)
+            .GroupBy(o => o.IssueNumber!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
 
-        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
+        var seenIssueNumbers = new HashSet<int>();
         var results = new List<BatchMembershipOutcome>(requestedIdentifiers.Count);
         foreach (var identifier in requestedIdentifiers)
         {
             if (string.IsNullOrWhiteSpace(identifier)) continue;
             // Unresolved identifier: link reports not-found; unlink is
             // idempotent and reports was-not-a-member per the unlink contract.
-            if (!resolvedItems.TryGetValue(identifier, out var item) || string.IsNullOrEmpty(item.IssueId))
+            if (!resolvedItems.TryGetValue(identifier, out var item) || item.IssueNumber <= 0)
             {
-                if (!isUnlink && notFoundByIdentifier.TryGetValue(identifier, out var nfe))
-                {
-                    results.Add(nfe);
-                }
-                else
-                {
-                    results.Add(isUnlink
-                        ? new BatchMembershipOutcome(identifier, "was-not-a-member")
-                        : BatchMembershipOutcome.NotFound(identifier));
-                }
+                results.Add(isUnlink
+                    ? new BatchMembershipOutcome(identifier, "was-not-a-member")
+                    : BatchMembershipOutcome.NotFound(identifier));
                 continue;
             }
 
-            if (byIssueId.TryGetValue(item.IssueId, out var outcome))
+            if (byIssueNumber.TryGetValue(item.IssueNumber, out var outcome))
             {
-                results.Add(seenIssueIds.Add(item.IssueId)
+                results.Add(seenIssueNumbers.Add(item.IssueNumber)
                     ? outcome with { Identifier = identifier }
                     : DuplicateOutcome(identifier, item, outcome, isUnlink));
             }
@@ -450,7 +388,7 @@ public static class EpicRoutes
                 // Resolved issue that the grain dropped (only possible if
                 // the grain returned no entry for it — defensive fallback).
                 results.Add(isUnlink
-                    ? BatchMembershipOutcome.WasNotAMember(identifier, item.IssueId, item.IssueNumber)
+                    ? BatchMembershipOutcome.WasNotAMember(identifier, item.IssueNumber)
                     : BatchMembershipOutcome.NotFound(identifier));
             }
         }
@@ -465,10 +403,10 @@ public static class EpicRoutes
         bool isUnlink)
     {
         if (isUnlink)
-            return BatchMembershipOutcome.WasNotAMember(identifier, item.IssueId, item.IssueNumber);
+            return BatchMembershipOutcome.WasNotAMember(identifier, item.IssueNumber);
         return firstOutcome.Status == "conflict"
             ? firstOutcome with { Identifier = identifier }
-            : BatchMembershipOutcome.AlreadyLinked(identifier, item.IssueId, item.IssueNumber);
+            : BatchMembershipOutcome.AlreadyLinked(identifier, item.IssueNumber);
     }
 
     private static async Task<BatchMembershipRequest?> ReadBatchRequestAsync(HttpContext context)
@@ -495,19 +433,13 @@ public static class EpicRoutes
         }
     }
 
-    private static async Task<string?> ResolveIssueIdAsync(IssueQuerier issuesQuery, string projectId, string issueId)
-    {
-        if (!int.TryParse(issueId, out var issueNumber))
-            return issueId;
-
-        var issue = await issuesQuery.GetAsync(projectId, issueNumber);
-        return issue?.Id;
-    }
+    private static IEpicGrain GetEpicGrain(IGrainFactory grains, string projectId, int epicNumber) =>
+        grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epicNumber)));
 }
 
 public record EpicCreateRequest(string Title, string? Description, string? Priority);
-public record EpicIssueRequest(string IssueId);
+public record EpicIssueRequest(int IssueNumber);
 public record UpdateEpicRequest(string? Title = null, string? Description = null, string? Priority = null);
 public record PauseEpicRequest(string? Reason = null);
-public record BatchMembershipRequest(IReadOnlyList<string>? IssueIds);
+public record BatchMembershipRequest(IReadOnlyList<int>? IssueNumbers);
 public sealed record BatchMembershipResponse(IReadOnlyList<BatchMembershipOutcome> Results);

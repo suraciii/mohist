@@ -22,12 +22,10 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
 
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -45,9 +43,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -65,7 +62,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "closed");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -80,9 +77,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused", pauseReason: "on hold");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -101,11 +97,9 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -128,11 +122,9 @@ public class EpicAutoDoneSpecs
         // readiness but not counted as delivered.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -149,7 +141,7 @@ public class EpicAutoDoneSpecs
     public async Task AutoMarkDoneIfReadyAsync_UnknownEpic_ReturnsNull()
     {
         await using var database = CreateDatabase();
-        var grain = CreateGrain(database.Factory, "project_1:epic_missing");
+        var grain = CreateGrain(database.Factory, "project_1:9999");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -163,7 +155,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -178,9 +170,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var first = await grain.AutoMarkDoneIfReadyAsync();
         var second = await grain.AutoMarkDoneIfReadyAsync();
@@ -198,9 +189,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.ResumeAsync();
 
@@ -219,11 +209,9 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.ResumeAsync();
 
@@ -243,9 +231,8 @@ public class EpicAutoDoneSpecs
         // via the shared readiness rule and auto-transitions to done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.ResumeAsync();
 
@@ -262,9 +249,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.ResumeAsync();
 
@@ -282,7 +268,7 @@ public class EpicAutoDoneSpecs
         // can map it to 409 EPIC_RESUME_REQUIRES_PAUSED.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var ex = await Assert.ThrowsAsync<EpicResumeRequiresPausedException>(
             () => grain.ResumeAsync());
@@ -300,7 +286,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(
             () => grain.ResumeAsync());
@@ -315,7 +301,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(
             () => grain.StartAsync());
@@ -330,7 +316,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused", pauseReason: "on hold");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var ex = await Assert.ThrowsAsync<EpicStartRequiresIdleException>(
             () => grain.StartAsync());
@@ -344,7 +330,7 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
@@ -356,9 +342,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
@@ -370,9 +355,8 @@ public class EpicAutoDoneSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
@@ -391,13 +375,12 @@ public class EpicAutoDoneSpecs
         // with open issues never silently flips to done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var ex = await Assert.ThrowsAsync<EpicNotReadyToMarkDoneException>(
             () => grain.SetStatusAsync("done"));
-        Assert.Equal("epic_1", ex.EpicId);
+        Assert.Equal(1, ex.EpicNumber);
         Assert.Equal(1, ex.OpenLinkedCount);
 
         await using var verify = database.CreateDbContext();
@@ -417,9 +400,8 @@ public class EpicAutoDoneSpecs
         // to close the status-mirrors-reality loop.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
@@ -443,9 +425,8 @@ public class EpicAutoDoneSpecs
         // is invoked because status != running) and never marks done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
-        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
-        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        var grain = CreateGrain(database.Factory, "project_1:1");
 
         var result = await grain.RecomputeProgressAsync();
 
@@ -470,7 +451,6 @@ public class EpicAutoDoneSpecs
     private static async Task SeedEpicAsync(
         TestDatabase database,
         string projectId = "project_1",
-        string epicId = "epic_1",
         int number = 1,
         string status = "idle",
         string? pauseReason = null)
@@ -478,10 +458,9 @@ public class EpicAutoDoneSpecs
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
-            Id = epicId,
             ProjectId = projectId,
             Number = number,
-            Title = $"Epic {epicId}",
+            Title = $"Epic {number}",
             Description = "",
             Priority = "p2",
             Status = status,
@@ -495,41 +474,25 @@ public class EpicAutoDoneSpecs
     private static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId,
-        string epicId,
-        string issueId,
         int issueNumber,
         Mohist.Server.Issue.Domain.IssueStatus status)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = $"Issue {issueNumber}",
             Status = status,
+            EpicNumber = 1,
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
             ProjectId = projectId,
             Number = issueNumber,
+            EpicNumber = 1,
             State = json,
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private static async Task SeedLinkAsync(TestDatabase database, string epicId, string issueId, int issueNumber)
-    {
-        await using var db = database.CreateDbContext();
-        db.EpicIssues.Add(new EpicIssueRow
-        {
-            EpicId = epicId,
-            ProjectId = "project_1",
-            IssueId = issueId,
-            IssueNumber = issueNumber,
-            CreatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

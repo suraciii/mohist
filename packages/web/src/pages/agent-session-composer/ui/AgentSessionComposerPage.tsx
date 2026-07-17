@@ -234,8 +234,11 @@ export function AgentSessionComposerPage({
 
     const context: AgentSessionLaunchContext = {}
     for (const ref of contextRefs) {
-      if (ref.type === 'issue') context.issueNumber = parseInt(ref.value, 10) || undefined
-      else if (ref.type === 'epic') context.epicNumber = ref.value
+      const number = Number(ref.value)
+      if ((ref.type === 'issue' || ref.type === 'epic') && Number.isInteger(number) && number > 0) {
+        if (ref.type === 'issue') context.issueNumber = number
+        else context.epicNumber = number
+      }
       else if (ref.type === 'repository') context.repository = ref.value
       else if (ref.type === 'workspace') context.workspacePath = ref.value
     }

@@ -687,7 +687,6 @@ public class AgentUsageTimeseriesApiSpecs
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -699,7 +698,8 @@ public class AgentUsageTimeseriesApiSpecs
             .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();

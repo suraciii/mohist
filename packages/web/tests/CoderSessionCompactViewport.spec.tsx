@@ -137,7 +137,6 @@ function makeCancelableSessionData(): SessionDataSourceResult {
     meta: {
       sessionId: 'agent-session-12345678',
       sessionName: 'build',
-      issueId: 'issue-1',
       runtimeSessionId: 'acp-1',
       executionId: null,
       title: 'Build session',
@@ -188,7 +187,6 @@ function makeCancelableSessionData(): SessionDataSourceResult {
 
 function setupDefaults() {
   _issueData = {
-    id: 'issue-1',
     number: 123,
     title: 'Compact viewport spec',
     body: 'Body',

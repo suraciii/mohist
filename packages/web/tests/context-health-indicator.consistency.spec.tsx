@@ -8,8 +8,7 @@ import { CompactSessionCard } from '@/widgets/dashboard-pulse'
 
 function makeListRow(overrides: Partial<SessionCardType> = {}): SessionCardType {
   return {
-    issueId: 'issue-1',
-    issueNumber: '12',
+    issueNumber: 12,
     issueTitle: 'Fix project selector',
     issueStage: 'Build',
     sessionId: 'session-1',

@@ -194,7 +194,6 @@ export interface PromptSummary {
 export interface SessionMetadata {
   sessionId: string
   sessionName?: string | null
-  issueId: string
   runtimeSessionId: string
   runtime?: string | null
   executionId: string | null

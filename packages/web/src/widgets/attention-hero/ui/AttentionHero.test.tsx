@@ -50,7 +50,6 @@ function AttentionHero(
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: `issue-${overrides.number ?? 100}-${overrides.title ?? 'default'}`,
     number: 100,
     title: 'Default issue title',
     status: IssueStatus.Backlog,
@@ -69,7 +68,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
-    issueId: null,
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },
@@ -81,7 +79,6 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
 
 const NO_AGENT: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 0 },
@@ -132,13 +129,11 @@ describe('AttentionHero - has-attention state', () => {
   it('renders one entry per AttentionItem in evaluation order with label and detail', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 10,
         title: 'Awaiting approval on schema',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
       makeIssue({
-        id: 'blocked-1',
         number: 20,
         title: 'Build needs action',
         workflowStage: WorkflowStage.Build,
@@ -146,7 +141,6 @@ describe('AttentionHero - has-attention state', () => {
         blockedReason: 'Waiting on infra fix',
       }),
       makeIssue({
-        id: 'integrate-failed-1',
         number: 30,
         title: 'Failed merge attempt',
         workflowStage: WorkflowStage.Integrate,
@@ -182,7 +176,6 @@ describe('AttentionHero - has-attention state', () => {
   it('does NOT render the all-clear state when attention items are present', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 11,
         title: 'Awaiting approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -202,13 +195,11 @@ describe('AttentionHero - has-attention state', () => {
   it('Hero and the shared derivation produce identical attention items for the same input', async () => {
     const issues: Issue[] = [
       makeIssue({
-        id: 'awaiting-1',
         number: 10,
         title: 'Awaiting approval on schema',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
       makeIssue({
-        id: 'blocked-1',
         number: 20,
         title: 'Build needs action',
         workflowStage: WorkflowStage.Build,
@@ -216,7 +207,6 @@ describe('AttentionHero - has-attention state', () => {
         blockedReason: 'Waiting on infra fix',
       }),
       makeIssue({
-        id: 'integrate-failed-1',
         number: 30,
         title: 'Failed merge attempt',
         workflowStage: WorkflowStage.Integrate,
@@ -236,9 +226,9 @@ describe('AttentionHero - has-attention state', () => {
 
     const shared = deriveAttentionItems(issues, agentStatus)
     expect(shared).toHaveLength(3)
-    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10 })
-    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20 })
-    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30 })
+    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10, })
+    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20, })
+    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30, })
 
     const rendered = screen.getAllByTestId('attention-item')
     expect(rendered).toHaveLength(shared.length)
@@ -250,7 +240,6 @@ describe('AttentionHero - has-attention state', () => {
   it('contains no local copy of the four attention rules (only delegates to deriveAttentionItems)', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 1,
         title: 't',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -271,7 +260,6 @@ describe('AttentionHero - per-item actions', () => {
   it('Approval-needed item exposes Approve and invokes approveIssue with projectId and issueNumber', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 12,
         title: 'Approve me',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -292,7 +280,6 @@ describe('AttentionHero - per-item actions', () => {
   it('does NOT render an Approve button for non-approval items', async () => {
     _issues = [
       makeIssue({
-        id: 'blocked-1',
         number: 22,
         title: 't',
         workflowStage: WorkflowStage.Build,
@@ -312,14 +299,12 @@ describe('AttentionHero - per-item actions', () => {
   it('blocked items offer Open without guessing a recovery action', async () => {
     _issues = [
       makeIssue({
-        id: 'integrate-1',
         number: 31,
         title: 'Integration failure',
         workflowStage: WorkflowStage.Integrate,
         health: IssueHealth.Blocked,
       }),
       makeIssue({
-        id: 'blocked-1',
         number: 33,
         title: 'Needs action issue',
         workflowStage: WorkflowStage.Build,
@@ -342,7 +327,6 @@ describe('AttentionHero - per-item actions', () => {
 
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 50,
         title: 'Approve and invalidate',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -363,7 +347,6 @@ describe('AttentionHero - per-item actions', () => {
   it('navigation affordance links to the issue detail route via useProjectPath', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 77,
         title: 'Click me to navigate',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -379,13 +362,11 @@ describe('AttentionHero - per-item actions', () => {
   it('renders one Open link per attention item pointing to its own issue detail route', async () => {
     _issues = [
       makeIssue({
-        id: 'a-1',
         number: 11,
         title: 'a',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
       makeIssue({
-        id: 'b-1',
         number: 22,
         title: 'b',
         workflowStage: WorkflowStage.Build,
@@ -431,7 +412,6 @@ describe('AttentionHero - runner-down entry', () => {
   it('renders Runner-down entry alongside attention items when both are present', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 88,
         title: 'Pending approval',
         status: IssueStatus.InProgress,
@@ -525,7 +505,6 @@ describe('AttentionHero - runner-down entry', () => {
   it('does NOT render Runner-down entry when only attention items are present and runner is up', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 88,
         title: 'Pending approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -568,7 +547,6 @@ describe('AttentionHero - runner-capacity-limited entry', () => {
   it('surfaces a runner-capacity-limited attention item alongside issue items', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 90,
         title: 'Pending approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -706,14 +684,12 @@ describe('AttentionHero - all-clear state', () => {
   it('renders the all-clear state when only healthy issues are present', async () => {
     _issues = [
       makeIssue({
-        id: 'healthy-1',
         number: 90,
         title: 'Healthy build',
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
       }),
       makeIssue({
-        id: 'healthy-2',
         number: 91,
         title: 'Healthy done',
         workflowStage: WorkflowStage.Done,
@@ -749,7 +725,6 @@ describe('AttentionHero - passive surface', () => {
   it('does not approve on render without a click', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 12,
         title: 'Approve me',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -778,7 +753,6 @@ describe('AttentionHero - data-testid/data-zone hook', () => {
 
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 100,
         title: 'Now with attention',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -794,7 +768,6 @@ describe('AttentionHero - approval-wait metric', () => {
   it('shows the aggregate average approval wait from the aggregation', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 200,
         title: 'Pending approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -824,7 +797,6 @@ describe('AttentionHero - approval-wait metric', () => {
   it('renders a defined empty presentation when the aggregation has zero samples', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 201,
         title: 'Pending approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -853,7 +825,6 @@ describe('AttentionHero - approval-wait metric', () => {
   it('accepts an approvalWait prop that overrides the internal hook', async () => {
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 202,
         title: 'Pending approval',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
@@ -899,7 +870,6 @@ describe('AttentionHero - approval-wait metric', () => {
 
     _issues = [
       makeIssue({
-        id: 'awaiting-1',
         number: 203,
         title: 'Approve and invalidate approval wait',
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },

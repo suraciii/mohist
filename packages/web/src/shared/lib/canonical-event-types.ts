@@ -13,6 +13,7 @@ export const REVERSE_DNS_EVENT_TYPES = {
   StageApprovalRequested: 'com.mohist.workflow.stage.approval-requested',
   StageApprovalResolved: 'com.mohist.workflow.stage.approval-resolved',
   IssueCreated: 'com.mohist.issue.created',
+  IssueEpicChanged: 'com.mohist.issue.epic-changed',
   IssueCancelled: 'com.mohist.issue.cancelled',
   IssueArchived: 'com.mohist.issue.archived',
   IssueUnarchived: 'com.mohist.issue.unarchived',

@@ -20,11 +20,11 @@ const _removeIssueHandler = vi.fn()
 let _blockRemove = false
 
 const removeEpicIssueHook: RemoveEpicIssueHook = () =>
-  useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
-    mutationFn: async ({ epicId, issueId }) => {
-      _removeIssueHandler(issueId)
+  useMutation<{ epicNumber: number; issueNumber: number }, Error, { epicNumber: number; issueNumber: number }>({
+    mutationFn: async ({ epicNumber, issueNumber }) => {
+      _removeIssueHandler(issueNumber)
       if (_blockRemove) return new Promise(() => {})
-      return { epicId, issueId }
+      return { epicNumber, issueNumber }
     },
   })
 
@@ -36,17 +36,17 @@ function renderPage() {
 }
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber', () =>
     HttpResponse.json({ success: true, data: _epicData }),
   ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: _issuesData }),
   ),
-  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
-    _removeIssueHandler(params.issueId)
+  http.delete('*/api/projects/:projectId/epics/:epicNumber/issues/:issueNumber', ({ params }) => {
+    _removeIssueHandler(Number(params.issueNumber))
     if (_blockRemove) return new Promise(() => {})
     return HttpResponse.json({ success: true, data: {} })
   }),
@@ -54,8 +54,8 @@ useMswServer(
 
 function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'epic-12345678',
-    number: null,
+    projectId: 'proj-1',
+    number: 123,
     title: 'Epic title',
     description: 'Epic description',
     priority: 'p1',
@@ -91,7 +91,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('places the Remove button in the actions row, not the primary reading row', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -109,7 +109,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('renders the Remove button with the ghost variant for a secondary de-emphasized affordance', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -124,7 +124,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('a single click on Remove does NOT call removeEpicIssue.mutate', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -139,8 +139,8 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('clicking Remove opens a confirmation Dialog that shows the issue number and an explanation', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        linkedIssue({ id: 'issue-7', number: 7, title: 'Other issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 7, title: 'Other issue' }),
       ],
     })
 
@@ -159,7 +159,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('does not render the remove confirm dialog in the DOM before Remove is clicked', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -174,7 +174,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('clicking Cancel keeps the link intact and closes the dialog without calling mutate', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -188,10 +188,10 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
     expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
   })
 
-  it('clicking Confirm (destructive) calls removeEpicIssue.mutate with the correct epicId and issueId', async () => {
+  it('clicking Confirm (destructive) calls removeEpicIssue.mutate with the correct epic and issue numbers', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -202,7 +202,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
     await waitFor(() => {
-      expect(_removeIssueHandler).toHaveBeenCalledWith('issue-3')
+      expect(_removeIssueHandler).toHaveBeenCalledWith(3)
       expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
     })
     expect(_removeIssueHandler).toHaveBeenCalledTimes(1)
@@ -211,7 +211,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('the Confirm button uses the destructive variant', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -227,7 +227,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('the Cancel button uses the outline variant', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -243,7 +243,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('Cancel and Confirm are not disabled while removeEpicIssue is not pending', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -262,7 +262,7 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
     _blockRemove = true
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ number: 3, title: 'Candidate issue' }),
       ],
     })
 
@@ -287,8 +287,8 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   it('each row owns its own remove-confirm open state — clicking one row does not open another row dialog', async () => {
     _epicData = makeEpic({
       linkedIssues: [
-        linkedIssue({ id: 'issue-3', number: 3, title: 'First issue' }),
-        linkedIssue({ id: 'issue-7', number: 7, title: 'Second issue' }),
+        linkedIssue({ number: 3, title: 'First issue' }),
+        linkedIssue({ number: 7, title: 'Second issue' }),
       ],
     })
 

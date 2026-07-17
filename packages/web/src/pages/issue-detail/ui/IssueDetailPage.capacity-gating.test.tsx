@@ -20,7 +20,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 300,
     title: 'Capacity gating test issue',
     body: '',
@@ -94,9 +93,9 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
     mockIssue(makeIssue())
     mockAgentStatus({
       activeAgents: [
-        { issueId: 'i-1', issueNumber: 101, projectId: 'proj-1' },
-        { issueId: 'i-2', issueNumber: 102, projectId: 'proj-1' },
-        { issueId: 'i-3', issueNumber: 103, projectId: 'proj-1' },
+        { issueNumber: 101, projectId: 'proj-1' },
+        { issueNumber: 102, projectId: 'proj-1' },
+        { issueNumber: 103, projectId: 'proj-1' },
       ],
       capacity: { active: 1, max: 4 },
       runnerAvailable: true,
@@ -143,7 +142,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
     mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
     mockAgentStatus({
       activeAgents: [
-        { issueId: 'i-other', issueNumber: 999, projectId: 'proj-1' },
+        { issueNumber: 999, projectId: 'proj-1' },
       ],
       capacity: { active: 0, max: 4 },
       runnerAvailable: true,

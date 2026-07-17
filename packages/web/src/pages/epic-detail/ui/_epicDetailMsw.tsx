@@ -3,7 +3,7 @@ import type { EpicDetail } from '../../../entities/epic'
 import type { Issue } from '../../../entities/issue'
 import { server, useMswServer } from '../../../../tests/support/msw'
 
-const EPICS = '*/api/projects/:projectId/epics/:id'
+const EPICS = '*/api/projects/:projectId/epics/:number'
 const ISSUES = '*/api/projects/:projectId/issues'
 
 let epicData: EpicDetail = {} as EpicDetail

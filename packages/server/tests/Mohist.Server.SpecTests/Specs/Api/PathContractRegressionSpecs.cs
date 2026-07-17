@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
@@ -314,6 +315,7 @@ public class PathContractRegressionSpecs
             $"/api/projects/{projectId}/issues/{issueNumber}/start",
             null);
         Assert.Equal(System.Net.HttpStatusCode.OK, startResponse.StatusCode);
+        await DispatchEventsAsync();
 
         using var statusResponse = await _client.GetAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
@@ -388,6 +390,7 @@ public class PathContractRegressionSpecs
             $"/api/projects/{projectId}/issues/{issueNumber}/start",
             null);
         Assert.Equal(System.Net.HttpStatusCode.OK, startResponse.StatusCode);
+        await DispatchEventsAsync();
 
         using var statusResponse = await _client.GetAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
@@ -502,4 +505,7 @@ public class PathContractRegressionSpecs
             Assert.True(workspace.TryGetProperty("branch", out _), "workspace dispatch variable missing 'branch'");
         }
     }
+
+    private Task DispatchEventsAsync() =>
+        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 }

@@ -112,6 +112,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private AgentSession CreateSession(OpenAgentSessionCommand command)
     {
+        RequireProjectOwnership(command.Metadata);
         var session = AgentSession.Create(
             SessionId,
             command.RunnerId ?? string.Empty,
@@ -121,6 +122,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             runtime: command.AgentRuntime);
         session.Settings = new AgentSessionSettings(command.Model);
         return session;
+    }
+
+    private static void RequireProjectOwnership(AgentSessionMetadata? metadata)
+    {
+        var labels = metadata?.Labels;
+        if (labels is not null
+            && labels.TryGetValue(AgentSessionQueryMetadataKeys.ProjectId, out var projectId)
+            && !string.IsNullOrWhiteSpace(projectId))
+            return;
+
+        throw new InvalidOperationException("Agent session cannot open without the required project-id label.");
     }
 
     public async Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command)

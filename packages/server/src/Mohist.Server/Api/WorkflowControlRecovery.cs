@@ -24,11 +24,11 @@ internal static class WorkflowControlRecovery
 
     internal static async Task<IResult> RecoverIssueScopedRerunAsync(
         IGrainFactory grains,
-        IssueIdentityResolver issueIdentityResolver,
+        IssueQuerier issuesQuery,
         string projectId,
         int number)
     {
-        var issueGrain = await IssueRoutes.GetIssueGrainAsync(grains, issueIdentityResolver, projectId, number);
+        var issueGrain = await IssueRoutes.GetIssueGrainAsync(grains, issuesQuery, projectId, number);
         if (issueGrain is null) return ApiResults.NotFound($"Issue #{number} not found");
 
         await issueGrain.StartWorkAsync();
@@ -40,11 +40,11 @@ internal static class WorkflowControlRecovery
         IssueQuerier issuesQuery,
         string workflowRunId)
     {
-        var issueId = await issuesQuery.GetIssueIdForWorkflowRunAsync(workflowRunId);
-        if (issueId is null)
+        var issue = await issuesQuery.GetIssueForWorkflowRunAsync(workflowRunId);
+        if (issue is null)
             return ApiResults.NotFound($"Issue for workflow run '{workflowRunId}' not found");
 
-        await grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId)).StartWorkAsync();
+        await grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(issue.ProjectId, issue.Number))).StartWorkAsync();
         return ApiResults.Ok();
     }
 }

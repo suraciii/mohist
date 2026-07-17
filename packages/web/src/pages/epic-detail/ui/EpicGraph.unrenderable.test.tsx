@@ -27,52 +27,52 @@ const _pauseEpicTracker = vi.fn()
 const _resumeEpicTracker = vi.fn()
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber', () =>
     HttpResponse.json({ success: true, data: _epicData }),
   ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: _issuesData }),
   ),
-  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request, params }) => {
-    const body = await request.json() as { issueId: string }
-    _addEpicIssueTracker({ epicId: params.epicId, issueId: body.issueId })
-    return HttpResponse.json({ success: true, data: { epicId: params.epicId, issueId: body.issueId } })
+  http.post('*/api/projects/:projectId/epics/:epicNumber/issues', async ({ request, params }) => {
+    const body = await request.json() as { issueNumber: number }
+    _addEpicIssueTracker({ epicNumber: Number(params.epicNumber), issueNumber: body.issueNumber })
+    return HttpResponse.json({ success: true, data: { epicNumber: Number(params.epicNumber), issueNumber: body.issueNumber } })
   }),
-  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
-    _removeEpicIssueTracker({ epicId: params.epicId, issueId: params.issueId })
+  http.delete('*/api/projects/:projectId/epics/:epicNumber/issues/:issueNumber', ({ params }) => {
+    _removeEpicIssueTracker({ epicNumber: Number(params.epicNumber), issueNumber: Number(params.issueNumber) })
     return HttpResponse.json({ success: true, data: {} })
   }),
   http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
     _startIssueTracker(Number(params.issueNumber))
     return HttpResponse.json({ success: true, data: { issue: {}, message: '' } })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
-    _startEpicTracker(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/start', ({ params }) => {
+    _startEpicTracker(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
-    _markEpicDoneTracker(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/done', ({ params }) => {
+    _markEpicDoneTracker(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/close', ({ params }) => {
-    _closeEpicTracker(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/close', ({ params }) => {
+    _closeEpicTracker(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.patch('*/api/projects/:projectId/epics/:epicId', ({ params }) => {
-    _updateEpicTracker(params.epicId)
+  http.patch('*/api/projects/:projectId/epics/:epicNumber', ({ params }) => {
+    _updateEpicTracker(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+  http.post('*/api/projects/:projectId/epics/:epicNumber/pause', async ({ request, params }) => {
     let reason: string | null = null
     try { const body = await request.json() as Record<string, unknown>; reason = (body.reason as string) ?? null } catch { /* empty body */ }
-    _pauseEpicTracker({ id: params.epicId, reason })
+    _pauseEpicTracker({ number: Number(params.epicNumber), reason })
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
-    _resumeEpicTracker(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/resume', ({ params }) => {
+    _resumeEpicTracker(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
 )
@@ -148,7 +148,6 @@ function renderPage() {
 
 function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
   return {
-    id: 'epic-12345678',
     number: 7,
     title: 'Graph epic',
     description: 'Epic description',
@@ -184,8 +183,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('renders the cyclic banner explaining the dependency cycle when the graph reports cyclic', async () => {
     widgetBehavior.mode = 'default'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, prerequisiteNumbers: [2] }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -204,8 +203,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('renders the empty banner explaining there is not enough data when the graph reports empty', async () => {
     widgetBehavior.mode = 'empty'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1 }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1 }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -224,8 +223,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('renders the fallback "Graph is unavailable" banner when the Error Boundary catches a render exception', async () => {
     widgetBehavior.mode = 'error'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1 }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1 }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -249,8 +248,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('keeps the List view rendered as fallback for the empty unrenderable scenario', async () => {
     widgetBehavior.mode = 'empty'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'L-1' }),
+      linkedIssue({ number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -272,8 +271,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('keeps the List view rendered as fallback when the Error Boundary catches a render exception', async () => {
     widgetBehavior.mode = 'error'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'L-1' }),
+      linkedIssue({ number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -297,8 +296,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('keeps the List view rendered as fallback for the cyclic unrenderable scenario (existing behavior)', async () => {
     widgetBehavior.mode = 'default'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+      linkedIssue({ number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -320,8 +319,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('does not show the graph canvas or scroll container when the banner is displayed (any unrenderable state)', async () => {
     widgetBehavior.mode = 'empty'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1 }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1 }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -339,8 +338,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('shows the narrow-screen hint above the unavailability banner in DOM order', async () => {
     widgetBehavior.mode = 'empty'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1 }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1 }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -366,8 +365,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('clears the error fallback when the user switches back to the List tab and re-selects Graph with a healthy widget', async () => {
     widgetBehavior.mode = 'error'
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1 }),
-      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1 }),
+      linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ])
 
     renderPage()
@@ -395,8 +394,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
 
   it('re-probes graph renderability when linked issue data changes while Graph remains selected', async () => {
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+      linkedIssue({ number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
 
     const { unmount } = renderPage()
@@ -410,8 +409,8 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
 
     unmount()
     _epicData = makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'L-1' }),
+      linkedIssue({ number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
 
     const { rerenderPage } = renderPage()
@@ -432,16 +431,16 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   it('every unrenderable banner message directs the user to the list below (spec contract)', async () => {
     const scenarios = [
       { reason: 'cyclic' as const, expectedKeyword: /cycle/i, linkedIssues: () => [
-        linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+        linkedIssue({ number: 1, prerequisiteNumbers: [2] }),
+        linkedIssue({ number: 2, prerequisiteNumbers: [1] }),
       ] },
       { reason: 'empty' as const, expectedKeyword: /not enough/i, linkedIssues: () => [
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2 }),
+        linkedIssue({ number: 1 }),
+        linkedIssue({ number: 2 }),
       ] },
       { reason: 'error' as const, expectedKeyword: /graph is unavailable/i, linkedIssues: () => [
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2 }),
+        linkedIssue({ number: 1 }),
+        linkedIssue({ number: 2 }),
       ] },
     ]
 

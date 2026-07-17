@@ -7,7 +7,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -43,9 +48,9 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CompleteWorkAsync_IssueTransitionsFromInProgressToDone()
     {
-        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueKey, wrId) = await SeedIssueInProgressAsync();
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CompleteWorkAsync(wrId);
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);
@@ -65,9 +70,9 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CancelAsync_WhenWorkflowRunning_RejectsWithError()
     {
-        var (_, _, _, issueId, _) = await SeedIssueInProgressAsync();
+        var (_, _, _, issueKey, _) = await SeedIssueInProgressAsync();
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
     }
 
@@ -76,12 +81,12 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CancelAsync_WhenWorkflowStopped_IssueTransitionsToCancelled()
     {
-        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueKey, wrId) = await SeedIssueInProgressAsync();
 
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StopAsync("user-stopped");
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CancelAsync();
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);
@@ -100,9 +105,9 @@ public class IssueWorkflowLifecycleSpecs
         // running" check (the workflow is not active); Close() itself
         // rejects Done/archived with a different error. Verify the thrown
         // exception is the Close() rejection, not the workflow-running one.
-        var (_, _, _, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (_, _, _, issueKey, wrId) = await SeedIssueInProgressAsync();
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CompleteWorkAsync(wrId);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
@@ -120,9 +125,9 @@ public class IssueWorkflowLifecycleSpecs
         // template is locked from that point onward, including after
         // Done/archive. Verify the guard still rejects a profile change
         // when the reference is present, regardless of status.
-        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueKey, wrId) = await SeedIssueInProgressAsync();
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CompleteWorkAsync(wrId);
 
         await Assert.ThrowsAsync<WorkflowProfileLockedException>(() =>
@@ -141,10 +146,10 @@ public class IssueWorkflowLifecycleSpecs
     public async Task CompleteWorkAsync_ForIssueNotInProgress_StaysInCurrentState()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
 
         var wrId = $"wr_{Guid.NewGuid():N}";
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CompleteWorkAsync(wrId);
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);
@@ -184,10 +189,10 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWorkAsync_WhenExistingWorkflowIsStopped_StartsNewWorkflow()
     {
-        var (projectId, _, issueNumber, issueId, oldWrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueKey, oldWrId) = await SeedIssueInProgressAsync();
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         var newWrId = await issue.StartWorkAsync();
 
         Assert.NotEqual(oldWrId, newWrId);
@@ -219,9 +224,9 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWorkAsync_WhenActiveRunExists_ReusesRunAndWorkspace()
     {
-        var (_, _, _, issueId, firstWrId) = await SeedIssueInProgressAsync();
+        var (_, _, _, issueKey, firstWrId) = await SeedIssueInProgressAsync();
 
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         var secondWrId = await issue.StartWorkAsync();
 
         Assert.Equal(firstWrId, secondWrId);
@@ -234,13 +239,32 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task EventDispatcher_RedeliversIssueWorkStartedAndCreatesMissingWorkflowRun()
+    {
+        var (projectId, _, issueNumber, _, workflowRunId) = await SeedIssueInProgressAsync();
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+        await DeleteWorkflowRunAsync(workflowRunId);
+        await MarkIssueWorkStartedUndeliveredAsync(projectId, issueNumber);
+
+        using var scope = _services.CreateScope();
+        var dispatcher = scope.ServiceProvider.GetRequiredService<EventDispatcherService>();
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+        await AssertIssueWorkStartedDispatchedAsync(projectId, issueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task StartWorkAsync_WhenPrerequisiteIncomplete_DoesNotCreateWorkflowRunOrWorkspace()
     {
         var (projectId, _) = await SeedProjectAsync();
         var prereq = await CreateIssueInBacklogAsync(projectId);
         var dependent = await CreateIssueInBacklogAsync(projectId);
 
-        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.issueId);
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.issueKey);
         await dependentGrain.AddPrerequisiteAsync(prereq.number);
 
         await Assert.ThrowsAsync<IssueStartBlockedException>(() => dependentGrain.StartWorkAsync());
@@ -333,24 +357,30 @@ public class IssueWorkflowLifecycleSpecs
         return (id, name);
     }
 
-    private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
+    private async Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Lifecycle", null, null, null, null, issueId, isDraft: false);
-        return (issueId, number);
+        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
+        await grain.CreateAsync(projectId, number, "Lifecycle", null, null, null, isDraft: false);
+        return (issueKey, number);
     }
 
-    private async Task<(string projectId, string projectName, int number, string issueId, string wrId)> SeedIssueInProgressAsync()
+    private async Task<(string projectId, string projectName, int number, string issueKey, string wrId)> SeedIssueInProgressAsync()
     {
         var (projectId, projectName) = await SeedProjectAsync();
-        var (issueId, number) = await CreateIssueInBacklogAsync(projectId);
+        var (issueKey, number) = await CreateIssueInBacklogAsync(projectId);
 
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
+        await DispatchEventsAsync();
 
-        return (projectId, projectName, number, issueId, wrId);
+        return (projectId, projectName, number, issueKey, wrId);
+    }
+
+    private async Task DispatchEventsAsync()
+    {
+        await _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
     }
 
     private async Task PoisonWorkflowFailureReasonAsync(string workflowRunId, string reason)
@@ -385,6 +415,51 @@ public class IssueWorkflowLifecycleSpecs
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId);
         return row is null ? null : JSON.Deserialize<WorkflowRun>(row.State);
+    }
+
+    private async Task DeleteWorkflowRunAsync(string workflowRunId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(workflowRunId)
+            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} was not stored");
+        db.WorkflowRuns.Remove(row);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task MarkIssueWorkStartedUndeliveredAsync(string projectId, int issueNumber)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.IssueEvents
+            .Where(entry => entry.Source == IssueEventPersistence.IssueSource(projectId, issueNumber)
+                && entry.Type == EventCatalog.ReverseDns.IssueWorkStarted)
+            .OrderByDescending(entry => entry.Id)
+            .FirstAsync();
+        row.DispatchedAt = null;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task AssertIssueWorkStartedDispatchedAsync(string projectId, int issueNumber)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.IssueEvents
+            .AsNoTracking()
+            .Where(entry => entry.Source == IssueEventPersistence.IssueSource(projectId, issueNumber)
+                && entry.Type == EventCatalog.ReverseDns.IssueWorkStarted)
+            .OrderByDescending(entry => entry.Id)
+            .FirstAsync();
+        Assert.NotNull(row.DispatchedAt);
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

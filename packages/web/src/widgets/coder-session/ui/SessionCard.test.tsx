@@ -7,8 +7,7 @@ import { ActiveSessionCard, RecentCard, WaitingCard } from './SessionCard'
 
 function makeCard(overrides: Partial<SessionCardType> = {}): SessionCardType {
   return {
-    issueId: 'issue-1',
-    issueNumber: '12',
+    issueNumber: 12,
     issueTitle: 'Fix project selector',
     issueStage: 'Build',
     sessionId: 'session-1',
@@ -185,7 +184,7 @@ describe('ActiveSessionCard context health', () => {
 
 describe('WaitingCard', () => {
   it('uses warning treatment for a blocked wait', () => {
-    const card: WaitingCardType = { issueId: 'issue-1', issueNumber: '12', issueTitle: 'Resolve merge conflict', issueStage: 'Check', label: 'Blocked' }
+    const card: WaitingCardType = { issueNumber: 12, issueTitle: 'Resolve merge conflict', issueStage: 'Check', label: 'Blocked' }
     render(<MemoryRouter><WaitingCard card={card} /></MemoryRouter>)
 
     expect(screen.getByTestId('waiting-card-chip')).toHaveAttribute('data-tone', 'warning')

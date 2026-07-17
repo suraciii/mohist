@@ -348,6 +348,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     variables: parseObject(dispatch.variables),
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,
+    epicNumber: dispatch.epicNumber ?? undefined,
     artifacts: parseObject(dispatch.artifacts),
     setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,

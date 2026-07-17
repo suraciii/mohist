@@ -149,12 +149,7 @@ export function PulseZone({
 }
 
 function compareSessionCards(a: SessionCard, b: SessionCard): number {
-  const aIssueNumber = Number(a.issueNumber)
-  const bIssueNumber = Number(b.issueNumber)
-  if (Number.isFinite(aIssueNumber) && Number.isFinite(bIssueNumber)) {
-    return aIssueNumber - bIssueNumber
-  }
-  return a.issueNumber.localeCompare(b.issueNumber)
+  return a.issueNumber - b.issueNumber
 }
 
 function deriveAgentStatusRows(

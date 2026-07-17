@@ -14,7 +14,6 @@ function apiResponse(data: unknown) {
 
 function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
   return {
-    id: `issue-${number}`,
     number,
     title: `Issue ${number}`,
     status: 'backlog',

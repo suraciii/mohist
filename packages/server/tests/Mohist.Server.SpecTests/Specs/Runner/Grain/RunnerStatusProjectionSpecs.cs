@@ -33,7 +33,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         string runnerId,
         string workflowId,
         string projectId,
-        string issueId,
         int issueNumber,
         string title = "Issue Task")
     {
@@ -47,7 +46,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
-                ["issueId"] = issueId,
                 ["issueNumber"] = issueNumber.ToString(),
             })));
         await workflow.AssignWorkerAsync(runnerId);
@@ -381,12 +379,11 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "active-ctx-host", "test-project"));
 
         var workflowId = $"wf-ctx-{Guid.NewGuid():N}";
-        var issue = new WorkIssueRef("test-project", "issue-abc", 42);
+        var issue = new WorkIssueRef("test-project", 42);
         var dispatch = await StartIssueWorkflowWorkAsync(
             runnerId,
             workflowId,
             issue.ProjectId,
-            issue.IssueId,
             issue.IssueNumber,
             "Task 1");
 
@@ -400,14 +397,13 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("Task 1", active.Title);
         Assert.NotNull(active.Issue);
         Assert.Equal(issue.ProjectId, active.Issue!.ProjectId);
-        Assert.Equal(issue.IssueId, active.Issue.IssueId);
         Assert.Equal(issue.IssueNumber, active.Issue.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task GetRuntimeStateAsync_BusyRunnerWithoutIssue_ExposesNullIssue()
+    public async Task GetRuntimeStateAsync_BusyRunner_ProjectsWorkflowIssue()
     {
         var runnerId = $"runner-no-issue-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -418,7 +414,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var runtime = await runner.GetRuntimeStateAsync();
         var active = Assert.Single(runtime.ActiveWorks);
-        Assert.Null(active.Issue);
+        Assert.NotNull(active.Issue);
+        Assert.Equal(1, active.Issue!.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -503,7 +500,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             Assert.Equal("task", work.WorkType);
             Assert.False(string.IsNullOrWhiteSpace(work.Stage));
             Assert.False(string.IsNullOrWhiteSpace(work.Title));
-            Assert.Null(work.Issue);
+            Assert.NotNull(work.Issue);
+            Assert.Equal(1, work.Issue!.IssueNumber);
         });
     }
 
@@ -517,12 +515,11 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "issue-proj-host", "test-project"));
 
         var workflowId = $"wf-issue-proj-{Guid.NewGuid():N}";
-        var issue = new WorkIssueRef("test-project", "issue-xyz", 9);
+        var issue = new WorkIssueRef("test-project", 9);
         await StartIssueWorkflowWorkAsync(
             runnerId,
             workflowId,
             issue.ProjectId,
-            issue.IssueId,
             issue.IssueNumber);
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
@@ -531,9 +528,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var work = Assert.Single(view.ActiveWorks);
         Assert.Equal(workflowId, work.OwnerId);
         Assert.NotNull(work.Issue);
-        Assert.Equal("test-project", work.Issue!.ProjectId);
-        Assert.Equal("issue-xyz", work.Issue.IssueId);
-        Assert.Equal(9, work.Issue.IssueNumber);
+        Assert.Equal(issue.ProjectId, work.Issue!.ProjectId);
+        Assert.Equal(issue.IssueNumber, work.Issue.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -1,0 +1,595 @@
+# Issue 412 redesign baseline
+
+## Post-rebase validation (2026-07-16)
+
+The candidate was rebased over current `origin/master`, with the current-branch
+recovery fixtures retained alongside the #412 scoped-identity coverage. The
+rebased result passed the full repository validation:
+
+- CLI: 911 tests
+- Server: 2,722 SpecTests, 1,449 UnitTests, and 27 architecture tests
+- Web: 4,680 tests, typecheck, FSD boundary check, and Node test-boundary check
+- Runner: 1,030 tests, typecheck, and Node test-boundary check
+
+T-001 through T-008 are now accepted in `tasks.json`. T-009 is deliberately
+still in progress: Epic routes and envelope-first timeline routing are complete,
+but the Web `Issue` DTO and Agent/session live-event fixtures still expose
+legacy Issue UUID fields. T-010 remains pending on that cutover and final
+removal verification.
+
+## Why the previous progress is superseded
+
+The previous T-001..T-007 implementation completed an event-lineage plan built on random
+IssueId/EpicId identities, Epic-owned membership rows, copied EpicId snapshots, Workflow binding
+states/revisions, and a per-type EventCatalog registry. Repeated check failures exposed failures in
+normal cross-aggregate crash windows. The user then confirmed a different domain model, so those
+task completion claims no longer describe the accepted target.
+
+The old implementation commits remain in the candidate as migration input. Replacement tasks must
+remove or reshape them; they are not accepted progress and no task in the new tasks.json is marked
+passing.
+
+## Authoritative redesign
+
+- Master spec commit: `71f2cd7b9 docs: define Issue-owned Epic membership`
+- Live Issue #412 title/body updated to the number-only identity and Issue-owned affiliation model.
+- Workdir rebased onto `origin/master` at that spec commit.
+- New OpenSpec proposal/design/delta specs/tasks replace the old D5 denormalization and binding plan.
+
+Core target:
+
+- Issue identity: (`ProjectId`, `IssueNumber`)
+- Epic identity: (`ProjectId`, `EpicNumber`)
+- current affiliation authority: Issue.`EpicNumber?`
+- Workflow local context: `{ ProjectId, IssueNumber, EpicNumber? }`
+- cross-aggregate process: aggregate commit + durable event + idempotent target command
+- event keys: `projectid`, `issue`, `epic`, `workflowrunid`, `stage` (plus independent entity ids)
+- conformance: real producer-family paths and structural Stage, not a per-type catalog matrix
+
+## Preserved independent repair
+
+Commit `6ef69d923` adds `RejectIfRunReloadRequired()` at the start of `WorkflowGrain.StartAsync` and a
+state-save-failure regression. This guard is independent of the superseded lineage protocol and must
+survive T-006 cleanup.
+
+## Current candidate debt to remove
+
+The rebased branch still contains old implementation references including:
+
+- random IssueId/EpicId and number alias resolution;
+- EpicIssueRow/EpicActiveIssue ownership;
+- copied EpicId lineage snapshots;
+- AwaitingBinding, WorkflowBindingPending, binding confirmation, and lineage revisions;
+- EventCatalog.RequiredAttributes, EnvelopeConformance, and CatalogOnlyTypes;
+- issueid/epicid/issueno/epicno producer and fallback paths.
+
+These are expected before new build tasks run. They must not be treated as compatibility requirements.
+
+## Rejected implementation attempt
+
+The first replacement T-001 attempt (`c75a3e263`) mixed typed-key primitives with an incomplete
+data patch. It backfilled missing legacy IssueId values, silently deleted orphan membership rows,
+left known owners without canonical columns, and tested copied migration SQL rather than a complete
+owner migration. It was reverted by `2544a2475` before any later task ran.
+
+The plan was split so identity primitives, Issue references, Epic references, runtime cutover, and
+membership authority each have a separately enforceable boundary. Do not reuse the rejected
+`20260716120000_AdoptScopedIssueEpicIdentity` migration.
+
+## Replacement task state
+
+| Task | State |
+|---|---|
+| T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
+| T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
+| T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
+| T-004 number-only server model/APIs | done — full Server/CLI test suite passes with scoped identity contracts |
+| T-005 Issue-owned membership and Epic progression | done — Issue commits affiliation and Epic derives membership/progression through durable reactions |
+| T-006 durable EnsureStarted Workflow handoff | done — binding protocol removed and durable IssueWorkStarted/EnsureStarted recovery coverage passes |
+| T-007 canonical lineage and producer-family conformance | done — canonical extensions and producer-family paths are verified |
+| T-008 server lineage consumers/integrations | done — server consumers route from canonical envelope context |
+| T-009 CLI/Web cutover | in progress — Epic/timeline complete; Issue DTO and live Agent/session contracts remain |
+| T-010 cleanup and end-to-end recovery verification | pending |
+
+## T-001 delivered
+
+### Files added
+
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/ScopedGrainKeyCodec.cs`
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/IssueKey.cs`
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/EpicKey.cs`
+- `packages/server/tests/Mohist.Server.UnitTests/Orleans/ScopedGrainKeyCodecTests.cs`
+
+### Files changed
+
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/GrainKey.cs` — typed-only
+  `Issue(IssueKey)` / `Epic(EpicKey)` public surface; legacy random-id `Issue(string)` kept
+  as `internal` so existing IssueGrain activation paths keep compiling until T-004 removes it.
+  No `(string, int)` shortcut — that would re-open the validation bypass the typed keys exist
+  to prevent.
+
+### Constructive details
+
+- `IssueKey` and `EpicKey` are `readonly record struct`s that validate in the primary
+  constructor. Blank ProjectId and ProjectId containing the `:` separator throw
+  `ArgumentException`. Non-positive numbers throw `ArgumentOutOfRangeException`. The language
+  can produce default values, but `GrainKey` and the codec reject them during encoding.
+- `ScopedGrainKeyCodec` formats the exact canonical length for `(ProjectId, Number)`: number
+  digits are computed up front and the destination span is allocated to that size, so the
+  output never contains padding or NUL characters. Number text is invariant-culture
+  `int.TryFormat`. `int.MaxValue` (10 digits) round-trips losslessly.
+- `TryParse(string?, out string, out int)` validates both halves: separator must be present,
+  exactly one separator (separator ambiguity is rejected), neither side may be blank, every
+  character of the number side must be `0`-`9`, parsed number must be strictly positive.
+- `Parse(string, out string, out int)` is the throwing counterpart used by typed-key callers.
+- `GrainKey.Issue(IssueKey)` and `GrainKey.Epic(EpicKey)` are the only public Issue / Epic
+  access methods. Reflection-surface test (`GrainKey_DoesNotExposeScalarIssueOverload` /
+  `GrainKey_DoesNotExposeScalarEpicOverload`) confirms there is no `(string, int)` Issue or
+  Epic overload to bypass typed construction.
+- The one necessary comment lives on the `internal` legacy overload and explains only its
+  reason and removal task (T-004). Names explain normal behavior.
+
+### Test coverage (46 new tests)
+
+- Round-trip (Format → TryParse → Format yields the original).
+- Exact output length: `projectId.Length + 1 + NumberDigits(number)`.
+- No NUL padding for short numbers.
+- `int.MaxValue` (2_147_483_647, 10 digits) encoded exactly as `p:2147483647` with length
+  12; round-trips losslessly.
+- Invariant-culture number text (no thousand separators, no decimal).
+- Construction rejects: blank ProjectId, separator-containing ProjectId, non-positive
+  number (`0`, `-1`).
+- TryParse rejects: `null`, empty, `:`, `proj_a`, `proj_a:`, `:1`, `proj_a:notanumber`,
+  `proj_a:0`, `proj_a:-1`, `proj_a:+1`, `proj_a:01`, `proj_a:007`,
+  `proj_a:1:2` (separator ambiguity), `proj::a:1`,
+  `proj_a:1 ` (trailing whitespace), `proj_a: 1` (leading whitespace), `proj_a:1\0` (NUL).
+- Cross-Project same-number isolation: `proj_a:42 != proj_b:42` and the typed keys are
+  unequal.
+- Default `IssueKey` and `EpicKey` values are rejected by `GrainKey` through the shared codec.
+- Reflection surface test proves the public GrainKey Issue / Epic surface has no
+  `(string, int)` shortcut.
+- Reflection surface test proves the random-id `Issue(string)` overload is non-public.
+
+### Test results
+
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj`
+  — **1458 passed / 0 failed / 0 skipped** (baseline 1412; +46 new tests).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj`
+  — **22/22 pass**.
+- Server build clean with `TreatWarningsAsErrors=true`.
+- SpecTests build clean (no behavioral changes; existing calls to internal `Issue(string)`
+  keep resolving via the `InternalsVisibleTo("Mohist.Server.SpecTests")` attribute).
+
+### Out of T-001 scope
+
+- EF migrations: explicitly NOT in this task. The previous T-001 attempt at a data
+  migration (`20260716120000_AdoptScopedIssueEpicIdentity`) was rejected; the rejected
+  filename must not be recreated. Owner migrations for Issue/Epic live in T-002 and T-003.
+- Runtime cutover of existing random-id IssueGrain call sites: T-004.
+- Issue/Epic membership authority and lineage: T-005..T-008.
+
+## T-002 delivered
+
+### Current-state Issue owner inventory
+
+- `Issues` is the aggregate root. Its legacy `IssueId` primary key remains only as the T-004
+  transition lookup; stored `State` already derives the unique canonical (`ProjectId`, `Number`)
+  pair and is the source used by this migration.
+- `IssueWorkflowProfiles` now persists required `ProjectId` + `IssueNumber` with a unique scoped
+  index. Legacy rows are backfilled through their owning Issue; every production create path reads
+  the canonical pair from that Issue before inserting a profile.
+- Issue-bound `WorkflowArtifacts` now persist `IssueNumber` beside their existing `ProjectId`.
+  `WorkflowItemTranslator` carries the run's positive canonical number into the final artifact row.
+  Pending uploads are owned by WorkflowRun/work item until bind and therefore are not a second
+  Issue-reference owner.
+- `Attachments` with `OwnerKind = issue` now persist `OwnerIssueNumber`; issue bind/replace writers
+  set it and unbind clears it. Comment-owned and unbound attachments keep it null.
+- `WorkflowRuns` store canonical Issue context in metadata. Legacy `issueId` annotations are
+  reconciled to `projectId` + `issueNumber`; a stored computed `IssueNumber` and scoped index expose
+  that context without another owner lookup. `WorkIssueRef` is a run-derived dispatch/read shape,
+  not an independently persisted owner.
+- `IssueComments`, `InboxItems`, `EpicIssues`, and `EpicActiveIssues` already persist
+  `ProjectId` + `IssueNumber`. Reconciliation verifies those values against their referenced Issue
+  and fails on missing or cross-Project rows instead of rewriting from the canonical side backward.
+- `IssuePrerequisites` already owns the canonical (`ProjectId`, `IssueNumber`,
+  `PrerequisiteNumber`) relation. Reconciliation verifies that both scoped Issues exist.
+- Workflow-origin and direct Agent-launch `AgentSessions` already persist Issue context as computed
+  Project/number labels. Reconciliation validates both label families and adds Project-scoped
+  recency indexes.
+
+Managers, queriers, storage-integrity helpers and API projections are access paths over the owners
+above, not additional persisted owners. `WorkflowRunId`, `SessionId`, `AgentId`, `RunnerId`,
+attachment id and event id remain independent identities.
+
+### Historical and later-removal references
+
+- Existing `IssueEvents` sources, payloads and extension JSON are immutable historical envelopes;
+  the migration proves them byte-for-byte unchanged. Historical migration/designer files likewise
+  remain historical evidence rather than current owners.
+- Legacy `IssueId` on `IssueRow`, profiles, artifacts, comments, inbox, Epic relation rows,
+  `WorkIssueRef`, run annotations and server APIs remains only until the T-004 number-only runtime
+  and schema cutover.
+- Legacy event lineage aliases and their current consumers remain explicitly assigned to T-007 and
+  T-008. T-002 does not make historical envelopes conform to the future lineage shape.
+
+### Migration and convergence
+
+- `20260716130000_AddCanonicalIssueReferenceColumns` adds nullable transition columns from the
+  immediate previous schema. `20260716140000_BackfillCanonicalIssueReferences` executes the shared
+  guarded reconciliation, makes profile scope required, and creates the scoped indexes.
+- The shared reconciliation is null-safe and idempotent: missing canonical values are filled from
+  the owning Issue, already matching values remain unchanged, and present conflicts or unresolved
+  owners fail with an owner-specific SQLite constraint name. No owner row is deleted.
+- Migration specs seed both `proj_alpha/#42` and `proj_beta/#42`, every discovered owner family,
+  a missing Workflow project scope, and an immutable historical event. They apply the actual target
+  migration through `IMigrator`, preserve row counts and Project isolation, and run the shared
+  convergence operation twice to prove the second pass is a no-op.
+- The pre-existing `20260618112000_AddAttachments` migration lacked `DbContext` metadata, so EF
+  never discovered it and tests/runtime had been creating the table out of band. It is now a real,
+  idempotent migration. Regressions prove both a fresh migration chain and adoption of an existing
+  out-of-band table without data loss; fixture-side schema patches were removed.
+
+### T-002 validation
+
+- Canonical Issue migration specs: **9 passed / 0 failed**.
+- Affected profile/artifact/attachment/workflow/session/history specs: **33 passed / 0 failed**.
+- Server UnitTests: **1458 passed / 0 failed / 0 skipped**.
+- Server ArchTests: **22 passed / 0 failed / 0 skipped**.
+- Server SpecTests full suite: **2833 passed / 0 failed / 0 skipped**.
+- EF pending-model snapshot check and `git diff --check` pass; server builds with zero warnings.
+
+## T-003 delivered
+
+### Current-state Epic owner inventory
+
+- `Epics` is the aggregate root. (`ProjectId`, `Number`) is now required and unique. Legacy `Id`
+  remains only as the T-004 transition lookup and migration source.
+- `EpicIssues` and `EpicActiveIssues` are the current Epic-owned retained/current membership rows.
+  Both now persist `ProjectId` + `EpicNumber` + `IssueNumber`. They remain temporary T-005 migration
+  input; T-005 removes both rows after Issue becomes the sole affiliation authority.
+- `Issues` now persists nullable `EpicNumber` beside the transitional `EpicId` copy. Reconciliation
+  requires its JSON state, copied columns, and current membership to agree. Active membership wins;
+  otherwise the latest retained membership is the deterministic current-affiliation dataset for
+  T-005.
+- `WorkflowRuns` now persists nullable `EpicNumber` beside the transitional `EpicId` copy and its
+  computed Project context. Current writers resolve the canonical number before the WorkflowRun
+  transaction starts.
+- Direct Agent-launch `AgentSessions` already persist Project and epic number through computed
+  labels. Reconciliation requires a positive canonical decimal that resolves within the same
+  Project and adds a Project-scoped recency index. Workflow-origin Sessions do not currently own an
+  Epic field; T-006/T-008 will carry the minimal Workflow context into those integrations.
+
+Epic managers, grains, queriers and API/read DTOs are access paths over these owners, not additional
+persisted owners. Existing API and domain contracts still expose `EpicId` until the number-only
+server cutover in T-004.
+
+### Historical and later-removal references
+
+- Existing `EpicEvents` source paths, payloads and extension JSON are immutable historical
+  envelopes. The migration proves they remain byte-for-byte unchanged.
+- Historical migration/designer files remain historical evidence and are not rewritten.
+- Current Epic event sources/query methods and `epicid` lineage remain transition runtime paths for
+  T-004 and T-007. Server consumers and integrations move to canonical envelope context in T-008.
+- Legacy `EpicId` on root, membership, Issue, WorkflowRun and current DTOs remains only until the
+  tasks named above remove it. No compatibility owner/controller model was introduced.
+
+### Migration and transaction boundary
+
+- `20260716150000_AddCanonicalEpicReferenceColumns` adds nullable transition columns from the
+  immediate previous schema. `20260716160000_BackfillCanonicalEpicReferences` executes one guarded
+  reconciliation, makes root/relation numbers required, and creates scoped indexes.
+- Reconciliation validates every owner before changing data. Missing roots, cross-Project links,
+  invalid/non-unique numbers, conflicting copied values and invalid Session references fail with an
+  owner-specific constraint. No Epic, membership, Issue, WorkflowRun, Session or event row is
+  deleted.
+- Migration specs seed `proj_alpha/Epic 7` and `proj_beta/Epic 7`, preserve all owner counts and
+  Project isolation, apply the actual migration through `IMigrator`, and execute reconciliation
+  twice after migration to prove idempotency.
+- Transitional Issue/Workflow writers resolve `EpicNumber` before opening their aggregate
+  transaction. The transaction itself still writes only that aggregate state and its events. Epic
+  membership writers copy the Epic root's own number inside the existing Epic aggregate boundary.
+
+### T-003 validation
+
+- Canonical Epic migration and writer specs: **11 passed / 0 failed**.
+- Formerly affected recovery, transactional append, artifact and historical migration specs:
+  **66 passed / 0 failed**.
+- Server SpecTests full suite: **2816 passed / 0 failed / 0 skipped**.
+- Server UnitTests: **1454 passed / 0 failed / 0 skipped**.
+- Server ArchTests: **27 passed / 0 failed / 0 skipped**.
+- EF runtime model matches `MohistDbContextModelSnapshot`; `git diff --check` and OpenSpec JSON
+  validation pass.
+- Full `npm test` passes: CLI **861**, Web **4683**, and Runner **1018** in addition to the server
+  suites above; Web/Runner typechecks and boundary checks are green.
+
+## T-004 current progress
+
+- Issue/Epic domain, server routes, grains, event sources, inbox and Hermes test support now use
+  `ProjectId` plus number without random Issue/Epic identity fields.
+- Server UnitTests build and pass: **1477 passed / 0 failed / 0 skipped**.
+- SpecTests fixture migration is in progress. Inbox projection and Issue metrics helpers now seed
+  canonical sources and scoped rows; the remaining failures include stale Epic relation-row specs
+  that are intentionally owned by T-005.
+- The number-only fixture pass has removed obsolete Epic membership/reopen suites and converted
+  workflow-profile, activity-card, workflow-reference, event-append, issue-creation, and profile
+  storage fixtures to scoped numbers. Full SpecTests compile diagnostics have reduced from 710 to
+  183 before the T-006 protocol cutover. Its removal exposed 205 stale fixtures that still invoke
+  binding/revision APIs; recovery, workflow storage/scheduling, concurrency, and Issue metrics
+  fixtures now use scoped numbers, reducing the current SpecTests compile backlog to 11 without
+  restoring random identity aliases.
+- T-004 is not complete until the current-state server contracts and all affected specs compile
+  without legacy identity aliases.
+
+## T-005 current progress
+
+- `Issue.AssignEpic` and expected-number `Issue.RemoveEpic` are the only affiliation mutations.
+  They save `Issue.EpicNumber` and `IssueEpicChanged(previous,current)` in the Issue store's
+  existing state-plus-event transaction. Repeated assign is a no-op; an unlink from an old Epic
+  cannot clear a later move.
+- `Epic.LinkIssue` now reads first for idempotence, rejects a new link to a closed Epic, then
+  commands Issue. A-to-B movement is one Issue commit. Batch operations follow the same command
+  path and do not open an Epic membership transaction.
+- `IssueEpicChangedHandler` opens a scoped read, re-reads the current Issue, recomputes the event
+  old/new/current Epics, and refreshes active Workflow lineage after the Issue commit. It has no
+  shared database transaction with Issue, Epic, or WorkflowRun.
+- Epic member list, progress, readiness, primary-Epic projection, and start candidates now query
+  `Issues.EpicNumber`. Candidate execution calls `Issue.TryStartFromEpic(expectedEpicNumber)` so
+  a stale read cannot start an Issue moved elsewhere. A done Epic with a newly affiliated open
+  Issue is revived by the durable recompute path.
+- `EpicIssueRow`, `EpicActiveIssueRow`, their resolver, Epic-owned member collection, link/unlink
+  domain events and subscriptions have been removed from the runtime model. Migration
+  `20260716170000_DropEpicMembershipTables` drops both former tables after the preceding
+  affiliation backfill; historical migrations remain upgrade history.
+- The Issue key's computed projections are generated on insert only, not on every update. This
+  preserves their immutable aggregate identity and restores EF design-time validation; the
+  migration chain discovers the new drop migration and generates the expected SQLite
+  `DROP TABLE "EpicActiveIssues"` / `DROP TABLE "EpicIssues"` script.
+- Validation so far: server build clean; UnitTests **1477 passed / 0 failed / 0 skipped**; current
+  SpecTests still contain pre-cutover relation-row fixtures and remain part of the T-004/T-005
+  fixture migration backlog.
+
+## Validation of planning artifacts
+
+- tasks.json parses as JSON and all dependencies point to prior tasks.
+- Every task references an existing delta spec requirement.
+- The plan contains no accepted path that shares a database transaction across aggregates.
+- Every ambiguous cross-aggregate failure window has a specified idempotent/redelivery outcome.
+
+## T-003 validation repair
+
+The current branch had already carried the first T-003 migration commit, but its migration spec was
+removed by the later runtime cutover. A focused audit and replacement spec now covers the actual
+migration boundary again.
+
+### Complete EpicId owner inventory
+
+- `Epics` is the aggregate root. Current runtime identity is `(ProjectId, Number)` and the row is
+  keyed by that pair. The legacy random `Id` exists only in the pre-T-004 migration input; the
+  T-003 backfill validates it, copies the canonical number, and rebuilds the root without deleting
+  resolvable rows.
+- `EpicIssues` is the retained historical membership input and `EpicActiveIssues` is the retained
+  current-membership input at the T-003 boundary. Both receive nullable transition `EpicNumber`
+  columns, are backfilled from the same-project Epic row, then rebuilt with required `EpicNumber`
+  and scoped `(ProjectId, EpicNumber, IssueNumber)` indexes. They remain migration-only input for
+  the later T-005 deletion; T-003 does not use them as runtime authority.
+- `Issues` is a current-state copied-affiliation owner during the transition. Its nullable
+  `EpicNumber` is backfilled from legacy `EpicId` within the same Project and is indexed with
+  `(ProjectId, EpicNumber, Number)`. The random `EpicId` column and `State.epicId` are migration
+  input only; the later number-only cutover removes them.
+- `WorkflowRuns` is a current-state local-context owner. Its nullable `EpicNumber` is backfilled
+  from legacy `EpicId` and indexed with computed `MetadataProjectId`. Its legacy EpicId column and
+  annotation are migration input; WorkflowRun is not the affiliation authority.
+- Direct Agent-launch `AgentSessions` persist Epic context in the existing
+  `mohist.io/agent-launch/epic-number` label, projected by
+  `LabelAgentLaunchEpicNumber`, with `LabelProjectId` and a Project-scoped recency index. This
+  is metadata owned by the session, not a new relation row. Workflow-origin sessions currently
+  carry issue/run/stage labels but no independent Epic owner; their canonical Workflow context is
+  assigned to T-006/T-008 rather than duplicating a current-state reference here.
+- `EpicQuerier`, Issue read projections, API DTOs, session context DTOs, and Agent launch request
+  shapes are query/read paths over the owners above and use `EpicNumber`; they do not persist a
+  second Epic identity. `EpicCounterRow` is a Project-owned allocator, not an Epic reference.
+- `EpicEvents` and other event rows are historical envelopes. Their source, payload, and extension
+  JSON are intentionally unchanged by this current-state migration, including legacy `epicid`.
+
+### Migration implementation decisions
+
+- `CanonicalEpicReferenceReconciliation.Sql` remains the first-pass guard/backfill executed by
+  `20260716160000_BackfillCanonicalEpicReferences` after
+  `20260716150000_AddCanonicalEpicReferenceColumns`. It validates every owner before updates and
+  fails through named zero-check guard columns; no orphan membership, active, Issue, Epic,
+  WorkflowRun, Session, or event row is deleted.
+- SQLite does not support EF `AlterColumn` for these transition tables or `ADD COLUMN` for a stored
+  computed column. The T-002 predecessor migrations were repaired with explicit table rebuilds for
+  `WorkflowRuns` and `IssueWorkflowProfiles`; T-003 rebuilds retained membership tables after
+  backfill to make relation `EpicNumber` required while preserving all rows and indexes.
+- `CanonicalEpicReferenceReconciliation.ApplyAsync` detects whether the legacy Epic root `Id` and
+  membership tables still exist. The legacy schema path validates and fills canonical columns; the
+  canonical retained-membership path validates only canonical values. This makes a real second
+  execution a no-op instead of querying removed `Epics.Id` / copied `EpicId` columns.
+
+### Focused verification
+
+- `CanonicalEpicReferenceMigrationSpecs`: **9 passed / 0 failed**. It starts from
+  `20260715123000_ReconcileLineageSnapshotsFromMembership`, applies the real EF chain through
+  `20260716160000_BackfillCanonicalEpicReferences`, isolates two Projects sharing Epic 7, checks
+  every current owner and historical envelope, proves the second reconciliation is unchanged,
+  checks required relation columns/indexes, and exercises six unresolved-owner failures without
+  row loss.
+- `CanonicalIssueReferenceMigrationSpecs`: **15 passed / 0 failed** after the SQLite predecessor
+  migration repair.
+- Existing `DropEpicMembershipTablesMigrationSpecs`: **1 passed / 0 failed**.
+
+## T-001 verification follow-up (2026-07-17)
+
+- The typed identity and codec implementation from `a75479051` is already an ancestor of the
+  workflow branch. Re-checked the current source and production call sites against the scoped
+  identity requirement; only the internal random-id `Issue(string)` transition seam remains.
+- Canonical grain keys now reject NUL characters in `ProjectId` at typed-key construction,
+  formatting, and parsing. This keeps the no-NUL output invariant true even for malformed input,
+  rather than relying only on the exact-length formatter for ordinary project ids.
+- Focused Orleans identity tests pass (**28 passed / 0 failed**), architecture tests pass
+  (**27 passed / 0 failed**), and the server build passes with zero warnings/errors.
+
+## T-002 verification follow-up (2026-07-17)
+
+The T-002 owner inventory was rechecked against production source and the EF model. The complete
+classification is:
+
+- Current canonical owners: `IssueRow` uses `ProjectId + Number`; `IssueCommentRow`,
+  `InboxItemRow`, and `IssuePrerequisiteRow` use scoped number columns; `IssueWorkflowProfile`
+  uses required `ProjectId + IssueNumber`; `WorkflowArtifactRow` uses `ProjectId + IssueNumber`;
+  issue-owned `AttachmentRow` uses `ProjectId + OwnerIssueNumber`; and `WorkflowRunRow` exposes
+  `MetadataProjectId + IssueNumber` from its persisted run metadata and indexes that pair.
+- Derived current references: `WorkflowArtifactPendingUploadRow` is owned by `WorkflowRunId`, so
+  its Issue scope is derived by joining the canonical WorkflowRun context; `WorkIssueRef` and
+  runner work state carry `ProjectId + IssueNumber`; workflow, session, inbox, comment, artifact,
+  and issue query projections read the same scoped pair. The workflow-run detail projection now
+  includes `ProjectId` beside `Number`, so it cannot emit an ambiguous number-only reference.
+- Session origin references: `AgentSessionRow` workflow and direct-agent labels are computed from
+  persisted metadata, validated against `LabelProjectId + issue number`, and indexed by Project.
+- Already-canonical or separately identified resources: Issue prerequisites are verified by both
+  `(ProjectId, IssueNumber)` and `(ProjectId, PrerequisiteNumber)`; comment attachments use their
+  independently identified comment owner; WorkflowRunId, SessionId, AgentId, RunnerId,
+  attachment id, and event id are independent identities rather than Issue references.
+- Historical or later-removal references: legacy `IssueId` columns and JSON annotations exist only
+  in the migration boundary until T-004; old migration/designer files and persisted CloudEvent
+  source, payload, and extension JSON remain immutable history. No current production source path
+  retains an `IssueId` reference after the projection/comment audit.
+
+Migration specs now seed both Projects with Issue 42 plus their scoped prerequisite, every retained
+owner family, a pending upload derived through its WorkflowRun, and an immutable historical event.
+They assert root/current/history/pending row counts, cross-Project relationships, and explicit
+guarded failures for profiles, artifacts, attachments, WorkflowRuns, comments, inbox, both Epic
+relation shapes, prerequisites, and sessions. Focused migration, querier, and workflow-detail
+verification passes: **29 passed / 0 failed / 0 skipped**. Server UnitTests pass (**1453**),
+ArchTests pass (**27**), and the server build has zero errors. A full SpecTests run had one transient
+`IssueRebaseApi_QueuesWorkflowTask` conflict response; rerunning that exact case passed.
+
+## T-004 cutover verification follow-up (2026-07-17)
+
+- The final `RemoveLegacyIssueEpicIdentity` migration now removes legacy identity properties from current Issue and WorkflowRun JSON after canonical columns are established. Historical event rows remain untouched; the migration does not rewrite event source, payload, or extension JSON.
+- The cutover spec applies the real migration from `20260716180000_RemoveWorkflowBindingState`, preserves Issue/Epic/WorkflowRun rows for `proj_alpha/#42` and `proj_beta/#42`, asserts the old current-state columns are absent, checks both JSON shapes lose `id`/`issueId`/`epicId`, and reruns the target migration to prove convergence.
+- Event-store per-source sequence helpers are named `NextIssueSequenceAsync` and `NextEpicSequenceAsync`; their numeric row sequence remains independent from Issue/Epic identity.
+
+## T-005 migration and transaction verification follow-up (2026-07-17)
+
+- The existing runtime cutover correctly uses `Issue.EpicNumber` as the sole affiliation fact: `AssignEpic` replaces the current number and raises `IssueEpicChanged`, `RemoveEpic` requires the expected number, Epic queries `Issues.EpicNumber`, and `TryStartFromEpic` revalidates the target Issue before starting.
+- Found and fixed a migration gap: T-003 populated the `Issues.EpicNumber` column, but the final `RemoveLegacyIssueEpicIdentity` migration removed legacy `epicId` from `Issue.State` without writing canonical `epicNumber`. `IssueStore.LoadAsync` deserializes `State`, so the column-only value was not enough for a live Issue grain.
+- Added `20260716165000_MigrateEpicAffiliationToIssues`. It materializes the preferred current affiliation from canonical T-003 membership input (active row first, then newest retained row), rejects a conflicting pre-existing Issue affiliation, writes both the Issue column and canonical JSON state, and runs before `20260716170000_DropEpicMembershipTables`.
+- Hardened `20260716190000_RemoveLegacyIssueEpicIdentity` to preserve/canonicalize `epicNumber` from the row or existing JSON before removing legacy identity fields. It also removes the PascalCase `EpicNumber` duplicate so current JSON has one canonical property.
+- `DropEpicMembershipTablesMigrationSpecs` now seeds active and retained memberships for two Projects sharing Epic 7, verifies active precedence, retained fallback, Project isolation, materialized Issue affiliation, and removal of both legacy tables.
+- Added a direct-move unit assertion (`IssueDomainTests`) and an Issue-store transaction spec (`IssueTransactionalEventAppendSpecs`) proving A-to-B produces one `IssueEpicChanged` and persists Issue state/event without Epic or Workflow rows participating.
+
+## T-005 verification follow-up
+
+- Focused Issue domain tests: **19 passed / 0 failed**.
+- Focused membership, progression, affiliation-lineage, migration, and Issue transactional specs: **38 passed / 0 failed**.
+- The pre-edit focused membership/progression/migration suite was **30 passed / 0 failed**; the new migration regression exposed the State JSON gap before the fix.
+
+## T-006 verification follow-up
+
+- The durable handoff implementation is present on the branch: Issue start persists only the Issue state and `IssueWorkStarted`; `IssueWorkflowStartHandler` re-reads current Issue state before calling `WorkflowRun.EnsureStartedAsync`; Workflow creation/start is persisted by the WorkflowRun store; completion still passes the expected `WorkflowRunId` into `Issue.Complete`.
+- `EnsureStartedAsync` now routes an already-existing nonterminal run through `RefreshIssueContextAsync`. A duplicate or late start delivery therefore refreshes the current `EpicNumber` without emitting another `WorkflowRunStarted`; terminal runs remain a no-op and project/issue identity mismatches still reject.
+- Removed the remaining runtime special handling for the deleted binding state: the server control guard and runtime projection no longer recognize `awaiting-binding`; the Web `WorkflowRunStatus` and status pill no longer model it; runner status contracts and cleanup/signal tests no longer enumerate `AwaitingBinding`.
+- Renamed `IssueWorkflowBindingHandler` to `IssueWorkflowStartHandler` and removed obsolete `EnsureWorkflowBindingAsync` members from server test doubles. Artifact/session uses of the word "binding" are unrelated resource/session terminology and remain unchanged.
+- Historical EF migration files still mention `LineageVersion` because they are the applied-schema history used by the canonical identity cutover; no live entity, store, API, runner, Web contract, or test fake retains the revision field/protocol.
+
+### T-006 validation
+
+- Focused pre-edit suites: **45 Server SpecTests**, **15 Web tests**, and **46 Runner tests** passed.
+- Focused post-edit suites: **45 Server SpecTests**, **13 Web tests**, and **44 Runner tests** passed.
+- Server build: clean with zero warnings/errors.
+- Server UnitTests: **1454 passed**; Server SpecTests: **2743 passed**; Server ArchTests: **27 passed**; CLI: **911 passed**.
+- Web typecheck and suite: **4678 passed**; Runner typecheck and suite: **1028 passed**.
+- Full `npm test` passed, including FSD and test-boundary checks.
+
+## T-007 implementation follow-up
+
+- The current `EventCatalog` is type-only: no required-lineage matrix, conformance registry, or
+  catalog-only bypass remains. Added `EventProducerFamily`, `ProducerLineageContext`, and
+  `ProducerConformance` in `Infrastructure/Events/ProducerConformance.cs`. The guard enforces
+  family-required canonical keys, exact local optional context, structural Workflow stage
+  presence/absence as supplied by the producer shape, empty-value omission, and rejection of
+  `issueid`/`epicid`/`issueno`/`epicno`.
+- Workflow, Issue, and AgentSession transactional append specs now drive every serializable event
+  variant through the real store path and run the producer-family guard on the persisted envelope.
+  Epic lifecycle and start-failure specs do the same for Epic append paths. Runner remains a
+  reserved catalog type with no producer, so it has guard coverage but no fake producer path.
+- Workflow-origin AgentSession metadata now accepts and stores an optional canonical
+  `mohist.io/epic-number` label. `AgentSessionLineage` projects it to `epic`; direct agent-launch
+  issue/epic context remains metadata-only and is intentionally not promoted to workflow lineage.
+  Runner workflow-session open accepts the optional EpicNumber and passes it into that metadata.
+- Inbox synthesis now uses `InboxLineage.BuildExtensions`: `projectid`/`issue` come from the
+  committed draft, while `epic`/`workflowrunid`/`stage` are copied only when present and non-empty
+  on the source envelope. It never queries another aggregate for inherited lineage.
+- `WorkflowRunLineage.CarriesStage` exposes the structural stage decision separately from
+  `StageOf`, allowing append specs to verify all stage-bearing variants and the artifact/run
+  variants that must omit stage.
+
+### T-007 verification
+
+- Pre-edit focused suites: **102 UnitTests** and **46 SpecTests** passed.
+- Focused post-edit producer/conformance suites: **27 UnitTests** and **55 SpecTests** passed.
+- Server build: clean with zero warnings/errors.
+- Full `npm test` rerun: CLI **911**, Server Unit **1465**, Server Arch **27**, Server Spec **2750**,
+  Web **4678**, Runner **1028**; all passed. The first full run had the known transient
+  `IssueRebaseApi_QueuesWorkflowTask` conflict; the isolated retry and complete rerun passed.
+- Final post-verification normalization of optional workflow Issue/Epic numbers (non-positive
+  values omitted) passed the server build and **17** focused WorkflowSession/AgentSession specs.
+
+## T-008 implementation follow-up
+
+- Inbox and Hermes now resolve Project + Issue number, and optional Epic number, from canonical
+  envelope extensions. Workflow-run annotations and source URIs are no longer used to choose the
+  target issue. Inbox still snapshots the current Issue title, while its persisted hint inherits
+  only canonical optional envelope context.
+- Stage lock release and subscription response prompts read `workflowrunid` and `stage` from
+  envelope extensions. Runner terminal-status routing also uses the envelope workflow-run id;
+  source-URI extraction helpers were removed from current consumers.
+- Project event feed workflow identity is read from stored envelope extensions instead of current
+  Issue/WorkflowRun state. Workflow-origin session projections carry issue and epic numbers when
+  present, including synthetic session lifecycle entries. The API exposes `epicNumber` alongside
+  `issueNumber`.
+- Workflow profile context prefers the WorkflowRun's canonical Project + Issue columns and keeps
+  the crash-window lookup through the owning Issue's canonical Project + number state until the
+  durable WorkflowRun row exists. No random Issue/Epic id or legacy lineage key is involved.
+  Payloads remain unchanged and are still used only for display/audit fields such as Hermes failure
+  text and Issue event run id.
+- Added envelope disagreement coverage for Inbox, Hermes, response prompts, and project events,
+  plus canonical lineage parser tests. Focused UnitTests and consumer SpecTests pass after the
+  fixture migration.
+
+## T-008 final reconciliation (2026-07-17)
+
+- Centralized current-consumer parsing in `CloudEventLineage`. Typed and untyped CloudEvents now
+  share positive-number validation for `projectid` + `issue` or `projectid` + `epic`; invalid or
+  missing context is skipped/rejected instead of being interpreted as an identity.
+- Issue completion/start, IssueEpicChanged, Epic recompute reactions, and Agent subscription
+  project selection now use the canonical envelope helper. Epic reactions may still re-read Issue
+  to derive current affiliation before commanding Epic, but no payload or source URI supplies the
+  target identity.
+- Project event feed workflow and persisted AgentSession event rows no longer fall back to current
+  WorkflowRun/session metadata when envelope issue/epic context is absent. Synthetic opened/closed
+  session lifecycle entries intentionally use the session's own workflow-origin labels because they
+  are synthesized without a stored CloudEvent. Runner projection reads only canonical `runnerid`.
+- Hermes uses envelope `stage` for approval notifications and envelope Issue/Epic context. Issue
+  event workflow-run IDs and failure messages remain payload display/audit data; payload JSON is
+  never mutated. Inbox hint extensions continue to inherit only canonical optional lineage keys.
+- Added regression coverage for session envelope disagreement/missing context, Hermes stage
+  disagreement, typed lineage parsing, and Epic context validation. Final server verification:
+  UnitTests **1470 passed**, SpecTests **2754 passed**, ArchTests **27 passed**.
+
+## T-009 final reconciliation (2026-07-17)
+
+- CLI Epic commands now accept Project-scoped Epic numbers for show/update/link/unlink/lifecycle
+  operations, send Issue numbers for membership changes, render number-only confirmations, and
+  expose `epic reopen`.
+- Web Issue/Epic DTOs, Agent/session event payloads, activity cards, attention items, cache keys,
+  routes, forms, fixtures, and displays now use ProjectId plus IssueNumber/EpicNumber. Legacy
+  `issueId`, `epicId`, `issueNo`, `epicNo`, `issue_number`, and `epic_number` paths were removed;
+  independent resource/event ids remain unchanged.
+- Live coder-session and transcript routing now requires matching ProjectId plus IssueNumber.
+  Envelope routing recognizes canonical `issueNumber` only and leaves event payloads unchanged.
+- Web typecheck passed; Web suite passed **4678/4678** tests across **335** files. CLI suite passed
+  **911/911** tests, and the CLI project build passed with zero warnings/errors.
+- `git diff --check` passed. T-010 remains pending for the broader aggregate recovery/model audit.

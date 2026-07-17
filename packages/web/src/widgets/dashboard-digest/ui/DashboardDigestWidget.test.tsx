@@ -33,7 +33,7 @@ function mockIssuesPending() {
 
 const digestHook = () => digest
 
-function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     number: 1,
     title: 'Issue title',
@@ -73,21 +73,18 @@ describe('DashboardDigestWidget', () => {
   it('renders three sections (completed, failed, archived) with DigestRows when populated', async () => {
     mockIssuesResponse([
       makeIssue({
-        id: 'i-1',
         number: 101,
         title: 'Ship digest widget',
         status: IssueStatus.Done,
         updatedAt: '2026-07-09T07:00:00Z',
       }),
       makeIssue({
-        id: 'i-2',
         number: 102,
         title: 'Failing build',
         status: IssueStatus.Cancelled,
         updatedAt: '2026-07-09T05:00:00Z',
       }),
       makeIssue({
-        id: 'i-3',
         number: 99,
         title: 'Old cleanup issue',
         status: IssueStatus.Done,
@@ -148,7 +145,6 @@ describe('DashboardDigestWidget', () => {
   it('renders only non-empty sections when one or more categories are empty', async () => {
     mockIssuesResponse([
       makeIssue({
-        id: 'i-done',
         number: 5,
         title: 'Only done',
         status: IssueStatus.Done,
@@ -169,7 +165,6 @@ describe('DashboardDigestWidget', () => {
   it('renders completed rows in most-recent-first order by completedAt', async () => {
     mockIssuesResponse([
       makeIssue({
-        id: 'older',
         number: 10,
         title: 'Older done',
         status: IssueStatus.Done,
@@ -177,7 +172,6 @@ describe('DashboardDigestWidget', () => {
         updatedAt: '2026-07-09T03:00:00Z',
       }),
       makeIssue({
-        id: 'newer',
         number: 11,
         title: 'Newer done',
         status: IssueStatus.Done,
@@ -198,7 +192,7 @@ describe('DashboardDigestWidget', () => {
 describe('DigestRow', () => {
   it('renders issue number, title, and relative timestamp via shared formatTimeAgo', () => {
     const updatedAt = '2026-07-09T07:00:00Z'
-    const issue = makeIssue({ id: 'row-7', number: 7, title: 'Row title', updatedAt })
+    const issue = makeIssue({ number: 7, title: 'Row title', updatedAt })
 
     render(<DigestRow issue={issue} timestamp={updatedAt} />, { wrapper: makeWrapper() })
 
@@ -209,7 +203,7 @@ describe('DigestRow', () => {
   })
 
   it('renders a neutral timestamp label when the timestamp is invalid', () => {
-    const issue = makeIssue({ id: 'row-8', number: 8, title: 'Invalid time row' })
+    const issue = makeIssue({ number: 8, title: 'Invalid time row' })
 
     render(<DigestRow issue={issue} timestamp="not-a-date" />, { wrapper: makeWrapper() })
 
@@ -220,7 +214,7 @@ describe('DigestRow', () => {
   })
 
   it('navigates to /issues/<number> using useProjectPath (issue detail target)', () => {
-    const issue = makeIssue({ id: 'row-42', number: 42, title: 'Click me' })
+    const issue = makeIssue({ number: 42, title: 'Click me' })
 
     render(<DigestRow issue={issue} timestamp={issue.updatedAt} />, { wrapper: makeWrapper() })
 

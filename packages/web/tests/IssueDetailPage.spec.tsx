@@ -77,7 +77,6 @@ useMswServer(
       success: true,
       data: {
         running: false,
-        issueId: null,
         issueNumber: null,
         activeAgents: [],
         runnerAvailable: true,
@@ -120,7 +119,7 @@ useMswServer(
   http.post('*/api/projects/:projectId/issues/:number/comments', async ({ params, request }) => {
     const body = await request.json() as any
     _addCommentHandler(Number(params.number), body.body, params.projectId)
-    return HttpResponse.json({ success: true, data: { id: 'comment-new', issueId: params.number, body: body.body, createdAt: new Date().toISOString() } })
+    return HttpResponse.json({ success: true, data: { id: 'comment-new', body: body.body, createdAt: new Date().toISOString() } })
   }),
   http.delete('*/api/projects/:projectId/issues/:number/comments/:commentId', ({ params }) => {
     _deleteCommentHandler(Number(params.number), params.commentId, params.projectId)
@@ -253,7 +252,6 @@ function renderWithQueryClient(ui: React.ReactElement) {
 
 function makeIssue(overrides: any = {}) {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Test Issue',
     body: '',
@@ -360,7 +358,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: '# Comment Heading\n\n**Bold** text',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -379,7 +376,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Use `code` in comments',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -398,7 +394,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: '```\nconst x = 1;\n```',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -416,7 +411,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Comment with **formatting**',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -434,7 +428,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Comment body',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -562,7 +555,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: '# Comment Title\n\nComment body',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -585,7 +577,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: '# Comment Heading',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -645,7 +636,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Existing comment',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -663,7 +653,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Existing comment',
             createdAt: '2024-01-01T11:00:00.000Z',
           },
@@ -829,7 +818,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         comments: [
           {
             id: 'comment-1',
-            issueId: 'issue-1',
             body: 'Comment image ![comment](att:att_comment_image_real)',
             createdAt: '2024-01-01T11:00:00.000Z',
             attachments: [

@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Epic.Services;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Api;
@@ -45,6 +47,8 @@ public static class AgentSessionLaunchRoutes
             string agentRef,
             AgentSessionLaunchRequest req,
             AgentQuerier agentQuerier,
+            IssueQuerier issueQuerier,
+            EpicQuerier epicQuerier,
             IAgentLauncher launcher,
             CancellationToken ct) =>
         {
@@ -68,9 +72,13 @@ public static class AgentSessionLaunchRoutes
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
 
+            var contextError = await ValidateContextAsync(req!.Context, project.Id, issueQuerier, epicQuerier);
+            if (contextError is not null)
+                return contextError;
+
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
-                IssueNumber: req!.Context?.IssueNumber,
+                IssueNumber: req.Context?.IssueNumber,
                 EpicNumber: req.Context?.EpicNumber,
                 Repository: req.Context?.Repository,
                 WorkspacePath: req.Context?.WorkspacePath,
@@ -100,6 +108,32 @@ public static class AgentSessionLaunchRoutes
 
         return app;
     }
+
+    private static async Task<IResult?> ValidateContextAsync(
+        AgentSessionLaunchContextRef? context,
+        string projectId,
+        IssueQuerier issueQuerier,
+        EpicQuerier epicQuerier)
+    {
+        if (context?.IssueNumber is <= 0)
+            return ApiResults.BadRequest("issueNumber must be positive", "validation_failed");
+        if (context?.EpicNumber is <= 0)
+            return ApiResults.BadRequest("epicNumber must be positive", "validation_failed");
+
+        if (context?.IssueNumber is int issueNumber
+            && await issueQuerier.GetAsync(projectId, issueNumber) is null)
+        {
+            return ApiResults.NotFound($"Issue #{issueNumber} not found");
+        }
+
+        if (context?.EpicNumber is int epicNumber
+            && await epicQuerier.GetAsync(projectId, epicNumber) is null)
+        {
+            return ApiResults.NotFound($"Epic #{epicNumber} not found");
+        }
+
+        return null;
+    }
 }
 
 /// <summary>
@@ -114,7 +148,7 @@ public sealed record AgentSessionLaunchRequest(
 
 public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,
-    string? EpicNumber = null,
+    int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null);
 

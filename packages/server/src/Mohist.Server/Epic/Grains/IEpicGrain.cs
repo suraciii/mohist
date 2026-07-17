@@ -4,9 +4,9 @@ namespace Mohist.Server.Epic.Grains;
 
 public interface IEpicGrain : IGrainWithStringKey
 {
-    Task<EpicDto> CreateAsync(string projectId, string title, string? description, string? priority);
-    Task LinkIssueAsync(string issueId, int issueNumber, string projectId);
-    Task UnlinkIssueAsync(string issueId, string projectId);
+    Task<EpicDto> CreateAsync(string projectId, int number, string title, string? description, string? priority);
+    Task LinkIssueAsync(int issueNumber, string projectId);
+    Task UnlinkIssueAsync(int issueNumber, string projectId);
     Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId);

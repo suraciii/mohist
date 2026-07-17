@@ -6,7 +6,6 @@ import type { LinkedIssue } from '../../../entities/epic/model/types'
 
 function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: `i-${overrides.number ?? 0}`,
     number: 1,
     title: 'Issue',
     status: IssueStatus.Backlog,
@@ -23,8 +22,8 @@ function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
 
 describe('buildLayout', () => {
   it('produces one positioned node per linked issue', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
-    const b = makeLinkedIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeLinkedIssue({ number: 1 })
+    const b = makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] })
     const { edges: graphEdges } = buildGraphEdges([a, b])
     const layout = buildLayout({
       linkedIssues: [a, b],
@@ -40,7 +39,7 @@ describe('buildLayout', () => {
   })
 
   it('positions each member node anchored so its center is the dagre coordinate (width subtracted)', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
+    const a = makeLinkedIssue({ number: 1 })
     const { nodes } = buildLayout({
       linkedIssues: [a],
       edges: [],
@@ -56,7 +55,6 @@ describe('buildLayout', () => {
   it('produces a member node carrying readiness and waitingForIssueNumber', () => {
     const a = makeLinkedIssue({
       number: 1,
-      id: 'a',
       status: IssueStatus.Backlog,
       canStart: false,
       startBlocker: { kind: 'waiting-for', issue: { number: 7, title: 'X' } },
@@ -80,7 +78,6 @@ describe('buildLayout', () => {
   it('produces a ghost node for external prereqs with the resolved flag and number', () => {
     const a = makeLinkedIssue({
       number: 1,
-      id: 'a',
       prerequisiteNumbers: [99],
       externalPrerequisites: [{ number: 99, title: 'Out-of-epic', stage: 'plan', status: 'active' }],
     })
@@ -105,7 +102,7 @@ describe('buildLayout', () => {
   })
 
   it('produces an unresolved ghost with empty title and status when the prereq has no external summary', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a', prerequisiteNumbers: [404] })
+    const a = makeLinkedIssue({ number: 1, prerequisiteNumbers: [404] })
     const { edges: graphEdges, externalGhosts } = buildGraphEdges([a])
     const { nodes } = buildLayout({
       linkedIssues: [a],
@@ -126,9 +123,9 @@ describe('buildLayout', () => {
   })
 
   it('produces one edge per prerequisite relationship', () => {
-    const a = makeLinkedIssue({ number: 1, id: 'a' })
-    const b = makeLinkedIssue({ number: 2, id: 'b' })
-    const c = makeLinkedIssue({ number: 3, id: 'c', prerequisiteNumbers: [1, 2] })
+    const a = makeLinkedIssue({ number: 1 })
+    const b = makeLinkedIssue({ number: 2 })
+    const c = makeLinkedIssue({ number: 3, prerequisiteNumbers: [1, 2] })
     const { edges: graphEdges } = buildGraphEdges([a, b, c])
     const { edges } = buildLayout({
       linkedIssues: [a, b, c],
@@ -144,7 +141,6 @@ describe('buildLayout', () => {
   it('routes edges from ghost nodes when the source is external', () => {
     const a = makeLinkedIssue({
       number: 1,
-      id: 'a',
       prerequisiteNumbers: [99],
       externalPrerequisites: [{ number: 99, title: 'Out-of-epic', stage: 'plan', status: 'active' }],
     })

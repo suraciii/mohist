@@ -15,7 +15,7 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
-let currentEpic: { id: string; number: number | null; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | undefined
+let currentEpic: { projectId: string; number: number; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | undefined
 let epicLoading = true
 
 const dataHooks: HeaderDataHooks = {
@@ -56,7 +56,7 @@ function renderHeaderWithRoute(initialRoute: string, routePath: string) {
   )
 }
 
-function mockEpic(epic: { id: string; number: number | null; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | null) {
+function mockEpic(epic: { projectId: string; number: number; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | null) {
   currentEpic = epic ?? undefined
   epicLoading = false
 }
@@ -125,25 +125,25 @@ describe('Header', () => {
   })
 
   it('shows Epic #<number> on epic detail route (first-segment branch)', async () => {
-    mockEpic({ id: 'epic-99', number: 7, title: 'Test', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeaderWithRoute('/epics/epic-99', '/epics/:id')
+    mockEpic({ projectId: 'test-project', number: 7, title: 'Test', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
+    renderHeaderWithRoute('/epics/7', '/epics/:number')
     expect(await screen.findByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
   })
 
   it('shows Epic #<number> on epic detail route with project prefix (section branch)', async () => {
-    mockEpic({ id: 'epic-42', number: 3, title: 'My Epic', description: '', priority: 'p2', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeaderWithRoute('/demo/epics/epic-42', '/:projectName/epics/:id')
+    mockEpic({ projectId: 'test-project', number: 3, title: 'My Epic', description: '', priority: 'p2', status: 'active', createdAt: '', updatedAt: '' })
+    renderHeaderWithRoute('/demo/epics/3', '/:projectName/epics/:number')
     expect(await screen.findByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
   })
 
   it('shows Epic #… while epic number is loading', () => {
-    renderHeaderWithRoute('/epics/epic-loading', '/epics/:id')
+    renderHeaderWithRoute('/epics/7', '/epics/:number')
     expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
   })
 
   it('resolves Epic #<number> when path segment is the epic number itself', async () => {
-    mockEpic({ id: 'epic-something', number: 12, title: 'By Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeaderWithRoute('/demo/epics/12', '/:projectName/epics/:id')
+    mockEpic({ projectId: 'test-project', number: 12, title: 'By Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
+    renderHeaderWithRoute('/demo/epics/12', '/:projectName/epics/:number')
     expect(await screen.findByRole('heading', { level: 1, name: 'Epic #12' })).toBeInTheDocument()
   })
 
@@ -158,32 +158,20 @@ describe('Header', () => {
   })
 
   it('shows Epic #<number> on project-prefixed route with production mount (outside <Routes>)', async () => {
-    mockEpic({ id: 'epic-99', number: 3, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
+    mockEpic({ projectId: 'test-project', number: 3, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeader('/demo/epics/3')
     expect(await screen.findByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
   })
 
-  it('shows Epic #<number> on legacy /epics/<id> route with production mount (outside <Routes>)', async () => {
-    mockEpic({ id: 'epic-99', number: 7, title: 'Legacy Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeader('/epics/epic-99')
+  it('shows Epic #<number> on the production mount (outside <Routes>)', async () => {
+    mockEpic({ projectId: 'test-project', number: 7, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
+    renderHeader('/epics/7')
     expect(await screen.findByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
   })
 
   it('shows Epic #… while loading on production mount (outside <Routes>)', () => {
-    renderHeader('/demo/epics/epic-loading')
+    renderHeader('/demo/epics/7')
     expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
-  })
-
-  it('falls back to a short id prefix when an epic has loaded without a number on production mount', async () => {
-    mockEpic({ id: 'epic-fallback-001', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeader('/demo/epics/epic-fallback-001')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
-  })
-
-  it('falls back to a short id prefix when an epic has loaded without a number on legacy route', async () => {
-    mockEpic({ id: 'epic-fallback-002', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
-    renderHeaderWithRoute('/epics/epic-fallback-002', '/epics/:id')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
   })
 
   it('never displays a bare "Epic #" when the epic has loaded with no number and no path segment fallback', () => {

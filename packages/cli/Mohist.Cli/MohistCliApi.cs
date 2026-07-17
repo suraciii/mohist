@@ -441,7 +441,7 @@ internal sealed class MohistCliApi
                 if (work["issue"] is JsonObject issue)
                 {
                     var issueNumber = issue["issueNumber"]?.GetValue<int?>();
-                    WriteKeyValue("      issue", issueNumber?.ToString() ?? StringOfNullable(issue, "issueId"));
+                    WriteKeyValue("      issue", issueNumber?.ToString() ?? "");
                 }
             }
         }

@@ -69,7 +69,6 @@ let _activityCardsMock: any = { ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: n
 const queryClients = new Set<QueryClient>()
 function makeActiveCard(overrides: Record<string, unknown> = {}) {
   return {
-    issueId: 'session-only-issue',
     issueNumber: '999',
     issueTitle: 'Session-only issue',
     issueStage: 'Build',
@@ -101,7 +100,6 @@ function makeActiveCard(overrides: Record<string, unknown> = {}) {
 }
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: overrides.id ?? `issue-${Math.random().toString(36).slice(2, 8)}`,
     number: overrides.number ?? 1,
     title: overrides.title ?? 'Issue title',
     status: overrides.status ?? IssueStatus.Backlog,
@@ -121,7 +119,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
-    issueId: null,
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },
@@ -226,7 +223,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 11,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
@@ -267,7 +263,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       _agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
       _issuesData = [
         makeIssue({
-          id: 'blocked-issue',
           number: 1,
           title: 'Blocked issue',
           status: IssueStatus.InProgress,
@@ -275,7 +270,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
           workflowStage: WorkflowStage.Build,
         }),
         makeIssue({
-          id: 'running-issue',
           number: 2,
           title: 'Running issue',
           status: IssueStatus.InProgress,
@@ -283,7 +277,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
           workflowStage: WorkflowStage.Build,
         }),
         makeIssue({
-          id: 'archived-1',
           number: 99,
           title: 'Old archived issue',
           status: IssueStatus.Done,
@@ -319,7 +312,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 11,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
@@ -340,7 +332,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 12,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
@@ -372,7 +363,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 13,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
@@ -466,7 +456,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 14,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
@@ -486,7 +475,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'running-1',
           number: 20,
           title: 'Running',
           status: IssueStatus.InProgress,
@@ -509,7 +497,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       _agentStatus = makeAgentStatus({
         activeAgents: [
           {
-            issueId: 'issue-agent-live',
             issueNumber: 42,
             projectId: 'p1',
           },
@@ -533,7 +520,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'archived-1',
           number: 88,
           title: 'Old done',
           status: IssueStatus.Done,
@@ -603,7 +589,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       _agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
       _issuesData = [
         makeIssue({
-          id: 'running-1',
           number: 30,
           title: 'Running',
           status: IssueStatus.InProgress,
@@ -611,7 +596,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
           workflowStage: WorkflowStage.Build,
         }),
         makeIssue({
-          id: 'archived-1',
           number: 88,
           title: 'Old done',
           status: IssueStatus.Done,
@@ -657,7 +641,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _agentStatus = makeAgentStatus({ runnerAvailable: false })
       _issuesData = [makeIssue({
-        id: 'affected-1',
         number: 49,
         title: 'Affected workflow',
         status: IssueStatus.InProgress,
@@ -677,7 +660,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       ]
       _issuesData = [
         makeIssue({
-          id: 'running-1',
           number: 50,
           title: 'Running',
           status: IssueStatus.InProgress,
@@ -728,13 +710,11 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       _agentStatus = makeAgentStatus({ capacity: { active: 1, max: 4 } })
       _issuesData = [
         makeIssue({
-          id: 'await-1',
           number: 60,
           title: 'Awaiting approval',
           approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
         }),
         makeIssue({
-          id: 'running-1',
           number: 61,
           title: 'Running',
           status: IssueStatus.InProgress,
@@ -742,7 +722,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
           workflowStage: WorkflowStage.Build,
         }),
         makeIssue({
-          id: 'archived-1',
           number: 99,
           title: 'Old done',
           status: IssueStatus.Done,

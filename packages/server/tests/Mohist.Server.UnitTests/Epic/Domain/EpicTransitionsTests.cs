@@ -12,7 +12,6 @@ public class EpicTransitionsTests
 
     private static EpicAggregate NewIdleEpic() =>
         EpicAggregate.Create(
-            id: "epic_1",
             projectId: "project-1",
             number: 1,
             title: "Container epic",
@@ -69,7 +68,7 @@ public class EpicTransitionsTests
 
         var ex = Assert.Throws<EpicStartRequiresIdleException>(() => epic.Start(UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal("paused", ex.CurrentStatus);
         Assert.Equal(EpicStatus.Paused, epic.Status);
     }
@@ -78,7 +77,6 @@ public class EpicTransitionsTests
     public void Start_OnDone_ThrowsAlreadyTerminal()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() => epic.Start(UtcNow));
@@ -103,14 +101,12 @@ public class EpicTransitionsTests
     public void Pause_FromRunning_SetsStatusToPausedAndPersistsReasonAndRecordsStatusChanged()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.Start(UtcNow);
 
         epic.Pause(reason: "need to clarify scope", now: UtcNow);
 
         Assert.Equal(EpicStatus.Paused, epic.Status);
         Assert.Equal("need to clarify scope", epic.PauseReason);
-        Assert.Single(epic.LinkedIssueNumbers);
         var statusChanged = EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents).Last();
         Assert.Equal("running", statusChanged.OldStatus);
         Assert.Equal("paused", statusChanged.NewStatus);
@@ -141,7 +137,7 @@ public class EpicTransitionsTests
 
         var ex = Assert.Throws<EpicPauseRequiresRunningException>(() => epic.Pause(null, UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal("idle", ex.CurrentStatus);
         Assert.Equal(EpicStatus.Idle, epic.Status);
     }
@@ -150,7 +146,6 @@ public class EpicTransitionsTests
     public void Pause_OnDoneEpic_ThrowsAlreadyTerminal()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() =>
@@ -209,7 +204,7 @@ public class EpicTransitionsTests
 
         var ex = Assert.Throws<EpicResumeRequiresPausedException>(() => epic.Resume(UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal("idle", ex.CurrentStatus);
         Assert.Equal(EpicStatus.Idle, epic.Status);
     }
@@ -218,7 +213,6 @@ public class EpicTransitionsTests
     public void Resume_OnDoneEpic_ThrowsAlreadyTerminal()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() => epic.Resume(UtcNow));
@@ -231,8 +225,6 @@ public class EpicTransitionsTests
     public void MarkDone_OnIdle_TransitionsToDoneAndRecordsStatusChanged()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        epic.LinkIssue("issue_2", 2, UtcNow);
 
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
@@ -246,7 +238,6 @@ public class EpicTransitionsTests
     public void MarkDone_OnRunning_TransitionsToDoneAndRecordsStatusChanged()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.Start(UtcNow);
 
         epic.MarkDone(new HashSet<int>(), UtcNow);
@@ -267,7 +258,7 @@ public class EpicTransitionsTests
         var ex = Assert.Throws<EpicPausedCannotMarkDoneException>(() =>
             epic.MarkDone(new HashSet<int>(), UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal(EpicStatus.Paused, epic.Status);
     }
 
@@ -275,14 +266,13 @@ public class EpicTransitionsTests
     public void MarkDone_WhenOpenLinkedSetHasThree_ThrowsNotReadyToMarkDoneWithCount()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
 
         var open = new HashSet<int> { 1, 2, 3 };
 
         var ex = Assert.Throws<EpicNotReadyToMarkDoneException>(() =>
             epic.MarkDone(open, UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal(3, ex.OpenLinkedCount);
         Assert.Equal(EpicStatus.Idle, epic.Status);
         Assert.Empty(EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents));
@@ -292,7 +282,6 @@ public class EpicTransitionsTests
     public void MarkDone_OnDoneEpic_ThrowsAlreadyTerminal()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() =>
@@ -319,7 +308,6 @@ public class EpicTransitionsTests
     public void Close_FromIdle_TransitionsToClosedAndRecordsEpicClosed()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
 
         epic.Close(UtcNow);
 
@@ -361,7 +349,6 @@ public class EpicTransitionsTests
     public void Close_OnDoneEpic_ThrowsAlreadyTerminal()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() =>
@@ -394,73 +381,6 @@ public class EpicTransitionsTests
 
         Assert.Equal(EpicStatus.Paused, epic.Status);
         Assert.Null(epic.PauseReason);
-    }
-
-    [Fact]
-    public void LinkIssue_DuplicateId_IsIdempotent()
-    {
-        var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        var eventsBeforeDuplicate = epic.PendingEvents.Count;
-
-        epic.LinkIssue("issue_1", 1, UtcNow);
-
-        Assert.Single(epic.LinkedIssueNumbers);
-        Assert.Equal(eventsBeforeDuplicate, epic.PendingEvents.Count);
-        Assert.Equal(1, epic.LinkedIssueNumbers["issue_1"]);
-    }
-
-    [Fact]
-    public void LinkIssue_DuplicateNumberWithDifferentId_ThrowsDuplicateLinkedIssue()
-    {
-        var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        var eventsBeforeDuplicate = epic.PendingEvents.Count;
-
-        var ex = Assert.Throws<EpicDuplicateLinkedIssueException>(() => epic.LinkIssue("issue_renamed", 1, UtcNow));
-
-        Assert.Equal(1, ex.IssueNumber);
-        Assert.Single(epic.LinkedIssueNumbers);
-        Assert.Equal(eventsBeforeDuplicate, epic.PendingEvents.Count);
-    }
-
-    [Fact]
-    public void LinkIssue_DistinctIds_RecordsOneLinkEventEach()
-    {
-        var epic = NewIdleEpic();
-
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        epic.LinkIssue("issue_2", 2, UtcNow);
-
-        Assert.Equal(2, epic.LinkedIssueNumbers.Count);
-        Assert.Equal(2, EpicEventAssertions.OfType<EpicIssueLinked>(epic.PendingEvents).Count());
-    }
-
-    [Fact]
-    public void UnlinkIssue_RemovesFromSetAndRecordsUnlinkEvent()
-    {
-        var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        epic.LinkIssue("issue_2", 2, UtcNow);
-
-        epic.UnlinkIssue("issue_1", UtcNow);
-
-        Assert.Single(epic.LinkedIssueNumbers);
-        Assert.True(epic.LinkedIssueNumbers.ContainsKey("issue_2"));
-        Assert.NotNull(EpicEventAssertions.OfType<EpicIssueUnlinked>(epic.PendingEvents).SingleOrDefault());
-    }
-
-    [Fact]
-    public void UnlinkIssue_UnknownId_NoOp()
-    {
-        var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        var eventsBefore = epic.PendingEvents.Count;
-
-        epic.UnlinkIssue("issue_unknown", UtcNow);
-
-        Assert.Single(epic.LinkedIssueNumbers);
-        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
     }
 
     [Fact]
@@ -516,7 +436,6 @@ public class EpicTransitionsTests
     public void Reopen_FromDone_TransitionsToIdleAndRecordsReopenedAndStatusChanged()
     {
         var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
         epic.MarkDone(new HashSet<int>(), UtcNow);
 
         epic.Reopen(UtcNow);
@@ -558,7 +477,7 @@ public class EpicTransitionsTests
 
         var ex = Assert.Throws<EpicNotTerminalException>(() => epic.Reopen(UtcNow));
 
-        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(epic.Number, ex.EpicNumber);
         Assert.Equal("idle", ex.CurrentStatus);
         Assert.Equal(EpicStatus.Idle, epic.Status);
         Assert.Equal(eventsBefore, epic.PendingEvents.Count);
@@ -593,25 +512,6 @@ public class EpicTransitionsTests
         Assert.Equal(EpicStatus.Paused, epic.Status);
         Assert.Equal("hold", epic.PauseReason);
         Assert.Equal(eventsBefore, epic.PendingEvents.Count);
-    }
-
-    [Fact]
-    public void Reopen_LeavesLinkedIssueMembershipsIntact()
-    {
-        // Reopen only flips status; the EpicIssueRows (link records)
-        // remain in the aggregate so the grain's re-claim loop can
-        // re-establish active memberships.
-        var epic = NewIdleEpic();
-        epic.LinkIssue("issue_1", 1, UtcNow);
-        epic.LinkIssue("issue_2", 2, UtcNow);
-        epic.MarkDone(new HashSet<int>(), UtcNow);
-        Assert.Equal(2, epic.LinkedIssueNumbers.Count);
-
-        epic.Reopen(UtcNow);
-
-        Assert.Equal(2, epic.LinkedIssueNumbers.Count);
-        Assert.True(epic.LinkedIssueNumbers.ContainsKey("issue_1"));
-        Assert.True(epic.LinkedIssueNumbers.ContainsKey("issue_2"));
     }
 
     [Fact]

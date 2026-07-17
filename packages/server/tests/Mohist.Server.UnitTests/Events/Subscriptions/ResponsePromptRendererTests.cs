@@ -41,6 +41,7 @@ public class ResponsePromptRendererTests
         var evt = BuildWorkflowEvent(
             source: "/mohist/workflow-runs/wr_xyz",
             type: EventCatalog.ReverseDns.StageCompleted,
+            stage: "build",
             data: data);
         var template = "stage={{stage}}";
 
@@ -56,10 +57,25 @@ public class ResponsePromptRendererTests
         var evt = BuildWorkflowEvent(
             source: "/mohist/workflow-runs/wr_uvw",
             type: "com.mohist.workflow.stage.started",
+            stage: "check",
             data: data);
         var template = "stage={{stage}}";
 
         Assert.Equal("stage=check", ResponsePromptRenderer.Render(template, evt));
+    }
+
+    [Fact]
+    public void Render_EnvelopeStageWinsWithoutChangingPayload()
+    {
+        var data = JsonSerializer.SerializeToElement(new { stage = "payload-stage" });
+        var evt = BuildWorkflowEvent(
+            source: "/mohist/workflow-runs/wr_context",
+            type: EventCatalog.ReverseDns.StageStarted,
+            stage: "envelope-stage",
+            data: data);
+
+        Assert.Equal("stage=envelope-stage", ResponsePromptRenderer.Render("stage={{stage}}", evt));
+        Assert.Equal("payload-stage", data.GetProperty("stage").GetString());
     }
 
     [Fact]
@@ -168,16 +184,18 @@ public class ResponsePromptRendererTests
         string? stage = null,
         JsonElement? data = null)
     {
-        JsonElement? effectiveData = data;
-        if (effectiveData is null && stage is not null)
-        {
-            effectiveData = JsonSerializer.SerializeToElement(new { stage });
-        }
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
+        const string prefix = "/mohist/workflow-runs/";
+        if (source.StartsWith(prefix, StringComparison.Ordinal))
+            extensions[EventCatalog.Lineage.WorkflowRunId] = source[prefix.Length..];
+        if (!string.IsNullOrWhiteSpace(stage))
+            extensions[EventCatalog.Lineage.Stage] = stage;
         return new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),
             type: type,
             time: DateTimeOffset.UnixEpoch,
-            data: effectiveData);
+            data: data,
+            extensions: extensions);
     }
 }

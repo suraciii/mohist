@@ -34,7 +34,7 @@ export function IssuesPage({
   return (
     <KanbanBoard
       issues={issues ?? []}
-      agentStatus={agentStatus ?? { running: false, issueId: null, issueNumber: null, activeAgents: [], capacity: { active: 0, max: 8 } }}
+      agentStatus={agentStatus ?? { running: false, issueNumber: null, activeAgents: [], capacity: { active: 0, max: 8 } }}
       archivedCount={archivedIssues?.length ?? 0}
     />
   )

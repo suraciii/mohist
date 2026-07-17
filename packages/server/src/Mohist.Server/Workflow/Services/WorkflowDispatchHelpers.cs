@@ -77,17 +77,15 @@ internal static class WorkflowDispatchHelpers
         if (issueEl.Value.ValueKind != JsonValueKind.Object) return null;
 
         if (!projectEl.Value.TryGetProperty("id", out var projectIdEl)) return null;
-        if (!issueEl.Value.TryGetProperty("id", out var issueIdEl)) return null;
         if (!issueEl.Value.TryGetProperty("number", out var numberEl)) return null;
 
         var projectId = projectIdEl.ValueKind == JsonValueKind.String ? projectIdEl.GetString() : projectIdEl.GetRawText();
-        var issueId = issueIdEl.ValueKind == JsonValueKind.String ? issueIdEl.GetString() : issueIdEl.GetRawText();
         var numberStr = numberEl.ValueKind == JsonValueKind.Number ? numberEl.GetRawText() : numberEl.GetString();
 
-        if (projectId is null || issueId is null || !int.TryParse(numberStr, out var num))
+        if (projectId is null || !int.TryParse(numberStr, out var num))
             return null;
 
-        return new WorkIssueRef(projectId, issueId, num);
+        return new WorkIssueRef(projectId, num);
     }
 
     internal static int TaskAttempt(string taskRunId)

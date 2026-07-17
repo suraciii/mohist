@@ -24,7 +24,6 @@ async function captureCreateIssueRequest(request: Request, requests: CapturedReq
 
 function issueResponse(title: string, extra: Record<string, unknown> = {}) {
   return {
-    id: 'issue_1',
     number: 1,
     title,
     body: null,

@@ -45,7 +45,6 @@ function buildSessionMetadata(
   return {
     sessionId: meta.id,
     sessionName: meta.sessionName,
-    issueId: '',
     runtimeSessionId: meta.runtimeSessionId ?? runtimeSessionId,
     runtime: meta.runtime ?? null,
     executionId: null,

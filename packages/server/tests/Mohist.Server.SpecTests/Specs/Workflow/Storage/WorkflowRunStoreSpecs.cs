@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 
 /// <summary>
 /// Unit specs for <see cref="WorkflowRunStore"/> covering issue-361 T-003:
-/// the store now stamps both <c>projectid</c> and <c>issueid</c> onto the
+/// the store stamps the project-scoped Issue context onto the
 /// emitted WorkflowRun CloudEvent (read from
 /// <see cref="WorkflowRunMetadata.Annotations"/>), appends the event row in
 /// the same EF Core transaction as the run state, and lets an event-row
@@ -51,8 +51,9 @@ public sealed class FakeWorkflowRunStoreDbContextFactory : IDbContextFactory<Moh
 public class WorkflowRunStoreSpecs
 {
     private const string ProjectId = "proj_workflow_store";
-    private const string IssueId = "issue_ws_1";
+    private const int IssueNumber = 1;
     private const string WorkflowRunId = "wr_ws_1";
+    private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
@@ -72,8 +73,7 @@ public class WorkflowRunStoreSpecs
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
-                    ["issueId"] = IssueId,
-                    ["issueNumber"] = "1",
+                    ["issueNumber"] = IssueNumber.ToString(),
                 }),
             Stages = [],
         };
@@ -85,12 +85,33 @@ public class WorkflowRunStoreSpecs
         Assert.Equal("com.mohist.workflow.run.failed", envelope.Type);
         Assert.True(envelope.Extensions.TryGetValue("projectid", out var projectId));
         Assert.Equal(ProjectId, projectId);
+        // workflowrunid is always stamped (D2/issue-412 T-002): the run
+        // itself is the producer, so every emitted workflow.* envelope
+        // carries its run id on extensions.
+        Assert.True(envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+        Assert.Equal(WorkflowRunId, stampedRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions()
+    public async Task SaveAsync_UsesTheWorkflowOwnedLineageSnapshot()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+
+        var run = CreateRun("wr_owned_lineage", epicNumber: 2);
+        await store.SaveAsync(run, [new WorkflowRunStarted()]);
+
+        var started = Assert.Single(await eventStore.ListAsync(run.Id));
+        Assert.Equal("2", started.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task SaveAsync_WithIssueContext_StampsIssueNumberOnPersistedEventExtensions()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
@@ -105,8 +126,7 @@ public class WorkflowRunStoreSpecs
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
-                    ["issueId"] = IssueId,
-                    ["issueNumber"] = "1",
+                    ["issueNumber"] = IssueNumber.ToString(),
                 }),
             Stages = [],
         };
@@ -114,14 +134,13 @@ public class WorkflowRunStoreSpecs
         await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
 
         var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
-        Assert.True(stored.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
-        Assert.Equal(IssueId, stampedIssueId);
+        Assert.Equal(IssueNumber.ToString(), stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension()
+    public async Task SaveAsync_WithoutProjectAnnotation_FailsBecauseProjectOwnershipIsRequired()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
@@ -136,11 +155,11 @@ public class WorkflowRunStoreSpecs
             Stages = [],
         };
 
-        await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.SaveAsync(run, [new WorkflowRunFailed("failed")]));
 
-        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
+        Assert.Contains("projectId", ex.Message);
+        Assert.Empty(await eventStore.ListAsync(WorkflowRunId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -161,7 +180,7 @@ public class WorkflowRunStoreSpecs
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
-                    ["issueId"] = IssueId,
+                    ["issueNumber"] = IssueNumber.ToString(),
                 }),
             Stages = [],
         };
@@ -179,6 +198,42 @@ public class WorkflowRunStoreSpecs
         var loaded = await store.LoadAsync(WorkflowRunId);
         Assert.NotNull(loaded);
         Assert.Equal(WorkflowRunId, loaded!.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task SaveAsync_UsesCurrentEpicSnapshotAfterLinkAndUnlink()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var run = new WorkflowRun
+        {
+            Id = WorkflowRunId,
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: FixedTime,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = ProjectId,
+                    ["issueNumber"] = IssueNumber.ToString(),
+                }),
+            Stages = [],
+        };
+
+        await store.SaveAsync(run, [new WorkflowRunStarted()]);
+
+        run.Metadata.Annotations!["epicNumber"] = "2";
+        await store.SaveAsync(run, [new WorkflowRunResumed()]);
+
+        run.Metadata.Annotations.Remove("epicNumber");
+        await store.SaveAsync(run, [new WorkflowRunPaused()]);
+
+        var events = await eventStore.ListAsync(run.Id);
+        Assert.False(events[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Epic));
+        Assert.Equal("2", events[1].Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        Assert.False(events[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Epic));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -363,6 +418,24 @@ public class WorkflowRunStoreSpecs
                 task!.AsObject().Remove("recoveryRemaining");
         }
         return root.ToJsonString();
+    }
+
+    private static WorkflowRun CreateRun(string workflowRunId, int? epicNumber)
+    {
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = ProjectId,
+            ["issueNumber"] = IssueNumber.ToString(),
+        };
+        if (epicNumber is not null)
+            annotations["epicNumber"] = epicNumber.Value.ToString();
+
+        return new WorkflowRun
+        {
+            Id = workflowRunId,
+            Metadata = new WorkflowRunMetadata(null, FixedTime, Annotations: annotations),
+            Stages = [],
+        };
     }
 
     /// <summary>

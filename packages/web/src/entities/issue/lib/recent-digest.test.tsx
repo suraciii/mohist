@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -11,20 +11,16 @@ import {
   type RecentDigestHooks,
 } from './recent-digest'
 
-let nextIssueId = 1
-
 function makeIssue(overrides: {
   status: 'backlog' | 'in_progress' | 'done' | 'cancelled'
   createdAt: string
   updatedAt: string
   completedAt?: string
   archivedAt?: string
-  id?: string
   number?: number
   title?: string
 }): Issue {
   return {
-    id: overrides.id ?? `issue-${nextIssueId++}`,
     number: overrides.number ?? 1,
     title: overrides.title ?? 'title',
     status: overrides.status as IssueStatus,
@@ -59,10 +55,6 @@ function makeWrapper(projectId: string | null = 'proj-1') {
     </QueryClientProvider>
   )
 }
-
-beforeEach(() => {
-  nextIssueId = 1
-})
 
 function makeDigestHooks({
   issues,

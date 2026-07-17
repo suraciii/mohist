@@ -57,7 +57,6 @@ public sealed class InboxStore : IScopedService
         {
             Id = id,
             ProjectId = draft.ProjectId,
-            IssueId = draft.IssueId,
             IssueNumber = draft.IssueNumber,
             IssueTitle = draft.IssueTitle ?? string.Empty,
             NotificationKind = draft.NotificationKind,
@@ -173,7 +172,7 @@ public sealed class InboxStore : IScopedService
     private static void ValidateDraft(InboxItemDraft draft)
     {
         if (string.IsNullOrWhiteSpace(draft.ProjectId)) throw new ArgumentException("ProjectId required", nameof(draft));
-        if (string.IsNullOrWhiteSpace(draft.IssueId)) throw new ArgumentException("IssueId required", nameof(draft));
+        if (draft.IssueNumber <= 0) throw new ArgumentOutOfRangeException(nameof(draft), "IssueNumber must be positive");
         if (!NotificationKinds.IsDefined(draft.NotificationKind)) throw new ArgumentException("NotificationKind must be one of the MVP inbox kinds", nameof(draft));
         if (string.IsNullOrWhiteSpace(draft.SourceEventSource)) throw new ArgumentException("SourceEventSource required", nameof(draft));
         if (string.IsNullOrWhiteSpace(draft.SourceEventId)) throw new ArgumentException("SourceEventId required", nameof(draft));

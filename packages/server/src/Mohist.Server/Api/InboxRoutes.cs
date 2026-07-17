@@ -188,7 +188,6 @@ public sealed class InboxItemDto
 {
     public string ItemId { get; init; } = "";
     public string NotificationKind { get; init; } = "";
-    public string IssueId { get; init; } = "";
     public int IssueNumber { get; init; }
     public string IssueTitle { get; init; } = "";
     public DateTimeOffset CreatedAt { get; init; }
@@ -201,7 +200,6 @@ public sealed class InboxItemDto
     {
         ItemId = view.Id,
         NotificationKind = view.NotificationKind,
-        IssueId = view.IssueId,
         IssueNumber = view.IssueNumber,
         IssueTitle = view.IssueTitle,
         CreatedAt = view.CreatedAt,

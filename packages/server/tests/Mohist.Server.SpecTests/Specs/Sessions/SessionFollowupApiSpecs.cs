@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
@@ -37,7 +38,7 @@ public class SessionFollowupApiSpecs
         var (project, issue, workflowRunId, session) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
         var sessionState = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.Equal("active", sessionState?.Status);
-        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
@@ -62,7 +63,7 @@ public class SessionFollowupApiSpecs
             Assert.Equal("plan", payload.GetProperty("sessionName").GetString());
             Assert.Equal("加个登出", payload.GetProperty("text").GetString());
 
-            var tasksAfter = await GetWorkflowTaskSnapshotAsync(issue.Id);
+            var tasksAfter = await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number);
             Assert.Equal(tasksBefore, tasksAfter);
         }
         finally
@@ -79,7 +80,7 @@ public class SessionFollowupApiSpecs
         var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-idle", sessionName: "plan", attachAndStart: true);
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync())?.Status);
-        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number);
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -92,7 +93,7 @@ public class SessionFollowupApiSpecs
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("ReceiveFollowup", Assert.Single(runnerHub.SentMessages).Method);
-            Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(issue.Id));
+            Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(project.Id, issue.Number));
         }
         finally
         {
@@ -212,9 +213,11 @@ public class SessionFollowupApiSpecs
     private Task<HttpResponseMessage> PostFollowupAsync(string projectId, int issueNumber, string sessionName, object body) =>
         _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/sessions/{sessionName}/followup", body);
 
-    private async Task<string[]> GetWorkflowTaskSnapshotAsync(string issueId)
+    private async Task<string[]> GetWorkflowTaskSnapshotAsync(string projectId, int issueNumber)
     {
-        var status = await _fixture.Grains.GetGrain<IIssueGrain>(issueId).GetWorkflowStatusAsync();
+        var status = await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .GetWorkflowStatusAsync();
         return status?.Workflow?.Stages
             .SelectMany(stage => stage.Tasks)
             .Select(task => $"{task.Id}:{task.Status}")
@@ -234,11 +237,11 @@ public class SessionFollowupApiSpecs
             WorkType: "task",
             Stage: "Build",
             Title: $"Session followup {name}",
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
 
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], "followup-host", project.Id));
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, sessionName, work, $"Session followup {name}");
@@ -292,7 +295,7 @@ public class SessionFollowupApiSpecs
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}/attach";
 
     private sealed record ProjectDto(string Id, string Name);
-    private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record IssueDto(int Number, string Title);
     private sealed record CreatedSession(
         string ProjectId,
         int IssueNumber,

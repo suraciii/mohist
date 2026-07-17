@@ -65,8 +65,8 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_QueriesOnlyActiveEntries_IgnoresEligible", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-active", workspacePath: join(root, "w1") })
-    await registry.register({ issueId: "i2", issueNumber: 2, workflowRunId: "wr-eligible", workspacePath: join(root, "w2") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-active", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 2, workflowRunId: "wr-eligible", workspacePath: join(root, "w2") })
     await registry.markEligible("wr-eligible")
 
     const stub = new StubRunner([{ "wr-active": "Running" }])
@@ -83,7 +83,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnTerminalStatus_TransitionsActiveToEligible", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "Completed" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -97,7 +97,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnStoppedStatus_TransitionsActiveToEligible", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "Stopped" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -113,7 +113,7 @@ describe("ConvergenceBackstop", () => {
     // terminal: a failed run's workspace must stay active so the next
     // dispatch finds the run branch intact.
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "Failed" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -127,7 +127,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnNonTerminalStatus_LeavesEntryActive", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "AwaitingApproval" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -141,7 +141,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnRunningStatus_LeavesEntryActive", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "Running" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -164,7 +164,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnCreatedStatus_LeavesEntryActive (D1 created — built not started)", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-created", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-created", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-created": "Created" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -178,7 +178,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnPendingStatus_LeavesEntryActive (D1 pending — waiting for claim)", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-pending", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-pending", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-pending": "Pending" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -192,7 +192,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnReadyStatus_LeavesEntryActive (D1 ready — assigned, waiting for pickup)", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-ready", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-ready", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-ready": "Ready" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -206,7 +206,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnPausedStatus_LeavesEntryActive", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-1": "Paused" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -219,7 +219,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnServerForgotRunId_DropsRegistryEntry", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-gone", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-gone", workspacePath: join(root, "w1") })
 
     // Server response omits wr-gone entirely.
     const stub = new StubRunner([{}])
@@ -233,10 +233,10 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_MixedStatuses_TransitionsOnlyTerminal", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-done", workspacePath: join(root, "w1") })
-    await registry.register({ issueId: "i2", issueNumber: 2, workflowRunId: "wr-running", workspacePath: join(root, "w2") })
-    await registry.register({ issueId: "i3", issueNumber: 3, workflowRunId: "wr-stopped", workspacePath: join(root, "w3") })
-    await registry.register({ issueId: "i4", issueNumber: 4, workflowRunId: "wr-forgotten", workspacePath: join(root, "w4") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-done", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 2, workflowRunId: "wr-running", workspacePath: join(root, "w2") })
+    await registry.register({ issueNumber: 3, workflowRunId: "wr-stopped", workspacePath: join(root, "w3") })
+    await registry.register({ issueNumber: 4, workflowRunId: "wr-forgotten", workspacePath: join(root, "w4") })
 
     const stub = new StubRunner([{
       "wr-done": "Completed",
@@ -260,8 +260,8 @@ describe("ConvergenceBackstop", () => {
     // be re-queried — that is the no-full-history-scan guarantee for the
     // pre-eligible side of the registry.
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-eligible-1", workspacePath: join(root, "w1") })
-    await registry.register({ issueId: "i2", issueNumber: 2, workflowRunId: "wr-eligible-2", workspacePath: join(root, "w2") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-eligible-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 2, workflowRunId: "wr-eligible-2", workspacePath: join(root, "w2") })
     await registry.markEligible("wr-eligible-1")
     await registry.markEligible("wr-eligible-2")
 
@@ -278,7 +278,7 @@ describe("ConvergenceBackstop", () => {
     // Pre-condition: no full-history scan. The stub will fail the test
     // if the runner sends a workflowRunId it does not own.
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-mine", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-mine", workspacePath: join(root, "w1") })
 
     const stub = new StubRunner([{ "wr-mine": "Running" }])
     const backstop = new ConvergenceBackstop(registry, stub)
@@ -293,7 +293,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnServerError_LeavesRegistryUnchanged", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const failure = new Error("network blip")
     const stub = new StubRunner([failure])
@@ -314,7 +314,7 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_OnTerminalStatus_StampsTerminalAt", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const before = new Date("2026-06-25T10:00:00.000Z")
     vi.useFakeTimers()
@@ -331,8 +331,8 @@ describe("ConvergenceBackstop", () => {
 
   it("RunOnce_TwoActiveEntriesServerReportsOneTerminal_TransitionsOnlyThatOne", async () => {
     const registry = await makeRegistry()
-    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
-    await registry.register({ issueId: "i2", issueNumber: 2, workflowRunId: "wr-2", workspacePath: join(root, "w2") })
+    await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
+    await registry.register({ issueNumber: 2, workflowRunId: "wr-2", workspacePath: join(root, "w2") })
 
     const stub = new StubRunner([{ "wr-1": "Completed", "wr-2": "Running" }])
     const backstop = new ConvergenceBackstop(registry, stub)

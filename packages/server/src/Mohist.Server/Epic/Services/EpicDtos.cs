@@ -5,8 +5,8 @@ namespace Mohist.Server.Epic.Services;
 
 [GenerateSerializer]
 public sealed record EpicDto(
-    [property: Id(0)] string Id,
-    [property: Id(1)] int? Number,
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] int Number,
     [property: Id(2)] string Title,
     [property: Id(3)] string Description,
     [property: Id(4)] string Priority,
@@ -16,18 +16,14 @@ public sealed record EpicDto(
     [property: Id(8)] string? PauseReason = null);
 
 /// <summary>
-/// Resolved issue identifier passed from the HTTP layer to the grain's
-/// batch link/unlink entry points. The HTTP route resolves each
-/// identifier (number or internal id) to its issue via
-/// <c>IssueQuerier.ListAsync(all: true)</c>; the grain receives the
-/// resolved pair so duplicate-identifier de-dup is deterministic and
-/// the cross-aggregate invariant operates on the canonical internal id.
+/// Resolved issue number passed from the HTTP layer to the grain's batch
+/// link/unlink entry points. The grain receives the number with its wire
+/// identifier so duplicate requests are deterministic.
 /// </summary>
 [GenerateSerializer]
 public sealed record BatchMembershipRequestItem(
     [property: Id(0)] string Identifier,
-    [property: Id(1)] string IssueId,
-    [property: Id(2)] int IssueNumber);
+    [property: Id(1)] int IssueNumber);
 
 public sealed record EpicProgressDto(
     int DeliveredCount,
@@ -38,17 +34,16 @@ public sealed record EpicProgressDto(
     string? NextIssueReason,
     bool ReadyToMarkDone);
 
-public sealed record EpicNextIssueDto(string Id, int Number, string Title);
+public sealed record EpicNextIssueDto(int Number, string Title);
 
 public sealed record EpicProgressIssueDto(
-    string Id,
     int Number,
     string Title,
     string Health);
 
 public sealed record EpicWithProgressDto(
-    string Id,
-    int? Number,
+    string ProjectId,
+    int Number,
     string Title,
     string Description,
     string Priority,
@@ -60,7 +55,6 @@ public sealed record EpicWithProgressDto(
 
 public sealed record LinkedIssueDto
 {
-    public string Id { get; init; } = "";
     public int Number { get; init; }
     public string Title { get; init; } = "";
     public string Status { get; init; } = "";
@@ -75,7 +69,6 @@ public sealed record LinkedIssueDto
     public LinkedIssueDto() { }
 
     public LinkedIssueDto(
-        string Id,
         int Number,
         string Title,
         string Status,
@@ -88,7 +81,6 @@ public sealed record LinkedIssueDto
         IReadOnlyList<IssuePrerequisiteRefDto>? ExternalPrerequisites = null)
         : this()
     {
-        this.Id = Id;
         this.Number = Number;
         this.Title = Title;
         this.Status = Status;
@@ -103,8 +95,8 @@ public sealed record LinkedIssueDto
 }
 
 public sealed record EpicDetailDto(
-    string Id,
-    int? Number,
+    string ProjectId,
+    int Number,
     string Title,
     string Description,
     string Priority,
@@ -119,33 +111,32 @@ public sealed record EpicDetailDto(
 /// Per-issue result emitted by <c>IEpicGrain.LinkIssuesAsync</c> /
 /// <c>UnlinkIssuesAsync</c>. The HTTP layer wraps the list in
 /// <c>{ results: [...] }</c>. The <see cref="Status"/> discriminator is
-/// machine-friendly; <see cref="OwningEpicId"/> / <see cref="OwningEpicTitle"/>
+/// machine-friendly; <see cref="OwningEpicNumber"/> / <see cref="OwningEpicTitle"/>
 /// are populated only for <c>conflict</c> outcomes.
 /// </summary>
 [GenerateSerializer]
 public sealed record BatchMembershipOutcome(
     [property: Id(0)] string Identifier,
     [property: Id(1)] string Status,
-    [property: Id(2)] string? IssueId = null,
-    [property: Id(3)] int? IssueNumber = null,
-    [property: Id(4)] string? OwningEpicId = null,
-    [property: Id(5)] string? OwningEpicTitle = null)
+    [property: Id(2)] int? IssueNumber = null,
+    [property: Id(3)] int? OwningEpicNumber = null,
+    [property: Id(4)] string? OwningEpicTitle = null)
 {
-    public static BatchMembershipOutcome Linked(string identifier, string issueId, int issueNumber) =>
-        new(identifier, "linked", issueId, issueNumber);
+    public static BatchMembershipOutcome Linked(string identifier, int issueNumber) =>
+        new(identifier, "linked", issueNumber);
 
-    public static BatchMembershipOutcome AlreadyLinked(string identifier, string issueId, int issueNumber) =>
-        new(identifier, "already-linked", issueId, issueNumber);
+    public static BatchMembershipOutcome AlreadyLinked(string identifier, int issueNumber) =>
+        new(identifier, "already-linked", issueNumber);
 
-    public static BatchMembershipOutcome Unlinked(string identifier, string issueId, int issueNumber) =>
-        new(identifier, "unlinked", issueId, issueNumber);
+    public static BatchMembershipOutcome Unlinked(string identifier, int issueNumber) =>
+        new(identifier, "unlinked", issueNumber);
 
-    public static BatchMembershipOutcome WasNotAMember(string identifier, string issueId, int issueNumber) =>
-        new(identifier, "was-not-a-member", issueId, issueNumber);
+    public static BatchMembershipOutcome WasNotAMember(string identifier, int issueNumber) =>
+        new(identifier, "was-not-a-member", issueNumber);
 
     public static BatchMembershipOutcome Conflict(
-        string identifier, string issueId, int issueNumber, string owningEpicId, string owningEpicTitle) =>
-        new(identifier, "conflict", issueId, issueNumber, owningEpicId, owningEpicTitle);
+        string identifier, int issueNumber, int owningEpicNumber, string owningEpicTitle) =>
+        new(identifier, "conflict", issueNumber, owningEpicNumber, owningEpicTitle);
 
     public static BatchMembershipOutcome NotFound(string identifier) =>
         new(identifier, "not-found");

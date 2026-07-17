@@ -94,8 +94,7 @@ describe('planRoundStartReducer', () => {
   it('appends a Round and marks the matching BASE step running', () => {
     const prev = emptyTimelineState()
     const detail = {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
@@ -117,8 +116,7 @@ describe('planRoundStartReducer', () => {
   it('appends a new step when roundType is not in BASE_PLAN_STEPS', () => {
     const prev = emptyTimelineState()
     const next = planRoundStartReducer(prev, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'custom-step',
       roundLabel: 'Custom Step',
       roundIndex: 7,
@@ -137,8 +135,7 @@ describe('planRoundStartReducer', () => {
   it('falls back to Round N+1 when roundLabel is absent', () => {
     const prev = emptyTimelineState()
     const detail = {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'proposal',
       roundLabel: undefined as unknown as string,
       roundIndex: 0,
@@ -152,8 +149,7 @@ describe('planRoundStartReducer', () => {
     const prev = emptyTimelineState()
     const snapshot = JSON.stringify(prev)
     planRoundStartReducer(prev, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
@@ -166,8 +162,7 @@ describe('planRoundStartReducer', () => {
 describe('planRoundCompleteReducer', () => {
   it('marks the matching step completed on PASS and stamps verdict', () => {
     const start = planRoundStartReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'specs',
       roundLabel: 'Specs',
       roundIndex: 1,
@@ -175,8 +170,7 @@ describe('planRoundCompleteReducer', () => {
     }, ENV)
 
     const next = planRoundCompleteReducer(start, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'specs',
       roundIndex: 1,
       duration: 500,
@@ -193,8 +187,7 @@ describe('planRoundCompleteReducer', () => {
 
   it('marks the matching step failed on FAIL and extends with auto-fix + re-self-review for self-review', () => {
     const start = planRoundStartReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'self-review',
       roundLabel: 'Self Review',
       roundIndex: 4,
@@ -202,8 +195,7 @@ describe('planRoundCompleteReducer', () => {
     }, ENV)
 
     const after = planRoundCompleteReducer(start, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'self-review',
       roundIndex: 4,
       duration: 1234,
@@ -222,8 +214,7 @@ describe('planRoundCompleteReducer', () => {
 
   it('does not duplicate auto-fix / re-self-review on repeated self-review FAIL', () => {
     let state = planRoundStartReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'self-review',
       roundLabel: 'Self Review',
       roundIndex: 4,
@@ -231,8 +222,7 @@ describe('planRoundCompleteReducer', () => {
     }, ENV)
 
     state = planRoundCompleteReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'self-review',
       roundIndex: 4,
       duration: 1000,
@@ -240,8 +230,7 @@ describe('planRoundCompleteReducer', () => {
     }, ENV)
 
     state = planRoundCompleteReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'self-review',
       roundIndex: 4,
       duration: 999,
@@ -255,8 +244,7 @@ describe('planRoundCompleteReducer', () => {
 
   it('does not extend steps when FAIL is not on self-review', () => {
     let state = planRoundStartReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
@@ -264,8 +252,7 @@ describe('planRoundCompleteReducer', () => {
     }, ENV)
 
     state = planRoundCompleteReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       roundType: 'proposal',
       roundIndex: 0,
       duration: 100,
@@ -283,8 +270,7 @@ describe('coderRecoveryStatusReducer', () => {
     ]))
 
     const next = coderRecoveryStatusReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
       runtimeSessionId: 'acp-1',
       status: 'recovering',
@@ -312,8 +298,7 @@ describe('coderRecoveryStatusReducer', () => {
     ]))
 
     const next = coderRecoveryStatusReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
       runtimeSessionId: 'acp-1',
       status: 'recovered',
@@ -327,8 +312,7 @@ describe('coderRecoveryStatusReducer', () => {
 
   it('does nothing to rounds when there is no current round', () => {
     const next = coderRecoveryStatusReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
       runtimeSessionId: 'acp-1',
       status: 'recovering',
@@ -580,8 +564,7 @@ describe('contextCompactedReducer', () => {
     ]))
 
     const next = contextCompactedReducer(state, {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       strategy: 'summary',
       contextWindowUsedBefore: 800_000,
       contextWindowUsedAfter: 200_000,
@@ -607,8 +590,7 @@ describe('contextCompactedReducer', () => {
 
   it('synthesises a placeholder Compaction round when no round exists', () => {
     const next = contextCompactedReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       contextWindowUsedAfter: 100_000,
       recordedAt: '2024-01-01T00:00:01.000Z',
     }, ENV)
@@ -622,8 +604,7 @@ describe('contextCompactedReducer', () => {
 describe('contextHealthUpdatedReducer', () => {
   it('applies server-provided values verbatim', () => {
     const next = contextHealthUpdatedReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       healthStatus: 'yellow',
       contextUsagePercent: 65,
       contextWindowUsed: 65_000,
@@ -642,8 +623,7 @@ describe('contextHealthUpdatedReducer', () => {
 
   it('falls back to env.isoNow when recordedAt is missing', () => {
     const next = contextHealthUpdatedReducer(emptyTimelineState(), {
-      issueId: '1',
-      projectId: 'p',
+      issueNumber: 1,      projectId: 'p',
       healthStatus: 'green',
       contextWindowUsed: 1,
       contextWindowSize: 1,

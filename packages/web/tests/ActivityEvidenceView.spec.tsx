@@ -194,7 +194,6 @@ describe('Activity evidence view', () => {
       summary: { active: 2, waiting: 0, completed: 0, failed: 0, slots: { active: 2, max: 8 } },
       sessions: [
         {
-          issueId: 'issue_1_42',
           issueNumber: 42,
           issueTitle: 'Workflow issue',
           issueStage: 'Build',
@@ -212,7 +211,6 @@ describe('Activity evidence view', () => {
           failureReason: null,
         },
         {
-          issueId: 'agent_agent-1',
           issueNumber: 42,
           issueTitle: 'Agent session',
           issueStage: '',
@@ -263,7 +261,7 @@ describe('Activity evidence view', () => {
         sourceAggregateId: 'session-42',
         source: '/mohist/agent-session/session-42',
         type: 'coder_session_started',
-        data: { issueNumber: 42 },
+        data: { issueNumber: 42, },
       }),
     ]
 

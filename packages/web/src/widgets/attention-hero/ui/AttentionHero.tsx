@@ -174,13 +174,12 @@ export function AttentionHero({
 }
 
 function attentionKey(item: AttentionItem): string {
-  if (isIssueAttentionItem(item)) return item.issueId
+  if (isIssueAttentionItem(item)) return String(item.issueNumber)
   return item.kind
 }
 
 const defaultAgentStatus: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 0 },

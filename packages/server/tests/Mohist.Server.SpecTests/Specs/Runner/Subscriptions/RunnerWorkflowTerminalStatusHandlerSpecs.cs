@@ -62,7 +62,11 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: type,
             time: DateTimeOffset.UnixEpoch,
-            data: null);
+            data: null,
+            extensions: new Dictionary<string, string>
+            {
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+            });
 
     private sealed class RecordingStatusRouter : IRunnerWorkflowStatusRouter
     {

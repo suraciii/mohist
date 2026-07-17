@@ -83,14 +83,14 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
 
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.workflowKey(context.workflowRunId, sessionName)
-    const existing = await context.serverConnection.getWorkflowAgentSession(projectId, context.workflowRunId, sessionName, context.signal)
-    const session = existing ?? await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
+    const session = await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
       workType: context.workType,
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
       workDir: context.workDir,
+      epicNumber: context.epicNumber,
     }, context.signal)
 
     if (session.runtimeSessionId) {
@@ -116,6 +116,7 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
+      epicNumber: context.epicNumber,
     }, context.signal)
   }
 

@@ -41,7 +41,6 @@ public class CliIssueWorkflowConfigSpecs
     {
         issueNumber = 42,
         projectId = "proj_abc",
-        issueId = "issue_42",
         sourceTemplateId = "mohist/local",
         hasCustomTemplate = true,
         yaml = "name: workflow\ntasks:\n  - stage: plan\n    with:\n      greeting: hi\n",

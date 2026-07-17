@@ -4,6 +4,7 @@ public static class AgentSessionQueryMetadataKeys
 {
     public const string ProjectId = "mohist.io/project-id";
     public const string IssueNumber = "mohist.io/issue-number";
+    public const string EpicNumber = "mohist.io/epic-number";
     public const string SourceKind = "mohist.io/source-kind";
     public const string WorkflowRunId = "mohist.io/source-id";
     public const string SessionName = "mohist.io/session-name";

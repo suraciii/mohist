@@ -3,10 +3,10 @@ import { EpicStatus, type EpicWithProgress } from '../../../entities/epic'
 import { IssueHealth } from '../../../entities/issue'
 import { groupActiveEpics } from './groupActiveEpics'
 
-function makeEpic(overrides: Partial<EpicWithProgress> & { id: string }): EpicWithProgress {
+function makeEpic(overrides: Partial<EpicWithProgress> & { number: number }): EpicWithProgress {
   return {
-    number: null,
-    title: `Epic ${overrides.id}`,
+    projectId: 'proj-1',
+    title: `Epic ${overrides.number}`,
     description: '',
     priority: 'p1',
     status: EpicStatus.Idle,
@@ -26,12 +26,12 @@ function makeEpic(overrides: Partial<EpicWithProgress> & { id: string }): EpicWi
 }
 
 const runningOnly = makeEpic({
-  id: 'running-only',
+  number: 1,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 1,
     blockedIssues: [],
-    activeIssues: [{ id: 'i1', number: 1, title: 'In flight', health: IssueHealth.Active }],
+    activeIssues: [{ number: 1, title: 'In flight', health: IssueHealth.Active }],
     nextIssue: null,
     nextIssueReason: null,
     readyToMarkDone: false,
@@ -39,46 +39,46 @@ const runningOnly = makeEpic({
 })
 
 const runningWithNextAndReason = makeEpic({
-  id: 'running-both',
+  number: 2,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 2,
     blockedIssues: [],
-    activeIssues: [{ id: 'i1', number: 1, title: 'In flight', health: IssueHealth.Active }],
-    nextIssue: { id: 'i2', number: 2, title: 'Queued next' },
+    activeIssues: [{ number: 1, title: 'In flight', health: IssueHealth.Active }],
+    nextIssue: { number: 2, title: 'Queued next' },
     nextIssueReason: 'Waiting for #1 to complete',
     readyToMarkDone: false,
   },
 })
 
 const readyToStart = makeEpic({
-  id: 'ready',
+  number: 3,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 1,
     blockedIssues: [],
     activeIssues: [],
-    nextIssue: { id: 'i1', number: 1, title: 'Start me' },
+    nextIssue: { number: 1, title: 'Start me' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
 })
 
 const readyToStartAlsoFlagged = makeEpic({
-  id: 'ready-flagged',
+  number: 4,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 1,
     blockedIssues: [],
     activeIssues: [],
-    nextIssue: { id: 'i1', number: 1, title: 'Start me' },
+    nextIssue: { number: 1, title: 'Start me' },
     nextIssueReason: 'some leftover reason',
     readyToMarkDone: false,
   },
 })
 
 const waitingBlocked = makeEpic({
-  id: 'waiting',
+  number: 5,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 1,
@@ -91,7 +91,7 @@ const waitingBlocked = makeEpic({
 })
 
 const idleReadyToMarkDone = makeEpic({
-  id: 'idle-ready',
+  number: 6,
   progress: {
     deliveredCount: 3,
     totalIssueCount: 3,
@@ -104,7 +104,7 @@ const idleReadyToMarkDone = makeEpic({
 })
 
 const idleEmpty = makeEpic({
-  id: 'idle-empty',
+  number: 7,
   progress: {
     deliveredCount: 0,
     totalIssueCount: 0,
@@ -203,22 +203,22 @@ describe('groupActiveEpics', () => {
 
     expect(total).toBe(all.length)
 
-    const seen = new Set<string>()
+    const seen = new Set<number>()
     for (const epic of groups.running) {
-      expect(seen.has(epic.id)).toBe(false)
-      seen.add(epic.id)
+      expect(seen.has(epic.number)).toBe(false)
+      seen.add(epic.number)
     }
     for (const epic of groups.readyToStart) {
-      expect(seen.has(epic.id)).toBe(false)
-      seen.add(epic.id)
+      expect(seen.has(epic.number)).toBe(false)
+      seen.add(epic.number)
     }
     for (const epic of groups.waitingBlocked) {
-      expect(seen.has(epic.id)).toBe(false)
-      seen.add(epic.id)
+      expect(seen.has(epic.number)).toBe(false)
+      seen.add(epic.number)
     }
     for (const epic of groups.idleEmpty) {
-      expect(seen.has(epic.id)).toBe(false)
-      seen.add(epic.id)
+      expect(seen.has(epic.number)).toBe(false)
+      seen.add(epic.number)
     }
     expect(seen.size).toBe(all.length)
   })
@@ -233,21 +233,21 @@ describe('groupActiveEpics', () => {
     ]
 
     const groups = groupActiveEpics(all)
-    expect(groups.readyToStart.map(e => e.id)).toEqual(['ready'])
-    expect(groups.idleEmpty.map(e => e.id)).toEqual(['idle-empty', 'idle-ready'])
-    expect(groups.running.map(e => e.id)).toEqual(['running-only'])
-    expect(groups.waitingBlocked.map(e => e.id)).toEqual(['waiting'])
+    expect(groups.readyToStart.map(e => e.number)).toEqual([3])
+    expect(groups.idleEmpty.map(e => e.number)).toEqual([7, 6])
+    expect(groups.running.map(e => e.number)).toEqual([1])
+    expect(groups.waitingBlocked.map(e => e.number)).toEqual([5])
   })
 
   it('does not mutate the input array or the epic references', () => {
     const all: EpicWithProgress[] = [runningWithNextAndReason, readyToStart, waitingBlocked, idleEmpty]
-    const snapshot = all.map(e => ({ id: e.id, progress: { ...e.progress, activeIssues: [...e.progress.activeIssues] } }))
+    const snapshot = all.map(e => ({ number: e.number, progress: { ...e.progress, activeIssues: [...e.progress.activeIssues] } }))
 
     groupActiveEpics(all)
 
     expect(all.length).toBe(4)
     for (let i = 0; i < all.length; i++) {
-      expect(all[i].id).toBe(snapshot[i].id)
+      expect(all[i].number).toBe(snapshot[i].number)
       expect(all[i].progress.activeIssues.length).toBe(snapshot[i].progress.activeIssues.length)
     }
   })

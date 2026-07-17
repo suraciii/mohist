@@ -26,7 +26,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 14,
     title: 'Control workspace test',
     body: 'Long body that should remain in reading-flow below the control region.',
@@ -41,7 +40,6 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
     comments: [
       {
         id: 'c1',
-        issueId: 'issue-1',
         author: 'tester',
         body: 'A reviewer comment that must remain below the control region.',
         createdAt: '2026-01-02T00:00:00Z',
@@ -52,7 +50,7 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
     blocker: null,
     model: 'sonnet',
     prerequisites: [
-      { number: 9, title: 'Prerequisite issue', completed: true, issueId: 'prereq-9', status: 'done', health: 'done' },
+      { number: 9, title: 'Prerequisite issue', completed: true, status: 'done', health: 'done' },
     ],
     repository: {
       name: 'master',
@@ -210,7 +208,6 @@ function expectNoNewActionKinds(container: HTMLElement) {
 describe('Control workspace: queued/backlog path', () => {
   it('shows identity and queued situation without fabricated stage, progress, or runtime actions', async () => {
     mockIssue(makeIssue({
-      id: 'issue-queue-1',
       number: 14,
       title: 'Backlog draft test',
       status: 'backlog',
@@ -286,7 +283,6 @@ describe('Control workspace: queued/backlog path', () => {
 describe('Control workspace: done path (non-archived)', () => {
   it('shows the terminal Done state with no start/stop/approve/retry/resume/rerun actions offered', async () => {
     mockIssue(makeIssue({
-      id: 'issue-done-1',
       number: 14,
       status: 'done',
       workflowStage: 'done',
@@ -327,7 +323,6 @@ describe('Control workspace: done path (non-archived)', () => {
 describe('Control workspace: archived done path', () => {
   it('shows archived banner, identity, terminal Done state, and no active workflow controls', async () => {
     mockIssue(makeIssue({
-      id: 'issue-arch-1',
       number: 14,
       status: 'done',
       workflowStage: 'done',
@@ -369,7 +364,6 @@ describe('Control workspace: archived done path', () => {
 
   it('preserves archived description and comments in reading-flow even when no runtime actions are offered', async () => {
     mockIssue(makeIssue({
-      id: 'issue-arch-2',
       number: 14,
       status: 'done',
       workflowStage: 'done',
@@ -381,7 +375,6 @@ describe('Control workspace: archived done path', () => {
       comments: [
         {
           id: 'c-arch-1',
-          issueId: 'issue-arch-2',
           author: 'tester',
           body: 'Archived reviewer comment.',
           createdAt: '2026-06-25T11:00:00Z',
@@ -423,12 +416,11 @@ describe('Control workspace: secondary content placement', () => {
         gitUrl: 'https://github.com/suraciii/mohist.git',
       },
       prerequisites: [
-        { number: 9, title: 'Prerequisite issue', completed: true, issueId: 'prereq-9', status: 'done', health: 'done' },
+        { number: 9, title: 'Prerequisite issue', completed: true, status: 'done', health: 'done' },
       ],
       comments: [
         {
           id: 'c-1',
-          issueId: 'issue-1',
           author: 'tester',
           body: 'A reviewer comment.',
           createdAt: '2026-01-02T00:00:00Z',
@@ -480,7 +472,6 @@ describe('Control workspace: secondary content placement', () => {
       comments: [
         {
           id: 'c-1',
-          issueId: 'issue-1',
           author: 'tester',
           body: 'A reviewer comment.',
           createdAt: '2026-01-02T00:00:00Z',

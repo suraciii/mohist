@@ -25,7 +25,6 @@ import { exists, readText } from "../system/process.js"
 export type WorkspaceRegistryPhase = "active" | "eligible"
 
 export interface WorkspaceRegistryEntry {
-  issueId: string | null
   issueNumber: number
   workflowRunId: string
   workspacePath: string
@@ -42,7 +41,6 @@ interface WorkspaceRegistryFile {
 }
 
 export interface RegisterInput {
-  issueId: string | null
   issueNumber: number
   workflowRunId: string
   workspacePath: string
@@ -118,7 +116,6 @@ export class WorkspaceRegistry {
     const materializedAt = this.now().toISOString()
     const existing = this.entries.get(input.workflowRunId)
     const entry: WorkspaceRegistryEntry = {
-      issueId: input.issueId,
       issueNumber: input.issueNumber,
       workflowRunId: input.workflowRunId,
       workspacePath: resolve(input.workspacePath),
@@ -233,7 +230,6 @@ export class WorkspaceRegistry {
       if (entry.phase !== "active" && entry.phase !== "eligible") continue
       if (typeof entry.materializedAt !== "string") continue
       this.entries.set(key, {
-        issueId: typeof entry.issueId === "string" ? entry.issueId : null,
         issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,
         workflowRunId: entry.workflowRunId,
         workspacePath: resolve(entry.workspacePath),

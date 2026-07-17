@@ -85,7 +85,7 @@ public sealed record AgentLaunchResult(
 public sealed record AgentLaunchContext(
     string ProjectId,
     int? IssueNumber = null,
-    string? EpicNumber = null,
+    int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null,
     string? Title = null);

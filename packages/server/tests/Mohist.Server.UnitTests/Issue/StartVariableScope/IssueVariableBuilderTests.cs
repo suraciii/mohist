@@ -35,7 +35,6 @@ public class IssueVariableBuilderTests
 
     private static MohistIssue TestIssue(int number = 80) => new()
     {
-        Id = $"issue_{number:D2}",
         ProjectId = Project.Id,
         Number = number,
         Title = "Kanban 看板 Cancelled issues 可见性交互混乱",

@@ -28,7 +28,6 @@ public static class NotificationKinds
 /// </summary>
 public sealed record InboxItemDraft(
     string ProjectId,
-    string IssueId,
     int IssueNumber,
     string IssueTitle,
     string NotificationKind,
@@ -54,7 +53,6 @@ public sealed class InboxItemView
 {
     public string Id { get; init; } = "";
     public string ProjectId { get; init; } = "";
-    public string IssueId { get; init; } = "";
     public int IssueNumber { get; init; }
     public string IssueTitle { get; init; } = "";
     public string NotificationKind { get; init; } = "";

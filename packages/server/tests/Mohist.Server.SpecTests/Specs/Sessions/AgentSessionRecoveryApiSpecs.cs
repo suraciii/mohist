@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
@@ -940,9 +941,9 @@ public class AgentSessionRecoveryApiSpecs
             WorkType: "task",
             Stage: "Build",
             Title: $"Session api {name}",
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, sessionName, work, $"Session api {name}");

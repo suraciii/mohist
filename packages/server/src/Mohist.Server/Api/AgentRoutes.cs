@@ -115,7 +115,6 @@ public static class AgentRoutes
 
         return waiting
             .Select(issue => new ActivityWaitingCardDto(
-                IssueId: issue.Id,
                 IssueNumber: issue.Number,
                 IssueTitle: string.IsNullOrWhiteSpace(issue.Title) ? $"Issue #{issue.Number}" : issue.Title,
                 Stage: issue.WorkflowStage,
@@ -144,7 +143,6 @@ public static class AgentRoutes
 
 public sealed record AgentStatusResponse(
     bool Running,
-    string? IssueId,
     int? IssueNumber,
     IReadOnlyList<ActiveAgentDto> ActiveAgents,
     AgentCapacityResponse Capacity,
@@ -172,7 +170,6 @@ public sealed record AgentStatusResponse(
         // is intentionally NOT used for any slot count.
         return new AgentStatusResponse(
             Running: activeAgents.Count > 0,
-            IssueId: activeAgents.FirstOrDefault()?.IssueId,
             IssueNumber: activeAgents.FirstOrDefault()?.IssueNumber,
             ActiveAgents: activeAgents,
             Capacity: new AgentCapacityResponse(capacity.UsedSlots, capacity.TotalSlots),

@@ -11,7 +11,6 @@ import { ProjectProvider } from '../../../entities/project'
 
 function makeIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: `i-${overrides.number ?? 0}`,
     number: 1,
     title: 'Issue',
     status: IssueStatus.Backlog,
@@ -77,8 +76,8 @@ afterEach(() => {
 
 describe('DependencyGraphCanvas - rendering', () => {
   it('renders the canvas wrapper when there are at least 2 issues', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeIssue({ number: 1 })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
@@ -91,13 +90,13 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('does not render the canvas when there is only 1 issue', () => {
-    renderCanvas([makeIssue({ number: 1, id: 'a' })])
+    renderCanvas([makeIssue({ number: 1 })])
     expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
   })
 
   it('reports cyclic renderability when a cycle is present', async () => {
-    const a = makeIssue({ number: 1, id: 'a', prerequisiteNumbers: [2] })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeIssue({ number: 1, prerequisiteNumbers: [2] })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     const onChange = vi.fn()
     renderCanvas([a, b], { onRenderabilityChange: onChange })
     await waitFor(() => {
@@ -109,8 +108,8 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('reports renderable=true for a DAG with no cycle', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeIssue({ number: 1 })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     const onChange = vi.fn()
     renderCanvas([a, b], { onRenderabilityChange: onChange })
     await waitFor(() => {
@@ -131,8 +130,8 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('renders a member node for each linked issue inside the canvas', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const a = makeIssue({ number: 1 })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getAllByTestId('epic-dep-member-node')).toHaveLength(2)
@@ -140,10 +139,9 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('marks each member node with the right readiness data attribute', async () => {
-    const ready = makeIssue({ number: 1, id: 'a', canStart: true, startBlocker: null })
+    const ready = makeIssue({ number: 1, canStart: true, startBlocker: null })
     const waiting = makeIssue({
       number: 2,
-      id: 'b',
       prerequisiteNumbers: [1],
       canStart: false,
       startBlocker: { kind: 'waiting-for', issue: { number: 1, title: 'A' } },
@@ -157,10 +155,9 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('shows the Waiting for #N marker on waiting nodes', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
+    const a = makeIssue({ number: 1 })
     const b = makeIssue({
       number: 2,
-      id: 'b',
       prerequisiteNumbers: [1],
       canStart: false,
       startBlocker: { kind: 'waiting-for', issue: { number: 1, title: 'A' } },
@@ -172,8 +169,8 @@ describe('DependencyGraphCanvas - rendering', () => {
   })
 
   it('does not show the Waiting for #N marker on non-waiting nodes', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1], canStart: true, startBlocker: null })
+    const a = makeIssue({ number: 1 })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1], canStart: true, startBlocker: null })
     renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getAllByTestId('epic-dep-member-node')).toHaveLength(2)
@@ -184,10 +181,9 @@ describe('DependencyGraphCanvas - rendering', () => {
 
 describe('DependencyGraphCanvas - external prerequisites', () => {
   it('renders a ghost node for an external prerequisite that has a summary', async () => {
-    const a = makeIssue({ number: 1, id: 'a', prerequisiteNumbers: [99] })
+    const a = makeIssue({ number: 1, prerequisiteNumbers: [99] })
     const b = makeIssue({
       number: 2,
-      id: 'b',
       prerequisiteNumbers: [1, 99],
       externalPrerequisites: [{ number: 99, title: 'Out-of-epic', stage: 'plan', status: 'active' }],
     })
@@ -202,8 +198,8 @@ describe('DependencyGraphCanvas - external prerequisites', () => {
   })
 
   it('renders an unresolved ghost node when the prereq has no summary', async () => {
-    const a = makeIssue({ number: 1, id: 'a' })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1, 404] })
+    const a = makeIssue({ number: 1 })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1, 404] })
     renderCanvas([a, b])
     await waitFor(() => {
       const ghosts = screen.getAllByTestId('epic-dep-ghost-node')
@@ -217,8 +213,8 @@ describe('DependencyGraphCanvas - external prerequisites', () => {
 
 describe('DependencyGraphCanvas - read-only projection', () => {
   it('does not render any add/edit/delete/start controls on member nodes', async () => {
-    const ready = makeIssue({ number: 1, id: 'a', canStart: true })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1], canStart: true })
+    const ready = makeIssue({ number: 1, canStart: true })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1], canStart: true })
     renderCanvas([ready, b])
     await waitFor(() => {
       expect(screen.getAllByTestId('epic-dep-member-node')).toHaveLength(2)
@@ -235,11 +231,10 @@ describe('DependencyGraphCanvas - read-only projection', () => {
   it('does not render any controls on ghost nodes', async () => {
     const a = makeIssue({
       number: 1,
-      id: 'a',
       prerequisiteNumbers: [99],
       externalPrerequisites: [{ number: 99, title: 'Out-of-epic', stage: 'plan', status: 'active' }],
     })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getByTestId('epic-dep-ghost-node')).toBeInTheDocument()
@@ -251,8 +246,8 @@ describe('DependencyGraphCanvas - read-only projection', () => {
 
 describe('DependencyGraphCanvas - click navigation', () => {
   it('navigates to the issue route when a member node is clicked', async () => {
-    const a = makeIssue({ number: 7, id: 'a', title: 'Clickable A' })
-    const b = makeIssue({ number: 8, id: 'b', prerequisiteNumbers: [7], title: 'Clickable B' })
+    const a = makeIssue({ number: 7, title: 'Clickable A' })
+    const b = makeIssue({ number: 8, prerequisiteNumbers: [7], title: 'Clickable B' })
     const { location } = renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getAllByTestId('epic-dep-member-node')).toHaveLength(2)
@@ -271,11 +266,10 @@ describe('DependencyGraphCanvas - click navigation', () => {
   it('does not navigate when a ghost node is clicked (ghosts have no internal issue to open)', async () => {
     const a = makeIssue({
       number: 1,
-      id: 'a',
       prerequisiteNumbers: [99],
       externalPrerequisites: [{ number: 99, title: 'External', stage: 'plan', status: 'active' }],
     })
-    const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
+    const b = makeIssue({ number: 2, prerequisiteNumbers: [1] })
     const { location } = renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getByTestId('epic-dep-ghost-node')).toBeInTheDocument()

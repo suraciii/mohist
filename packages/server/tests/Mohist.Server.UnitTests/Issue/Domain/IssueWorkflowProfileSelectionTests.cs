@@ -21,7 +21,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void Create_WithoutProfile_LeavesSelectionNull()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Plain");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Plain");
 
         Assert.Null(issue.WorkflowProfileId);
     }
@@ -29,7 +29,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void State_RoundTripsExplicitSelection()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "PR issue");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "PR issue");
         issue.ReplaceWorkflowProfile("mohist/github-pr");
 
         var json = IssueStore.Serialize(issue);
@@ -51,7 +51,6 @@ public class IssueWorkflowProfileSelectionTests
         // design — additive, null-safe, no migration).
         const string legacyJson = """
             {
-              "id": "issue_legacy_1",
               "projectId": "project-1",
               "number": 1,
               "title": "Legacy",
@@ -72,7 +71,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void ReplaceWorkflowProfile_RecordsChangeEvent()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Title");
 
         issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
@@ -86,7 +85,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void ReplaceWorkflowProfile_NullClearsSelection()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Title");
         issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
 
@@ -101,7 +100,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void ReplaceWorkflowProfile_SameValueIsNoOp()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Title");
         issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
 
@@ -113,7 +112,7 @@ public class IssueWorkflowProfileSelectionTests
     [Fact]
     public void ReplaceWorkflowProfile_NormalizesWhitespace()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Title");
 
         issue.ReplaceWorkflowProfile("   ");
 

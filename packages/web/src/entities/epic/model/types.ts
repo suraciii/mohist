@@ -22,8 +22,8 @@ export function parseEpicStatus(value: string | null | undefined): EpicStatus {
 export type EpicPriority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4'
 
 export interface Epic {
-  id: string
-  number: number | null
+  projectId: string
+  number: number
   title: string
   description: string
   priority: EpicPriority
@@ -34,7 +34,6 @@ export interface Epic {
 }
 
 export interface EpicProgressIssue {
-  id: string
   number: number
   title: string
   health: IssueHealth
@@ -45,7 +44,7 @@ export interface EpicProgress {
   totalIssueCount: number
   blockedIssues: EpicProgressIssue[]
   activeIssues: EpicProgressIssue[]
-  nextIssue: { id: string; number: number; title: string } | null
+  nextIssue: { number: number; title: string } | null
   nextIssueReason: string | null
   readyToMarkDone: boolean
 }
@@ -62,7 +61,6 @@ export interface LinkedIssueExternalPrerequisite {
 }
 
 export interface LinkedIssue {
-  id: string
   number: number
   title: string
   status: IssueStatus

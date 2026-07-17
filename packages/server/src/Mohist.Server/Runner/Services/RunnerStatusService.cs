@@ -183,7 +183,7 @@ public class RunnerStatusService : IScopedService
                 work.Title,
                 work.Issue is null
                     ? null
-                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueId, work.Issue.IssueNumber)));
+                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueNumber)));
         }
         return views;
     }

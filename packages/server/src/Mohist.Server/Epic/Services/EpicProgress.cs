@@ -32,7 +32,7 @@ public static class EpicProgress
             linked.Count,
             blocked,
             active,
-            next is null ? null : new EpicNextIssueDto(next.Id, next.Number, next.Title),
+            next is null ? null : new EpicNextIssueDto(next.Number, next.Title),
             nextIssueReason,
             IsReadyToComplete(linked));
     }
@@ -122,7 +122,7 @@ public static class EpicProgress
     }
 
     private static EpicProgressIssueDto ToProgressIssue(LinkedIssueDto i) =>
-        new(i.Id, i.Number, i.Title, i.Health);
+        new(i.Number, i.Title, i.Health);
 
     private static int PriorityRank(string? priority) => priority switch
     {

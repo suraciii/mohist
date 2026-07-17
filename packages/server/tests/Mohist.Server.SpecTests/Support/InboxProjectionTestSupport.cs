@@ -29,6 +29,8 @@ namespace Mohist.Server.SpecTests.Support;
 /// </summary>
 internal static class InboxProjectionTestSupport
 {
+    public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
+
     public static InboxProjectionHandler CreateHandler(TestDatabase database) =>
         CreateHandler(database, new NoopEventPublisher());
 
@@ -43,27 +45,38 @@ internal static class InboxProjectionTestSupport
             scopeFactory: new InboxScopeFactory(database, eventPublisher, configureServices),
             log: NullLogger<InboxProjectionHandler>.Instance);
 
-    public static CloudEvent BuildIssueEvent(string type, string projectId, string issueId, int issueNumber, string eventId) =>
+    public static CloudEvent BuildIssueEvent(string type, string projectId, int issueNumber, string eventId) =>
         new(
             id: eventId,
-            source: new Uri($"/mohist/issues/{issueId}", UriKind.Relative),
+            source: new Uri($"/mohist/projects/{projectId}/issues/{issueNumber}", UriKind.Relative),
             type: type,
             time: TestTime.UtcNow,
             data: null,
-            extensions: new Dictionary<string, string>
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["projectid"] = projectId,
-                ["issueid"] = issueId,
-                ["issueno"] = issueNumber.ToString(),
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
             });
 
-    public static CloudEvent BuildWorkflowEvent(string type, string workflowRunId, string eventId) =>
+    public static CloudEvent BuildWorkflowEvent(
+        string type,
+        string workflowRunId,
+        string eventId,
+        IReadOnlyDictionary<string, string>? extensions = null,
+        string projectId = "proj_a",
+        int issueNumber = 1) =>
         new(
             id: eventId,
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: type,
             time: TestTime.UtcNow,
-            data: null);
+            data: null,
+            extensions: extensions ?? new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+            });
 
     public static async Task<List<InboxItemView>> GetInboxAsync(TestDatabase database, string projectId)
     {
@@ -78,7 +91,6 @@ internal static class InboxProjectionTestSupport
             {
                 Id = r.Id,
                 ProjectId = r.ProjectId,
-                IssueId = r.IssueId,
                 IssueNumber = r.IssueNumber,
                 IssueTitle = r.IssueTitle,
                 NotificationKind = r.NotificationKind,
@@ -94,7 +106,6 @@ internal static class InboxProjectionTestSupport
     public static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId,
-        string issueId,
         int issueNumber,
         string title)
     {
@@ -102,7 +113,6 @@ internal static class InboxProjectionTestSupport
 
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = title,
@@ -112,7 +122,8 @@ internal static class InboxProjectionTestSupport
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = issueNumber,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -165,10 +176,9 @@ internal static class InboxProjectionTestSupport
         TestDatabase database,
         string workflowRunId,
         string? projectId,
-        string? issueId,
         int? issueNumber)
     {
-        var run = BuildWorkflowRun(workflowRunId, projectId, issueId, issueNumber);
+        var run = BuildWorkflowRun(workflowRunId, projectId, issueNumber);
         var json = Mohist.Server.Infrastructure.JSON.Serialize(run);
         await using var db = database.CreateDbContext();
         db.WorkflowRuns.Add(new WorkflowRunRow
@@ -182,12 +192,10 @@ internal static class InboxProjectionTestSupport
     public static WorkflowRun BuildWorkflowRun(
         string workflowRunId,
         string? projectId,
-        string? issueId,
         int? issueNumber)
     {
         var annotations = new Dictionary<string, string>(StringComparer.Ordinal);
         if (projectId is not null) annotations["projectId"] = projectId;
-        if (issueId is not null) annotations["issueId"] = issueId;
         if (issueNumber is not null) annotations["issueNumber"] = issueNumber.Value.ToString();
 
         return new WorkflowRun
@@ -252,9 +260,9 @@ internal static class InboxProjectionTestSupport
         public Task AppendAsync(MohistDbContext db, CloudEvent evt, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
-        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
-        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
@@ -340,10 +348,10 @@ internal static class InboxProjectionTestSupport
         public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
-        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
-        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
         public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>

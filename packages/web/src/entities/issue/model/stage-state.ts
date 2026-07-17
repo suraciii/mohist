@@ -89,7 +89,6 @@ export interface StageStateRead {
 }
 
 export interface IssueStageStateResponse {
-  issueId: string
   issueNumber: number
   stages: StageStateRead[]
   drift?: BaseDriftInfo | null

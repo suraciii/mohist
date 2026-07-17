@@ -33,7 +33,9 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+
+    internal string GrainKeyForTest { get; set; } = string.Empty;
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -64,8 +66,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     Task IWorkflowGrainContext.ReleaseCurrentStageLocks(string reason) =>
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
     string IWorkflowGrainContext.GetProjectId() => GetProjectId();
-    string? IWorkflowGrainContext.GetIssueId() => GetIssueId();
-    string? IWorkflowGrainContext.GetIssueNumber() => GetIssueNumber();
+    int? IWorkflowGrainContext.GetIssueNumber() => GetIssueNumber();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -96,20 +97,74 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
-        if (_run is null)
+        RejectIfRunReloadRequired();
+        await EnsureCreatedRunAsync(input);
+        var events = _run!.Start(Now());
+
+        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
+        await CommitAsync(events);
+    }
+
+    public async Task EnsureStartedAsync(WorkflowIssueContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RejectIfRunReloadRequired();
+        if (_run is not null)
         {
-            var metadata = input?.Metadata;
-            var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
-            var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
-            var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
-            _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata ?? BuildRunMetadata(null));
-            _run.Workspace = input?.Workspace;
+            await RefreshIssueContextAsync(context);
+            return;
         }
 
-        var events = _run.Start(Now());
-
-        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
+        await EnsureCreatedRunAsync(context);
+        var events = _run!.Start(Now());
         await CommitAsync(events);
+    }
+
+    public async Task RefreshIssueContextAsync(WorkflowIssueContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RejectIfRunReloadRequired();
+        if (_run is null || _run.Status.IsTerminal()) return;
+        RequireIssueContext(context);
+        if (WorkflowRunLineage.ContextEquals(_run, context.ProjectId, context.IssueNumber, context.EpicNumber)) return;
+        WorkflowRunLineage.ApplyContext(_run, context.ProjectId, context.IssueNumber, context.EpicNumber);
+        await SaveRunAsync();
+    }
+
+    private void RequireIssueContext(WorkflowIssueContext context)
+    {
+        var expectedProjectId = GetProjectId();
+        var expectedIssueNumber = GetIssueNumber();
+        if (!string.Equals(expectedProjectId, context.ProjectId, StringComparison.Ordinal)
+            || expectedIssueNumber != context.IssueNumber)
+            throw new InvalidOperationException(
+                $"Workflow '{GrainKey}' belongs to issue '{expectedProjectId}#{expectedIssueNumber}', not '{context.ProjectId}#{context.IssueNumber}'.");
+    }
+
+    private async Task EnsureCreatedRunAsync(WorkflowStartInput? input)
+    {
+        if (_run is not null) return;
+        var metadata = input?.Metadata ?? BuildRunMetadata(input);
+        RequireProjectOwnership(metadata);
+        var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
+        var issueNumber = metadata?.Annotations?.GetValueOrDefault("issueNumber") is { } rawNumber
+            && int.TryParse(rawNumber, out var parsedNumber)
+            ? parsedNumber
+            : (int?)null;
+        var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueNumber);
+        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        _run.Workspace = input?.Workspace;
+    }
+
+    private async Task EnsureCreatedRunAsync(WorkflowIssueContext context)
+    {
+        var metadata = new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: Now(),
+            Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
+        var structure = await _profileManager.LoadStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
+        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 
     public async Task ResumeAsync()
@@ -132,7 +187,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         EnsureRun();
 
-        if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
         var stopEvents = _run.Stop();
@@ -434,7 +489,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
         if (_runReloadRequired)
-            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
     }
 
     // For entry points that return a result (not throw) when no run exists, a
@@ -444,10 +499,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private void RejectIfRunReloadRequired()
     {
         if (_runReloadRequired)
-            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
     }
 
-    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)
+    private async Task CommitAsync(
+        IReadOnlyList<WorkflowEvent> events,
+        string? reason = null,
+        CancellationToken ct = default)
     {
         if (_run is not null)
         {
@@ -489,16 +547,27 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     internal string GetProjectId() =>
         _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
-    internal string? GetIssueId() =>
-        _run?.Metadata?.Annotations?.TryGetValue("issueId", out var v) == true ? v : null;
-
-    internal string? GetIssueNumber() =>
-        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true ? v : null;
+    internal int? GetIssueNumber() =>
+        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true
+            && int.TryParse(v, out var number)
+            && number > 0
+            ? number
+            : null;
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
         if (input is null) return null;
         return new WorkflowRunMetadata(input.Name, Now(), input.Labels, input.Annotations);
+    }
+
+    private void RequireProjectOwnership(WorkflowRunMetadata? metadata)
+    {
+        if (metadata?.Annotations?.TryGetValue("projectId", out var projectId) == true
+            && !string.IsNullOrWhiteSpace(projectId))
+            return;
+
+        throw new InvalidOperationException(
+            $"Workflow '{GrainKey}' cannot start without the required projectId annotation.");
     }
 
     private async Task ClearStoppedRunStaleApprovalGateAsync(CancellationToken ct)
@@ -521,9 +590,16 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            MarkRunReloadRequired();
             _log.LogWarning(ex,
                 "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
                 GrainKey);
+            DeactivateOnIdle();
+            throw;
+        }
+        catch
+        {
+            MarkRunReloadRequired();
             DeactivateOnIdle();
             throw;
         }

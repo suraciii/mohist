@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -47,7 +49,7 @@ public class IssueFeedbackApiSpecs
     [Fact]
     public async Task CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback()
     {
-        var (project, issueNumber, issueId, wrId) = await SeedAwaitingApprovalIssueAsync();
+        var (project, issueNumber, issueKey, wrId) = await SeedAwaitingApprovalIssueAsync();
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
@@ -414,7 +416,7 @@ public class IssueFeedbackApiSpecs
     [Fact]
     public async Task StageState_IncludesFeedbackScopedToStage()
     {
-        var (project, issueNumber, issueId, wrId) = await SeedAwaitingApprovalIssueAsync();
+        var (project, issueNumber, issueKey, wrId) = await SeedAwaitingApprovalIssueAsync();
         var planFeedbackId = $"fb_{Guid.NewGuid():N}";
 
         var run = await LoadWorkflowRunAsync(wrId);
@@ -434,7 +436,7 @@ public class IssueFeedbackApiSpecs
             Status: ApprovalFeedbackStatus.Open,
             CreatedAt: TestTime.UtcNow.AddMinutes(-1)));
         await SaveWorkflowRunAsync(wrId, run);
-        await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
+        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
         var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
@@ -452,7 +454,7 @@ public class IssueFeedbackApiSpecs
     [Fact]
     public async Task StageState_DistinguishesOpenAndResolvedFeedback()
     {
-        var (project, issueNumber, issueId, wrId) = await SeedAwaitingApprovalIssueAsync();
+        var (project, issueNumber, issueKey, wrId) = await SeedAwaitingApprovalIssueAsync();
         var openId = $"fb_{Guid.NewGuid():N}";
         var resolvedId = $"fb_{Guid.NewGuid():N}";
 
@@ -476,7 +478,7 @@ public class IssueFeedbackApiSpecs
             ResolvedAt: TestTime.UtcNow.AddMinutes(-1),
             ResolutionSummary: "Done"));
         await SaveWorkflowRunAsync(wrId, run);
-        await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
+        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
         var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
@@ -501,8 +503,8 @@ public class IssueFeedbackApiSpecs
     [Fact]
     public async Task StageState_WithoutFeedback_OmitsOrEmptyFeedbackArray()
     {
-        var (project, issueNumber, issueId, _) = await SeedAwaitingApprovalIssueAsync();
-        await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
+        var (project, issueNumber, issueKey, _) = await SeedAwaitingApprovalIssueAsync();
+        await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
         var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
@@ -513,26 +515,26 @@ public class IssueFeedbackApiSpecs
             Assert.Empty(planStage.Feedback);
     }
 
-    private async Task<(ProjectInfo Project, int IssueNumber, string IssueId, string WorkflowRunId)>
+    private async Task<(ProjectInfo Project, int IssueNumber, string IssueKey, string WorkflowRunId)>
         SeedAwaitingApprovalIssueAsync()
     {
         var project = await CreateProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueAsync(project.Id, "Feedback API test");
+        var (issueKey, issueNumber) = await CreateIssueAsync(project.Id, "Feedback API test");
         var wrId = $"wr_{Guid.NewGuid():N}";
-        await SeedWorkflowRunAsync(wrId, project.Id, issueId, issueNumber, stage: "plan", awaitingApproval: true);
+        await SeedWorkflowRunAsync(wrId, project.Id, issueNumber, stage: "plan", awaitingApproval: true);
         await AttachWorkflowRunToIssueAsync(project.Id, issueNumber, wrId);
-        return (project, issueNumber, issueId, wrId);
+        return (project, issueNumber, issueKey, wrId);
     }
 
-    private async Task<(ProjectInfo Project, int IssueNumber, string IssueId, string WorkflowRunId)>
+    private async Task<(ProjectInfo Project, int IssueNumber, string IssueKey, string WorkflowRunId)>
         SeedNonAwaitingApprovalIssueAsync()
     {
         var project = await CreateProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueAsync(project.Id, "Non-approval feedback test");
+        var (issueKey, issueNumber) = await CreateIssueAsync(project.Id, "Non-approval feedback test");
         var wrId = $"wr_{Guid.NewGuid():N}";
-        await SeedWorkflowRunAsync(wrId, project.Id, issueId, issueNumber, stage: "plan", awaitingApproval: false);
+        await SeedWorkflowRunAsync(wrId, project.Id, issueNumber, stage: "plan", awaitingApproval: false);
         await AttachWorkflowRunToIssueAsync(project.Id, issueNumber, wrId);
-        return (project, issueNumber, issueId, wrId);
+        return (project, issueNumber, issueKey, wrId);
     }
 
     private async Task<ProjectInfo> CreateProjectAsync()
@@ -542,13 +544,13 @@ public class IssueFeedbackApiSpecs
         return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
     }
 
-    private async Task<(string IssueId, int Number)> CreateIssueAsync(string projectId, string title)
+    private async Task<(string IssueKey, int Number)> CreateIssueAsync(string projectId, string title)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, null, null, null, null, issueId);
-        return (issueId, number);
+        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
+        await grain.CreateAsync(projectId, number, title, null, null, null, isDraft: false);
+        return (issueKey, number);
     }
 
     private async Task AttachWorkflowRunToIssueAsync(string projectId, int issueNumber, string workflowRunId)
@@ -578,7 +580,6 @@ public class IssueFeedbackApiSpecs
     private async Task SeedWorkflowRunAsync(
         string wrId,
         string projectId,
-        string issueId,
         int issueNumber,
         string stage,
         bool awaitingApproval)
@@ -614,7 +615,6 @@ public class IssueFeedbackApiSpecs
                 annotations = new Dictionary<string, string>
                 {
                     ["projectId"] = projectId,
-                    ["issueId"] = issueId,
                     ["issueNumber"] = issueNumber.ToString(),
                 },
             },
@@ -709,7 +709,6 @@ public class IssueFeedbackApiSpecs
 
     private sealed record IssueDetailDto(
         int Number,
-        string Id,
         string Title,
         string Status,
         FeedbackDto[] Feedback);

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
@@ -218,9 +219,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             $"/api/projects/{project.Id}/issues",
             new { title = "Started issue", projectId = project.Id, workflowProfileId = "mohist/github-pr", isDraft = false });
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
             project.Id, "wfp-patch-locked", RepositoryBaseBranch: "main"));
+        await DispatchEventsAsync();
         _startedProjectId = project.Id;
         _startedIssueNumber = issue.Number;
 
@@ -248,9 +250,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             $"/api/projects/{project.Id}/issues",
             new { title = "Variables on started", projectId = project.Id, isDraft = false });
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await grain.StartWorkAsync(new WorkflowProjectContext(
             project.Id, "wfp-vars-started", RepositoryBaseBranch: "main"));
+        await DispatchEventsAsync();
         _startedProjectId = project.Id;
         _startedIssueNumber = issue.Number;
 
@@ -435,9 +438,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                 isDraft = false,
             });
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
             project.Id, "wfp-start-pr", RepositoryBaseBranch: "main"));
+        await DispatchEventsAsync();
         _startedProjectId = project.Id;
         _startedIssueNumber = issue.Number;
 
@@ -473,9 +477,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                 isDraft = false,
             });
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
             project.Id, "wfp-start-default", RepositoryBaseBranch: "main"));
+        await DispatchEventsAsync();
         _startedProjectId = project.Id;
         _startedIssueNumber = issue.Number;
 
@@ -557,9 +562,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             new { yaml = customYaml });
         Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
             project.Id, "wfp-start-override", RepositoryBaseBranch: "main"));
+        await DispatchEventsAsync();
         _startedProjectId = project.Id;
         _startedIssueNumber = issue.Number;
 
@@ -808,12 +814,15 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var profileData = (await profileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal(JsonValueKind.Null, profileData.GetProperty("profileId").ValueKind);
 
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.StartWorkAsync(new WorkflowProjectContext(
                 project.Id, "wfp-existing-all-disabled", RepositoryBaseBranch: "main")));
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    private Task DispatchEventsAsync() =>
+        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]

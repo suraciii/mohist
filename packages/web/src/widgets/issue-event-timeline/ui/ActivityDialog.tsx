@@ -7,7 +7,6 @@ import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelin
 
 interface ActivityDialogProps {
   issueNumber: number
-  issueId: string | null | undefined
   workflowStatus?: string | null
   triggerLabel?: string
   triggerClassName?: string
@@ -17,7 +16,6 @@ interface ActivityDialogProps {
 
 export function ActivityDialog({
   issueNumber,
-  issueId,
   workflowStatus,
   triggerLabel = 'Activity',
   triggerClassName,
@@ -63,7 +61,6 @@ export function ActivityDialog({
             {open && (
               <TimelinePanel
                 issueNumber={issueNumber}
-                issueId={issueId}
                 workflowStatus={workflowStatus}
                 enabled={open}
                 showHeader={false}

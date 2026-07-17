@@ -13,40 +13,37 @@ let _issuesData: unknown[] = []
 const _addIssueHandler = vi.fn()
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
-  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request }) => {
-    const body = (await request.json()) as { issueId: string }
+  http.post('*/api/projects/:projectId/epics/:epicNumber/issues', async ({ request }) => {
+    const body = (await request.json()) as { issueNumber: number }
     _addIssueHandler(body)
-    return HttpResponse.json({ success: true, data: { epicId: 'epic-12345678', issueId: body.issueId } })
+    return HttpResponse.json({ success: true, data: { epicNumber: 123, issueNumber: body.issueNumber } })
   }),
 )
 
 const searchEpic = {
   ...epic,
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+    linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
   ],
 }
 
 const searchIssues = [
-  { id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as const, isDraft: false, canStart: false, blocker: null },
+  { number: 1, title: 'Done issue', status: 'done' as const, isDraft: false, canStart: false, blocker: null },
   {
-    id: 'issue-archived',
     number: 4,
     title: 'Archived candidate',
     status: 'backlog' as const,
     archivedAt: '2026-01-15T00:00:00Z',
   },
   {
-    id: 'issue-closed',
     number: 5,
     title: 'Closed candidate',
     status: 'done' as const,
   },
   {
-    id: 'issue-blocked',
     number: 6,
     title: 'Blocked candidate',
     status: 'backlog' as const,
@@ -54,8 +51,8 @@ const searchIssues = [
     canStart: false,
     blocker: { kind: 'waiting-for', issue: { number: 1, title: 'Done issue' } },
   },
-  { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as const, isDraft: false, canStart: false, blocker: null },
-  { id: 'issue-3', number: 3, title: 'Candidate issue', status: 'in_progress' as const, isDraft: false, canStart: true, blocker: null },
+  { number: 2, title: 'Blocked issue', status: 'in_progress' as const, isDraft: false, canStart: false, blocker: null },
+  { number: 3, title: 'Candidate issue', status: 'in_progress' as const, isDraft: false, canStart: true, blocker: null },
 ]
 
 function renderSearchPage() {
@@ -79,19 +76,19 @@ describe('EpicDetailPage searchable Add Issue', () => {
     await screen.findByTestId('epic-issue-selector-trigger')
     fireEvent.click(screen.getByTestId('epic-issue-selector-trigger'))
     const search = await screen.findByTestId('epic-issue-search')
-    expect(screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-id')))
-      .toEqual(['issue-archived', 'issue-closed', 'issue-blocked', 'issue-2', 'issue-3'])
+    expect(screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-number')))
+      .toEqual(['4', '5', '6', '2', '3'])
 
     fireEvent.change(search, { target: { value: 'archived' } })
     await waitFor(() => {
-      const visible = screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-id'))
-      expect(visible).toEqual(['issue-archived'])
+      const visible = screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-number'))
+      expect(visible).toEqual(['4'])
     })
 
     fireEvent.change(search, { target: { value: '#6' } })
     await waitFor(() => {
-      const visible = screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-id'))
-      expect(visible).toEqual(['issue-blocked'])
+      const visible = screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-number'))
+      expect(visible).toEqual(['6'])
     })
 
     fireEvent.change(search, { target: { value: 'no-match-query' } })
@@ -106,16 +103,16 @@ describe('EpicDetailPage searchable Add Issue', () => {
     await screen.findByTestId('epic-issue-search')
 
     const options = screen.getAllByTestId('epic-issue-option')
-    const findOption = (issueId: string) =>
-      options.find(node => node.getAttribute('data-issue-id') === issueId) as HTMLElement
+    const findOption = (issueNumber: number) =>
+      options.find(node => node.getAttribute('data-issue-number') === String(issueNumber)) as HTMLElement
     const unavailable = options
       .filter(node => node.getAttribute('data-unavailable') === 'true')
-      .map(node => node.getAttribute('data-issue-id'))
-    expect(unavailable).toEqual(['issue-archived', 'issue-closed', 'issue-blocked'])
+      .map(node => node.getAttribute('data-issue-number'))
+    expect(unavailable).toEqual(['4', '5', '6'])
 
-    const archived = findOption('issue-archived')
-    const closed = findOption('issue-closed')
-    const blocked = findOption('issue-blocked')
+    const archived = findOption(4)
+    const closed = findOption(5)
+    const blocked = findOption(6)
 
     expect(archived.hasAttribute('disabled')).toBe(true)
     expect(closed.hasAttribute('disabled')).toBe(true)
@@ -144,8 +141,8 @@ describe('EpicDetailPage searchable Add Issue', () => {
       linkedIssues: [],
     }
     _issuesData = [
-      { id: 'issue-archived', number: 4, title: 'Archived candidate', status: 'backlog' as const, archivedAt: '2026-01-15T00:00:00Z' },
-      { id: 'issue-closed', number: 5, title: 'Closed candidate', status: 'done' as const },
+      { number: 4, title: 'Archived candidate', status: 'backlog' as const, archivedAt: '2026-01-15T00:00:00Z' },
+      { number: 5, title: 'Closed candidate', status: 'done' as const },
     ]
 
     renderSearchPage()

@@ -31,7 +31,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(result);
         Assert.Equal(42, result!.Value.IssueNumber);
-        Assert.Equal("7", result.Value.EpicNumber);
+        Assert.Equal(7, result.Value.EpicNumber);
         Assert.Equal("owner/repo", result.Value.Repository);
         Assert.Equal("/work/agent", result.Value.WorkspacePath);
     }
@@ -45,7 +45,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(result);
         Assert.Null(result!.Value.IssueNumber);
-        Assert.Equal("7", result.Value.EpicNumber);
+        Assert.Equal(7, result.Value.EpicNumber);
         Assert.Equal("owner/repo", result.Value.Repository);
         Assert.Equal("/work", result.Value.WorkspacePath);
     }
@@ -59,7 +59,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(result);
         Assert.Null(result!.Value.IssueNumber);
-        Assert.Equal("9", result.Value.EpicNumber);
+        Assert.Equal(9, result.Value.EpicNumber);
         Assert.Null(result.Value.Repository);
         Assert.Null(result.Value.WorkspacePath);
     }
@@ -85,6 +85,18 @@ public sealed class AgentSessionContextRefsTests
     }
 
     [Fact]
+    public void TryBuild_NonPositiveEpicNumber_OmitsEpicContext()
+    {
+        var record = BuildRecord(epic: "0", repo: "owner/repo");
+
+        var result = AgentSessionContextRefs.TryBuild(record);
+
+        Assert.NotNull(result);
+        Assert.Null(result!.Value.EpicNumber);
+        Assert.Equal("owner/repo", result.Value.Repository);
+    }
+
+    [Fact]
     public void TryBuild_LabelsOnlyOnMetadata_FallbackResolvesFields()
     {
         var record = BuildRecordOnMetadata(issueNumber: "11", epic: "3", repo: "owner/metarepo", workspace: "/work/meta");
@@ -93,7 +105,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(result);
         Assert.Equal(11, result!.Value.IssueNumber);
-        Assert.Equal("3", result.Value.EpicNumber);
+        Assert.Equal(3, result.Value.EpicNumber);
         Assert.Equal("owner/metarepo", result.Value.Repository);
         Assert.Equal("/work/meta", result.Value.WorkspacePath);
     }
@@ -123,7 +135,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
-        Assert.Equal("7", dto.EpicNumber);
+        Assert.Equal(7, dto.EpicNumber);
         Assert.Equal("owner/repo", dto.Repository);
         Assert.Equal("/work/agent", dto.WorkspacePath);
     }
@@ -140,7 +152,7 @@ public sealed class AgentSessionContextRefsTests
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
-        Assert.Equal("7", dto.EpicNumber);
+        Assert.Equal(7, dto.EpicNumber);
         Assert.Equal("owner/repo", dto.Repository);
         Assert.Equal("/work/agent", dto.WorkspacePath);
     }

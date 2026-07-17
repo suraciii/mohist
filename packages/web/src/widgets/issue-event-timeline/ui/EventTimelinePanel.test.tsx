@@ -223,7 +223,6 @@ describe('EventTimelinePanel', () => {
     render(
       <EventTimelinePanel
         issueNumber={42}
-        issueId="issue-42"
         enabled={false}
         historyHook={historyHook}
       />,
@@ -237,7 +236,7 @@ describe('EventTimelinePanel', () => {
 
   it('loads history for the issue by default', async () => {
     render(
-      <EventTimelinePanel issueNumber={42} issueId="issue-42" historyHook={historyHook} />,
+      <EventTimelinePanel issueNumber={42} historyHook={historyHook} />,
     )
 
     await waitFor(() => {

@@ -22,7 +22,7 @@ public sealed record GenericAgentSessionContext(
     string AgentId,
     string AgentName,
     int? IssueNumber = null,
-    string? EpicNumber = null,
+    int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null,
     string? Title = null);
@@ -96,10 +96,10 @@ public static class GenericAgentSessionMetadata
             [AgentId] = context.AgentId,
             [AgentName] = context.AgentName,
         };
-        if (context.IssueNumber is not null)
+        if (context.IssueNumber is > 0)
             labels[IssueNumber] = context.IssueNumber.Value.ToString();
-        if (!string.IsNullOrWhiteSpace(context.EpicNumber))
-            labels[EpicNumber] = context.EpicNumber!;
+        if (context.EpicNumber is > 0)
+            labels[EpicNumber] = context.EpicNumber.Value.ToString();
         if (!string.IsNullOrWhiteSpace(context.Repository))
             labels[Repository] = context.Repository!;
         if (!string.IsNullOrWhiteSpace(context.WorkspacePath))
