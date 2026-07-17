@@ -18,6 +18,15 @@ const FULL_DESCRIPTION = [
 
 type EpicStatus = 'idle' | 'running' | 'done' | 'closed'
 
+const EPIC_NUMBER_BY_STATUS: Record<EpicStatus, number> = {
+  running: 7,
+  idle: 8,
+  done: 9,
+  closed: 10,
+}
+
+const LINKED_ROWS_EPIC_NUMBER = 11
+
 function apiResponse(data: unknown) {
   return { success: true, data }
 }
@@ -51,7 +60,7 @@ function makeEpic(status: EpicStatus, overrides: Record<string, unknown> = {}) {
   ]
 
   return {
-    number: status === 'running' ? 7 : status === 'idle' ? 8 : status === 'done' ? 9 : 10,
+    number: EPIC_NUMBER_BY_STATUS[status],
     title: LONG_TITLE,
     description: FULL_DESCRIPTION,
     priority: 'p1',
@@ -94,15 +103,15 @@ async function mockEpicApi(page: Page) {
       return route.fulfill({ json: apiResponse([]) })
     }
     if (method === 'GET' && path.startsWith(epicPath)) {
-      const id = decodeURIComponent(path.slice(epicPath.length))
-      if (id.includes('/')) {
+      const rawNumber = decodeURIComponent(path.slice(epicPath.length))
+      if (rawNumber.includes('/')) {
         return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
       }
-      if (id === 'epic-linked-rows') {
+      const epicNumber = Number(rawNumber)
+      if (epicNumber === LINKED_ROWS_EPIC_NUMBER) {
         return route.fulfill({
           json: apiResponse(makeEpic('idle', {
-            id,
-            number: 11,
+            number: LINKED_ROWS_EPIC_NUMBER,
             linkedIssues: [
               makeIssue(1, {
                 title: LONG_LINKED_ISSUE_TITLE,
@@ -120,7 +129,11 @@ async function mockEpicApi(page: Page) {
           })),
         })
       }
-      const status = id.replace('epic-', '') as EpicStatus
+      const status = (Object.entries(EPIC_NUMBER_BY_STATUS) as Array<[EpicStatus, number]>)
+        .find(([, number]) => number === epicNumber)?.[0]
+      if (!status) {
+        return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
+      }
       return route.fulfill({ json: apiResponse(makeEpic(status)) })
     }
 
@@ -198,7 +211,7 @@ test.describe('Epic detail mobile overflow', () => {
         await page.setViewportSize({ width, height: 900 })
         await mockEpicApi(page)
 
-        await page.goto(`/${project.name}/epics/epic-${status}`)
+        await page.goto(`/${project.name}/epics/${EPIC_NUMBER_BY_STATUS[status]}`)
         await expect(page.getByRole('heading', { name: LONG_TITLE })).toBeVisible()
         await expect(page.getByTestId('epic-description')).toContainText(LONG_DESCRIPTION)
 
@@ -222,7 +235,7 @@ test.describe('Epic detail mobile overflow', () => {
       await page.setViewportSize({ width, height: 900 })
       await mockEpicApi(page)
 
-      await page.goto(`/${project.name}/epics/epic-linked-rows`)
+      await page.goto(`/${project.name}/epics/${LINKED_ROWS_EPIC_NUMBER}`)
       await expect(page.getByTestId('linked-issue-title').first()).toContainText(LONG_LINKED_ISSUE_TITLE)
       await expect(page.getByText('Another issue is in progress')).toBeVisible()
 
@@ -241,7 +254,7 @@ test.describe('Epic detail summary first fold', () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await mockEpicApi(page)
 
-      await page.goto(`/${project.name}/epics/epic-running`)
+      await page.goto(`/${project.name}/epics/${EPIC_NUMBER_BY_STATUS.running}`)
       await expect(page.getByRole('heading', { name: LONG_TITLE })).toBeVisible()
       await expect(page.getByTestId('epic-description')).toContainText(LONG_DESCRIPTION)
 
