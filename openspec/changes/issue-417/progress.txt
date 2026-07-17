@@ -325,3 +325,35 @@
   nondeterministic `DeactivateOnIdle` assumption. Its test helper now forces
   activation collection on each convergence probe; the final run passed 911
   CLI + 1444 unit + 28 arch + 2829 spec + 4681 web + 1016 runner tests.
+
+## T-007 notes (run-unique Runner workspace identity and delivery)
+
+- Issue-backed workspace identity is now derived only from the dispatch
+  `workflowRunId`: both Server and Runner use
+  `<runnerRoot>/workspaces/run-<sha256(runId)>`. The Runner ignores a
+  variable-supplied workspace path and rejects a variable run ID that differs
+  from the dispatch envelope.
+- Runner bootstrap uses a deterministic sibling `.preparing` directory,
+  verifies the configured base branch and normalized `origin`, writes a
+  version-2 marker, validates it again, then publishes with same-parent
+  `rename`. A final workspace is never replaced when its marker/origin is
+  missing or mismatched; retry after a registry write failure validates the
+  published directory and rebuilds the registry entry.
+- Marker and registry identity fields are intentionally credential-free:
+  project ID, issue number, repository resource, base branch, run branch,
+  remote fingerprint, and normalizer version. The Runner normalizer mirrors
+  Server `git-remote-url/v1` vectors, including SCP-like remotes, default
+  ports, credentials, and query/fragment removal.
+- SignalR workspace queries now carry the full expected run identity. Runner
+  review, status, cleanup, and removal paths validate path containment,
+  symlink-free managed parents, marker, and actual origin before Git or disk
+  mutation. The registry remains versioned and generic legacy entries retain
+  the existing cleanup shape.
+- Built-in Issue delivery rejects missing authoritative base branches rather
+  than falling back to Project defaults or `main`. The Server's
+  `project-integration` lock uses a length-prefixed typed key containing
+  Project ID, repository resource, and resource name; generic/custom locks
+  retain Project/resource scope.
+- Verification after implementation: Runner typecheck + test typecheck and
+  tests pass (1027 tests); Server UnitTests pass (1445) and Server SpecTests
+  pass (2829). Server build passes with warnings-as-errors.

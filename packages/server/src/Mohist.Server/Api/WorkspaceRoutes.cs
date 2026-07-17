@@ -34,16 +34,18 @@ public static class WorkspaceRoutes
                     runnerWorkspace,
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (unavailable is not null) return ApiResults.Ok(unavailable);
 
                 var result = await runnerWorkspace.GetDiffAsync(
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (result is null)
                     return ApiResults.Ok(Unavailable("git_error", "Runner did not return diff data"));
@@ -89,16 +91,18 @@ public static class WorkspaceRoutes
                     runnerWorkspace,
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (unavailable is not null) return ApiResults.Ok(unavailable);
 
                 var result = await runnerWorkspace.GetCommitsAsync(
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (result is null)
                     return ApiResults.Ok(Unavailable("git_error", "Runner did not return commit data"));
@@ -143,16 +147,18 @@ public static class WorkspaceRoutes
                     runnerWorkspace,
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (unavailable is not null) return ApiResults.Ok(ToCommitDiffUnavailable(unavailable, hash));
 
                 var result = await runnerWorkspace.GetCommitDiffAsync(
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     hash,
                     context.RequestAborted);
                 if (result is null)
@@ -185,8 +191,9 @@ public static class WorkspaceRoutes
                     runnerWorkspace,
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (unavailable is not null)
                     return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = unavailable.Reason });
@@ -194,8 +201,9 @@ public static class WorkspaceRoutes
                 var result = await runnerWorkspace.GetWorkspaceStatusAsync(
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 return ApiResults.Ok(result);
             }
@@ -224,8 +232,9 @@ public static class WorkspaceRoutes
                     runnerWorkspace,
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     context.RequestAborted);
                 if (unavailable is not null)
                     return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = unavailable.Reason });
@@ -233,8 +242,9 @@ public static class WorkspaceRoutes
                 var result = await runnerWorkspace.GetFileContentAsync(
                     pid,
                     issue.WorkflowRunId!,
+                    issue.Number,
+                    prepared.Repository!,
                     prepared.Workspace!,
-                    prepared.BaseBranch!,
                     path,
                     context.RequestAborted);
                 return ApiResults.Ok(new { @base = result.Base, head = result.Head, reason = result.Reason });
@@ -278,10 +288,15 @@ public static class WorkspaceRoutes
             var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
                 return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
+            var repository = await querier.GetRepositoryContextAsync(issue.WorkflowRunId);
+            if (repository is null)
+                return ApiResults.Conflict("No workflow repository context to clean", "missing_repository_context");
 
             var removal = await runnerWorkspace.RemoveWorkspaceAsync(
                 pid,
                 issue.WorkflowRunId,
+                issue.Number,
+                repository,
                 workspace,
                 context.RequestAborted);
             if (removal.Status == "failed")
@@ -309,19 +324,19 @@ public static class WorkspaceRoutes
         if (repository is null)
             return PreparedWorkspaceQuery.UnavailableResult(Unavailable("missing_repository_context", "The workflow repository context is not available"));
 
-        var baseBranch = repository.BaseBranch;
-        return PreparedWorkspaceQuery.Ready(workspace, baseBranch);
+        return PreparedWorkspaceQuery.Ready(workspace, repository);
     }
 
     private static async Task<WorkspaceUnavailable?> EnsureRunnerWorkspaceAvailableAsync(
         IRunnerWorkspaceClient runnerWorkspace,
         string projectId,
         string workflowRunId,
+        int issueNumber,
+        WorkflowRepositoryContext repository,
         WorkspaceIdentity workspace,
-        string baseBranch,
         CancellationToken ct)
     {
-        var status = await runnerWorkspace.GetWorkspaceStatusAsync(projectId, workflowRunId, workspace, baseBranch, ct);
+        var status = await runnerWorkspace.GetWorkspaceStatusAsync(projectId, workflowRunId, issueNumber, repository, workspace, ct);
         if (status.Exists && !string.Equals(status.Reason, "branch_missing", StringComparison.Ordinal))
             return null;
 
@@ -388,9 +403,9 @@ public static class WorkspaceRoutes
         },
     };
 
-    private sealed record PreparedWorkspaceQuery(WorkspaceIdentity? Workspace, string? BaseBranch, WorkspaceUnavailable? Unavailable)
+    private sealed record PreparedWorkspaceQuery(WorkspaceIdentity? Workspace, WorkflowRepositoryContext? Repository, WorkspaceUnavailable? Unavailable)
     {
-        public static PreparedWorkspaceQuery Ready(WorkspaceIdentity workspace, string baseBranch) => new(workspace, baseBranch, null);
+        public static PreparedWorkspaceQuery Ready(WorkspaceIdentity workspace, WorkflowRepositoryContext repository) => new(workspace, repository, null);
         public static PreparedWorkspaceQuery UnavailableResult(WorkspaceUnavailable unavailable) => new(null, null, unavailable);
     }
 }

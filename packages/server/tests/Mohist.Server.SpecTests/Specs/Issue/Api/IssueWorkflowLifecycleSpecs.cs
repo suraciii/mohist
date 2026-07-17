@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
@@ -196,7 +197,7 @@ public class IssueWorkflowLifecycleSpecs
         Assert.NotNull(run);
         Assert.NotNull(run!.Workspace);
         Assert.Equal(
-            Path.Combine(_fixture.RunnerRoot, projectName, "workspaces", $"issue-{issueNumber}"),
+            MohistWorkspaceLayout.WorkflowRunWorkspacePath(_fixture.RunnerRoot, wrId),
             run.Workspace.Path);
         Assert.Equal($"mohist/run-{wrId}", run.Workspace.Branch);
         Assert.Equal($"openspec/changes/issue-{issueNumber}", run.Workspace.ChangeDir);

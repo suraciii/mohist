@@ -9,6 +9,7 @@ import { classifyGhFailure } from "./github-pr-classify.js"
 import { waitChecksAndMergePr } from "./github-pr-merge.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MergeGitHubPrOutput } from "./github-pr-types.js"
+import { resolveDeliveryBaseBranch } from "./delivery-context.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:merge-github-pr"
@@ -109,7 +110,15 @@ async function resolvePrNumberForMerge(
   if (explicit !== undefined) return { kind: "ok", prNumber: explicit, prUrl: null }
 
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"])
-  const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  const target = resolveDeliveryBaseBranch(context)
+  if (!target) {
+    return {
+      kind: "failure",
+      errorCode: "config-error",
+      message: "merge-github-pr requires the authoritative repository base branch.",
+      output: "merge-github-pr requires the authoritative repository base branch.",
+    }
+  }
   if (!source) {
     return {
       kind: "failure",

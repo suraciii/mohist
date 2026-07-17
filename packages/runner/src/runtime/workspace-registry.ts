@@ -28,6 +28,12 @@ export interface WorkspaceRegistryEntry {
   issueNumber: number
   workflowRunId: string
   workspacePath: string
+  projectId?: string | null
+  repositoryName?: string | null
+  baseBranch?: string | null
+  runBranch?: string | null
+  remoteFingerprint?: string | null
+  remoteIdentityVersion?: string | null
   phase: WorkspaceRegistryPhase
   materializedAt: string
   terminalAt: string | null
@@ -36,7 +42,7 @@ export interface WorkspaceRegistryEntry {
 // Wire shape. Persistence is intentionally versioned so a future schema
 // change can be detected and handled without silently corrupting state.
 interface WorkspaceRegistryFile {
-  version: 1
+  version: 1 | 2
   entries: Record<string, WorkspaceRegistryEntry>
 }
 
@@ -44,6 +50,12 @@ export interface RegisterInput {
   issueNumber: number
   workflowRunId: string
   workspacePath: string
+  projectId?: string | null
+  repositoryName?: string | null
+  baseBranch?: string | null
+  runBranch?: string | null
+  remoteFingerprint?: string | null
+  remoteIdentityVersion?: string | null
 }
 
 export interface WorkspaceRegistryOptions {
@@ -119,6 +131,12 @@ export class WorkspaceRegistry {
       issueNumber: input.issueNumber,
       workflowRunId: input.workflowRunId,
       workspacePath: resolve(input.workspacePath),
+      projectId: input.projectId ?? null,
+      repositoryName: input.repositoryName ?? null,
+      baseBranch: input.baseBranch ?? null,
+      runBranch: input.runBranch ?? null,
+      remoteFingerprint: input.remoteFingerprint ?? null,
+      remoteIdentityVersion: input.remoteIdentityVersion ?? null,
       phase: "active",
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
@@ -240,7 +258,7 @@ export class WorkspaceRegistry {
       return
     }
     const file = parsed as Partial<WorkspaceRegistryFile> | null
-    if (!file || typeof file !== "object" || file.version !== 1 || !file.entries || typeof file.entries !== "object") {
+    if (!file || typeof file !== "object" || (file.version !== 1 && file.version !== 2) || !file.entries || typeof file.entries !== "object") {
       this.loaded = true
       return
     }
@@ -255,6 +273,12 @@ export class WorkspaceRegistry {
         issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,
         workflowRunId: entry.workflowRunId,
         workspacePath: resolve(entry.workspacePath),
+        projectId: typeof entry.projectId === "string" ? entry.projectId : null,
+        repositoryName: typeof entry.repositoryName === "string" ? entry.repositoryName : null,
+        baseBranch: typeof entry.baseBranch === "string" ? entry.baseBranch : null,
+        runBranch: typeof entry.runBranch === "string" ? entry.runBranch : null,
+        remoteFingerprint: typeof entry.remoteFingerprint === "string" ? entry.remoteFingerprint : null,
+        remoteIdentityVersion: typeof entry.remoteIdentityVersion === "string" ? entry.remoteIdentityVersion : null,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
         terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,
@@ -271,7 +295,7 @@ export class WorkspaceRegistry {
     await mkdir(dir, { recursive: true })
     const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`
     const file: WorkspaceRegistryFile = {
-      version: 1,
+      version: 2,
       entries: Object.fromEntries(this.entries),
     }
     await writeFile(tempPath, JSON.stringify(file, null, 2))

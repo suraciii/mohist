@@ -31,17 +31,24 @@ describe("WorkspaceRegistry", () => {
       issueNumber: 42,
       workflowRunId: "wr-123",
       workspacePath: join(root, "mohist-local/workspaces/issue-42"),
+      projectId: "project-1",
+      repositoryName: "web",
+      baseBranch: "develop",
+      runBranch: "mohist/run-wr-123",
+      remoteFingerprint: "fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
     })
 
     expect(entry.issueNumber).toBe(42)
     expect(entry.workflowRunId).toBe("wr-123")
     expect(entry.workspacePath).toBe(join(root, "mohist-local/workspaces/issue-42"))
+    expect(entry).toMatchObject({ projectId: "project-1", repositoryName: "web", baseBranch: "develop", runBranch: "mohist/run-wr-123", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1" })
     expect(entry.phase).toBe("active")
     expect(entry.materializedAt).toBe(now.toISOString())
     expect(entry.terminalAt).toBeNull()
 
     const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.entries["wr-123"]).toMatchObject({
       issueNumber: 42,
       workflowRunId: "wr-123",
@@ -113,7 +120,7 @@ describe("WorkspaceRegistry", () => {
     })
 
     const persisted = JSON.parse(await readFile(filePath, "utf8"))
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.entries["wr-1"]).toMatchObject({ phase: "active" })
   })
 

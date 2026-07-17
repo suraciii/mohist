@@ -3,6 +3,7 @@ import { booleanInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
+import { resolveDeliveryBaseBranch } from "./delivery-context.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -40,11 +41,8 @@ function networkOptions(context: ActionContext): GitOptions | undefined {
 
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
-  const target = stringInput(context.with, "target")
-    ?? stringAt(context.variables, ["repository", "baseBranch"])
-    ?? stringAt(context.variables, ["project", "defaultBranch"])
-    ?? stringAt(context.variables, ["project", "baseBranch"])
-    ?? "main"
+  const target = resolveDeliveryBaseBranch(context)
+  if (!target) return { status: "failure", message: "Push requires the authoritative repository base branch" }
   const remote = stringInput(context.with, "remote") ?? "origin"
   const force = booleanInput(context.with, "force") === true
   const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true

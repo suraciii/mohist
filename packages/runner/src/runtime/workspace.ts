@@ -1,12 +1,14 @@
-import { readdir } from "node:fs/promises"
+import { lstat, readdir, rename } from "node:fs/promises"
+import { createHash } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { isAbsolute, join, relative, resolve } from "node:path"
 import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
+import { fingerprintGitRemote } from "./git-remote-identity.js"
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -96,44 +98,40 @@ export class WorkspaceManager {
   async prepare(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const gitUrl = stringAt(variables, ["repository", "gitUrl"])
-    const baseBranch = stringAt(variables, ["repository", "baseBranch"]) ?? "main"
+    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
     const issueNumber = numberAt(variables, ["issue", "number"])
-
-    if (!gitUrl || issueNumber === undefined) {
-      throw new Error(`Workspace requires repository.gitUrl and issue.number in variables. Got gitUrl=${gitUrl ?? "null"}, issueNumber=${issueNumber ?? "undefined"}`)
+    if (!gitUrl || !baseBranch || issueNumber === undefined) {
+      throw new Error(`Workspace requires repository.gitUrl, repository.baseBranch, and issue.number. Got gitUrl=${gitUrl ?? "null"}, baseBranch=${baseBranch ?? "null"}, issueNumber=${issueNumber ?? "undefined"}`)
     }
 
-    const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
-    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
-    const runBranch = runBranchName(runId)
+    const runId = work.workflowRunId
+    const expected = workspaceIdentity(work, variables, runId, gitUrl, baseBranch, issueNumber)
+    const runBranch = expected.runBranch
     const changeDir = stringAt(variables, ["openspecChangeDir"])
-    const marker = issueWorkspaceMarker(variables)
+    const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
+    await assertManagedWorkspacePath(this.runnerRoot, workspacePath, false)
 
-    const suppliedPath = stringAt(variables, ["workspace", "path"])
-    const workspacePath = suppliedPath
-      ? resolve(suppliedPath)
-      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber)
-
-    if (await this.hasRunBranch(workspacePath, runBranch, signal, log)) {
-      // Re-entry: this run already has its branch here. Switch back to it,
-      // recovering from any in-flight rebase/merge that crashed mid-op.
+    if (await pathExists(workspacePath)) {
+      await validateWorkspaceIdentity(workspacePath, expected, signal, log, this.runnerRoot)
+      if (!await this.hasRunBranch(workspacePath, runBranch, signal, log)) {
+        throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`, workspacePath, expected)
+      }
       await this.reenterRunBranch(workspacePath, runBranch, signal, log)
     } else {
-      // Fresh run at this path: a pristine clone + a new run branch off
-      // the latest base. Any leftover directory (a previous run's) is
-      // replaced so the new run starts clean.
-      await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
-      await this.cloneFresh(workspacePath, gitUrl, signal, log)
-      await this.createRunBranch(workspacePath, baseBranch, runBranch, signal, log)
+      await this.bootstrap(workspacePath, gitUrl, baseBranch, expected, signal, log)
     }
 
-    await ensureMarkerExcluded(workspacePath)
-    await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
     if (this.registry) {
       await this.registry.register({
-        issueNumber: marker.issueNumber,
-        workflowRunId: runId ?? "",
+        issueNumber: expected.issueNumber,
+        workflowRunId: expected.workflowRunId,
         workspacePath,
+        projectId: expected.projectId,
+        repositoryName: expected.repositoryName,
+        baseBranch: expected.baseBranch,
+        runBranch: expected.runBranch,
+        remoteFingerprint: expected.remoteFingerprint,
+        remoteIdentityVersion: expected.remoteIdentityVersion,
       })
     }
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
@@ -142,16 +140,19 @@ export class WorkspaceManager {
   async verify(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ["issue", "number"])
-    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
-    const runBranch = runBranchName(runId)
-    const marker = issueWorkspaceMarker(variables)
+    const runId = work.workflowRunId
+    const gitUrl = stringAt(variables, ["repository", "gitUrl"])
+    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
+    if (!gitUrl || !baseBranch || issueNumber === undefined) {
+      throw new WorkspaceIdentityMismatchError("Issue workspace identity is incomplete")
+    }
+    const expected = workspaceIdentity(work, variables, runId, gitUrl, baseBranch, issueNumber)
+    const runBranch = expected.runBranch
     const changeDir = stringAt(variables, ["openspecChangeDir"])
 
-    const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
-    const suppliedPath = stringAt(variables, ["workspace", "path"])
-    const workspacePath = suppliedPath
-      ? resolve(suppliedPath)
-      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber ?? 0)
+    const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
+    await assertManagedWorkspacePath(this.runnerRoot, workspacePath, true)
+    await validateWorkspaceIdentity(workspacePath, expected, signal, log, this.runnerRoot)
 
     // Health gate: every dispatch passes through verify(), so this is
     // the per-task entry point. A residual rebase / merge / cherry-pick
@@ -170,26 +171,10 @@ export class WorkspaceManager {
       )
     }
 
-    const markerOnDisk = await readMarker(workspacePath)
-    if (markerOnDisk === null) {
-      throw new WorkspaceCorruptError(
-        `Workflow workspace ${workspacePath} has no marker at .mohist/workspace.json; the bound workspace identity cannot be verified.`,
-        workspacePath,
-      )
-    }
-    if (!markerMatches(markerOnDisk, marker)) {
-      throw new WorkspaceIdentityMismatchError(
-        `Workflow workspace ${workspacePath} marker is bound to a different run (expected ${formatIdentity(marker)}, found ${formatIdentity(markerOnDisk)}).`,
-        workspacePath,
-        marker,
-        markerOnDisk,
-      )
-    }
-
     await verifyWorkspaceBranch(workspacePath, runBranch, signal, log)
 
     if (this.registry) {
-      await this.registry.refreshMaterializedAt(runId ?? "")
+      await this.registry.refreshMaterializedAt(runId)
     }
 
     return {
@@ -197,6 +182,20 @@ export class WorkspaceManager {
       branch: runBranch,
       changeDir: changeDir ? join(workspacePath, changeDir) : null,
     }
+  }
+
+  private async bootstrap(workspacePath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null): Promise<void> {
+    const preparationPath = `${workspacePath}.preparing`
+    await assertManagedWorkspacePath(this.runnerRoot, preparationPath, false)
+    if (await pathExists(preparationPath)) await deleteDirectory(preparationPath)
+    await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
+    await this.cloneFresh(preparationPath, gitUrl, signal, log)
+    await validateWorkspaceOrigin(preparationPath, expected, signal, log)
+    await this.createRunBranch(preparationPath, baseBranch, expected.runBranch, signal, log)
+    await ensureMarkerExcluded(preparationPath)
+    await writeText(markerPath(preparationPath), JSON.stringify(expected, null, 2))
+    await validateWorkspaceIdentity(preparationPath, expected, signal, log, this.runnerRoot)
+    await rename(preparationPath, workspacePath)
   }
 
   // True only when <path> is a git clone that already has <runBranch> —
@@ -319,8 +318,9 @@ export function runnerVariables() {
   return { os: process.platform, hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "unknown", temp: tmpdir() }
 }
 
-function issueWorkspacePath(runnerRoot: string, projectName: string, issueNumber: number) {
-  return resolve(join(runnerRoot, slug(projectName), "workspaces", `issue-${issueNumber}`))
+export function issueWorkspacePath(runnerRoot: string, workflowRunId: string) {
+  const hash = createHash("sha256").update(workflowRunId).digest("hex")
+  return resolve(join(runnerRoot, "workspaces", `run-${hash}`))
 }
 
 function runBranchName(runId: string | null | undefined) {
@@ -328,15 +328,40 @@ function runBranchName(runId: string | null | undefined) {
   return safe ? `mohist/run-${safe}` : "mohist/run"
 }
 
-interface IssueWorkspaceMarker {
+export interface IssueWorkspaceMarker {
   issueNumber: number
-  workflowRunId: string | null
+  workflowRunId: string
+  projectId: string
+  repositoryName: string
+  baseBranch: string
+  runBranch: string
+  remoteFingerprint: string
+  remoteIdentityVersion: string
 }
 
-function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
+function workspaceIdentity(work: RenderedWorkItem, variables: JsonObject, workflowRunId: string, gitUrl: string, baseBranch: string, issueNumber: number): IssueWorkspaceMarker {
+  const variableRunId = stringAt(variables, ["mohist", "runId"])
+  if (variableRunId && variableRunId !== workflowRunId) throw new WorkspaceIdentityMismatchError("Dispatch workflowRunId does not match the authoritative run identity")
+  const projectId = work.projectId ?? stringAt(variables, ["project", "id"])
+  const repositoryName = stringAt(variables, ["repository", "name"])
+  const remoteFingerprint = stringAt(variables, ["repository", "remoteFingerprint"])
+  const remoteIdentityVersion = stringAt(variables, ["repository", "remoteIdentityVersion"])
+  if (!projectId || !repositoryName || !remoteFingerprint || !remoteIdentityVersion) {
+    throw new WorkspaceIdentityMismatchError("Issue workspace identity requires project.id, repository.name, repository.remoteFingerprint, and repository.remoteIdentityVersion")
+  }
+  const computed = fingerprintGitRemote(gitUrl)
+  if (!computed || computed.remoteIdentityVersion !== remoteIdentityVersion || computed.remoteFingerprint !== remoteFingerprint) {
+    throw new WorkspaceIdentityMismatchError(`Repository remote identity does not match the authoritative fingerprint for ${repositoryName}`)
+  }
   return {
-    issueNumber: numberAt(variables, ["issue", "number"]) ?? 0,
-    workflowRunId: stringAt(variables, ["mohist", "runId"]) ?? null,
+    issueNumber,
+    workflowRunId,
+    projectId,
+    repositoryName,
+    baseBranch,
+    runBranch: runBranchName(workflowRunId),
+    remoteFingerprint,
+    remoteIdentityVersion,
   }
 }
 
@@ -345,7 +370,7 @@ function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
 // that is (corrupt vs missing). Used by both `verify()` (which needs
 // to distinguish missing / corrupt / mismatch) and `planResolution()`
 // (which just needs a yes/no answer).
-async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
+export async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
   const path = markerPath(workspacePath)
   if (!exists(path)) return null
   try {
@@ -361,13 +386,63 @@ export async function readMarkerWorkflowRunId(workspacePath: string): Promise<st
   return marker?.workflowRunId
 }
 
-function markerMatches(actual: Partial<IssueWorkspaceMarker>, expected: IssueWorkspaceMarker): boolean {
-  return actual.issueNumber === expected.issueNumber
-    && actual.workflowRunId === expected.workflowRunId
+export async function validateWorkspaceIdentity(workspacePath: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null = null, runnerRoot?: string): Promise<void> {
+  if (runnerRoot) await assertManagedWorkspacePath(runnerRoot, workspacePath, true)
+  const marker = await readMarker(workspacePath)
+  if (!marker) {
+    throw new WorkspaceCorruptError(`Workflow workspace ${workspacePath} has no readable identity marker`, workspacePath)
+  }
+  const fields: (keyof IssueWorkspaceMarker)[] = ["issueNumber", "workflowRunId", "projectId", "repositoryName", "baseBranch", "runBranch", "remoteFingerprint", "remoteIdentityVersion"]
+  if (fields.some((field) => marker[field] !== expected[field])) {
+    throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} marker identity does not match the requested run`, workspacePath, expected, marker)
+  }
+  await validateWorkspaceOrigin(workspacePath, expected, signal, log)
 }
 
-function formatIdentity(marker: Partial<IssueWorkspaceMarker> | IssueWorkspaceMarker): string {
-  return `issueNumber=${marker.issueNumber ?? "<null>"}, workflowRunId=${marker.workflowRunId ?? "<null>"}`
+async function validateWorkspaceOrigin(workspacePath: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  const sink = workspacePrepSink(log)
+  const options = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+  const result = await runCommand("git", ["-C", workspacePath, "remote", "get-url", "origin"], ".", signal, undefined, options)
+  const actual = result.exitCode === 0 ? fingerprintGitRemote(result.stdout.trim()) : null
+  if (!actual || actual.remoteIdentityVersion !== expected.remoteIdentityVersion || actual.remoteFingerprint !== expected.remoteFingerprint) {
+    throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} origin does not match repository ${expected.repositoryName}`, workspacePath, expected)
+  }
+}
+
+async function assertManagedWorkspacePath(runnerRoot: string, candidate: string, requireFinal: boolean): Promise<void> {
+  const root = resolve(runnerRoot)
+  const target = resolve(candidate)
+  const rel = relative(root, target)
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside runner root ${root}`, target)
+  }
+  try {
+    if ((await lstat(root)).isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Runner root ${root} is symlinked`, target)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  const components = rel.split(/[\\/]+/).filter(Boolean)
+  let current = root
+  for (let i = 0; i < components.length; i++) {
+    current = join(current, components[i]!)
+    try {
+      const stat = await lstat(current)
+      if (stat.isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Workspace path ${current} is symlinked`, target)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (i === components.length - 1 && !requireFinal) return
+        continue
+      }
+      throw error
+    }
+  }
+  if (requireFinal && !pathExists(target)) {
+    throw new WorkspaceMissingError(`Workflow workspace ${target} is missing`, target)
+  }
+}
+
+function pathExists(path: string): boolean {
+  return exists(path)
 }
 
 async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal, log: TaskLogger | null = null) {

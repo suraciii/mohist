@@ -5,7 +5,9 @@ import { runCommand as defaultRunCommand, type CommandLineOptions } from "../sys
 import {
   resolveWorkspaceQuery,
   type WorkspaceQuery,
+  hasCompleteWorkspaceIdentity,
 } from "../runtime/workspace-query.js"
+import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
 import {
   parseAheadBehind,
   parseCommits,
@@ -51,6 +53,7 @@ import {
 // without going through the module-level setters at all.
 export interface WorkspaceGitHandlerDeps {
   resolveQuery: typeof resolveWorkspaceQuery
+  runnerRoot?: string
   runCommand?: typeof defaultRunCommand
   pathExists?: typeof defaultExistsSync
 }
@@ -104,10 +107,35 @@ export function registerWorkspaceGitHandlers(
     return result.exitCode === 0 && result.stdout.trim() === "true"
   }
 
+  async function validateIdentity(query: WorkspaceQuery, signal: AbortSignal): Promise<boolean> {
+    if (!hasCompleteWorkspaceIdentity(query)) return true
+    if (!deps.runnerRoot) return false
+    if (query.workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) return false
+    const expected: IssueWorkspaceMarker = {
+      version: 2,
+      issueId: null,
+      issueNumber: query.issueNumber,
+      workflowRunId: query.workflowRunId,
+      projectId: query.projectId,
+      repositoryName: query.repositoryName,
+      baseBranch: query.baseBranch,
+      runBranch: query.branch,
+      remoteFingerprint: query.remoteFingerprint,
+      remoteIdentityVersion: query.remoteIdentityVersion,
+    }
+    try {
+      await validateWorkspaceIdentity(query.workspacePath, expected, signal, null, deps.runnerRoot)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   conn.on("GetDiff", async (query: WorkspaceQuery) => {
     const workspace = resolveQuery(query)
     if (!workspace) return null
     const ac = new AbortController()
+    if (!await validateIdentity(query, ac.signal)) return null
     if (!await isWorkTree(workspace.workDir, ac.signal)) return null
 
     const branchExists = await runGit(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
@@ -143,6 +171,7 @@ export function registerWorkspaceGitHandlers(
     const workspace = resolveQuery(query)
     if (!workspace) return null
     const ac = new AbortController()
+    if (!await validateIdentity(query, ac.signal)) return null
     if (!await isWorkTree(workspace.workDir, ac.signal)) return null
 
     const [logResult, numstat, mergeBaseResult, aheadBehindResult] = await Promise.all([
@@ -175,6 +204,7 @@ export function registerWorkspaceGitHandlers(
     if (!workspace) return null
 
     const ac = new AbortController()
+    if (!await validateIdentity(query, ac.signal)) return null
     if (!await isWorkTree(workspace.workDir, ac.signal)) return null
     const result = await runGit(workspace.workDir, ["show", "--format=", "--patch", hash], ac.signal)
     if (result.exitCode !== 0) return null
@@ -186,6 +216,7 @@ export function registerWorkspaceGitHandlers(
     if (!workspace) return { exists: false }
 
     const ac = new AbortController()
+    if (!await validateIdentity(query, ac.signal)) return { exists: false, reason: "workspace_identity_mismatch" }
     if (!await isWorkTree(workspace.workDir, ac.signal)) return { exists: false }
 
     const branchExists = await runGit(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
@@ -218,6 +249,7 @@ export function registerWorkspaceGitHandlers(
     if (!workspace) return { base: null, head: null }
 
     const ac = new AbortController()
+    if (!await validateIdentity(query, ac.signal)) return { base: null, head: null }
     if (!await isWorkTree(workspace.workDir, ac.signal)) return { base: null, head: null }
 
     const [baseResult, headResult] = await Promise.all([

@@ -317,7 +317,7 @@ public class IssueGrain : Grain, IIssueGrain
     private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)
     {
         var runnerRoot = MohistWorkspaceLayout.ResolveRunnerRoot(_configuration, _environment);
-        var workspacePath = MohistWorkspaceLayout.IssueWorkspacePath(runnerRoot, projectContext.Name, issue.Number);
+        var workspacePath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, workflowRunId);
         var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
         // The runner manages the per-run head ref (`mohist/run-${workflowRunId}`)
         // inside the workspace; the integrate merge uses this branch as the

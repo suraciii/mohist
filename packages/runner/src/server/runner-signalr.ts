@@ -148,6 +148,7 @@ export class RunnerSignalRClient {
   private registerHandlers(): void {
     registerWorkspaceGitHandlers(this.connection, {
       resolveQuery: resolveWorkspaceQuery,
+      runnerRoot: this.runnerRoot,
     })
 
     registerWorkspaceRemovalHandler(this.connection, {

@@ -74,6 +74,18 @@ describe("mohist/push", () => {
     expect(registry.resolve("mohist/push")).toBe(pushAction)
   })
 
+  it("IssueRunWithoutRepositoryBase_FailsWithoutProjectOrMainFallback", async () => {
+    const calls = installGit(async () => { throw new Error("git must not run") })
+    const result = await pushAction(context({}, {
+      project: { path: WORKSPACE_PATH, defaultBranch: "main" },
+      repository: { name: "web", gitUrl: "https://example.com/web.git", baseBranch: null },
+    }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toMatch(/authoritative repository base branch/)
+    expect(calls).toHaveLength(0)
+  })
+
   it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")

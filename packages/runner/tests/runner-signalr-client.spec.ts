@@ -143,6 +143,33 @@ describe("RunnerSignalRClient workspace queries", () => {
     expect(query).toBeNull()
   })
 
+  it("IssueWorkspaceQuery_RejectsPartialIdentity", () => {
+    expect(resolveWorkspaceQuery({
+      workflowRunId: "wr-1",
+      projectId: "project-1",
+      issueNumber: 1,
+      repositoryName: "web",
+      workspacePath: "/runner/workspaces/run-hash",
+      branch: "mohist/run-wr-1",
+      baseBranch: "develop",
+    })).toBeNull()
+  })
+
+  it("IssueWorkspaceQuery_CarriesCompleteIdentity", () => {
+    const query = resolveWorkspaceQuery({
+      workflowRunId: "wr-1",
+      projectId: "project-1",
+      issueNumber: 1,
+      repositoryName: "web",
+      remoteFingerprint: "a".repeat(64),
+      remoteIdentityVersion: "git-remote-url/v1",
+      workspacePath: "/runner/workspaces/run-hash",
+      branch: "mohist/run-wr-1",
+      baseBranch: "develop",
+    })
+    expect(query).toMatchObject({ workDir: "/runner/workspaces/run-hash", baseBranch: "develop", head: "mohist/run-wr-1", identity: { repositoryName: "web", remoteIdentityVersion: "git-remote-url/v1" } })
+  })
+
   it("WorkspaceRemoval_OnlyAllowsPathsUnderRunnerRoot", () => {
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects/app/workspaces/issue-1")).toBe(true)
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(true)

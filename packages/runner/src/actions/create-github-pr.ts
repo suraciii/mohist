@@ -8,6 +8,7 @@ import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, getGitHubPrGit, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type CreateGitHubPrOutput, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata } from "./github-pr-types.js"
+import { resolveDeliveryBaseBranch } from "./delivery-context.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -47,7 +48,8 @@ function networkGhOptions(context: ActionContext): CommandLineOptions | undefine
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
-  const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  const target = resolveDeliveryBaseBranch(context)
+  if (!target) return { status: "failure", message: "create-github-pr requires the authoritative repository base branch" }
   const remote = stringInput(context.with, "remote") ?? "origin"
   const draft = context.with?.["draft"] !== false
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir

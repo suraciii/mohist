@@ -26,8 +26,9 @@ import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import { deleteDirectory } from "../system/process.js"
-import { isUnderRunnerRoot, type WorkspaceQuery } from "../runtime/workspace-query.js"
+import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from "../runtime/workspace-query.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
+import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
 
 export interface WorkspaceRemovalHandlerDeps {
   runnerRoot: string
@@ -49,6 +50,28 @@ export function registerWorkspaceRemovalHandler(
     const workspacePath = resolve(query.workspacePath)
     if (!isUnderRunnerRoot(deps.runnerRoot, workspacePath)) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
+    }
+    if (hasCompleteWorkspaceIdentity(query)) {
+      if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
+        return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path does not belong to the workflow run")
+      }
+      const expected: IssueWorkspaceMarker = {
+        version: 2,
+        issueId: null,
+        issueNumber: query.issueNumber,
+        workflowRunId: query.workflowRunId,
+        projectId: query.projectId,
+        repositoryName: query.repositoryName,
+        baseBranch: query.baseBranch ?? "",
+        runBranch: query.branch,
+        remoteFingerprint: query.remoteFingerprint,
+        remoteIdentityVersion: query.remoteIdentityVersion,
+      }
+      try {
+        await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal, null, deps.runnerRoot)
+      } catch (error) {
+        return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
+      }
     }
     // Pre-resolve any matching registry entry after the containment
     // check. In-root missing directories still drop their registry entry

@@ -39,39 +39,39 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         }
     }
 
-    public Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         MaybeThrow();
-        LastBaseBranch = baseBranch;
+        LastBaseBranch = repository.BaseBranch;
         return Task.FromResult(Diff);
     }
 
-    public Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         MaybeThrow();
         return Task.FromResult(Commits);
     }
 
-    public Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string hash, CancellationToken ct = default)
+    public Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string hash, CancellationToken ct = default)
     {
         MaybeThrow();
         return Task.FromResult(CommitDiffs.GetValueOrDefault(hash));
     }
 
-    public Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         MaybeThrow();
-        LastBaseBranch = baseBranch;
+        LastBaseBranch = repository.BaseBranch;
         return Task.FromResult(WorkspaceStatus);
     }
 
-    public Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string path, CancellationToken ct = default)
+    public Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string path, CancellationToken ct = default)
     {
         MaybeThrow();
         return Task.FromResult(FileContent);
     }
 
-    public Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, CancellationToken ct = default)
+    public Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         MaybeThrow();
         lock (_gate)

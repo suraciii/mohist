@@ -4,6 +4,7 @@ import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
+import { resolveDeliveryBaseBranch } from "./delivery-context.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -54,7 +55,8 @@ export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
 }
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
+  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
+  if (!baseBranch) return { status: "failure", message: "Rebase requires the authoritative repository base branch" }
   const remote = stringInput(context.with, "remote") ?? null
   const squash = booleanInput(context.with, "squash") === true
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
@@ -348,7 +350,8 @@ export function combinedRebaseGitOutput(outputs: string[]) {
 }
 
 export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
+  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
+  if (!baseBranch) return { status: "failure", message: "Rebase status requires the authoritative repository base branch" }
   const remote = stringInput(context.with, "remote")
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const opts = sinkOptions(context)

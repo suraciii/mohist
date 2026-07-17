@@ -21,7 +21,7 @@ internal sealed class WorkflowStageLockCoordinator
         if (string.IsNullOrWhiteSpace(projectId))
             throw new InvalidOperationException($"Workflow '{_owner.GrainKey}' stage '{stage}' requires resource '{resource}' but project id is missing");
 
-        var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
+        var key = BuildLockKey(projectId, resource);
         var lockGrain = _owner.Grains.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.AcquireSequentialAsync(new StageLockRequest(_owner.GrainKey, stage, resource, projectId));
 
@@ -42,7 +42,7 @@ internal sealed class WorkflowStageLockCoordinator
         var projectId = _owner.GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
 
-        var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
+        var key = BuildLockKey(projectId, resource);
         var lockGrain = _owner.Grains.GetGrain<IWorkflowStageLockGrain>(key);
         await lockGrain.ReleaseAsync(new StageLockOwner(_owner.GrainKey, stage));
     }
@@ -54,5 +54,16 @@ internal sealed class WorkflowStageLockCoordinator
         if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))
             return null;
         return stageDef.Resources?.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
+    }
+
+    private string BuildLockKey(string projectId, string resource)
+    {
+        var repository = _owner.RunOrNull?.Repository;
+        if (repository is not null
+            && !string.IsNullOrWhiteSpace(_owner.GetIssueNumber())
+            && string.Equals(resource, "project-integration", StringComparison.Ordinal))
+            return WorkflowStageLockKeys.ForProjectRepositoryResource(projectId, repository.Name, resource);
+
+        return WorkflowStageLockKeys.ForProjectResource(projectId, resource);
     }
 }

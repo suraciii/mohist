@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
+import { resolveDeliveryBaseBranch } from "./delivery-context.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { timeoutSignal } from "../system/timeout-signal.js"
 import { acpAgentAction } from "./acp-agent.js"
@@ -143,7 +144,8 @@ function isPromiseVerdict(value: string) {
 }
 
 export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = stringInput(context.with, "baseBranch") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
+  if (!baseBranch) return { status: "failure", message: "Merge readiness requires the authoritative repository base branch" }
   const remote = stringInput(context.with, "remote") ?? "origin"
   const baseRef = `${remote}/${baseBranch}`
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"

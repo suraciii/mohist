@@ -8,11 +8,20 @@ import { isAbsolute, relative, resolve } from "node:path"
 // used to derive a head ref. The legacy `mo/issue-${issueNumber}` branch
 // is no longer materialized and MUST NOT be used as a fallback.
 export interface WorkspaceQuery {
+  workflowRunId?: string | null
+  projectId?: string | null
   issueNumber?: number
+  repositoryName?: string | null
+  remoteFingerprint?: string | null
+  remoteIdentityVersion?: string | null
   workspacePath?: string | null
   branch?: string | null
   baseBranch?: string | null
 }
+
+type ResolvedWorkspaceQuery =
+  | { workDir: string; baseBranch: string; head: string }
+  | { workDir: string; baseBranch: string; head: string; identity: WorkspaceQuery }
 
 // Resolve a workspace query into the triple every git-backed handler
 // needs. Returns `null` when ANY of `workspacePath` / `baseBranch` /
@@ -23,11 +32,30 @@ export interface WorkspaceQuery {
 // runner, so a phantom `mo/issue-${N}` ref would never resolve.
 export function resolveWorkspaceQuery(
   query: WorkspaceQuery | null | undefined,
-): { workDir: string; baseBranch: string; head: string } | null {
+): ResolvedWorkspaceQuery | null {
   if (!query?.workspacePath || !query.baseBranch) return null
   const head = query.branch ?? null
   if (!head) return null
-  return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
+  const identityFields = [query.workflowRunId, query.projectId, query.issueNumber, query.repositoryName, query.remoteFingerprint, query.remoteIdentityVersion]
+  const hasIdentity = identityFields.some((value) => value !== undefined && value !== null)
+  if (hasIdentity && (!query.workflowRunId || !query.projectId || query.issueNumber === undefined || !query.repositoryName || !query.remoteFingerprint || !query.remoteIdentityVersion)) return null
+  const resolved = { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
+  return hasIdentity ? { ...resolved, identity: query } : resolved
+}
+
+export function hasCompleteWorkspaceIdentity(query: WorkspaceQuery | null | undefined): query is WorkspaceQuery & {
+  workflowRunId: string
+  projectId: string
+  issueNumber: number
+  repositoryName: string
+  remoteFingerprint: string
+  remoteIdentityVersion: string
+  workspacePath: string
+  branch: string
+  baseBranch: string
+} {
+  const resolved = resolveWorkspaceQuery(query)
+  return resolved !== null && "identity" in resolved
 }
 
 // Containment check: is `candidate` the runner root itself, OR a path
