@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
 
@@ -24,54 +25,67 @@ public static class ProjectEventTailRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/events/tail")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("", async (
-            HttpContext context,
-            string? match,
-            IEventTailSource source,
-            CancellationToken ct) =>
-        {
-            var project = context.GetResolvedProject();
-
-            EventMatchExpression? compiled = null;
-            if (!string.IsNullOrWhiteSpace(match))
-            {
-                var result = EventMatchExpression.Compile(match!);
-                if (!result.IsSuccess)
-                {
-                    await WriteCompileFailureAsync(context, match!, result.Diagnostic!);
-                    return;
-                }
-                compiled = result.Expression;
-            }
-
-            await using var subscription = source.Open(project.Id, compiled);
-
-            context.Response.StatusCode = StatusCodes.Status200OK;
-            context.Response.ContentType = ContentType;
-            context.Response.Headers.CacheControl = "no-store";
-            context.Response.Headers["X-Accel-Buffering"] = "no";
-            await context.Response.Body.FlushAsync(ct).ConfigureAwait(false);
-
-            try
-            {
-                await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
-                {
-                    var dto = CloudEventTailDto.From(evt);
-                    await JsonSerializer.SerializeAsync(
-                        context.Response.Body,
-                        dto,
-                        CloudEvent.JsonOptions,
-                        ct).ConfigureAwait(false);
-                    await context.Response.Body.WriteAsync(NewLine, ct).ConfigureAwait(false);
-                    await context.Response.Body.FlushAsync(ct).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-            }
-        });
+        group.MapGet("", (HttpContext context, string? match, IEventTailSource source, CancellationToken ct)
+            => HandleTailAsync(context, match, source, ct));
 
         return app;
+    }
+
+    /// <summary>
+    /// Direct-invocation seam for the tail handler. Production wiring
+    /// registers this through the route table; spec tests invoke it
+    /// directly with a <see cref="DefaultHttpContext"/> + in-memory
+    /// response body so they can drive streaming without going through
+    /// TestServer's buffered HTTP pipeline. Callers that bypass
+    /// <see cref="MapProjectEventTailRoutes"/> are responsible for
+    /// populating <c>HttpContext.Items</c> with the resolved project
+    /// (via <see cref="ProjectResolutionEndpointFilter.ProjectInfoItemKey"/>).
+    /// </summary>
+    internal static async Task HandleTailAsync(
+        HttpContext context,
+        string? match,
+        IEventTailSource source,
+        CancellationToken ct)
+    {
+        var project = context.GetResolvedProject();
+
+        EventMatchExpression? compiled = null;
+        if (!string.IsNullOrWhiteSpace(match))
+        {
+            var result = EventMatchExpression.Compile(match!);
+            if (!result.IsSuccess)
+            {
+                await WriteCompileFailureAsync(context, match!, result.Diagnostic!);
+                return;
+            }
+            compiled = result.Expression;
+        }
+
+        await using var subscription = source.Open(project.Id, compiled);
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = ContentType;
+        context.Response.Headers.CacheControl = "no-store";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+        await context.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            {
+                var dto = CloudEventTailDto.From(evt);
+                await JsonSerializer.SerializeAsync(
+                    context.Response.Body,
+                    dto,
+                    CloudEvent.JsonOptions,
+                    ct).ConfigureAwait(false);
+                await context.Response.Body.WriteAsync(NewLine, ct).ConfigureAwait(false);
+                await context.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
     }
 
     private static readonly byte[] NewLine = [(byte)'\n'];
@@ -115,7 +129,7 @@ public sealed record CloudEventTailDto(
     string Id,
     string Time,
     string? Subject,
-    string SpecVersion,
+    [property: JsonPropertyName("specversion")] string SpecVersion,
     Dictionary<string, string> Extensions)
 {
     public static CloudEventTailDto From(CloudEvent evt)

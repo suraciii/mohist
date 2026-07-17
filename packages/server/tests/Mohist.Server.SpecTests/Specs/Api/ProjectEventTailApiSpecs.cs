@@ -1,10 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Pipelines;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -45,7 +49,7 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-all");
 
-        using var session = new TailSession(_client, Source, project.Id, match: null);
+        using var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
@@ -70,7 +74,6 @@ public class ProjectEventTailApiSpecs
         var project = await CreateProjectAsync("tail-match");
 
         using var session = new TailSession(
-            _client,
             Source,
             project.Id,
             match: "event.type == \"com.mohist.issue.completed\"");
@@ -96,7 +99,7 @@ public class ProjectEventTailApiSpecs
         var projectP = await CreateProjectAsync("tail-isolation-p");
         var projectQ = await CreateProjectAsync("tail-isolation-q");
 
-        using var session = new TailSession(_client, Source, projectP.Id, match: null);
+        using var session = new TailSession(Source, projectP.Id, match: null);
         session.Open();
 
         Publish(projectQ.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
@@ -116,7 +119,7 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-unprojected");
 
-        using var session = new TailSession(_client, Source, project.Id, match: null);
+        using var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Source.Publish(new CloudEvent(
@@ -143,7 +146,6 @@ public class ProjectEventTailApiSpecs
         var project = await CreateProjectAsync("tail-payload-isolation");
 
         using var session = new TailSession(
-            _client,
             Source,
             project.Id,
             match: "event.type == \"com.mohist.issue.completed\"");
@@ -207,7 +209,7 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-shape");
 
-        using var session = new TailSession(_client, Source, project.Id, match: null);
+        using var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
@@ -231,7 +233,7 @@ public class ProjectEventTailApiSpecs
     {
         var project = await CreateProjectAsync("tail-line-shape");
 
-        using var session = new TailSession(_client, Source, project.Id, match: null);
+        using var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string>
@@ -266,7 +268,7 @@ public class ProjectEventTailApiSpecs
 
         Assert.Equal(0, Source.ActiveSubscriptionCount);
 
-        var session = new TailSession(_client, Source, project.Id, match: null);
+        var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
@@ -288,7 +290,7 @@ public class ProjectEventTailApiSpecs
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "1" });
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "2" });
 
-        using var session = new TailSession(_client, Source, project.Id, match: null);
+        using var session = new TailSession(Source, project.Id, match: null);
         session.Open();
 
         Publish(project.Id, "com.mohist.issue.created", new Dictionary<string, string> { ["issue"] = "3" });
@@ -337,13 +339,14 @@ public class ProjectEventTailApiSpecs
         {
             extensionsDict[kvp.Key] = kvp.Value;
         }
+        extensions.TryGetValue("issue", out var subject);
         var envelope = new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/projects/{projectId}", UriKind.Relative),
             type: type,
             time: FixedTime,
             data: null,
-            subject: null,
+            subject: subject,
             extensions: extensionsDict);
         Source.Publish(envelope);
     }
@@ -353,30 +356,45 @@ public class ProjectEventTailApiSpecs
     private sealed record ParsedEnvelope(string Type, string Raw, Dictionary<string, string> Extensions, bool HasPayload);
 
     /// <summary>
-    /// Owns one open NDJSON tail session: the HTTP request/response, the
-    /// stream-reading task, and the cancellation token source. A
-    /// bounded <see cref="Channel{T}"/> buffers decoded lines so tests
-    /// can drive events deterministically without sleeping.
+    /// Owns one open NDJSON tail session: the in-memory response pipe,
+    /// the handler task running <see cref="ProjectEventTailRoutes.HandleTailAsync"/>,
+    /// the line reader, and the cancellation token source. A
+    /// <see cref="Channel{T}"/> buffers decoded lines so tests can drive
+    /// events deterministically without sleeping.
     /// </summary>
+    /// <remarks>
+    /// The handler is invoked directly against a <see cref="DefaultHttpContext"/>
+    /// rather than through HTTP. <c>WebApplicationFactory&lt;Program&gt;.CreateClient()</c>
+    /// returns an HttpClient backed by TestServer, which buffers the entire
+    /// response before returning from <c>SendAsync</c>; the streaming
+    /// response then never completes under that client, and the spec test
+    /// deadlocks. Invoking the handler directly with the project already
+    /// resolved on <c>HttpContext.Items</c> lets the test own its own
+    /// pipe without going through the buffered HTTP pipeline.
+    /// </remarks>
     private sealed class TailSession : IDisposable
     {
-        private readonly HttpClient _client;
         private readonly InMemoryEventTailSource _source;
         private readonly string _projectId;
         private readonly string? _match;
         private CancellationTokenSource? _cts;
         private Channel<string>? _lines;
         private Task? _reader;
-        private TaskCompletionSource<HttpResponseMessage>? _responseTcs;
+        private Task? _handler;
+        private Pipe? _pipe;
+        private int _statusCode;
+        private string? _contentType;
         private int _disposed;
 
-        public TailSession(HttpClient client, InMemoryEventTailSource source, string projectId, string? match)
+        public TailSession(InMemoryEventTailSource source, string projectId, string? match)
         {
-            _client = client;
             _source = source;
             _projectId = projectId;
             _match = match;
         }
+
+        public int StatusCode => _statusCode;
+        public string? ContentType => _contentType;
 
         public void Open()
         {
@@ -390,36 +408,52 @@ public class ProjectEventTailApiSpecs
                 SingleWriter = true,
             });
 
-            var url = $"/api/projects/{_projectId}/events/tail";
-            if (!string.IsNullOrEmpty(_match))
-                url += "?match=" + Uri.EscapeDataString(_match);
-
-            // TestHost buffers the entire response before returning
-            // from SendAsync, so the request must be issued from a
-            // background thread that reads the body as the endpoint
-            // produces it. We wait for the endpoint to register its
-            // subscription (via IEventTailSource.ActiveSubscriptionCount)
-            // on a dedicated thread before returning, so the caller can
-            // publish events that the endpoint will see.
+            var pipe = new Pipe();
             var initialCount = _source.ActiveSubscriptionCount;
-            var responseTcs = new TaskCompletionSource<HttpResponseMessage>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var httpContext = new DefaultHttpContext
+            {
+                RequestAborted = cts.Token,
+            };
+            httpContext.Response.Body = pipe.Writer.AsStream(leaveOpen: true);
+            httpContext.Items[ProjectResolutionEndpointFilter.ProjectInfoItemKey] =
+                new ProjectInfo { Id = _projectId };
+
+            var handler = Task.Run(async () =>
+            {
+                try
+                {
+                    await ProjectEventTailRoutes.HandleTailAsync(
+                        httpContext, _match, _source, cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                }
+                finally
+                {
+                    pipe.Writer.Complete();
+                }
+            }, cts.Token);
+
+            // EventTailSource.Open is synchronous under lock; the
+            // subscription count must be observable by the time
+            // source.Open returns, so this spin resolves in microseconds.
+            while (_source.ActiveSubscriptionCount <= initialCount)
+            {
+                if (handler.IsCompleted && handler.IsFaulted)
+                    throw new InvalidOperationException(
+                        "Handler faulted before subscription registration.",
+                        handler.Exception);
+                Thread.Yield();
+            }
 
             var reader = Task.Run(async () =>
             {
-                HttpResponseMessage? response = null;
                 try
                 {
-                    response = await _client
-                        .SendAsync(new HttpRequestMessage(HttpMethod.Get, url), cts.Token)
-                        .ConfigureAwait(false);
-                    responseTcs.TrySetResult(response);
-                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                    Assert.NotNull(response.Content.Headers.ContentType);
-                    Assert.Equal("application/x-ndjson", response.Content.Headers.ContentType!.MediaType);
-
-                    await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                    using var textReader = new StreamReader(stream, Encoding.UTF8);
+                    using var textReader = new StreamReader(
+                        pipe.Reader.AsStream(leaveOpen: true),
+                        Encoding.UTF8);
                     while (!cts.IsCancellationRequested)
                     {
                         var line = await textReader.ReadLineAsync().ConfigureAwait(false);
@@ -432,11 +466,6 @@ public class ProjectEventTailApiSpecs
                 }
                 catch (OperationCanceledException)
                 {
-                    responseTcs.TrySetCanceled(cts.Token);
-                }
-                catch (Exception ex)
-                {
-                    responseTcs.TrySetException(ex);
                 }
                 finally
                 {
@@ -444,24 +473,13 @@ public class ProjectEventTailApiSpecs
                 }
             }, cts.Token);
 
-            // Wait for the endpoint to register its subscription on a
-            // dedicated thread so the request thread (running the
-            // endpoint) is not blocked. The ActiveSubscriptionCount
-            // transition is the deterministic test-side signal that
-            // gates when the test may publish events.
-            Task.Run(() =>
-            {
-                while (_source.ActiveSubscriptionCount <= initialCount
-                    && !responseTcs.Task.IsCompleted)
-                {
-                    Thread.Yield();
-                }
-            }).GetAwaiter().GetResult();
-
             _cts = cts;
             _lines = lines;
             _reader = reader;
-            _responseTcs = responseTcs;
+            _handler = handler;
+            _pipe = pipe;
+            _statusCode = httpContext.Response.StatusCode;
+            _contentType = httpContext.Response.ContentType;
         }
 
         public async Task<List<ParsedEnvelope>> WaitForLinesAsync(int expected)
@@ -482,6 +500,7 @@ public class ProjectEventTailApiSpecs
             if (_disposed != 0 || _cts is null)
                 return;
             _cts.Cancel();
+            _handler?.GetAwaiter().GetResult();
             if (_reader is not null)
             {
                 try { await _reader.ConfigureAwait(false); }
@@ -498,14 +517,11 @@ public class ProjectEventTailApiSpecs
             try
             {
                 _cts.Cancel();
+                _handler?.GetAwaiter().GetResult();
                 _reader?.GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
             {
-            }
-            if (_responseTcs is { Task.IsCompletedSuccessfully: true })
-            {
-                _responseTcs.Task.GetAwaiter().GetResult().Dispose();
             }
             _cts.Dispose();
         }
