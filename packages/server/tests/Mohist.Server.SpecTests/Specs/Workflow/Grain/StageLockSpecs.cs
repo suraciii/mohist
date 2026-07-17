@@ -11,13 +11,11 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class StageLockSpecs : WorkflowGrainSpecs
 {
     public StageLockSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SameProjectIntegrateStages_RunSequentiallyAcrossWorkflows()
     {
@@ -127,8 +125,6 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await ReportAsync(secondRunnerId, secondMerge.WorkflowRunId, secondMerge.WorkId, new WorkResult("completed"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedIntegrateStage_ReleasesSequentialLock()
     {
@@ -182,8 +178,6 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await ReportAsync(runner2Id, workflow2Id, wf2Merge.WorkId, new WorkResult("completed"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedIntegrateStage_LockReleasedViaBusSubscriptionHandler()
     {
@@ -253,8 +247,6 @@ public class StageLockSpecs : WorkflowGrainSpecs
         Assert.Equal("integrate", wf2Integrate.Stage);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedIntegrateWorkflow_ReleasesSequentialLock()
     {

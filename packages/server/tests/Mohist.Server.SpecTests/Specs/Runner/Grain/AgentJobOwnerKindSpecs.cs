@@ -21,8 +21,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         .GetRequiredService<IServiceScopeFactory>().CreateScope()
         .ServiceProvider.GetRequiredService<DispatchService>();
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignWork_AgentJobDispatch_WithoutWorkflowRunId_IsAccepted()
     {
@@ -42,8 +40,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, result.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignWork_AgentJobDispatch_MissingAgentJobId_IsRejected()
     {
@@ -62,8 +58,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", result.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignWork_AgentJobDispatch_MissingWorkId_IsRejected()
     {
@@ -82,8 +76,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", result.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task IsWorkRunnable_AgentJobArm_RoutesToAgentJobGrain()
     {
@@ -113,8 +105,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal(workId, snapshot.CurrentWorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Poll_AgentJobLostResponse_IsRedeliveredUntilReported()
     {
@@ -139,8 +129,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Empty(reported.Dispatches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollGate_AdmitsOnlyOneOverlappingPoll()
     {
@@ -156,8 +144,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         await runner.EndPollAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignAgentJobAsync_DuringPollReconciliation_IsRetriedLater()
     {
@@ -179,8 +165,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task IsWorkRunnable_AgentJobArm_NotRunnable_DropsWork()
     {
@@ -204,8 +188,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Null(work);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ReportResult_AgentJobArm_RoutesToAgentJobGrain_AndDoesNotTouchWorkflowGrain()
     {
@@ -237,8 +219,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("ok", terminal.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ReportResult_AgentJobArm_MissingAgentJobId_ReturnsNotTracked()
     {
@@ -256,8 +236,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("missing-agent-job", report.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ReportResult_AgentJobArm_UntrackedWork_StillRoutesToJobGrain()
     {
@@ -282,8 +260,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.NotNull(snapshot);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignAgentJobAsync_WorkflowDispatch_IsRejected()
     {
@@ -301,8 +277,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", result.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignWork_WorkflowDispatch_MissingWorkflowRunId_IsRejected()
     {
@@ -320,8 +294,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", result.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task IsWorkRunnable_WorkflowArm_AsksWorkflowGrain_ForAssignedRunnerStatusAndWorkId()
     {
@@ -340,8 +312,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal(work.WorkId, currentWorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task IsWorkRunnable_WorkflowArm_DoesNotContactAgentJobGrain()
     {
@@ -378,8 +348,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", assignment.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AgentJobWork_SharesWorkflowSlotPool()
     {
@@ -402,8 +370,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal(agentJobId, state.ActiveWorks[0].OwnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignAgentJobAsync_ConcurrentJobsRespectSingleSlotCapacity()
     {
@@ -424,8 +390,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Single((await runner.GetRuntimeStateAsync()).ActiveWorks);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignAgentJobAsync_AfterUnregisterIsRejected()
     {
@@ -453,8 +417,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
 }
 
 [Collection("RunnerGrain")]
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class WorkDispatchSerializationSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

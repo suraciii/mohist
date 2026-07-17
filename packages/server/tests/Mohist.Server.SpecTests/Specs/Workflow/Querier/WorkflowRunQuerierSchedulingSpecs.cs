@@ -31,8 +31,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignableAsync_FiltersAtDbLayer_OnStatusPending()
     {
@@ -48,8 +46,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal($"{prefix}-pending", only);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignableAsync_ExcludesEveryNonPendingStatus()
     {
@@ -66,8 +62,6 @@ public class WorkflowRunQuerierSchedulingSpecs
             Assert.DoesNotContain(seeded, returned);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignableAsync_DoesNotDeserializeNonMatchingStateRows()
     {
@@ -115,8 +109,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal(pendingId, only);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignedToAsync_FiltersAtDbLayer_OnReadyAndRunner()
     {
@@ -154,8 +146,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal($"{prefix}-ready-A", only);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignedToAsync_ExcludesRunning_Terminal_AndOtherRunner()
     {
@@ -211,8 +201,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal($"{prefix}-ready-A", only);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FindAssignedToAsync_DoesNotDeserializeNonMatchingStateRows()
     {
@@ -246,8 +234,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal(new[] { $"{prefix}-ready-valid-this" }, ids);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CountRunningAssignedToAsync_CountsRunningRowsForTheRunner()
     {
@@ -283,8 +269,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerB));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyWorkerId_ReturnsEmptyResults()
     {
@@ -295,8 +279,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         Assert.Equal(0, await querier.CountRunningAssignedToAsync(""));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowRunsRow_HasStoredStatusColumnAndIndex()
     {

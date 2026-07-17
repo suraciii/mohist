@@ -24,8 +24,6 @@ public class AgentSessionActivityVisibilitySpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericAgentLaunchSession_CarriesAgentIdAndAgentName()
     {
@@ -46,8 +44,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericSessionWithoutIssueRef_ProducesNoSyntheticIssueCard()
     {
@@ -69,8 +65,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericSessionWithIssueRef_IsAssociatedButAgentAttributed()
     {
@@ -93,8 +87,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActiveAgents_GenericSession_AppearsDespiteBlankWorkflowRunId()
     {
@@ -116,8 +108,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task WorkflowActivityCard_DoesNotLeakAgentIdOrAgentName()
     {

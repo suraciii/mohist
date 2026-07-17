@@ -47,14 +47,12 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
-    public IEventPublisher EventBus => _factory.Services.GetRequiredService<IEventPublisher>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => VirtualRunnerRoot;
-    public string LogsPath => VirtualLogsPath;
 
     public async Task InitializeAsync()
     {

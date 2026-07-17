@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -41,7 +40,7 @@ internal static class AgentSubscriptionDispatchTestSupport
     public static async Task SeedProjectAsync(TestScope scope, string projectId)
     {
         var database = scope.Database;
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         if (await db.Projects.AnyAsync(p => p.Id == projectId))
             return;
         db.Projects.Add(new ProjectRow
@@ -80,7 +79,7 @@ internal static class AgentSubscriptionDispatchTestSupport
             CreatedAt = DateTimeOffset.UnixEpoch,
             UpdatedAt = DateTimeOffset.UnixEpoch,
         };
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.Agents.Add(new AgentRow
         {
             Id = agentId,
@@ -92,45 +91,13 @@ internal static class AgentSubscriptionDispatchTestSupport
         await db.SaveChangesAsync();
     }
 
-    public static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    public sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-        public TestDbContextFactory Factory { get; }
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    public sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-        public DbContextOptions<MohistDbContext> Options { get; }
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    public static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 
     public sealed class TestScope : IAsyncDisposable
     {
-        private readonly TestDatabase _database;
+        private readonly TestSqliteDatabase _database;
         public TestScope(
-            TestDatabase database,
+            TestSqliteDatabase database,
             AgentSubscriptionDispatchHandler handler,
             RecordingLogger<AgentSubscriptionDispatchHandler> logger)
         {
@@ -138,7 +105,7 @@ internal static class AgentSubscriptionDispatchTestSupport
             Handler = handler;
             Logger = logger;
         }
-        public TestDatabase Database => _database;
+        public TestSqliteDatabase Database => _database;
         public AgentSubscriptionDispatchHandler Handler { get; }
         public RecordingLogger<AgentSubscriptionDispatchHandler> Logger { get; }
         public async ValueTask DisposeAsync() => await _database.DisposeAsync();
@@ -203,9 +170,9 @@ internal static class AgentSubscriptionDispatchTestSupport
 
     private sealed class TestScopeFactory : IServiceScopeFactory
     {
-        private readonly TestDatabase _database;
+        private readonly TestSqliteDatabase _database;
         private readonly RecordingAgentLauncher _launcher;
-        public TestScopeFactory(TestDatabase database, RecordingAgentLauncher launcher)
+        public TestScopeFactory(TestSqliteDatabase database, RecordingAgentLauncher launcher)
         {
             _database = database;
             _launcher = launcher;
@@ -214,10 +181,10 @@ internal static class AgentSubscriptionDispatchTestSupport
 
         private sealed class TestScopeImpl : IServiceScope
         {
-            public TestScopeImpl(TestDatabase database, RecordingAgentLauncher launcher)
+            public TestScopeImpl(TestSqliteDatabase database, RecordingAgentLauncher launcher)
             {
                 var services = new ServiceCollection();
-                services.AddSingleton<IDbContextFactory<MohistDbContext>>(database.Factory);
+                services.AddSingleton<IDbContextFactory<MohistDbContext>>(new TestDbContextFactory(database.Options));
                 services.AddSingleton<TimeProvider>(new FakeTimeProvider(TestTime.UtcNow));
                 services.AddSingleton<IAgentLauncher>(launcher);
                 services.AddScoped<AgentSubscriptionStore>();

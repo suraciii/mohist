@@ -21,8 +21,6 @@ public class WorkspaceSpecs
         _fixture.RunnerWorkspace.Reset();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueHasNotStarted_WhenUserOpensReviewViews_ThenMohistExplainsThatWorkHasNotStarted()
     {
@@ -42,8 +40,6 @@ public class WorkspaceSpecs
         Assert.Equal("deadbeef", commitDiff.Hash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceIsRemoved_WhenUserOpensReviewViews_ThenMohistReportsWorkspaceRemoved()
     {
@@ -68,8 +64,6 @@ public class WorkspaceSpecs
         Assert.Equal("workspace_removed", fileContent.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenRunnerIsUnavailable_WhenUserOpensReviewViews_ThenMohistReportsRunnerUnavailable()
     {
@@ -88,8 +82,6 @@ public class WorkspaceSpecs
         Assert.Equal("runner_unavailable", status.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExistsButBranchMissing_WhenUserRequestsDiff_ThenMohistReportsBranchMissing()
     {
@@ -104,8 +96,6 @@ public class WorkspaceSpecs
         Assert.Equal("branch_missing", diff.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenGitFails_ThenMohistReportsGitError()
     {
@@ -121,8 +111,6 @@ public class WorkspaceSpecs
         Assert.Contains("git exploded", diff.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsDiff_ThenReturnsMergeBaseComparisonData()
     {
@@ -162,8 +150,6 @@ public class WorkspaceSpecs
         Assert.Equal("a.txt", diff.Patches[0].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueBranchIsBehindBase_WhenUserRequestsDiff_ThenComparisonIsMergeBaseAndExcludesBaseOnlyChanges()
     {
@@ -193,8 +179,6 @@ public class WorkspaceSpecs
         Assert.Equal("issue.txt", diff.Patches[0].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsCommits_ThenReturnsComparisonMetadataAndCommitRange()
     {
@@ -234,8 +218,6 @@ public class WorkspaceSpecs
         Assert.Equal("head123", commits.Commits[0].Hash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsSingleCommitDiff_ThenReturnsSingleCommitDiff()
     {
@@ -253,8 +235,6 @@ public class WorkspaceSpecs
         Assert.Contains("+y", commitDiff.Diff);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsStatus_ThenStatusHeadMatchesPerRunBranch()
     {
@@ -280,8 +260,6 @@ public class WorkspaceSpecs
         Assert.Equal(5, status.Ahead);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsFileContent_ThenReturnsBaseAndHeadContent()
     {
@@ -297,8 +275,6 @@ public class WorkspaceSpecs
         Assert.Equal("head content", fileContent.Head);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceExists_WhenUserCleansUpWorkspace_ThenWorkspaceIsRemoved()
     {
@@ -318,8 +294,6 @@ public class WorkspaceSpecs
         Assert.Equal(expectedPath, _fixture.RunnerWorkspace.RemoveWorkspaceCalls[0].WorkspacePath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceIsAlreadyClean_WhenUserRunsCleanupAgain_ThenCleanupSucceedsAsNoOp()
     {

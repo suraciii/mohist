@@ -32,8 +32,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task UsageAndEventSummary_QuerierAndAssembler_PreserveAlignedFieldsAndHistoryDifference()
     {
@@ -65,8 +63,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Null(fromQuerierPath.EventSummary.ContextExhaustion);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Lineage_MetadataPath_ProducesSharedMapperProjection()
     {
@@ -116,8 +112,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(AgentSessionDtoMapper.BuildLineageDto(session), lineage);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void Labels_SkipsBlankKeysAndValues_AndUsesOrdinalComparison()
     {

@@ -22,7 +22,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 ///   result in error codes.</item>
 /// </list>
 /// </summary>
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class EpicListQueryApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -34,8 +34,6 @@ public class EpicListQueryApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithSearch_FiltersByTitleSubstringCaseInsensitive()
     {
@@ -53,8 +51,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal(2, mixedCase.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithoutSearch_ReturnsAllEpics()
     {
@@ -67,8 +63,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal(3, all.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithSortPriorityAsc_OrdersP0BeforeP2()
     {
@@ -85,8 +79,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal("p2", list[1].Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithoutSort_KeepsLegacyDefaultOrdering()
     {
@@ -106,8 +98,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal(p2Earlier.Number, list[1].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithUnknownSortOrDir_FallsBackToDefault_Returns200()
     {
@@ -128,8 +118,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal(p0.Number, bothUnknown[0].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithSearchAndSort_ComposesBothIntoSingleResponse()
     {
@@ -146,8 +134,6 @@ public class EpicListQueryApiSpecs
         Assert.DoesNotContain(matched, e => e.Number == billing.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithSearch_WildcardCharactersAreLiteralTitleSubstrings()
     {
@@ -165,8 +151,6 @@ public class EpicListQueryApiSpecs
         Assert.Equal(underscore.Number, underscoreMatches[0].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListWithEmptyStringSearch_ReturnsAllEpics()
     {

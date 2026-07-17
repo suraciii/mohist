@@ -13,16 +13,12 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     private static IssueWorkflowProfileRegistry BuildRegistry() =>
         new(new FakePromptLoader(), new FakeDbContextFactory());
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWorkflowProfiles_ExposesGithubPrIdConstant()
     {
         Assert.Equal("mohist/github-pr", IssueWorkflowProfiles.GithubPrId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_ExposesCorrectMetadata()
     {
@@ -34,8 +30,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.False(string.IsNullOrWhiteSpace(profile.Description));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionSurfacesGhCliPrerequisite()
     {
@@ -46,8 +40,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("GitHub PR", profile.Description, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_DescriptionReadsFromGithubPrYaml()
     {
@@ -57,8 +49,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void MohistGithubPrIssueWorkflowProfile_Definition_ComesFromGithubPrYaml()
     {
@@ -71,8 +61,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
     // ===================== Registry exposure =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_GetById_ResolvesMohistGithubPr()
     {
@@ -85,8 +73,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, profile.Definition);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_GetById_ResolvesMohistLocal()
     {
@@ -98,8 +84,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.True(profile.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_GetByNullOrEmpty_ResolvesMohistLocal()
     {
@@ -114,8 +98,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/local", byWhitespace.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_Exists_RecognizesMohistGithubPr()
     {
@@ -127,8 +109,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.False(registry.Exists("mohist/unknown"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_ListIncludesBothBuiltInProfilesWithExpectedMetadata()
     {
@@ -147,8 +127,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(list, info => info.Id == "mohist/pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_ListDescribed_ExposesDescriptionForBothBuiltIns()
     {
@@ -166,8 +144,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), prEntry.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_Default_StillResolvesToMohistLocal()
     {
@@ -181,8 +157,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
     // ===================== Full graph / action names =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_StagesFollowPlanBuildCheckIntegrateOrder()
     {
@@ -192,8 +166,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/github-pr", definition.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_OpensDraftPrAsLastTask()
     {
@@ -218,8 +190,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("output.prUrl", openDraftPr.SetVars!["github.pr.url"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_SelfReviewUsesFailIfMarkerAndRetrySelf()
     {
@@ -247,8 +217,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("${{ prompts.fix-plan-review }}", fixPlanReview.With!["prompt"]!.Value.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck()
     {
@@ -268,8 +236,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(names, n => n == "self-review-passed");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void LocalWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck()
     {
@@ -297,8 +263,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("git diff --check", ReadStringWith(health, "run"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify()
     {
@@ -325,8 +289,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("recover:fix-tests", Assert.Single(handler.Tasks).Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_CheckStage_HasExactlyAiReviewPushMarkPrReadyAndGithubPrStatusCheck()
     {
@@ -379,8 +341,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(names, n => n == "merge-ready");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_IntegrateStage_DeliversViaArchivePushMergePr()
     {
@@ -415,8 +375,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("merged", ReadStringWith(mergeVerified, "expect"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_MergePrRecovery_DeclaresBaseMovedAndPrChecksFailedHandlers()
     {
@@ -483,8 +441,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Empty(protectionConflict.Tasks);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_TaskIdsHaveNoStagePrefixesAndRecoveryUsesRecover()
     {
@@ -512,8 +468,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("recover:fix-pr-checks", recoveryIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_AllTaskPromptsAreNamedReferences()
     {
@@ -554,8 +508,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Empty(inlinePromptTasks);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowDefinition_DoesNotReferenceRemovedActions()
     {
@@ -575,8 +527,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(usedActionIds, u => u == "mohist/publish-via-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrRecoveryPrompts_DoNotPerformExplicitPushSideEffects()
     {
@@ -592,8 +542,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("recover:push", resolveRebaseConflicts, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowYaml_ParsesViaWorkflowYamlSerializer()
     {
@@ -636,8 +584,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("prompts.fix-pr-checks", serializedAll);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GithubPrWorkflowYaml_RoundTripsViaWorkflowYamlSerializer()
     {
@@ -663,8 +609,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
             reparsed.Stages.SelectMany(s => s.Tasks).Select(t => t.Id));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_GithubPr_ReturnsFriendlyDisplayName()
     {
@@ -676,8 +620,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("gh auth login", info.Description, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ProjectWorkflowProfileManager_GetSystemTemplateDefinition_GithubPr_ReturnsGithubPrDefinition()
     {
@@ -687,8 +629,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Same(MohistWorkflow.GithubPrWorkflowDefinition, def);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ProjectWorkflowProfileManager_GetSystemTemplateInfo_LegacyPrId_ReturnsNull()
     {
@@ -696,8 +636,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/pr"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ProjectWorkflowProfileManager_SystemTemplates_ExposeGithubPrTemplate()
     {
@@ -713,8 +651,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(templates, t => t.Id == "mohist/pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
     {

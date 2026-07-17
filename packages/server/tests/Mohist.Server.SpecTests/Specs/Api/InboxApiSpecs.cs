@@ -31,9 +31,6 @@ public class InboxApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_EmptyProject_ReturnsEmptyArray()
     {
@@ -45,9 +42,6 @@ public class InboxApiSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_WithItems_ReturnsFieldsOrderedMostRecentFirstAndExcludesArchived()
     {
@@ -89,9 +83,6 @@ public class InboxApiSpecs
         Assert.False(failed.GetProperty("isRead").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_SetsItemRead_LeavesOthersUnchanged()
     {
@@ -117,50 +108,6 @@ public class InboxApiSpecs
         Assert.False(secondItem.TryGetProperty("readAt", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task MarkRead_RepeatedCall_StaysOk()
-    {
-        var projectId = await CreateProjectAsync("inbox-mark-idem");
-        var itemId = await SeedAsync(projectId, 1, "First",
-            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-mri-1");
-
-        await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{itemId}/read");
-        // A repeated "mark read" must not 404 — the user clicked the
-        // button twice. The item stays read.
-        await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{itemId}/read");
-
-        var items = await _client.GetDataAsync<JsonElement[]>(
-            $"/api/projects/{projectId}/inbox");
-        var item = Assert.Single(items);
-        Assert.Equal(itemId, item.GetProperty("itemId").GetString());
-        Assert.True(item.GetProperty("isRead").GetBoolean());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task MarkRead_CrossProjectItemId_Returns404()
-    {
-        var projectA = await CreateProjectAsync("inbox-cross-a");
-        var projectB = await CreateProjectAsync("inbox-cross-b");
-
-        var itemInA = await SeedAsync(projectA, 1, "First",
-            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-xcr-1");
-
-        using var response = await _client.PostAsync(
-            $"/api/projects/{projectB}/inbox/{itemInA}/read",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_UnknownItemId_Returns404()
     {
@@ -173,9 +120,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkAllRead_MarksAllNonArchivedItemsInProject()
     {
@@ -200,37 +144,6 @@ public class InboxApiSpecs
         Assert.All(items, i => Assert.True(i.GetProperty("isRead").GetBoolean()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task MarkAllRead_DoesNotTouchOtherProjectItems()
-    {
-        var projectA = await CreateProjectAsync("inbox-readall-a");
-        var projectB = await CreateProjectAsync("inbox-readall-b");
-
-        await SeedAsync(projectA, 1, "A1",
-            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ra-x-1");
-        await SeedAsync(projectA, 2, "A2",
-            NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ra-x-2");
-        var itemInB = await SeedAsync(projectB, 1, "B1",
-            NotificationKinds.IssueStarted, TestTime.UtcNow, "evt-ra-x-b-1");
-
-        var result = await _client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectA}/inbox/read-all");
-
-        Assert.Equal(2, result.GetProperty("marked").GetInt32());
-
-        var itemsB = await _client.GetDataAsync<JsonElement[]>(
-            $"/api/projects/{projectB}/inbox");
-        var b = Assert.Single(itemsB);
-        Assert.Equal(itemInB, b.GetProperty("itemId").GetString());
-        Assert.False(b.GetProperty("isRead").GetBoolean());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_ExcludesItemFromDefaultList()
     {
@@ -250,34 +163,6 @@ public class InboxApiSpecs
         Assert.False(surviving.GetProperty("isArchived").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task Archive_CrossProjectItemId_Returns404()
-    {
-        var projectA = await CreateProjectAsync("inbox-arc-a");
-        var projectB = await CreateProjectAsync("inbox-arc-b");
-
-        var itemInA = await SeedAsync(projectA, 1, "First",
-            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-arc-x-1");
-
-        using var response = await _client.PostAsync(
-            $"/api/projects/{projectB}/inbox/{itemInA}/archive",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-
-        // The cross-project attempt must not have touched the row.
-        var itemsA = await _client.GetDataAsync<JsonElement[]>(
-            $"/api/projects/{projectA}/inbox");
-        var a = Assert.Single(itemsA);
-        Assert.False(a.GetProperty("isArchived").GetBoolean());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_UnknownItemId_Returns404()
     {
@@ -290,9 +175,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_UnknownProject_Returns404()
     {
@@ -302,9 +184,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox()
     {
@@ -373,35 +252,12 @@ public class InboxApiSpecs
             $"/api/projects/{otherProjectId}/inbox"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task MarkRead_UnknownProject_Returns404()
-    {
-        using var response = await _client.PostAsync(
-            "/api/projects/proj_does_not_exist/inbox/inb_anything/read",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
             "/api/projects",
             $"{prefix}-{Guid.NewGuid():N}");
         return project.GetProperty("id").GetString()!;
-    }
-
-    private async Task<JsonElement[]> WaitForInboxItemsAsync(string projectId, int expectedCount)
-    {
-        return await TestWait.ForAsync(
-            () => _client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/inbox"),
-            items => items.Length == expectedCount,
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(20),
-            $"project '{projectId}' inbox to contain {expectedCount} items");
     }
 
     private async Task<string> SeedAsync(

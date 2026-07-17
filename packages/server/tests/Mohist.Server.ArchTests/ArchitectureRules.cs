@@ -9,7 +9,6 @@ using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
 
 namespace Mohist.Server.ArchTests;
 
-[Trait(Traits.Sut.Name, Traits.Sut.Architecture)]
 public class ArchitectureRules
 {
     private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()
@@ -397,6 +396,64 @@ public class ArchitectureRules
     }
 
 
+    [Fact]
+    public void CSharpTestFiles_MustStayWithinSizeRatchet()
+    {
+        const int absoluteBudgetBytes = 24_000;
+        var sources = EmbeddedSources("TestSources/");
+        Assert.NotEmpty(sources);
+
+        var requiredRoots = new[]
+        {
+            "Mohist.Server.SpecTests/",
+            "Mohist.Server.UnitTests/",
+            "Mohist.Server.ArchTests/",
+        };
+        foreach (var root in requiredRoots)
+        {
+            Assert.Contains(sources, source => source.Path.StartsWith(root, StringComparison.Ordinal));
+        }
+
+        var baseline = ReadTestFileSizeBaseline();
+        var sourceByPath = sources.ToDictionary(source => source.Path, StringComparer.Ordinal);
+        var violations = new List<string>();
+
+        foreach (var source in sources.Where(source => source.ByteLength > absoluteBudgetBytes))
+        {
+            if (!baseline.TryGetValue(source.Path, out var allowedBytes))
+            {
+                violations.Add($"{source.Path} is {source.ByteLength} bytes and has no baseline allowance");
+                continue;
+            }
+
+            if (source.ByteLength > allowedBytes)
+                violations.Add($"{source.Path} grew from its {allowedBytes}-byte allowance to {source.ByteLength} bytes");
+        }
+
+        foreach (var (path, allowedBytes) in baseline)
+        {
+            if (allowedBytes <= absoluteBudgetBytes)
+            {
+                violations.Add($"{path} has an invalid {allowedBytes}-byte baseline allowance");
+                continue;
+            }
+
+            if (!sourceByPath.TryGetValue(path, out var source))
+            {
+                violations.Add($"{path} is in the baseline but its source file is missing");
+                continue;
+            }
+
+            if (source.ByteLength <= absoluteBudgetBytes)
+                violations.Add($"{path} is now {source.ByteLength} bytes and must be removed from the baseline");
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "C# test files must stay within the 24,000-byte ratchet. Violations: "
+            + string.Join("; ", violations.OrderBy(violation => violation, StringComparer.Ordinal)));
+    }
+
     /// <summary>
     /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
     /// <c>Collection</c> (or be <c>Index.md</c>). Prevents accidental
@@ -405,7 +462,7 @@ public class ArchitectureRules
     [Fact]
     public void SpecFiles_MustHaveSpecOrCollectionSuffix()
     {
-        var violations = EmbeddedSources("SpecSources/")
+        var violations = EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/")
             .Select(source => Path.GetFileNameWithoutExtension(source.Path)!)
             .Where(name => !name.EndsWith("Specs")
                         && !name.EndsWith("Collection")
@@ -439,7 +496,7 @@ public class ArchitectureRules
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var source in EmbeddedSources("SpecSources/"))
+        foreach (var source in EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/"))
         {
             foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(source.Content))
             {
@@ -470,7 +527,7 @@ public class ArchitectureRules
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var source in EmbeddedSources("SpecSources/"))
+        foreach (var source in EmbeddedSources("TestSources/Mohist.Server.SpecTests/Specs/"))
         {
             var m = namespaceRegex.Match(source.Content);
             if (!m.Success)
@@ -492,6 +549,20 @@ public class ArchitectureRules
             string.Join(", ", violations));
     }
 
+    private static IReadOnlyDictionary<string, int> ReadTestFileSizeBaseline()
+    {
+        const string resourceName = "SpecFileSizeBaseline.json";
+        var assembly = typeof(ArchitectureRules).Assembly;
+        Assert.Contains(resourceName, assembly.GetManifestResourceNames());
+
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        Assert.NotNull(stream);
+        var baseline = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(stream);
+        Assert.NotNull(baseline);
+        Assert.NotEmpty(baseline);
+        return baseline;
+    }
+
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
     {
         var assembly = typeof(ArchitectureRules).Assembly;
@@ -501,11 +572,12 @@ public class ArchitectureRules
             .Select(name =>
             {
                 using var stream = assembly.GetManifestResourceStream(name)!;
+                var byteLength = checked((int)stream.Length);
                 using var reader = new StreamReader(stream);
-                return new EmbeddedSource(name[prefix.Length..], reader.ReadToEnd());
+                return new EmbeddedSource(name[prefix.Length..], reader.ReadToEnd(), byteLength);
             })
             .ToArray();
     }
 
-    private sealed record EmbeddedSource(string Path, string Content);
+    private sealed record EmbeddedSource(string Path, string Content, int ByteLength);
 }

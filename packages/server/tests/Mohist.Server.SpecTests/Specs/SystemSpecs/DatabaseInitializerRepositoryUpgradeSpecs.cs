@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
@@ -12,16 +11,12 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class DatabaseInitializerRepositoryUpgradeSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InitializeAsync_AfterMigration_UpgradesProjectRepositories()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        MigratedSqliteTemplate.CopyTo(connection);
+        await using var database = TestSqliteDatabase.CreateMigrated();
         var services = new ServiceCollection()
-            .AddDbContext<MohistDbContext>(options => options.UseSqlite(connection))
+            .AddDbContext<MohistDbContext>(options => options.UseSqlite(database.Keeper))
             .BuildServiceProvider();
         await using (services)
         {

@@ -18,8 +18,6 @@ public class IssueWorkflowProfileConsistencySpecs
 
     public IssueWorkflowProfileConsistencySpecs(MohistDbFixture fixture) => _fixture = fixture;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData(null, IssueWorkflowProfiles.LocalId)]
     [InlineData("mohist/github-pr", "mohist/github-pr")]

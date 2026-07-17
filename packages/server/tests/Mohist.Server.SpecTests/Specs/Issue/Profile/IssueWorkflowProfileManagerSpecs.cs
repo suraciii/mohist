@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -14,22 +13,15 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_profile";
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly IssueWorkflowProfileManager _manager;
-    private readonly SqliteConnection _keeper;
 
     public IssueWorkflowProfileManagerSpecs()
     {
-        var connectionString = $"Data Source=issue-profile-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        _manager = new IssueWorkflowProfileManager(new Factory(_options));
+        _database = TestSqliteDatabase.CreateModelSchema();
+        _manager = new IssueWorkflowProfileManager(new TestDbContextFactory(_database.Options));
 
-        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
-        using var db = new MohistDbContext(_options);
+        using var db = new MohistDbContext(_database.Options);
         var issueNumbers = new[] { 1, 2, 4, 5, 6, 7, 8, 9 };
         foreach (var issueNumber in issueNumbers)
         {
@@ -49,14 +41,12 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
     // ===================== Template =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetProfile_ReturnsNull_WhenNoRecord()
     {
@@ -64,8 +54,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(profile);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_ProjectReference_StoresSourceTemplateId()
     {
@@ -82,8 +70,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(1, stored.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_CustomYaml_StoresParsedDefinition()
     {
@@ -105,8 +91,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("my-custom", def.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_BothSet_Throws()
     {
@@ -123,8 +107,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                         """)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_NullClears_BothFields()
     {
@@ -139,8 +121,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(row.Template);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_OverwritesPreviousCustom()
     {
@@ -168,8 +148,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Variables =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetVariables_Empty_WhenNoRecord()
     {
@@ -177,8 +155,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Same(VariableBundle.Empty, bundle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SetVariables_StoresAndRetrieves()
     {
@@ -191,8 +167,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(got.Vars);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchVariables_DeepMergesAcrossCalls()
     {
@@ -215,8 +189,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task VariableOperations_AreIsolatedFromTemplateOperations()
     {
@@ -236,8 +208,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(1, doc.RootElement.GetProperty("keep").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite()
     {
@@ -259,7 +229,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
         await _manager.SetVariablesAsync(ProjectId, 9, bundle);
 
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             var conn = db.Database.GetDbConnection();
             await conn.OpenAsync();
@@ -292,12 +262,4 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("\"stageName\":\"构建\"", raw);
     }
 
-    // ===================== helpers =====================
-
-    private class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 }

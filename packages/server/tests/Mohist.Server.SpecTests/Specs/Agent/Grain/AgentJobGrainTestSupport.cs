@@ -1,0 +1,105 @@
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.SpecTests.Support;
+using Mohist.Server.SpecTests.Specs.Workflow;
+using Orleans;
+using Xunit;
+namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
+
+public abstract class AgentJobGrainTestSupport
+{
+    protected readonly AgentJobGrainFixture _fixture;
+
+    protected AgentJobGrainTestSupport(AgentJobGrainFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.DispatchObserver.Reset();
+    }
+
+    protected IGrainFactory Grains => _fixture.Grains;
+
+    protected IAgentJobGrain JobGrain(string key) => Grains.GetGrain<IAgentJobGrain>(key);
+
+    protected static async Task<T> WaitForAsync<T>(
+        Func<Task<T>> probe,
+        Func<T, bool> done,
+        TimeSpan timeout,
+        TimeSpan step,
+        string description)
+        => await TestWait.ForAsync(probe, done, timeout, step, description);
+
+    protected static async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
+    {
+        await WaitForAsync(
+            () => job.GetStatusAsync(),
+            s => s == expected,
+            timeout,
+            TimeSpan.FromMilliseconds(25),
+            $"status == {expected}",
+            () => job.CheckTimeoutsAsync());
+    }
+
+    protected static async Task<T> WaitForAsync<T>(
+        Func<Task<T>> probe,
+        Func<T, bool> done,
+        TimeSpan timeout,
+        TimeSpan step,
+        string description,
+        Func<Task> advance)
+        => await TestWait.ForAsync(probe, done, timeout, step, description, advance);
+
+    protected async Task<(string RunnerId, string ProjectId)> RegisterAgentJobRunnerAsync(
+        string runnerId,
+        string? projectId = null,
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+    {
+        // Every agent-job spec shares the in-memory backlog directory and
+        // global runner registry with the rest of the [Collection("RunnerGrain")]
+        // cluster. Without a reset here, a stale runner from a prior spec
+        // assigns this job before the new runner can, which makes the
+        // assertions on snapshot.RunnerId non-deterministic. Clear both
+        // before each registration.
+        await ClearBacklogAsync();
+
+        var pid = projectId ?? $"agent-job-project-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "agent-job-host",
+            pid));
+        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
+        {
+            await runner.UpdateAsync(maxWorkflowSlots);
+        }
+        return (runnerId, pid);
+    }
+
+    protected async Task ClearBacklogAsync()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+    }
+
+    protected async Task ClearGlobalRunnerRegistryAsync()
+    {
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var ids = await registry.ListRunnerIdsAsync();
+        foreach (var id in ids)
+            await registry.UnregisterAsync(id);
+    }
+
+    protected static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
+        new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId);
+
+}

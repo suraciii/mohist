@@ -10,8 +10,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class TranscriptEventPublisherSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_SubscribedConnection_DeliversEnvelopeOnTranscriptChannel()
     {
@@ -31,8 +29,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Equal("hello", message.Envelope.Payload.GetProperty("text").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_UnsubscribedConnection_DoesNotReceive()
     {
@@ -50,8 +46,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Equal("conn-subscribed", message.ConnectionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_ConnectionSubscribedToDifferentType_DoesNotReceive()
     {
@@ -67,8 +61,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Empty(hub.TranscriptMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_MultipleSubscribedConnections_AllReceive()
     {
@@ -91,8 +83,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Contains(hub.TranscriptMessages, m => m.ConnectionId == "conn-B");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_NoSubscribers_DoesNotThrow()
     {
@@ -105,8 +95,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Empty(hub.TranscriptMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_EmptyType_DoesNotDeliver()
     {
@@ -123,8 +111,6 @@ public class TranscriptEventPublisherSpecs
         Assert.Empty(hub.TranscriptMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_NullEnvelope_Throws()
     {
@@ -135,8 +121,6 @@ public class TranscriptEventPublisherSpecs
         await Assert.ThrowsAsync<ArgumentNullException>(() => publisher.PublishAsync(null!));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PublishAsync_TranscriptEnvelope_DoesNotLeakOnTaskLogChannel()
     {

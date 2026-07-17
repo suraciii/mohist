@@ -10,8 +10,6 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 {
     public CheckRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_DoesNotInjectRecoveryTask()
     {
@@ -37,8 +35,6 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskLevelRecoveryTasks_RunBeforeRetrySelf()
     {

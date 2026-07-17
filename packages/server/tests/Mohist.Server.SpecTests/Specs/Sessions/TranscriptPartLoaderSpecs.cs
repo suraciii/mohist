@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -24,11 +23,11 @@ public sealed class TranscriptPartLoaderSpecs
 {
     private static readonly DateTime FixedTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_EmptySessionIds_ReturnsEmptyResult()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await using var db = fixture.CreateDbContext();
 
         var result = await TranscriptPartLoader.LoadAsync(db, Array.Empty<string>());
@@ -38,11 +37,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_DuplicateSessionIds_AreDedupedBeforeQuery()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now);
         await SeedSessionAsync(fixture, "sess_b", now);
@@ -59,11 +58,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Contains(2L, result.SessionByTurnId.Keys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_MultipleSessions_ReturnsSessionByTurnId_AndAllParts()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
@@ -87,11 +86,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.All(result.Parts, p => Assert.Contains(result.Turns, t => t.Id == p.TurnId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_OnlySessionIdsWithoutTurns_ReturnsEmptyResult()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await using var db = fixture.CreateDbContext();
 
         var result = await TranscriptPartLoader.LoadAsync(
@@ -103,11 +102,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_PartTypeFilter_ReturnsOnlyMatchingParts()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
@@ -128,11 +127,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.All(result.Parts, p => Assert.Equal(TranscriptPartTypes.SessionClosed, p.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_PartTypeFilter_NoMatches_ReturnsEmptyPartsList()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
@@ -150,11 +149,11 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_DoesNotImposeOrderingOnMaterializedParts()
     {
-        using var fixture = new FakeLoaderDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
@@ -205,28 +204,5 @@ public sealed class TranscriptPartLoaderSpecs
             }
             await db.SaveChangesAsync();
         }
-    }
-
-    private sealed class FakeLoaderDbContextFactory : IDbContextFactory<MohistDbContext>, IDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public FakeLoaderDbContextFactory()
-        {
-            var dbName = $"loader-{Guid.NewGuid():N}";
-            _connection = new SqliteConnection($"Data Source={dbName};Mode=Memory;Cache=Shared");
-            _connection.Open();
-            MigratedSqliteTemplate.CopyTo(_connection);
-        }
-
-        public MohistDbContext CreateDbContext()
-        {
-            var options = new DbContextOptionsBuilder<MohistDbContext>()
-                .UseSqlite(_connection)
-                .Options;
-            return new MohistDbContext(options);
-        }
-
-        public void Dispose() => _connection.Dispose();
     }
 }

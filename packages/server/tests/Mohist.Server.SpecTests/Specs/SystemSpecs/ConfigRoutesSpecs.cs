@@ -56,8 +56,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetConfig_ExposesLogLevelAndRuntimeSchedulingKeys()
     {
@@ -77,8 +75,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.DoesNotContain(data.EnumerateObject(), p => LooksLikeSecret(p.Name));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("DEBUG")]
     [InlineData("INFO")]
@@ -94,8 +90,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(level, read.Data.GetProperty("logLevel").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("debug")]
     [InlineData("VERBOSE")]
@@ -120,8 +114,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal("WARN", read!.Data.GetProperty("logLevel").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("maxConcurrentAgents", 7)]
     [InlineData("agentTimeout", 900)]
@@ -138,8 +130,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(value, read!.Data.GetProperty(key).GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfig_RejectsUnknownKey()
     {
@@ -153,8 +143,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Contains("Unknown", envelope.Error, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfigRuntimeKey_RejectsNonNumberValue()
     {
@@ -162,8 +150,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfig_MissingValue_ReturnsBadRequest()
     {

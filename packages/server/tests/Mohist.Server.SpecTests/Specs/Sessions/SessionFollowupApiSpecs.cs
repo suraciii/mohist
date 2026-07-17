@@ -30,8 +30,6 @@ public class SessionFollowupApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsSent()
     {
@@ -72,8 +70,6 @@ public class SessionFollowupApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_IdleLiveSession_StartsUserTurnWithoutCreatingTask()
     {
@@ -101,8 +97,6 @@ public class SessionFollowupApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
@@ -115,8 +109,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_WhitespaceText_ReturnsBadRequest()
     {
@@ -129,8 +121,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_MissingText_ReturnsBadRequest()
     {
@@ -143,8 +133,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_UnknownSession_ReturnsNotFound()
     {
@@ -155,8 +143,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_MissingRuntimeBinding_ReturnsRuntimeSessionMissing()
     {
@@ -177,8 +163,6 @@ public class SessionFollowupApiSpecs
         Assert.Empty(runnerHub.SentMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_RunnerOffline_ReturnsServiceUnavailable()
     {
@@ -191,8 +175,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveFollowupTargetAsync_ReadsRunnerIdAndWorkflowRunIdFromSession()
     {

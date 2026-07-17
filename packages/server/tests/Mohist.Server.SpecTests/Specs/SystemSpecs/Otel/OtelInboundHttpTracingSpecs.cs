@@ -21,8 +21,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class OtelInboundHttpTracingSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboundHttpRequest_MappedRoute_ProducesExactlyOneAspNetCoreSpan()
     {
@@ -43,8 +41,6 @@ public class OtelInboundHttpTracingSpecs
         Assert.True(span.Duration >= TimeSpan.Zero);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboundHttpRequest_OtelPathPrefix_ProducesNoInboundSpan()
     {
@@ -58,8 +54,6 @@ public class OtelInboundHttpTracingSpecs
         Assert.Empty(inbound);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ExcludeOtelIngestPath_ReturnsFalse_ForOtelPathPrefix()
     {

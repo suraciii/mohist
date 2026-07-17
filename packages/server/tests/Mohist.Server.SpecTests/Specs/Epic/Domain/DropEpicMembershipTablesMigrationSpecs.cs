@@ -17,8 +17,6 @@ public class DropEpicMembershipTablesMigrationSpecs
     private const string PreviousMigration = "20260716160000_BackfillCanonicalEpicReferences";
     private const string TargetMigration = "20260716170000_DropEpicMembershipTables";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Migration_DropsLegacyMembershipTables_PreservingAffiliationDerivedFromMembership()
     {
@@ -57,8 +55,6 @@ public class DropEpicMembershipTablesMigrationSpecs
         Assert.Equal(7, materialized!.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Migration_ClearsStaleIssueAffiliationWhenNoLegacyMembershipExists()
     {
@@ -86,8 +82,6 @@ public class DropEpicMembershipTablesMigrationSpecs
         Assert.DoesNotContain("epicNumber", row.State, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Migration_MovesActiveAndRetainedAffiliationIntoIssueStateBeforeDroppingTables()
     {

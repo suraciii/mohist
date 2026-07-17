@@ -57,9 +57,6 @@ public class AgentLauncherSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithTriggerLabels_MergesThemIntoSessionMetadataLabels()
     {
@@ -104,8 +101,6 @@ public class AgentLauncherSpecs
             record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Launch_RepeatedTrigger_ReusesStableSession()
     {
@@ -132,8 +127,41 @@ public class AgentLauncherSpecs
         Assert.Equal(1, await CountSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Launch_WithContextRefs_RecordsThemAsSessionMetadataLabelsOnly()
+    {
+        var projectId = await CreateProjectAsync("launcher-context-refs");
+        var agent = await CreateAgentAsync(projectId, "context-refs-agent");
+
+        AgentLaunchResult result;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            result = await launcher.LaunchAsync(
+                agent,
+                prompt: "look at the issue",
+                new AgentLaunchContext(
+                    ProjectId: projectId,
+                    IssueNumber: 42,
+                    EpicNumber: 7,
+                    Repository: "feature-repo",
+                    WorkspacePath: "/tmp/launch-ctx",
+                    Title: null),
+                triggerLabels: null);
+        }
+
+        var record = await LoadSessionByIdAsync(result.SessionId);
+        Assert.NotNull(record);
+        Assert.Equal("42", record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
+        Assert.Equal("7", record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
+        Assert.Equal("feature-repo", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
+        Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
+
+        // Context refs are prompt context only — no lifecycle labels.
+        Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
+        Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.SessionName));
+    }
+
     [Fact]
     public async Task Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork()
     {
@@ -202,8 +230,6 @@ public class AgentLauncherSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DispatcherDelivery_ResolvesSiloScopedAgentLaunchServices()
     {
@@ -254,9 +280,6 @@ public class AgentLauncherSpecs
         Assert.Equal(agent.Id, session.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithoutTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
@@ -287,9 +310,6 @@ public class AgentLauncherSpecs
         Assert.DoesNotContain(labels, kv => kv.Key.StartsWith("mohist.io/trigger/", StringComparison.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithEmptyTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
@@ -313,9 +333,6 @@ public class AgentLauncherSpecs
         Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerSubscriptionId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -341,9 +358,6 @@ public class AgentLauncherSpecs
         Assert.Equal(sessionsBefore, sessionsAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithNullAgent_ThrowsArgumentNullException()
     {
@@ -358,9 +372,6 @@ public class AgentLauncherSpecs
                 triggerLabels: null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithNullContext_ThrowsArgumentNullException()
     {

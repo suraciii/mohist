@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.IssueTemplate;
 
-[Collection("IntegrationIssue3")]
+[Collection("IssueProfile")]
 public class IssueTemplateApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -23,8 +23,6 @@ public class IssueTemplateApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task List_IncludesBuiltinTemplates()
     {
@@ -44,8 +42,6 @@ public class IssueTemplateApiSpecs
         Assert.False(feature.TryGetProperty("isDefault", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Get_Feature_ReturnsFullTemplateWithBody()
     {
@@ -73,8 +69,6 @@ public class IssueTemplateApiSpecs
         Assert.False(data.TryGetProperty("sections", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Get_AliasMohistDefault_ReturnsFeature()
     {
@@ -91,8 +85,6 @@ public class IssueTemplateApiSpecs
         Assert.Equal(canonical.GetRawText(), alias.GetRawText());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Get_NonexistentTemplate_ReturnsNotFound()
     {
@@ -102,8 +94,6 @@ public class IssueTemplateApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task List_ExcludesBuiltinsWhenDisabled()
     {
@@ -127,8 +117,6 @@ public class IssueTemplateApiSpecs
         Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "refactor");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate()
     {
@@ -175,8 +163,6 @@ public class IssueTemplateApiSpecs
         Assert.Equal(data.GetRawText(), aliasData.GetRawText());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DisabledDefault_DoesNotAffectOtherProjects()
     {
@@ -196,8 +182,6 @@ public class IssueTemplateApiSpecs
         Assert.Contains(listB, t => t.GetProperty("id").GetString() == "feature");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task List_WithoutProjectId_ReturnsBadRequest()
     {

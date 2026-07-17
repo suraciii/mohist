@@ -8,8 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class EventDeliveryIndexSpecs
 {
     private const string UndeliveredFilter = "\"DispatchedAt\" IS NULL";

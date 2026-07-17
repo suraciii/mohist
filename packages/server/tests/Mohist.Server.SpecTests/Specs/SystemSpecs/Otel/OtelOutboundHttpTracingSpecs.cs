@@ -20,8 +20,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class OtelOutboundHttpTracingSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SystemNetHttpClientActivitySource_IsCapturedWithDestinationUriAndStatus()
     {

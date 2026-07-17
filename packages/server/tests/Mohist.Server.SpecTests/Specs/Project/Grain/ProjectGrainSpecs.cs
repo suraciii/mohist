@@ -25,8 +25,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
     private IProjectGrain NewProjectGrain(string? id = null) =>
         _grains.GetGrain<IProjectGrain>(id ?? Guid.NewGuid().ToString());
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_RequiresInitialRepository()
     {
@@ -41,8 +39,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             }));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_RequiresInitialRepositoryGitUrl()
     {
@@ -57,8 +53,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             }));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_WithInitialRepository_StoresSingleDefault()
     {
@@ -80,8 +74,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(repo.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_Duplicate_Throws()
     {
@@ -109,8 +101,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 }));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetAsync_Existing_ReturnsProject()
     {
@@ -130,8 +120,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("find-me", project.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetAsync_NotExisting_ReturnsNull()
     {
@@ -140,8 +128,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(project);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Update_Existing_UpdatesTimestamp()
     {
@@ -164,8 +150,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(string.CompareOrdinal(updated!.UpdatedAt, before) > 0);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Update_NotExisting_ReturnsNull()
     {
@@ -174,8 +158,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Delete_Existing_RemovesProject()
     {
@@ -194,8 +176,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(await grain.GetAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_PreservesDefaultWhenNotSetDefault()
     {
@@ -222,8 +202,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.False(backend.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_WithSetDefault_RebindsDefault()
     {
@@ -247,8 +225,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(frontend.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_DuplicateNameDifferentCase_Rejected()
     {
@@ -267,8 +243,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             grain.AddRepositoryAsync("SERVER", "git@example.com:server-other.git", "main"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_BlankGitUrl_Rejected()
     {
@@ -287,8 +261,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             grain.AddRepositoryAsync("server", "", "main"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_BlankName_Rejected()
     {
@@ -307,8 +279,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             grain.AddRepositoryAsync("", "git@example.com:r.git", "main"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_BlankBaseBranch_DefaultsToMain()
     {
@@ -329,8 +299,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("main", web.BaseBranch);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_WhenPersistenceFails_LeavesActivatedAndReactivatedProjectUnchanged()
     {
@@ -383,8 +351,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal(2, reactivated!.Repositories.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_WhenBackingRowIsMissing_LeavesActivatedProjectUnchanged()
     {
@@ -418,8 +384,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(repository.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultRepository_SwitchesDefault()
     {
@@ -444,8 +408,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.False(frontend.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultRepository_OnCurrentDefault_IsIdempotent()
     {
@@ -482,8 +444,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             after.Repositories.Select(repository => (repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultRepository_OnUnknown_ReturnsNull()
     {
@@ -502,8 +462,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_NonDefault_RemovesWithoutChangingDefault()
     {
@@ -526,8 +484,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(updated.Repositories[0].IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_Default_RejectedAsConflict()
     {
@@ -551,8 +507,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.True(after.Repositories[0].IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_Unknown_ReturnsNull()
     {
@@ -571,8 +525,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateRepository_ChangesGitUrlAndBaseBranch()
     {
@@ -595,8 +547,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("develop", repo.BaseBranch);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateRepository_EmptyPatch_ReturnsExistingWithoutMutation()
     {
@@ -615,8 +565,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             grain.UpdateRepositoryAsync("backend", gitUrl: null, baseBranch: null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateRepository_UnknownName_ReturnsNull()
     {
@@ -635,8 +583,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DefaultRepository_ReturnsFlaggedRepositoryWithoutFallback()
     {

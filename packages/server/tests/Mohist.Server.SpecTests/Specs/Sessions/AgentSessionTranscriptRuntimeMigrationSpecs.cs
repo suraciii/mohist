@@ -11,8 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionTranscriptRuntimeMigrationSpecs
 {
     private const string PreviousMigrationId = "20260714120000_AddProjectEventReadKeys";

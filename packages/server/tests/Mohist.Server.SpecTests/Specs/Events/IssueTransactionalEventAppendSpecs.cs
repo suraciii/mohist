@@ -1,6 +1,4 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -16,28 +14,18 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_txn";
-    private readonly SqliteConnection _keeper;
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly NullDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
     public IssueTransactionalEventAppendSpecs()
     {
-        var connectionString = $"Data Source=issue-transactional-event-append-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-        _dbFactory = new Factory(_options);
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
@@ -45,7 +33,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -84,7 +72,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
             ]));
 
         Assert.Contains("event write failed", exception.Message);
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         Assert.Empty(await verify.Issues.AsNoTracking().ToListAsync());
         Assert.Empty(await verify.IssueEvents.AsNoTracking().ToListAsync());
     }
@@ -97,7 +85,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
 
         await store.SaveAsync(Key(3), issue, [new IssueArchived()]);
 
-        await using var fresh = new MohistDbContext(_options);
+        await using var fresh = new MohistDbContext(_database.Options);
         var row = Assert.Single(await fresh.IssueEvents.AsNoTracking().ToListAsync());
         Assert.Equal($"/mohist/projects/{ProjectId}/issues/3", row.Source);
         Assert.Equal(EventCatalog.ReverseDns.IssueArchived, row.Type);
@@ -175,7 +163,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Equal(EventCatalog.ReverseDns.IssueEpicChanged, stored.Envelope.Type);
         Assert.Equal("9", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         Assert.Empty(await verify.Epics.AsNoTracking().ToListAsync());
         Assert.Empty(await verify.WorkflowRuns.AsNoTracking().ToListAsync());
     }
@@ -230,11 +218,6 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Priority = "p2",
         EpicNumber = epicNumber,
     };
-
-    private sealed class Factory(DbContextOptions<MohistDbContext> options) : IDbContextFactory<MohistDbContext>
-    {
-        public MohistDbContext CreateDbContext() => new(options);
-    }
 
     private sealed class NullDispatchGrainFactory : IGrainFactory
     {

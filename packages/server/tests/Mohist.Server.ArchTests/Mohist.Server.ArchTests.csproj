@@ -30,8 +30,17 @@
     <EmbeddedResource Include="..\..\src\Mohist.Server\**\*.cs">
       <LogicalName>ServerSources/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="..\Mohist.Server.SpecTests\Specs\**\*.cs">
-      <LogicalName>SpecSources/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    <EmbeddedResource Include="..\Mohist.Server.SpecTests\**\*.cs" Exclude="..\Mohist.Server.SpecTests\bin\**;..\Mohist.Server.SpecTests\obj\**">
+      <LogicalName>TestSources/Mohist.Server.SpecTests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Mohist.Server.UnitTests\**\*.cs" Exclude="..\Mohist.Server.UnitTests\bin\**;..\Mohist.Server.UnitTests\obj\**">
+      <LogicalName>TestSources/Mohist.Server.UnitTests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="*.cs">
+      <LogicalName>TestSources/Mohist.Server.ArchTests/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="spec-file-size-baseline.json">
+      <LogicalName>SpecFileSizeBaseline.json</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="..\..\src\Mohist.Server\Mohist.Server.csproj">
       <LogicalName>ProductionProjects/Mohist.Server.csproj</LogicalName>

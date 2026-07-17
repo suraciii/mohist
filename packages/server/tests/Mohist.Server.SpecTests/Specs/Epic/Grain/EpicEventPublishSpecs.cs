@@ -13,8 +13,6 @@ public class EpicEventPublishSpecs
     private const string ProjectId = "project_1";
     private const int EpicNumber = 1;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_PersistsScopedEpicStatusEvent()
     {
@@ -37,8 +35,6 @@ public class EpicEventPublishSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_CommandsIssueWithoutRecordingEpicMembershipEvent()
     {

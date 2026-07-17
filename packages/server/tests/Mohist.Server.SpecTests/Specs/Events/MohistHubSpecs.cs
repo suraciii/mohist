@@ -12,8 +12,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class MohistHubSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_FreshConnection_LeavesRegistrySubscriptionSetEmpty()
     {
@@ -32,8 +30,6 @@ public class MohistHubSpecs
         Assert.False(registry.ShouldNotify("conn-fresh", "coder_text_chunk"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_FreshConnection_DoesNotThrow()
     {
@@ -50,8 +46,6 @@ public class MohistHubSpecs
         Assert.Contains("conn-fresh", registry.ConnectionIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_GrainLookupFails_LeavesRegistryEmptyAndDoesNotThrow()
     {
@@ -72,8 +66,6 @@ public class MohistHubSpecs
         Assert.False(registry.ShouldNotify("conn-fresh", "com.mohist.workflow.stage.started"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_ReconnectWithStoredSet_ReappliesItToTheRegistry()
     {
@@ -99,8 +91,6 @@ public class MohistHubSpecs
         Assert.False(registry.ShouldNotify("conn-reconnect", "stage_changed"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SetSubscriptionsAsync_FirstCall_StoresListInGrainAndRegistry()
     {
@@ -130,8 +120,6 @@ public class MohistHubSpecs
         Assert.Equal(3, stored.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SetSubscriptionsAsync_SecondCallWithSameList_IsIdempotent()
     {
@@ -159,8 +147,6 @@ public class MohistHubSpecs
         Assert.True(registry.ShouldNotify("conn-A", "com.mohist.issue.created"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SetSubscriptionsAsync_ReplacingList_PurgesPriorEntries()
     {
@@ -179,8 +165,6 @@ public class MohistHubSpecs
         Assert.False(registry.ShouldNotify("conn-A", "old.type"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Dispatcher_ForConnectionWithEmptySubscriptionSet_FiltersEveryEmit()
     {
@@ -210,8 +194,6 @@ public class MohistHubSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Registry_AfterSetSubscriptions_ReportsMatchingEventTypesOnly()
     {

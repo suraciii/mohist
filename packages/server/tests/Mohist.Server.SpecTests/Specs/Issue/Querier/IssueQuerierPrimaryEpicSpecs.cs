@@ -19,8 +19,6 @@ public class IssueQuerierPrimaryEpicSpecs
 
     public IssueQuerierPrimaryEpicSpecs(MohistDbFixture fixture) => _fixture = fixture;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData(EpicStatusName.Idle)]
     [InlineData(EpicStatusName.Running)]
@@ -43,8 +41,6 @@ public class IssueQuerierPrimaryEpicSpecs
         Assert.Equal(status, item.PrimaryEpic.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData(EpicStatusName.Done)]
     [InlineData(EpicStatusName.Closed)]
@@ -62,8 +58,6 @@ public class IssueQuerierPrimaryEpicSpecs
         Assert.Null(item.PrimaryEpic);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PrimaryEpic_CurrentAffiliationAfterMove_ProjectsNewEpicOnly()
     {

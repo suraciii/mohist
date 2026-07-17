@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -34,16 +33,12 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         Logger.Entries.Clear();
     }
 
-    private SqliteConnection _keeper = null!;
+    private TestSqliteDatabase _database = null!;
 
     public Task InitializeAsync()
     {
-        var dbName = $"mohist-agent-session-test-{Guid.NewGuid():N}";
-        ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(ConnectionString);
-        _keeper.Open();
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        ConnectionString = _database.ConnectionString;
 
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>
@@ -66,7 +61,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public Task DisposeAsync()
     {
         Cluster?.Dispose();
-        _keeper?.Dispose();
+        _database?.Dispose();
         return Task.CompletedTask;
     }
 

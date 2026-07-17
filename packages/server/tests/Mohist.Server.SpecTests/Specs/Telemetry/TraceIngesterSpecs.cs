@@ -6,8 +6,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
 public class TraceIngesterSpecs : IDisposable
 {
     private const string TraceId1 = "00000000000000000000000000000001";

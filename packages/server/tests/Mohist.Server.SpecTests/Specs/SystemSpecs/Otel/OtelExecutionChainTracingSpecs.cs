@@ -35,8 +35,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboundHttpRequest_YieldsInboundAspNetCoreSpan()
     {
@@ -62,8 +60,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         Assert.Equal(200, span.GetTagItem("http.response.status_code"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RepresentativeRequest_YieldsSingleTraceAcrossAllFiveSources()
     {
@@ -122,8 +118,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         Assert.Equal(orleans.SpanId, outbound.ParentSpanId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task IssueCreationRequest_YieldsSingleTraceSpanningHttpAndOrleansAndEfCore()
     {
@@ -215,8 +209,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EfQuery_CarriesSqlTextAsAttribute()
     {

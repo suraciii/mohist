@@ -43,8 +43,6 @@ public class IssueGrainEventSaveFailureSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task EventAwareSaveFailure_QuarantinesActivation_SubsequentCommandMustReload()
     {
@@ -91,8 +89,6 @@ public class IssueGrainEventSaveFailureSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task EventAwareSaveFailure_QuarantinesActivation_CompleteWorkMustReload()
     {
@@ -130,8 +126,6 @@ public class IssueGrainEventSaveFailureSpecs
         Assert.Contains("must reload", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task EventAwareSaveFailure_QuarantinesActivation_EpicAssignmentMustNotPersistDirtyState()
     {

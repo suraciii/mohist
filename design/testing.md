@@ -90,19 +90,20 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 | Track | Per test | Per file |
 |---|---|---|
 | Unit | < 50ms | < 300 LOC |
-| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB enforced) |
+| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB ratchet: existing baseline files cannot grow; new over-budget files fail) |
 | Browser | separate `npm run test:browser`; never in default `npm test` | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
+
+The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 
 ## Spec parallelism (server)
 
 xUnit collection = scheduling unit; classes inside a collection run serially, so wall time = the longest class chain.
 
-- Parallel by default. `DisableParallelization` only for true process-global state (today only OtelTracing: shared `Microsoft.AspNetCore` ActivitySource). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
+- Parallel by default. `DisableParallelization` only for true process-global state (today `OtelTracing` for shared `Microsoft.AspNetCore` ActivitySource, and `Dispatcher` for shared instrumentation capture). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
 - Ports: WebApplicationFactory fixtures must allocate via TestClusterPortAllocator. InProcessTestCluster is in-memory transport — no ports, safe anywhere.
-- Sharding: big collections split into numbered partitions (`Name` / `Name2` / …, same fixture type, same semantics). A chain longer than ~10 classes gets split.
-- Scheduling: CostDescendingCollectionOrderer runs named (fixture-backed) collections first; `xunit.runner.json` sets `maxParallelThreads: 8` (wait-heavy load, oversubscribe cores).
+- Collections express shared fixture lifetime and isolation needs only — never speed or cost. No custom test orderer and no `xunit.runner.json` thread tuning: both were measured to sit within run-to-run noise and were removed. No runtime traits either; the track is expressed by naming + directory alone.
 - Schema: tests never run `Migrate()` / `EnsureCreated()` from empty — clone via `MigratedSqliteTemplate.CopyTo` / `CopyTo(target)` / `CopyModelSchemaTo`. Sole exception: DatabaseInitializationSpecs (its subject is the chain itself).
 
 ## Guards (automated)

@@ -23,8 +23,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// </summary>
 public class MohistHubProjectAffinitySpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringHasProjectId_StoresAffinity()
     {
@@ -38,8 +36,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Equal("proj-alpha", actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringMissingProjectId_StoresNullAffinity()
     {
@@ -53,8 +49,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Null(actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringEmptyProjectId_NormalisesToNull()
     {
@@ -68,8 +62,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Null(actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringWhitespaceProjectId_NormalisesToNull()
     {
@@ -83,8 +75,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Null(actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_NoHttpContext_LeavesRegistryUnchanged()
     {
@@ -104,8 +94,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Null(actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringProjectIdPlusOtherParams_StoresOnlyProjectId()
     {
@@ -123,8 +111,6 @@ public class MohistHubProjectAffinitySpecs
         Assert.Equal("proj-alpha", actual);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnConnectedAsync_QueryStringUrlEncodedProjectId_DecodesCorrectly()
     {

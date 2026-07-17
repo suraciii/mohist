@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue2")]
+[Collection("IssueLifecycle")]
 public class IssueSessionApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -28,8 +28,6 @@ public class IssueSessionApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ExposesRequiredMetadataAndOmitsProjectedFields()
     {
@@ -145,8 +143,6 @@ public class IssueSessionApiSpecs
         Assert.False(root.TryGetProperty("transcript", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ExposesContextExhaustionFailureCategory()
     {
@@ -198,8 +194,6 @@ public class IssueSessionApiSpecs
         Assert.Equal(1000, usage.GetProperty("contextWindowSize").GetInt64());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequenceAcrossBatches()
     {
@@ -278,8 +272,6 @@ public class IssueSessionApiSpecs
         Assert.NotNull(response.LastActivityAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionApis_DoNotReturnServerProjectedTurns()
     {

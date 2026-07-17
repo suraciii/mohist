@@ -17,8 +17,6 @@ public sealed class DispatcherStartupSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task HostStartup_ActivatesDispatcherAndRegistersReminder()
     {

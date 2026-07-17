@@ -14,8 +14,6 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 {
     public ApprovalGateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ApprovalStage_TasksAndChecksPass_WorkflowAwaitsApproval()
     {
@@ -34,8 +32,6 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Null(poll);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
     {
@@ -61,8 +57,6 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_UserApproves_AssignedRunnerContinuesWorkflow()
     {
@@ -86,8 +80,6 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("compile.", buildWork.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_LegacyReject_RoutesToFeedbackLoop_AndDoesNotFail()
     {
@@ -116,8 +108,6 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RejectedApproval_LegacyReject_NewRunResumesFromFeedbackTask()
     {

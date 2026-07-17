@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,14 +30,14 @@ internal static class InboxProjectionTestSupport
 {
     public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
-    public static InboxProjectionHandler CreateHandler(TestDatabase database) =>
+    public static InboxProjectionHandler CreateHandler(TestSqliteDatabase database) =>
         CreateHandler(database, new NoopEventPublisher());
 
-    public static InboxProjectionHandler CreateHandler(TestDatabase database, IEventPublisher eventPublisher) =>
+    public static InboxProjectionHandler CreateHandler(TestSqliteDatabase database, IEventPublisher eventPublisher) =>
         CreateHandler(database, eventPublisher, configureServices: null);
 
     public static InboxProjectionHandler CreateHandler(
-        TestDatabase database,
+        TestSqliteDatabase database,
         IEventPublisher eventPublisher,
         Action<IServiceCollection>? configureServices) =>
         new(
@@ -78,9 +77,9 @@ internal static class InboxProjectionTestSupport
                 [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
             });
 
-    public static async Task<List<InboxItemView>> GetInboxAsync(TestDatabase database, string projectId)
+    public static async Task<List<InboxItemView>> GetInboxAsync(TestSqliteDatabase database, string projectId)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var rows = await db.InboxItems.AsNoTracking()
             .Where(r => r.ProjectId == projectId && r.ArchivedAt == null)
             .ToListAsync();
@@ -104,7 +103,7 @@ internal static class InboxProjectionTestSupport
     }
 
     public static async Task SeedIssueAsync(
-        TestDatabase database,
+        TestSqliteDatabase database,
         string projectId,
         int issueNumber,
         string title)
@@ -119,7 +118,7 @@ internal static class InboxProjectionTestSupport
             Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
         };
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.Issues.Add(new IssueRow
         {
             ProjectId = projectId,
@@ -129,9 +128,9 @@ internal static class InboxProjectionTestSupport
         await db.SaveChangesAsync();
     }
 
-    public static async Task SeedProjectAsync(TestDatabase database, string projectId)
+    public static async Task SeedProjectAsync(TestSqliteDatabase database, string projectId)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         if (await db.Projects.AnyAsync(p => p.Id == projectId))
             return;
 
@@ -147,7 +146,7 @@ internal static class InboxProjectionTestSupport
     }
 
     public static async Task SeedSubscriptionAsync(
-        TestDatabase database,
+        TestSqliteDatabase database,
         string projectId,
         bool workflowFailedEnabled = true,
         bool approvalRequestedEnabled = true,
@@ -157,7 +156,7 @@ internal static class InboxProjectionTestSupport
         await SeedProjectAsync(database, projectId);
 
         var store = new InboxSubscriptionStore(
-            database.Factory,
+            new TestDbContextFactory(database.Options),
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
         await store.SetAsync(projectId, new InboxSubscriptionState(
             WorkflowFailedEnabled: workflowFailedEnabled,
@@ -173,14 +172,14 @@ internal static class InboxProjectionTestSupport
     }
 
     public static async Task SeedWorkflowRunAsync(
-        TestDatabase database,
+        TestSqliteDatabase database,
         string workflowRunId,
         string? projectId,
         int? issueNumber)
     {
         var run = BuildWorkflowRun(workflowRunId, projectId, issueNumber);
         var json = Mohist.Server.Infrastructure.JSON.Serialize(run);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
             WorkflowRunId = workflowRunId,
@@ -216,43 +215,7 @@ internal static class InboxProjectionTestSupport
         return h.HandleAsync(evt, ct);
     }
 
-    public static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    public sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    public sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    public static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 
     public sealed class NoopEventStore : IEventStore
     {
@@ -282,12 +245,12 @@ internal static class InboxProjectionTestSupport
 
     private sealed class InboxScopeFactory : IServiceScopeFactory
     {
-        private readonly TestDatabase _database;
+        private readonly TestSqliteDatabase _database;
         private readonly IEventPublisher _eventPublisher;
         private readonly Action<IServiceCollection>? _configureServices;
 
         public InboxScopeFactory(
-            TestDatabase database,
+            TestSqliteDatabase database,
             IEventPublisher eventPublisher,
             Action<IServiceCollection>? configureServices = null)
         {
@@ -300,8 +263,8 @@ internal static class InboxProjectionTestSupport
 
         private sealed class InboxScope : IServiceScope
         {
-            private readonly TestDatabase _database;
-            public InboxScope(TestDatabase database, IEventPublisher eventPublisher, Action<IServiceCollection>? configureServices)
+            private readonly TestSqliteDatabase _database;
+            public InboxScope(TestSqliteDatabase database, IEventPublisher eventPublisher, Action<IServiceCollection>? configureServices)
             {
                 _database = database;
                 ServiceProvider = BuildProvider(eventPublisher, configureServices);
@@ -314,18 +277,19 @@ internal static class InboxProjectionTestSupport
             private IServiceProvider BuildProvider(IEventPublisher eventPublisher, Action<IServiceCollection>? configureServices)
             {
                 var services = new ServiceCollection();
-                services.AddSingleton<IDbContextFactory<MohistDbContext>>(_database.Factory);
+                var factory = new TestDbContextFactory(_database.Options);
+                services.AddSingleton<IDbContextFactory<MohistDbContext>>(factory);
                 services.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
                 services.AddSingleton(eventPublisher);
                 services.AddSingleton<IEventStore>(new PublisherEventStore(eventPublisher));
                 services.AddScoped<InboxStore>();
                 services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
-                    _database.Factory,
+                    factory,
                     new NoopEventStore(),
                     new NullDispatchGrainFactory(),
                     NullLogger<WorkflowRunStore>.Instance));
-                services.AddScoped<IIssueStore>(sp => new IssueStore(_database.Factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance));
+                services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance));
                 services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
                 configureServices?.Invoke(services);
                 return services.BuildServiceProvider();

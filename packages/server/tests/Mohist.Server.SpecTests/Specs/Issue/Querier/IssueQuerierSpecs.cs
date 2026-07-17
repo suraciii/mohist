@@ -18,8 +18,6 @@ public class IssueQuerierSpecs
 
     public IssueQuerierSpecs(MohistDbFixture fixture) => _fixture = fixture;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetAndListAsync_UseProjectScopedIssueNumber()
     {
@@ -40,8 +38,6 @@ public class IssueQuerierSpecs
         Assert.Equal((projectB.Id, 42, "Project B issue"), (item.ProjectId, item.Number, item.Title));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_FiltersCurrentIssueStateByStatusLabelAndPriority()
     {
@@ -64,8 +60,6 @@ public class IssueQuerierSpecs
         Assert.Equal((1, "Frontend"), (item.Number, item.Title));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_UsesBuiltInWorkflowProfileWhenIssueHasNoSelection()
     {
@@ -80,8 +74,6 @@ public class IssueQuerierSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, item.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssueRefForWorkflowRunAsync_ReturnsScopedIssueReadContext()
     {

@@ -17,8 +17,6 @@ public class EpicAffiliationLineageSpecs
         _services = fixture.Services;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkAndUnlink_PersistIssueOwnedAffiliationEvents()
     {

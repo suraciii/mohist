@@ -136,8 +136,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             .FirstOrDefaultAsync(CancellationToken.None);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentTryBeginPollAsync_FromIdle_AdmitsOnlyOne()
     {
@@ -154,8 +152,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         await runner.EndPollAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentUpdateAndHeartbeatRepair_FromRegistered_SettleToConsistentState()
     {
@@ -187,8 +183,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         Assert.Equal(2, await definition.GetOrInitAsync(runnerId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentUnregisterAndRegister_FromRegistered_SettleToOneSerializedOutcome()
     {
@@ -221,8 +215,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentPollAndLifecycle_FromRegistered_OnlyOnePollAdmittedAndStateConsistent()
     {
@@ -258,8 +250,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         await runner.EndPollAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HandleTimeoutAsync_DuringAgentJobAssignment_NoDeadlock_RunnerOffline_AssignmentRejected_CloseoutCompleted()
     {
@@ -322,8 +312,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentAssignAgentJobAsync_RespectsSingleSlotCapacity()
     {
@@ -385,8 +373,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         Assert.Equal("outstanding", persistedWork!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAdmittedAfterAssignmentStarts_RejectsAssignmentWithoutPersistingWork()
     {
@@ -428,8 +414,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact(Timeout = 5000)]
     public async Task ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate()
     {
@@ -504,8 +488,6 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ConcurrentReportAndAssignment_PreserveRunnerStateAndWorkLedgerAcrossReactivation()
     {

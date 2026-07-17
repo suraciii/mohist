@@ -29,8 +29,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         ]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_DispatchedAsSingleWorkItem()
     {
@@ -49,8 +47,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal(3, checksArr.GetArrayLength());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_AllPass_WorkflowCompletes()
     {
@@ -66,8 +62,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_OneFails_WholeBatchFails()
     {
@@ -85,8 +79,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await (await StartWorkflowAsync(MultiCheckStage())).GetRunStatusAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_OneFails_FailureReportsCorrectCheck()
     {
@@ -106,8 +98,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("lint", status.Failure.CheckName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_PartialFailure_RetryResetsOnlyFailedCheck()
     {
@@ -138,8 +128,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_AllFail_FirstFailureRecorded()
     {
@@ -161,8 +149,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("typecheck", status.Failure.CheckName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_MixedResults_RecordsEachReportedCheck()
     {
@@ -192,8 +178,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("lint", run.Failure?.CheckName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleChecks_FailedCheckWithRetry_RetryActionTargetsCorrectCheck()
     {
@@ -221,8 +205,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("build", rerunAction.Target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NoChecks_WorkflowCompletesAfterTasks()
     {
@@ -236,8 +218,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TwoStages_EachStageDispatchesOwnChecksBatch()
     {

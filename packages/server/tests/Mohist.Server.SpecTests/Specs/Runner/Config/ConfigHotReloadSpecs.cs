@@ -9,9 +9,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Config;
 
 public sealed class ConfigHotReloadSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public void CleanupPolicyOptionsSnapshot_AfterConfigReload_NextScopeReturnsUpdatedBudget()
     {
@@ -30,9 +27,6 @@ public sealed class ConfigHotReloadSpecs
         Assert.Equal(updatedBudget, fixture.ReadSnapshot().StorageBudgetBytes);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public void CleanupPolicyOptionsSnapshot_AcrossReload_IsNotFrozenAtStartupValue()
     {
@@ -49,9 +43,6 @@ public sealed class ConfigHotReloadSpecs
         Assert.Equal(30, fixture.ReadSnapshot().RetentionDays);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public void CleanupPolicyOptionsSnapshot_UnconfiguredSource_YieldsAllNullPolicyFields()
     {

@@ -63,8 +63,6 @@ public class LogsRouteSpecs
             Raw: raw.GetString() ?? string.Empty);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_WhenLogDirectoryMissing_ReturnsUnavailableWithExpectedLocation()
     {
@@ -88,8 +86,6 @@ public class LogsRouteSpecs
         Assert.Contains("does not exist", reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_WhenLogDirectoryExistsButServerLogMissing_ReturnsUnavailableWithReason()
     {
@@ -105,8 +101,6 @@ public class LogsRouteSpecs
         Assert.Equal(JsonValueKind.Null, data.GetProperty("source").ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_OnFirstRead_AlwaysCarriesTheAgreedResponseShape()
     {
@@ -148,8 +142,6 @@ public class LogsRouteSpecs
         Assert.Equal(JsonValueKind.Null, data.GetProperty("reason").ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_WhenLineCapReachedBeforeEof_ReportsTruncatedTrueAndAdvancesCursor()
     {
@@ -195,8 +187,6 @@ public class LogsRouteSpecs
         Assert.Equal(thirdCursor, third.GetProperty("cursor").GetInt64());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_WhenFileShrinksBelowCursor_ReportsResetTrue()
     {
@@ -227,8 +217,6 @@ public class LogsRouteSpecs
         Assert.Contains("rotated", reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_AvailableButNoNewLinesSinceCursor_IsNotReportedAsUnavailable()
     {
@@ -256,8 +244,6 @@ public class LogsRouteSpecs
         Assert.Equal(JsonValueKind.Null, second.GetProperty("expectedLocation").ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_AutoFollowFromEof_DoesNotReplayAndReturnsOnlyAppendedLines()
     {
@@ -289,8 +275,6 @@ public class LogsRouteSpecs
         Assert.True(afterAppend.GetProperty("nextCursor").GetInt64() > eofCursor);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("?cursor=-1", "invalid_cursor")]
     [InlineData("?limit=0", "invalid_limit")]
@@ -305,8 +289,6 @@ public class LogsRouteSpecs
         await AssertBadRequestAsync(_fixture.Client, query, expectedCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_WhenSinglePhysicalLineExceedsMaxBytes_DoesNotReturnOversizedLineAndAdvancesCursor()
     {
@@ -332,8 +314,6 @@ public class LogsRouteSpecs
         Assert.Equal("after oversized", lines[0].GetProperty("message").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_NonJsonLine_DegradesToElementWithRawMessageAndNullStructuredFields()
     {
@@ -352,8 +332,6 @@ public class LogsRouteSpecs
         Assert.Equal("this is not json at all", entry.Raw);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("{}")]
     [InlineData("{\"raw\":\"x\"}")]
@@ -374,8 +352,6 @@ public class LogsRouteSpecs
         Assert.Equal(line, entry.Raw);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_MixedJsonAndNonJsonLines_BothProjectToTheSameElementType()
     {
@@ -415,8 +391,6 @@ public class LogsRouteSpecs
         Assert.Equal("also structured", structured2.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_SerializedLogRecord_RoundTripsWithoutFieldLoss()
     {
@@ -438,8 +412,6 @@ public class LogsRouteSpecs
         Assert.Equal(record, parsedBack);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_Source_ReflectsActiveLogFileName()
     {

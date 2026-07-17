@@ -31,21 +31,12 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// read-only contract.
 /// </summary>
 [Collection("IntegrationApi")]
-public class ProjectEventsApiSpecs
+public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
 {
-    private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
-
-    private readonly MohistIntegrationFixture _fixture;
-    private readonly HttpClient _client;
-
-    public ProjectEventsApiSpecs(MohistIntegrationFixture fixture)
+    public ProjectEventsApiSpecs(MohistIntegrationFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
-        _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ReturnsEventsAcrossAllAggregates_TimeSorted()
     {
@@ -104,8 +95,6 @@ public class ProjectEventsApiSpecs
             Assert.True(times[i - 1] >= times[i], $"Expected descending order but {times[i - 1]:o} < {times[i]:o}");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DefaultLimit_ReturnsMostRecentFirst()
     {
@@ -127,8 +116,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("test.event-5", response[^1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesWorkflowStoreMetadataForWorkflowContext()
     {
@@ -162,8 +149,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(workflowRunId, workflow.SourceAggregateId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesEnvelopeIssueNumberWhenPayloadDisagrees()
     {
@@ -188,8 +173,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(42, workflow.Data.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsPersistedSessionLifecycleWithHistoricalContext()
     {
@@ -217,8 +200,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("runner-1", closed.RunnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesSessionEnvelopeContextOverStoredMetadataAndPayload()
     {
@@ -243,8 +224,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(1, entry.Data.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotUseStoredSessionMetadataWhenEnvelopeContextIsAbsent()
     {
@@ -266,8 +245,6 @@ public class ProjectEventsApiSpecs
         Assert.Null(entry.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_WithExplicitLimit_CapsReturnedRows()
     {
@@ -289,8 +266,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("test.event-3", response[1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotLeakEventsFromOtherProjects()
     {
@@ -317,8 +292,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("1", responseB[0].SourceAggregateId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotLeakAgentSessionsFromOtherProjects()
     {
@@ -347,8 +320,6 @@ public class ProjectEventsApiSpecs
         Assert.DoesNotContain(responseB, e => e.SourceAggregateId == sessionAId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ForProjectWithNoEvents_ReturnsEmptyList()
     {
@@ -361,8 +332,6 @@ public class ProjectEventsApiSpecs
         Assert.Empty(response);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UnknownProject_Returns404()
     {
@@ -371,8 +340,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_RejectsEventTypesWithoutARecordedSource()
     {
@@ -386,8 +353,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, emptyResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotCreateAnyNewEvents()
     {
@@ -419,8 +384,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(sessionCountBefore, await db.AgentSessionEvents.AsNoTracking().CountAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsOnlyActivitySafePayloadFields()
     {
@@ -448,8 +411,6 @@ public class ProjectEventsApiSpecs
         Assert.False(entry.Data.TryGetProperty("internalTrace", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotExposeEnvelopeExtensions()
     {
@@ -466,8 +427,6 @@ public class ProjectEventsApiSpecs
         Assert.False(entry.TryGetProperty("extensions", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_AttentionFilter_FindsOlderFailureBeyondRoutineWindow()
     {
@@ -491,8 +450,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("com.mohist.workflow.stage.failed", failure.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_FailureFilter_FindsOlderStatusFailureBeyondRoutineWindow()
     {
@@ -524,8 +481,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("failed", failure.Data.GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_LargeHistory_ReturnsOnlyTheRequestedBoundedWindow()
     {
@@ -550,8 +505,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(200, defaultLimitResponse.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_LimitOne_UsesStableCompleteTieBreakAcrossAggregates()
     {
@@ -573,8 +526,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(first[0].EnvelopeId, Assert.Single(second).EnvelopeId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_SubSecondTimes_AreOrderedByFractionalPrecision()
     {
@@ -599,8 +550,6 @@ public class ProjectEventsApiSpecs
             entry => Assert.Equal("early", entry.Subject));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsScalarAndArrayPayloadsAsEmptyObjects()
     {
@@ -619,326 +568,6 @@ public class ProjectEventsApiSpecs
             Assert.Empty(entry.Data.EnumerateObject());
         });
     }
-
-    private async Task<ProjectDto> CreateProjectAsync(string nameSuffix = "events")
-    {
-        var name = $"{nameSuffix}-{Guid.NewGuid():N}";
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
-    }
-
-    private async Task SeedIssueAsync(string projectId, int number)
-    {
-        var issue = new DomainIssue
-        {
-            ProjectId = projectId,
-            Number = number,
-            Title = $"Issue #{number}",
-            Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
-        };
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        db.Issues.Add(new Mohist.Server.Infrastructure.Data.Issue.IssueRow
-        {
-            ProjectId = projectId,
-            Number = number,
-            State = Mohist.Server.Infrastructure.Data.Issue.IssueStore.Serialize(issue),
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task SeedWorkflowRunAsync(string projectId, string workflowRunId, int issueNumber)
-    {
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var state = JsonSerializer.Serialize(new
-        {
-            id = workflowRunId,
-            metadata = new
-            {
-                createdAt = FixedTime,
-                name = "test",
-                annotations = new Dictionary<string, string>
-                {
-                    ["projectId"] = projectId,
-                    ["issueNumber"] = issueNumber.ToString(),
-                },
-            },
-            status = "Running",
-            currentStageId = "build",
-            stages = Array.Empty<object>(),
-        });
-        db.WorkflowRuns.Add(new WorkflowRunRow
-        {
-            WorkflowRunId = workflowRunId,
-            State = state,
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task SeedAgentSessionAsync(string projectId, string sessionId)
-    {
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
-            [AgentSessionQueryMetadataKeys.IssueNumber] = "1",
-            [AgentSessionQueryMetadataKeys.EpicNumber] = "7",
-            [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wf-1",
-        };
-        var state = JsonSerializer.Serialize(new
-        {
-            id = sessionId,
-            metadata = new { labels },
-            settings = new { model = "gpt-4o" },
-            status = new { createdAt = FixedTime },
-        }, Mohist.Server.Infrastructure.JSON.Options);
-        db.AgentSessions.Add(new AgentSessionRow
-        {
-            Id = sessionId,
-            State = state,
-            Status = "opened",
-            CreatedAt = FixedTime.UtcDateTime,
-            RunnerId = "runner-1",
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task AppendSessionClosedFactAsync(string sessionId, DateTimeOffset time)
-    {
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var turn = new AgentSessionTranscriptTurnRow
-        {
-            SessionId = sessionId,
-            Sequence = 1,
-            StartedAt = time.UtcDateTime,
-            UpdatedAt = time.UtcDateTime,
-        };
-        db.AgentSessionTranscriptTurns.Add(turn);
-        await db.SaveChangesAsync();
-
-        db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
-        {
-            TurnId = turn.Id,
-            Sequence = 1,
-            Type = TranscriptPartTypes.SessionClosed,
-            CorrelationKey = $"session.closed_{Guid.NewGuid():N}",
-            PayloadJson = """{"status":"failed","failureReason":"runner timeout","exitCode":1}""",
-            FirstSeenAt = time.UtcDateTime,
-            LastSeenAt = time.UtcDateTime,
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task SeedEpicAsync(string projectId, int number)
-    {
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        db.Epics.Add(new Mohist.Server.Infrastructure.Data.Epic.EpicRow
-        {
-            ProjectId = projectId,
-            Number = number,
-            Title = $"Epic #{number}",
-            Description = "",
-            Priority = "p2",
-            Status = "active",
-            CreatedAt = FixedTime,
-            UpdatedAt = FixedTime,
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task AppendIssueEventAsync(
-        string projectId,
-        int issueNumber,
-        string type,
-        DateTimeOffset? time = null,
-        string? subject = null,
-        object? data = null)
-    {
-        await AppendEventAsync(
-            IssueEventPersistence.IssueSource(projectId, issueNumber),
-            projectId,
-            type,
-            time ?? FixedTime,
-            subject,
-            data,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = projectId,
-                ["issue"] = issueNumber.ToString(),
-            });
-    }
-
-    private async Task AppendWorkflowEventAsync(
-        string workflowRunId,
-        string projectId,
-        int issueNumber,
-        string type,
-        DateTimeOffset? time = null,
-        string? subject = null,
-        object? data = null,
-        int? envelopeIssueNumber = null)
-    {
-        await AppendEventAsync(
-            WorkflowRunEventPersistence.WorkflowRunSource(workflowRunId),
-            projectId,
-            type,
-            time ?? FixedTime,
-            subject,
-            data,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = projectId,
-                ["issue"] = (envelopeIssueNumber ?? issueNumber).ToString(),
-                ["workflowrunid"] = workflowRunId,
-                ["stage"] = "test",
-            });
-    }
-
-    private async Task AppendAgentSessionEventAsync(
-        string sessionId,
-        string projectId,
-        string type,
-        DateTimeOffset? time = null,
-        string? subject = null,
-        object? data = null,
-        int? envelopeIssueNumber = 1,
-        int? envelopeEpicNumber = 7,
-        bool includeIssueContext = true)
-    {
-        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectid"] = projectId,
-            ["sessionid"] = sessionId,
-        };
-        if (includeIssueContext)
-        {
-            if (envelopeIssueNumber is > 0)
-                extensions["issue"] = envelopeIssueNumber.Value.ToString();
-            if (envelopeEpicNumber is > 0)
-                extensions["epic"] = envelopeEpicNumber.Value.ToString();
-        }
-
-        await AppendEventAsync(
-            AgentSessionEventPersistence.AgentSessionSource(sessionId),
-            projectId,
-            type,
-            time ?? FixedTime,
-            subject,
-            data,
-            extensions: extensions);
-    }
-
-    private async Task AppendEpicEventAsync(
-        string projectId,
-        int epicNumber,
-        string type,
-        DateTimeOffset? time = null,
-        string? subject = null,
-        object? data = null)
-    {
-        await AppendEventAsync(
-            EpicEventPersistence.EpicSource(projectId, epicNumber),
-            projectId,
-            type,
-            time ?? FixedTime,
-            subject,
-            data,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = projectId,
-                ["epic"] = epicNumber.ToString(),
-            });
-    }
-
-    private async Task AppendEventAsync(
-        string source,
-        string projectId,
-        string type,
-        DateTimeOffset time,
-        string? subject,
-        object? data,
-        Dictionary<string, string> extensions)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var dataElement = data is null
-            ? JsonDocument.Parse("null").RootElement.Clone()
-            : JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions);
-        var envelope = new CloudEvent(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri(source, UriKind.Relative),
-            type: type,
-            time: time,
-            data: dataElement,
-            subject: subject,
-            extensions: extensions);
-        await store.AppendAsync(envelope);
-    }
-
-    private async Task SeedIssueEventHistoryAsync(string projectId, int issueNumber, int count)
-    {
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var source = IssueEventPersistence.IssueSource(projectId, issueNumber);
-        db.IssueEvents.AddRange(Enumerable.Range(1, count).Select(index => new IssueEventRow
-        {
-            Id = index,
-            Source = source,
-            EventId = $"history-{index}",
-            Type = "com.mohist.issue.created",
-            Time = FixedTime.AddSeconds(index),
-            SpecVersion = "1.0",
-            DataContentType = "application/json",
-            Data = JsonSerializer.SerializeToElement(new { }, CloudEvent.JsonOptions),
-            ExtensionsJson = JsonSerializer.Serialize(new Dictionary<string, string>
-            {
-                ["projectid"] = projectId,
-                ["issue"] = issueNumber.ToString(),
-            }),
-        }));
-        await db.SaveChangesAsync();
-    }
-
-    private sealed record ProjectDto(string Id, string Name);
-
-    private sealed record ProjectEventResponseDto(
-        long Id,
-        string Origin,
-        string SourceAggregateKind,
-        string SourceAggregateId,
-        string Source,
-        string Type,
-        string Time,
-        string EnvelopeId,
-        string SpecVersion,
-        string? Subject,
-        string? DataContentType,
-        JsonElement Data,
-        string? RunnerId,
-        int? IssueNumber,
-        int? EpicNumber,
-        string? SessionSourceKind,
-        string? WorkflowRunId,
-        string? AgentId,
-        string? AgentName);
 }
 
 public class ProjectEventsModelDebug

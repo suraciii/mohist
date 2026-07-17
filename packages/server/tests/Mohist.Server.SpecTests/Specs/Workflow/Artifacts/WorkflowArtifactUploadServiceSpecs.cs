@@ -39,8 +39,6 @@ public class WorkflowArtifactUploadServiceSpecs
 
     private static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_NewUploadCreatesPendingRowAndContent()
     {
@@ -91,8 +89,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(payload, buffer.ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_SameKeySameHashReturnsExistingId()
     {
@@ -139,8 +135,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Single(rows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_SameKeyDifferentHashReturnsConflict()
     {
@@ -193,8 +187,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(firstPayload, buffer.ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_UnknownWorkItemReturnsWorkItemNotFound()
     {
@@ -212,8 +204,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(WorkflowArtifactUploadResultKind.WorkItemNotFound, result.Kind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_MissingPathReturnsInvalid()
     {
@@ -230,8 +220,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_StoragePathIsGeneratedAndSourcePathNotUsedAsPathSegment()
     {
@@ -276,8 +264,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(sourcePath, row.Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_PendingUploadsAreNotVisibleInWorkflowArtifactQueries()
     {
@@ -321,8 +307,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Single(pendingRows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_DirectoryContent_DecodesEnvelopeAndPersistsFilesUnderFilesRoot()
     {
@@ -390,8 +374,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("directory", metadata!.Kind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_DirectoryContent_SameKeySameHashIsIdempotent()
     {
@@ -446,8 +428,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Single(rows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_DirectoryContent_DifferentHashIsConflict()
     {
@@ -503,8 +483,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("sha256:dir-b", second.Conflict.IncomingContentHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("not-valid-json")]
     [InlineData("{\"kind\":\"directory\",\"files\":[]}")]
@@ -539,8 +517,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_DirectoryContent_EnvelopeSizeMismatchReturnsInvalid()
     {
@@ -568,8 +544,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Contains("mismatch", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UploadAsync_WhenRequestIsCancelledDuringRollback_CleanupUsesIndependentToken()
     {
@@ -596,8 +570,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal(CancellationToken.None, _storage.LastDeleteCancellationToken);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task BindAsync_DirectoryPendingUpload_BindsAsDirectoryKind()
     {
@@ -675,8 +647,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("beta content", bBytes);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task BindAsync_DeclaredPathWithTemplateVariable_RendersAndMatchesUploadedPath()
     {
@@ -739,8 +709,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("file", bound.Kind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task BindAsync_DeclaredPathWithMissingTemplateVariable_BindsUploadRegardless()
     {
@@ -786,42 +754,5 @@ public class WorkflowArtifactUploadServiceSpecs
 
         Assert.True(bindResult.IsSuccess, bindResult.Error ?? "expected success");
         Assert.Single(bindResult.ArtifactRecordedEvents);
-    }
-}
-
-internal sealed class FixedTimeProvider : TimeProvider
-{
-    private readonly DateTimeOffset _now;
-
-    public FixedTimeProvider(DateTimeOffset now)
-    {
-        _now = now;
-    }
-
-    public override DateTimeOffset GetUtcNow() => _now;
-}
-
-internal sealed class StubWorkContextResolver : IWorkflowArtifactUploadWorkContextResolver
-{
-    private readonly Dictionary<(string WorkflowRunId, string WorkId), WorkflowActiveWorkView> _views = new();
-
-    public void Register(string workflowRunId, string workId, string taskRunId,
-        string? stage = "build", string workType = "task", string? title = null,
-        string? projectId = null, int? issueNumber = null)
-    {
-        _views[(workflowRunId, workId)] = new WorkflowActiveWorkView(
-            WorkId: workId,
-            WorkType: workType,
-            Stage: stage ?? "build",
-            TaskRunId: taskRunId,
-            Title: title,
-            ProjectId: projectId,
-            IssueNumber: issueNumber);
-    }
-
-    public Task<WorkflowActiveWorkView?> ResolveAsync(string workflowRunId, string workId, CancellationToken cancellationToken = default)
-    {
-        _views.TryGetValue((workflowRunId, workId), out var view);
-        return Task.FromResult(view);
     }
 }

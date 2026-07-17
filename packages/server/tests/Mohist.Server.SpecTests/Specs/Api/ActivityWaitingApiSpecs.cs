@@ -22,8 +22,6 @@ public class ActivityWaitingApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_WhenIssuePausedOnApprovalGate_AppearsInWaitingArray()
     {
@@ -44,8 +42,6 @@ public class ActivityWaitingApiSpecs
         Assert.Equal(1, response.Summary.Waiting);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_WhenNoIssuePausedOnApprovalGate_HasEmptyWaitingArray()
     {
@@ -59,8 +55,6 @@ public class ActivityWaitingApiSpecs
         Assert.Equal(0, response.Summary.Waiting);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_OnlyIncludesInProgressIssues_NotBacklogOrDone()
     {

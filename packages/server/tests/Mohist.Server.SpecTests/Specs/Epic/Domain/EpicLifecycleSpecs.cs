@@ -24,8 +24,6 @@ public class EpicLifecycleSpecs
         _services = fixture.Services;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenOpenLinkedIssuesRemain_Returns4xxAndLeavesStatusUnchanged()
     {
@@ -61,8 +59,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("running", after.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenAllLinkedIssuesCancelled_SucceedsAndChangesStatusToDone()
     {
@@ -90,8 +86,6 @@ public class EpicLifecycleSpecs
         Assert.True(detail.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WithMixedDoneAndCancelledLinkedIssues_SucceedsAndDeliveredCountCountsOnlyDone()
     {
@@ -120,8 +114,6 @@ public class EpicLifecycleSpecs
         Assert.Equal(2, detail.Progress.TotalIssueCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenAllLinkedIssuesDelivered_SucceedsAndChangesStatusToDone()
     {
@@ -149,8 +141,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", detail.LinkedIssues[1].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_RepeatedOnDoneEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -183,8 +173,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", after.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_OnClosedEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -207,8 +195,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", envelope.Details.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_RepeatedOnClosedEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -230,8 +216,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("closed", envelope.Details.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_RepeatedOnDoneEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -258,8 +242,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("closed", envelope.Details.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_SetsStatusToClosedAndRetainsEpicIssueLinks()
     {
@@ -288,8 +270,6 @@ public class EpicLifecycleSpecs
         Assert.False(detail.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_DoesNotChangeIssueStatusOrPrerequisitesOrWorkflow()
     {
@@ -320,8 +300,6 @@ public class EpicLifecycleSpecs
         Assert.Equal(dependent.Number, detail.LinkedIssues[0].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssue_ByIssueNumber_RemovesMembershipAndDoesNotSilentNoOp()
     {
@@ -346,8 +324,6 @@ public class EpicLifecycleSpecs
         Assert.Equal(second.Number, detail.LinkedIssues[0].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssue_ByNumber_RemovesSingleMember()
     {
@@ -365,8 +341,6 @@ public class EpicLifecycleSpecs
         Assert.Empty(detail.LinkedIssues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_AllDelivered_LinkTimeRecomputeAutoTransitionsToDone()
     {
@@ -388,8 +362,6 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, detail.Progress.TotalIssueCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_ExposesPrerequisiteNumbers()
     {
@@ -412,8 +384,6 @@ public class EpicLifecycleSpecs
         Assert.Empty(upstreamRow.PrerequisiteNumbers);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_ExposesExternalPrerequisitesSummary()
     {
@@ -436,8 +406,6 @@ public class EpicLifecycleSpecs
         Assert.False(string.IsNullOrEmpty(ghost.Status));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_InternalPrerequisiteIsNotExposedAsExternal()
     {
@@ -458,8 +426,6 @@ public class EpicLifecycleSpecs
         Assert.Empty(dependentRow.ExternalPrerequisites);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
     {
@@ -498,8 +464,6 @@ public class EpicLifecycleSpecs
         Assert.Empty(secondRow.ExternalPrerequisites);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnClosedEpic_ReturnsIdleEpic()
     {
@@ -515,8 +479,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", detail.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnDoneEpic_ReturnsIdleEpic()
     {
@@ -535,8 +497,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", reopened.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnIdleEpic_Returns409EpIcNotTerminal()
     {
@@ -558,8 +518,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", after.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnRunningEpic_Returns409EpIcNotTerminal()
     {
@@ -580,8 +538,6 @@ public class EpicLifecycleSpecs
         Assert.Equal("running", after.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnMissingEpic_Returns404()
     {
@@ -592,8 +548,6 @@ public class EpicLifecycleSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_UsesEpicNumber()
     {
@@ -606,8 +560,6 @@ public class EpicLifecycleSpecs
 
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnClosedEpic_WithLinkedIssues_PreservesMembershipsAndUnblocksAdvancement()
     {

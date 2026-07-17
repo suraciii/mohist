@@ -29,8 +29,6 @@ public class WorkflowSessionSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenPersistedIssueWhenAllProfilesDisabled_ThenReadSurfacesAreUnresolvedAndStartFails()
     {
@@ -90,8 +88,6 @@ public class WorkflowSessionSpecs
             StringComparison.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
     {
@@ -173,8 +169,6 @@ public class WorkflowSessionSpecs
         Assert.Null(turn.CompletedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenWorkflowSessionWithoutPhysicalBinding_WhenListed_ThenRuntimeSessionIdIsOmitted()
     {
@@ -189,8 +183,6 @@ public class WorkflowSessionSpecs
         Assert.False(listed.TryGetProperty("runtimeSessionId", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence()
     {

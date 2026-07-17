@@ -18,4 +18,10 @@
     <ProjectReference Include="..\..\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\Mohist.Cli\skill-data\**\*">
+      <LogicalName>SkillData/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

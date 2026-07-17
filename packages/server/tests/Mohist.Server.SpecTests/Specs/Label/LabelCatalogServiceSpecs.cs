@@ -26,8 +26,6 @@ public class LabelCatalogServiceSpecs
         return factory.CreateDbContext();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task ListAsync_ReturnsOnlyUserDefinitionsForProject()
     {
@@ -48,8 +46,6 @@ public class LabelCatalogServiceSpecs
         Assert.Contains("ui", module.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task ListAsync_ReturnsEmptyForProjectWithNoDefinitions()
     {
@@ -61,8 +57,6 @@ public class LabelCatalogServiceSpecs
         Assert.Empty(definitions);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithValidData_PersistsAndReturnsDefinition()
     {
@@ -83,8 +77,6 @@ public class LabelCatalogServiceSpecs
         Assert.Contains(definitions, d => d.Key == "module");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithExistingUserKey_RejectsDuplicate()
     {
@@ -99,8 +91,6 @@ public class LabelCatalogServiceSpecs
         Assert.Null(result.Definition);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithInvalidKey_RejectsWithError()
     {
@@ -120,8 +110,6 @@ public class LabelCatalogServiceSpecs
         Assert.Empty(rows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithLeadingDashKey_RejectsWithError()
     {
@@ -136,8 +124,6 @@ public class LabelCatalogServiceSpecs
         Assert.Null(result.Definition);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithEmptyDescription_RejectsWithError()
     {
@@ -155,8 +141,6 @@ public class LabelCatalogServiceSpecs
         Assert.Empty(rows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CreateAsync_WithEmptySupportedValue_RejectsWithError()
     {
@@ -175,8 +159,6 @@ public class LabelCatalogServiceSpecs
         Assert.Empty(rows);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task UpdateAsync_ExistingUserDefinition_UpdatesSuccessfully()
     {
@@ -195,8 +177,6 @@ public class LabelCatalogServiceSpecs
         Assert.Equal("data", result.Definition.SupportedValues[0]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task UpdateAsync_MissingKey_ReturnsNotFound()
     {
@@ -211,8 +191,6 @@ public class LabelCatalogServiceSpecs
         Assert.Null(result.Definition);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task DeleteAsync_ExistingUserKey_RemovesIt()
     {
@@ -228,8 +206,6 @@ public class LabelCatalogServiceSpecs
         Assert.DoesNotContain(definitions, d => d.Key == "module");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task DeleteAsync_MissingKey_IsIdempotent()
     {
@@ -241,8 +217,6 @@ public class LabelCatalogServiceSpecs
         Assert.Null(result.Error);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task Catalog_IsProjectScoped()
     {
@@ -259,8 +233,6 @@ public class LabelCatalogServiceSpecs
         Assert.DoesNotContain(catalogB, d => d.Key == "module");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task CatalogOperations_DoNotTouchIssueLabels()
     {

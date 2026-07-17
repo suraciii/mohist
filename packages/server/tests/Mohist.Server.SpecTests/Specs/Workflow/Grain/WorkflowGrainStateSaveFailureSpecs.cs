@@ -27,8 +27,6 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EnsureStarted_DuplicateDeliveryRefreshesCurrentContextWithoutRestarting()
     {
@@ -56,8 +54,6 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RefreshIssueContext_SaveFailureQuarantinesActivationAndRedeliveryConverges()
     {
@@ -92,8 +88,6 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         Assert.Equal(2, failingStore.StateOnlySaveAttempts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RefreshIssueContext_TerminalRunNoops()
     {

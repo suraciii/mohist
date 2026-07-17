@@ -23,8 +23,6 @@ public sealed class DeadLetterRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_ReturnsUnresolvedRowsAndSupportsHandlerFilter()
     {
@@ -53,8 +51,6 @@ public sealed class DeadLetterRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Redeliver_RetriesRecordedHandlerAndResolvesRow()
     {
@@ -79,8 +75,6 @@ public sealed class DeadLetterRoutesSpecs
             item => item.DeadLetterId == row.DeadLetterId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_RejectsOutOfRangeLimit()
     {
@@ -106,8 +100,6 @@ public sealed class DeadLetterRoutesSpecs
         Assert.Equal(expected, DeadLetterRoutes.UsesLoopbackOnlyListener(configuration));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Redeliver_RejectsProxyCallerWithoutCredentialAndHasNoSideEffect()
     {
@@ -153,8 +145,6 @@ public sealed class DeadLetterRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_RedactsEmbeddedStackFramesAndPaths()
     {
@@ -183,8 +173,6 @@ public sealed class DeadLetterRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_RedactsUncPaths()
     {

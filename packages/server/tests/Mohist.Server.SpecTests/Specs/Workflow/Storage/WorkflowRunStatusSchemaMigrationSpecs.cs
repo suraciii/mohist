@@ -21,8 +21,6 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 /// </summary>
 public class WorkflowRunStatusSchemaMigrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DbContext_ExposesStatusComputedColumnOnWorkflowRunRow()
     {
@@ -40,8 +38,6 @@ public class WorkflowRunStatusSchemaMigrationSpecs
             statusProperty!.GetComputedColumnSql());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DbContext_ExposesIndexOnStatusAndAssignedWorkerId()
     {
@@ -60,8 +56,6 @@ public class WorkflowRunStatusSchemaMigrationSpecs
             index!.Properties.Select(p => p.Name).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Migrator_AppliesWorkflowRunStatusMigration()
     {
@@ -72,8 +66,6 @@ public class WorkflowRunStatusSchemaMigrationSpecs
         Assert.Contains(applied, m => m == "20260702060000_WorkflowRunStatus");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DatabaseMigrate_LeavesModelAndSnapshotInAgreement()
     {

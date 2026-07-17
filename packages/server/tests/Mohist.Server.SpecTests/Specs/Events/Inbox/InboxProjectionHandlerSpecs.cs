@@ -22,8 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// </summary>
 public class InboxProjectionHandlerSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowRunFailed_ProducesWorkflowFailedItemInOwningProject()
     {
@@ -56,8 +54,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Issue 42", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task StageApprovalRequested_ProducesApprovalRequestedItemInOwningProject()
     {
@@ -88,8 +84,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(42, item.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueWorkStarted_ProducesIssueStartedItemInOwningProject()
     {
@@ -116,8 +110,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Started", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueCompleted_ProducesIssueCompletedItemInOwningProject()
     {
@@ -143,8 +135,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Done", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ReplayOfSameCloudEvent_DoesNotCreateSecondItem()
     {
@@ -170,8 +160,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-replay", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEventReplay_DoesNotCreateSecondItem()
     {
@@ -201,8 +189,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-wf-replay", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowStorePublishThenEventStoreReplay_DoesNotDuplicateInboxItem()
     {
@@ -213,8 +199,8 @@ public class InboxProjectionHandlerSpecs
             title: "Issue 1");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
-        var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
-        var runStore = new WorkflowRunStore(database.Factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var eventStore = new EventStore(new TestDbContextFactory(database.Options), NullLogger<EventStore>.Instance);
+        var runStore = new WorkflowRunStore(new TestDbContextFactory(database.Options), eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = InboxProjectionTestSupport.BuildWorkflowRun(
             workflowRunId: "wf_store_replay",
             projectId: "proj_a",
@@ -230,8 +216,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(stored.Envelope.Id, item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_LandsInProjectOwnedByRun_NotInOtherProjects()
     {
@@ -262,8 +246,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("proj_a", aItems[0].ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_LandsInProjectOwnedByIssue_NotInOtherProjects()
     {
@@ -289,8 +271,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("proj_a", aItems[0].ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_ProjectExtensionDisagreesWithLoadedIssue_SkipsWithoutLeakingToClaimedProject()
     {
@@ -313,8 +293,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_b"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_NumberExtensionDisagreesWithLoadedIssue_SkipsWithoutThrowing()
     {
@@ -336,8 +314,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_RunAnnotationsDisagreeWithLoadedIssue_SkipsWithoutLeakingToClaimedProject()
     {
@@ -369,8 +345,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_b"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_RunIssueNumberDisagreesWithLoadedIssue_SkipsWithoutThrowing()
     {
@@ -401,8 +375,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_MissingProjectIdExtension_SkipsWithoutThrowing()
     {
@@ -426,8 +398,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_MissingIssueNumberExtension_SkipsWithoutThrowing()
     {
@@ -451,8 +421,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_WithoutCanonicalIssueKey_Skips()
     {
@@ -474,8 +442,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing()
     {
@@ -504,8 +470,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_CanonicalIssueKey_Resolves()
     {
@@ -565,8 +529,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(99, payload.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_MissingAnnotationsOnRun_SkipsWithoutThrowing()
     {
@@ -589,8 +551,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_UnknownRunId_SkipsWithoutThrowing()
     {
@@ -608,8 +568,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_MissingWorkflowRunIdInSource_SkipsWithoutThrowing()
     {
@@ -629,8 +587,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_UnknownIssueNumberForTitle_SkipsWithoutThrowing()
     {
@@ -648,8 +604,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_TitleTakenFromIssueRowSnapshottedAtProjectionTime()
     {
@@ -673,7 +627,7 @@ public class InboxProjectionHandlerSpecs
 
         // After projection, mutate the issue title to prove the snapshot
         // is durable and the projection does not re-read on every query.
-        await using (var db = database.CreateDbContext())
+        await using (var db = database.CreateContext())
         {
             var row = await db.Issues.FirstAsync(r => r.ProjectId == "proj_a" && r.Number == 1);
             // The Issue.Title is init-only — patch the JSON state directly
@@ -687,8 +641,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Snapshot me", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Filter_AcceptsAllFourTypes()
     {
@@ -699,8 +651,6 @@ public class InboxProjectionHandlerSpecs
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Filter_RejectsOtherEventTypes()
     {
@@ -713,8 +663,6 @@ public class InboxProjectionHandlerSpecs
             data: null)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task HasSubscriptionAttributeWithExpectedFourTypes()
     {
@@ -729,8 +677,6 @@ public class InboxProjectionHandlerSpecs
             attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DistinctEvents_ProduceDistinctItemsAcrossKinds()
     {
@@ -769,8 +715,6 @@ public class InboxProjectionHandlerSpecs
         }, kinds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_EnabledKind_CreatesItem()
     {
@@ -795,8 +739,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.IssueCompleted, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DisabledKind_DoesNotCreateItem()
     {
@@ -826,8 +768,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DifferentDisabledKinds_EachPreventsItsOwnKind()
     {
@@ -856,8 +796,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_MissingSubscription_CreatesItem()
     {
@@ -880,8 +818,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.IssueStarted, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DisabledKind_LeavesExistingItemsUntouched()
     {
@@ -925,8 +861,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.WorkflowFailed, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_ReEnabledKind_CreatesItemForSubsequentEvent()
     {
@@ -974,8 +908,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-after-reenable", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_ReplayingDisabledKindEvent_RemainsNoOp()
     {
@@ -1005,86 +937,4 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    /// <summary>
-    /// Minimal <see cref="IGrainFactory"/> stand-in for transactional
-    /// unit specs. The dispatcher is a no-op grain reference; producers
-    /// only need to call DispatchNowAsync without exceptions. Lets the
-    /// store exercise its post-commit poke code path without spinning up
-    /// an Orleans silo.
-    /// </summary>
-    private sealed class NullDispatchGrainFactory : IGrainFactory
-    {
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
-        {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
-            throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-        }
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
-            => throw new NotSupportedException();
-    }
-
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
-    }
 }

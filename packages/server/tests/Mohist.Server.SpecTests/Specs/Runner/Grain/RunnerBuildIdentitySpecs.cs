@@ -10,8 +10,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
 {
     public RunnerBuildIdentitySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Register_StoresBuildGitHashOnRunnerInfo()
     {
@@ -30,8 +28,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Equal(hash, info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Register_DefaultsBuildGitHashToNullWhenOmitted()
     {
@@ -44,8 +40,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Null(info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateBuildGitHashAsync_StoresHashOnRegisteredRunner()
     {
@@ -61,8 +55,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Equal(hash, info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateBuildGitHashAsync_BuffersHashUntilRegister()
     {
@@ -80,8 +72,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Equal(hash, info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateBuildGitHashAsync_NormalisesBlankHashToNull()
     {
@@ -96,8 +86,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Null(info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateBuildGitHashAsync_ClearsStaleHashWhenSignalRHandshakeOmitsIdentity()
     {
@@ -112,8 +100,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Null(info!.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListRunners_ExposesBuildGitHashThroughRegistry()
     {
@@ -130,8 +116,6 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         Assert.Equal(hash, info.BuildGitHash);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HeartbeatRepair_UpdatesBuildGitHashFromRequest()
     {

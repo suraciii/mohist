@@ -186,27 +186,6 @@ public static class GrainTestConfig
             """);
     }
 
-    /// <summary>
-    /// Returns <c>true</c> if the WorkflowRuns table already has a
-    /// <c>Status</c> column. Used by <see cref="ApplyWorkflowRunsStatusSchemaFix"/>
-    /// to avoid emitting a duplicate-column error on a T-004 test DB
-    /// (whose schema already has the column materialized by the
-    /// migration) versus a T-002-only test DB that pre-created the
-    /// schema without applying migrations.
-    /// </summary>
-    private static bool HasWorkflowRunsStatusColumn(MohistDbContext db)
-    {
-        // Catch the duplicate-column error from the AddColumn itself —
-        // SQLite returns "duplicate column name: Status" when we try to
-        // add a column that already exists. On a T-004 DB the column is
-        // there (created by the migration), but in shared-cache mode
-        // pragma_table_info on a different connection can return stale
-        // results, so we let the actual DDL be the source of truth.
-        // This helper is therefore unused — see TryAddWorkflowRunsStatusColumn.
-        _ = db;
-        return false;
-    }
-
     public static void ConfigureSilo(
         ISiloBuilder siloBuilder,
         string connectionString,
@@ -215,7 +194,6 @@ public static class GrainTestConfig
         FakeTimeProvider? timeProvider = null)
     {
         siloBuilder.UseInMemoryReminderService();
-        DecorateReminderTable(siloBuilder.Services);
         // Issue-362: the dispatcher grain registers a ~1s reminder; the
         // in-memory reminder service still enforces MinimumReminderPeriod
         // by default, so lower the floor for the test silo as the
@@ -299,25 +277,6 @@ public static class GrainTestConfig
         // WorkCompletionTimeout knob has been removed (no server-side
         // work-completion wall clock under the reconciliation model).
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
-    }
-
-    private static void DecorateReminderTable(IServiceCollection services)
-    {
-        var descriptor = services.Last(d => d.ServiceType == typeof(IReminderTable));
-        services.Remove(descriptor);
-        services.AddSingleton(provider => new ControllableReminderTable(CreateReminderTable(provider, descriptor)));
-        services.AddSingleton<IReminderTable>(provider => provider.GetRequiredService<ControllableReminderTable>());
-    }
-
-    private static IReminderTable CreateReminderTable(IServiceProvider provider, ServiceDescriptor descriptor)
-    {
-        if (descriptor.ImplementationInstance is IReminderTable instance)
-            return instance;
-
-        if (descriptor.ImplementationFactory is not null)
-            return (IReminderTable)descriptor.ImplementationFactory(provider)!;
-
-        return (IReminderTable)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!);
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

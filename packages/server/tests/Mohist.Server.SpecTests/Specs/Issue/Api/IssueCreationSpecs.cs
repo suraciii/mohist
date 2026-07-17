@@ -17,8 +17,7 @@ using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
-
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class IssueCreationSpecs
 {
     private readonly IGrainFactory _grains;
@@ -82,8 +81,6 @@ public class IssueCreationSpecs
         return (await events.ListAsync(workflowRunId)).ToList();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_ReturnsInfoWithNumber()
     {
@@ -100,8 +97,6 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_RejectsIdentityOutsideGrainKey()
     {
@@ -124,8 +119,6 @@ public class IssueCreationSpecs
     // their drain paths snapshot via ToList(). This spec is the only place
     // that asserts the issue→IssueEvents append actually happens end-to-end
     // through the real grain + EventStore.
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_PersistsCreatedEventToIssueEvents()
     {
@@ -144,8 +137,6 @@ public class IssueCreationSpecs
         Assert.Equal($"/mohist/projects/{project.Id}/issues/{issue.Number}", created.Envelope.Source.ToString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_DefaultWorkflowProfile_ComesFromDefaultProfile()
     {
@@ -156,8 +147,6 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
@@ -200,8 +189,6 @@ public class IssueCreationSpecs
         await runner.UnregisterAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_UsesProjectDefaultTemplate()
     {
@@ -250,8 +237,6 @@ public class IssueCreationSpecs
         await runner.UnregisterAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_SequentialNumbers()
     {
@@ -264,8 +249,6 @@ public class IssueCreationSpecs
         Assert.Equal(2, second.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithLabelsAndPriority()
     {
@@ -286,8 +269,6 @@ public class IssueCreationSpecs
         Assert.Equal("p0", issue.Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_ReturnsIssueInfo()
     {
@@ -302,8 +283,6 @@ public class IssueCreationSpecs
         Assert.Equal("desc", info.Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Update_ChangesTitleAndBody()
     {
@@ -319,8 +298,6 @@ public class IssueCreationSpecs
         Assert.Equal("new body", info.Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Close_ActiveIssue_CancelsIssueWithoutRewritingLifecycleToWorkflowStage()
     {
@@ -342,8 +319,6 @@ public class IssueCreationSpecs
         Assert.Equal("cancelled", info.Health);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Cancel_ActiveIssue_RemovesWorkflowFromRunnerPoll()
     {
@@ -375,8 +350,6 @@ public class IssueCreationSpecs
         Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Hydrate_Duplicate_Throws()
     {
@@ -388,8 +361,6 @@ public class IssueCreationSpecs
             grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowStatus_ProjectsDefaultChangeDirOutsideWorkflowStatus()
     {
@@ -405,8 +376,6 @@ public class IssueCreationSpecs
         Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DifferentProjects_IndependentNumbering()
     {
@@ -420,8 +389,6 @@ public class IssueCreationSpecs
         Assert.Equal(1, issue2.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task AddPrerequisite_StartReadinessAndStartGateComeFromIssueGrain()
     {
@@ -442,8 +409,6 @@ public class IssueCreationSpecs
         await Assert.ThrowsAsync<IssueStartBlockedException>(() => grain.StartWorkAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletedPrerequisite_AllowsDependentIssueToStart()
     {
@@ -463,8 +428,6 @@ public class IssueCreationSpecs
         Assert.Null(readiness.Blocker);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithRisk_PersistsAndReturnsIt()
     {
@@ -475,8 +438,6 @@ public class IssueCreationSpecs
         Assert.Equal("high", issue.Risk);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithoutRisk_ReturnsNull()
     {
@@ -487,8 +448,6 @@ public class IssueCreationSpecs
         Assert.Null(issue.Risk);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_IncludesRisk_AfterCreate()
     {
@@ -506,8 +465,6 @@ public class IssueCreationSpecs
         Assert.Equal("medium", readModel!.Risk);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithInvalidRisk_Throws()
     {
@@ -519,8 +476,6 @@ public class IssueCreationSpecs
             grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, "unknown"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssueApi_WithPrerequisiteNumbers_BindsCamelCaseAndReturnsReadModels()
     {
@@ -553,56 +508,6 @@ public class IssueCreationSpecs
         Assert.Equal(prereq.Number, created.Blocker.Issue!.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CreateIssueApi_WithoutPrerequisiteNumbers_ReturnsEmptyPrerequisiteReadModels()
-    {
-        var project = await SetupProjectAsync();
-
-        var created = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "No prereqs API", isDraft = false });
-
-        Assert.Empty(created.PrerequisiteNumbers);
-        Assert.Empty(created.Prerequisites);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CreateIssueApi_WithEmptyPrerequisiteNumbers_ReturnsEmptyPrerequisiteReadModels()
-    {
-        var project = await SetupProjectAsync();
-
-        var created = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Empty prereqs API", isDraft = false, prerequisiteNumbers = Array.Empty<int>() });
-
-        Assert.Empty(created.PrerequisiteNumbers);
-        Assert.Empty(created.Prerequisites);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CreateIssueApi_WithDuplicatePrerequisiteNumbers_CollapsesDuplicates()
-    {
-        var project = await SetupProjectAsync();
-        var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Duplicate API prereq", isDraft = false });
-
-        var dependent = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Duplicate API dependent", isDraft = false, prerequisiteNumbers = new[] { prereq.Number, prereq.Number, prereq.Number } });
-
-        Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
-        Assert.Single(dependent.Prerequisites);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssueApi_WithNonexistentPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
     {
@@ -628,37 +533,6 @@ public class IssueCreationSpecs
         Assert.Equal(3, next.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CreateIssueApi_WithCrossProjectPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
-    {
-        var sourceProject = await SetupProjectAsync();
-        var targetProject = await SetupProjectAsync();
-        await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{sourceProject.Id}/issues",
-            new { title = "Source one", isDraft = false });
-        await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{sourceProject.Id}/issues",
-            new { title = "Source two", isDraft = false });
-        var sourceOnly = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{sourceProject.Id}/issues",
-            new { title = "Source three", isDraft = false });
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{targetProject.Id}/issues",
-            new { title = "Rejected cross-project dependent", isDraft = false, prerequisiteNumbers = new[] { sourceOnly.Number } },
-            JsonOptions);
-
-        await AssertCreatePrerequisiteFailureAsync(targetProject.Id, response, "prerequisite_not_found", sourceOnly.Number.ToString());
-        using var getAttempt = await _client.GetAsync($"/api/projects/{targetProject.Id}/issues/1");
-        Assert.Equal(HttpStatusCode.NotFound, getAttempt.StatusCode);
-        var issues = await _client.GetDataAsync<CreateIssueApiDto[]>($"/api/projects/{targetProject.Id}/issues?all=true");
-        Assert.Empty(issues);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssueApi_WithSelfReferencingPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
     {
@@ -676,8 +550,6 @@ public class IssueCreationSpecs
         Assert.Empty(issues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task AddPrerequisiteApi_RejectsActualCircularDependency()
     {
@@ -709,8 +581,6 @@ public class IssueCreationSpecs
         Assert.Empty(unchanged.PrerequisiteNumbers);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithPrerequisiteNumbers_RecordsBothAndExposesReadModels()
     {
@@ -737,8 +607,6 @@ public class IssueCreationSpecs
         Assert.Equal(prereqA.Number, waiting.Issue.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithPrerequisiteNumbers_CollapsesDuplicatesIdempotently()
     {
@@ -756,8 +624,6 @@ public class IssueCreationSpecs
         Assert.Single(readModel!.Prerequisites);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithoutPrerequisiteNumbers_LeavesEmptySet()
     {
@@ -772,8 +638,6 @@ public class IssueCreationSpecs
         Assert.True(readModel.CanStart || readModel.Blocker is not null);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithEmptyPrerequisiteNumbers_BehavesAsAbsent()
     {
@@ -784,8 +648,6 @@ public class IssueCreationSpecs
         Assert.Empty(plain.PrerequisiteNumbers);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithNonexistentPrerequisite_ThrowsAndLeavesNoIssue()
     {
@@ -813,8 +675,6 @@ public class IssueCreationSpecs
         Assert.Null(readModel);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithCrossProjectPrerequisite_ThrowsAsNotFound()
     {
@@ -829,8 +689,6 @@ public class IssueCreationSpecs
         Assert.Null(readModel);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithSelfReferencingPrerequisite_ThrowsAndLeavesNoIssue()
     {
@@ -866,8 +724,6 @@ public class IssueCreationSpecs
         Assert.Null(readModel);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithCompletedPrerequisite_MarksReadinessOpen()
     {
@@ -896,37 +752,6 @@ public class IssueCreationSpecs
         Assert.True(prereqSummary.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CreateIssueApi_WithCompletedPrerequisite_ReturnsOpenStartGateInCreatedResponse()
-    {
-        var project = await SetupProjectAsync();
-        var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Completed API prereq", isDraft = false });
-        var prereqGrain = IssueGrain(project.Id, prereq.Number);
-        var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
-            project.Id,
-            project.Name,
-            RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
-        await prereqGrain.CompleteWorkAsync(wrId);
-
-        var dependent = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Dependent of completed API prereq", isDraft = false, prerequisiteNumbers = new[] { prereq.Number } });
-
-        Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
-        var summary = Assert.Single(dependent.Prerequisites);
-        Assert.Equal("done", summary.Status);
-        Assert.Equal("done", summary.Health);
-        Assert.True(summary.Completed);
-        Assert.True(dependent.CanStart);
-        Assert.Null(dependent.Blocker);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssueApi_AllowsArchivedCompletedPrerequisite()
     {
@@ -952,8 +777,6 @@ public class IssueCreationSpecs
         Assert.True(dependent.CanStart);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SingleAddEndpoint_StillWorks_AfterCreateWithPrerequisitesAdded()
     {
@@ -972,8 +795,6 @@ public class IssueCreationSpecs
         Assert.Equal(new[] { initial.Number, later.Number }, numbers);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SingleRemoveEndpoint_StillWorks_AfterCreateWithPrerequisitesAdded()
     {
@@ -1008,26 +829,6 @@ public class IssueCreationSpecs
         Assert.DoesNotContain(issues, issue => issue.Title.Contains("Rejected", StringComparison.Ordinal));
     }
 
-    private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null);
-
-    private sealed record CreateIssueApiDto(
-        int Number,
-        string Title,
-        int[] PrerequisiteNumbers,
-        CreateIssueApiPrerequisiteDto[] Prerequisites,
-        bool CanStart,
-        CreateIssueApiBlockerDto? Blocker);
-
-    private sealed record CreateIssueApiPrerequisiteDto(
-        int Number,
-        string Title,
-        string Status,
-        string Health,
-        bool Completed);
-
-    private sealed record CreateIssueApiBlockerDto(string Kind, CreateIssueApiBlockerIssueDto? Issue);
-
-    private sealed record CreateIssueApiBlockerIssueDto(int Number, string Title);
 
     private async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
     {

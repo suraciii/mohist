@@ -187,26 +187,6 @@ public static class WorkflowGrainTestHelpers
         // assignment.
     }
 
-    public static async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(IGrainFactory grains, string connectionString, string runnerId, string workflowId)
-    {
-        if (string.IsNullOrWhiteSpace(workflowId))
-            Assert.Fail("workflowId is required for PollWorkAsync");
-
-        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "test-host",
-            TestProjectId(workflowId)));
-
-        // The runner grain no longer owns PollAsync; the stateless DispatchService
-        // computes dispatches. This static helper is retained for parity with the
-        // instance helper in WorkflowGrainSpecs but is currently unused — callers
-        // use the instance helper which has fixture access for the service provider.
-        throw new NotSupportedException(
-            "Static PollWorkAsync requires a service provider for DispatchService; use the WorkflowGrainSpecs instance helper instead.");
-    }
-
     public static WorkflowDefinition SingleStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null,

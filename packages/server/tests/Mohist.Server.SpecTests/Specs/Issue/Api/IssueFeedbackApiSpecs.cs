@@ -44,8 +44,6 @@ public class IssueFeedbackApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback()
     {
@@ -56,7 +54,7 @@ public class IssueFeedbackApiSpecs
             new { stage = "plan", body = "add a quick start section" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var envelope = await response.Content.ReadFromJsonAsync<FeedbackEnvelopeDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var envelope = await response.Content.ReadFromJsonAsync<FeedbackApiFeedbackEnvelopeDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.NotNull(envelope);
         Assert.True(envelope!.Success);
         var created = envelope.Data!;
@@ -81,8 +79,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(current.ApprovalStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_OnNonAwaitingStage_Returns409()
     {
@@ -95,8 +91,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_WithoutStageOrBody_Returns400()
     {
@@ -113,8 +107,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, missingStage.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_ReturnsAllFeedbackForRun_OrderedByCreatedAtDesc()
     {
@@ -143,7 +135,7 @@ public class IssueFeedbackApiSpecs
             CreatedAt: baseTime.AddMinutes(1)));
         await SaveWorkflowRunAsync(wrId, run);
 
-        var list = await _client.GetDataAsync<FeedbackDto[]>(
+        var list = await _client.GetDataAsync<FeedbackApiFeedbackDto[]>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback");
 
         Assert.Equal(2, list.Length);
@@ -151,8 +143,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("first feedback", list[1].Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithStageFilter_ReturnsOnlyMatchingStage()
     {
@@ -162,42 +152,38 @@ public class IssueFeedbackApiSpecs
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
             new { stage = "plan", body = "plan feedback" });
 
-        var planOnly = await _client.GetDataAsync<FeedbackDto[]>(
+        var planOnly = await _client.GetDataAsync<FeedbackApiFeedbackDto[]>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback?stage=plan");
         Assert.Single(planOnly);
         Assert.Equal("plan", planOnly[0].Stage);
 
-        var checkOnly = await _client.GetDataAsync<FeedbackDto[]>(
+        var checkOnly = await _client.GetDataAsync<FeedbackApiFeedbackDto[]>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback?stage=check");
         Assert.Empty(checkOnly);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithoutAnyFeedback_ReturnsEmptyArray()
     {
         var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
 
-        var list = await _client.GetDataAsync<FeedbackDto[]>(
+        var list = await _client.GetDataAsync<FeedbackApiFeedbackDto[]>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback");
 
         Assert.NotNull(list);
         Assert.Empty(list);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_ReturnsFullFeedbackRecord()
     {
         var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
 
-        var created = await _client.PostDataAsync<FeedbackDto>(
+        var created = await _client.PostDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
             new { stage = "plan", body = "show me the body" });
 
-        var single = await _client.GetDataAsync<FeedbackDto>(
+        var single = await _client.GetDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback/{created.Id}");
 
         Assert.Equal(created.Id, single.Id);
@@ -208,8 +194,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(single.Resolution);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
@@ -261,14 +245,12 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("Addressed live", resolution.GetProperty("resolutionSummary").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
         var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
 
-        var created = await _client.PostDataAsync<FeedbackDto>(
+        var created = await _client.PostDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
             new { stage = "plan", body = "live list shape" });
 
@@ -288,8 +270,6 @@ public class IssueFeedbackApiSpecs
             "list entries must not flatten 'resolutionSummary' to the top level");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_UnknownId_Returns404()
     {
@@ -301,8 +281,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_IncludesFeedbackArray()
     {
@@ -312,7 +290,7 @@ public class IssueFeedbackApiSpecs
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
             new { stage = "plan", body = "detailed feedback" });
 
-        var detail = await _client.GetDataAsync<IssueDetailDto>(
+        var detail = await _client.GetDataAsync<FeedbackApiIssueDetailDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}");
 
         Assert.NotNull(detail.Feedback);
@@ -322,22 +300,18 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", detail.Feedback[0].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_WithoutFeedback_IncludesEmptyFeedbackArray()
     {
         var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
 
-        var detail = await _client.GetDataAsync<IssueDetailDto>(
+        var detail = await _client.GetDataAsync<FeedbackApiIssueDetailDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}");
 
         Assert.NotNull(detail.Feedback);
         Assert.Empty(detail.Feedback);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_FeedbackArrayOrderedByCreatedAtDesc()
     {
@@ -369,7 +343,7 @@ public class IssueFeedbackApiSpecs
             CreatedAt: baseTime.AddMinutes(5)));
         await SaveWorkflowRunAsync(wrId, run);
 
-        var detail = await _client.GetDataAsync<IssueDetailDto>(
+        var detail = await _client.GetDataAsync<FeedbackApiIssueDetailDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}");
 
         Assert.Equal(3, detail.Feedback.Length);
@@ -378,8 +352,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("fb_first", detail.Feedback[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_ResolvesFeedbackRecords()
     {
@@ -401,7 +373,7 @@ public class IssueFeedbackApiSpecs
             ResolutionSummary: "Addressed"));
         await SaveWorkflowRunAsync(wrId, run);
 
-        var detail = await _client.GetDataAsync<IssueDetailDto>(
+        var detail = await _client.GetDataAsync<FeedbackApiIssueDetailDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}");
 
         var resolved = Assert.Single(detail.Feedback, f => f.Id == feedbackId);
@@ -411,8 +383,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_IncludesFeedbackScopedToStage()
     {
@@ -438,7 +408,7 @@ public class IssueFeedbackApiSpecs
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
-        var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
+        var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
 
         Assert.NotNull(status.Workflow);
@@ -449,8 +419,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", stageFeedback.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_DistinguishesOpenAndResolvedFeedback()
     {
@@ -480,7 +448,7 @@ public class IssueFeedbackApiSpecs
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
-        var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
+        var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
 
         var planStage = Assert.Single(status.Workflow!.Stages, s => s.Stage == "plan");
@@ -498,15 +466,13 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_WithoutFeedback_OmitsOrEmptyFeedbackArray()
     {
         var (project, issueNumber, issueKey, _) = await SeedAwaitingApprovalIssueAsync();
         await _grains.GetGrain<IIssueGrain>(issueKey).DeactivateForTestAsync();
 
-        var status = await _client.GetDataAsync<IssueWorkflowStatusDto>(
+        var status = await _client.GetDataAsync<FeedbackApiIssueWorkflowStatusDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
 
         Assert.NotNull(status.Workflow);
@@ -690,43 +656,4 @@ public class IssueFeedbackApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private sealed record ProjectDto(string Id, string Name);
-
-    private sealed record FeedbackEnvelopeDto(bool Success, FeedbackDto? Data, string? Error = null);
-    private sealed record FeedbackDto(
-        string Id,
-        int IssueNumber,
-        string WorkflowRunId,
-        string Stage,
-        string Status,
-        string Body,
-        string CreatedAt,
-        FeedbackResolutionDto? Resolution = null);
-    private sealed record FeedbackResolutionDto(
-        string? ResolutionTaskId,
-        string? ResolvedAt,
-        string? ResolutionSummary);
-
-    private sealed record IssueDetailDto(
-        int Number,
-        string Title,
-        string Status,
-        FeedbackDto[] Feedback);
-
-    private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);
-    private sealed record WorkflowStatusDto(string Status, string? CurrentStage, WorkflowStageDto[] Stages);
-    private sealed record WorkflowStageDto(
-        string Stage,
-        string Status,
-        StageFeedbackDto[]? Feedback = null);
-    private sealed record StageFeedbackDto(
-        string Id,
-        string Body,
-        string Status,
-        string CreatedAt,
-        StageFeedbackResolutionDto? Resolution = null);
-    private sealed record StageFeedbackResolutionDto(
-        string? ResolutionTaskId,
-        string? ResolvedAt,
-        string? ResolutionSummary);
 }

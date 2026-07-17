@@ -24,8 +24,6 @@ public class HttpApiJsonWiringSpecs
 
     private const string NonAsciiText = "修复中文乱码 — Issue #1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void HttpJsonOptions_MatchesUnifiedFacadeBehavior()
     {
@@ -40,8 +38,6 @@ public class HttpApiJsonWiringSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void HttpJsonOptions_UsesFacadeFailureReasonConverter()
     {
@@ -58,8 +54,6 @@ public class HttpApiJsonWiringSpecs
         Assert.Contains("\"message\":\"中文\"", json);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void SignalRJsonHubProtocolOptions_PayloadSerializerOptionsIsUnifiedFacade()
     {
@@ -70,8 +64,6 @@ public class HttpApiJsonWiringSpecs
         Assert.Same(JSON.Options.Encoder, protocolOptions.PayloadSerializerOptions.Encoder);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void JsonHubProtocol_WithUnifiedFacade_WritesNonAsciiPayloadVerbatim()
     {

@@ -9,13 +9,11 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain2")]
+[Collection("WorkflowExecution")]
 public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
 {
     public RuntimeVariableDispatchSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Dispatch_AfterTaskOutputs_IncludesTaskOutputsInVariables()
     {
@@ -50,8 +48,6 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("openspec/changes/issue-97", changeDir.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Dispatch_RuntimeVariablesTakePrecedenceOverLowerPrecedenceSources()
     {
@@ -90,8 +86,6 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("runtime-value", openspecName.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Dispatch_EmptyTaskOutput_DoesNotAlterVariables()
     {

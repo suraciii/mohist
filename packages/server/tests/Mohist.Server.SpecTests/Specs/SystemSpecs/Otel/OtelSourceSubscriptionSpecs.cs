@@ -31,8 +31,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class OtelSourceSubscriptionSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ConfigureTracing_SubscribesSignalRServerSource()
     {
@@ -45,8 +43,6 @@ public class OtelSourceSubscriptionSpecs
             MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ConfigureTracing_RegistersEntityFrameworkCoreInstrumentation()
     {

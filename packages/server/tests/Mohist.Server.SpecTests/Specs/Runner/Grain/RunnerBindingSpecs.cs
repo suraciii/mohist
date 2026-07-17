@@ -11,8 +11,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
 {
     public RunnerBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task CapacityOneRunner_WithInFlightWork_DoesNotGetSecondWorkflow()
     {
@@ -41,8 +39,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task CapacityTwoRunner_TwoWorkflows_BothGetInFlightWork()
     {
@@ -72,8 +68,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Contains("wf-capacity-2", dispatched);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task TaskCompletes_NextTaskOnSameRunner()
     {
@@ -105,8 +99,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-2.", second.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task TwoWorkflows_CompletingOneDoesNotAffectOther()
     {
@@ -138,8 +130,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", nextPoll.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RuntimeState_DoesNotConsumeAssignedWork()
     {
@@ -160,8 +150,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("wf-runtime-read", work.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HeartbeatRepair_WhenRegistryEntryMissing_ReRegistersRunner()
     {
@@ -192,8 +180,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Equal(registeredAt, info.RegisteredAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Poll_WhenRegistryEntryMissing_DoesNotWriteRegistryEveryPoll()
     {
@@ -213,8 +199,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Register_ReRegisteringWithDifferentProjectId_KeepsRunnerInGlobalRegistry()
     {

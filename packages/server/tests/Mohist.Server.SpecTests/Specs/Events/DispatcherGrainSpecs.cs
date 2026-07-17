@@ -30,8 +30,6 @@ public class DispatcherGrainSpecs
         _fixture.ResetInvocationRecords();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventDispatcherGrain_DispatchNowRegistersReminderAndRunsCycle()
     {
@@ -46,8 +44,6 @@ public class DispatcherGrainSpecs
             EventDispatcherGrain.ReminderName));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task DispatchNowAsync_AfterPublish_DeliversToMatchingClosedGenericHandler()
     {
@@ -79,8 +75,6 @@ public class DispatcherGrainSpecs
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task DispatchNowAsync_TriggersImmediateTick_BypassesReminderCadence()
     {
@@ -105,8 +99,6 @@ public class DispatcherGrainSpecs
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventDispatcherGrain_ResolveByFixedKey_ReturnsSingletonActivation()
     {
@@ -117,8 +109,6 @@ public class DispatcherGrainSpecs
         await second.DispatchNowAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventDispatcherGrain_NonFixedKey_SilentlyNoOpsAndDoesNotDispatch()
     {
@@ -143,8 +133,6 @@ public class DispatcherGrainSpecs
         await _fixture.EventDispatcher.DispatchNowAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RedeliverAsync_NoDeadLetter_NoOps()
     {
@@ -157,8 +145,6 @@ public class DispatcherGrainSpecs
         Assert.False(result.Delivered);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OnActivateAsync_RegistersPersistedReminderWithConfiguredCadence()
     {
@@ -179,8 +165,6 @@ public class DispatcherGrainSpecs
             $"Reminder period must be positive (got {row.Period})");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task HostedActivation_FirstReminderDeliversWithoutPulse()
     {
@@ -194,8 +178,6 @@ public class DispatcherGrainSpecs
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ReminderCallback_DeliversBeforeAndAfterHostingSiloLoss()
     {
@@ -232,8 +214,6 @@ public class DispatcherGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PoisonEvent_ExhaustsRetries_DeadLettersAndMarksDispatched()
     {
@@ -261,8 +241,6 @@ public class DispatcherGrainSpecs
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PoisonSettlementFailure_RollsBackSourceMarkAndDeadLetterRows()
     {

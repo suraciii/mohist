@@ -10,8 +10,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class DeadLettersMigrationSpecs
 {
     private const string PreviousMigrationId = "20260709000000_AddEventDeliveryDispatchedAt";

@@ -14,8 +14,6 @@ public class RunnerWorkflowStatusRouterSpecs
     private const string WorkflowRunId = "wf-router-1";
     private const string RunnerId = "runner-router-1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_RunnerIsConnected_PushesReceiveWorkflowRunStatus()
     {
@@ -38,8 +36,6 @@ public class RunnerWorkflowStatusRouterSpecs
         Assert.Equal("Completed", payload.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_RunnerIsOffline_NoPushAndBackstopIsReliedOn()
     {
@@ -55,8 +51,6 @@ public class RunnerWorkflowStatusRouterSpecs
         Assert.Empty(hub.SentMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_NoAssignedRunner_DropsNotificationWithoutPushing()
     {
@@ -73,8 +67,6 @@ public class RunnerWorkflowStatusRouterSpecs
         Assert.Empty(hub.SentMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_FailedStatus_PushesFailedStatusName()
     {
@@ -93,8 +85,6 @@ public class RunnerWorkflowStatusRouterSpecs
         Assert.Equal("Failed", payload.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_HubThrows_DoesNotPropagate()
     {
@@ -109,8 +99,6 @@ public class RunnerWorkflowStatusRouterSpecs
         await router.RouteAsync(WorkflowRunId, WorkflowRunStatus.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RouteAsync_EmptyRunId_NoOp()
     {

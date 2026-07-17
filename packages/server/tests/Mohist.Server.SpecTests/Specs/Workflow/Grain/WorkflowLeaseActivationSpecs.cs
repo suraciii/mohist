@@ -7,13 +7,11 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 {
     public WorkflowLeaseActivationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningTask_SurvivesActivation_AndRestoresOwnerFields()
     {

@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class RunnerStatusApiSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
@@ -97,39 +97,6 @@ public class RunnerStatusApiSpecs
         await db.SaveChangesAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_GlobalRunnerWithoutProjectId_IsReturned()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-global-scope-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "global-scope-host",
-        });
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
-            Assert.Equal("global", runner.GetProperty("scope").GetProperty("type").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_GlobalRunner_ReturnsRunner()
     {
@@ -164,45 +131,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_RunnerRegisteringWithProjectId_IsReturnedAsGlobal()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-proj-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "proj-host",
-            projectId,
-            coderModels = new[] { "anthropic/claude-3" },
-        });
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
-            Assert.Equal(runnerId, runner.GetProperty("id").GetString());
-            // Runners are global execution resources; the ProjectId field on
-            // the request is preserved on the wire for runner-line
-            // compatibility but does not bind the runner to a project.
-            Assert.Equal("global", runner.GetProperty("scope").GetProperty("type").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
     {
@@ -221,8 +149,6 @@ public class RunnerStatusApiSpecs
         Assert.Empty(runners.EnumerateArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_OnLegacyRoute_ReturnsNotFound()
     {
@@ -231,91 +157,6 @@ public class RunnerStatusApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_BusyRunner_IncludesActiveWork()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-busy-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "busy-host",
-            projectId,
-        });
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var workflowId = $"wf-{Guid.NewGuid():N}";
-        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runnerView = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
-            Assert.Equal("busy", runnerView.GetProperty("status").GetString());
-            var activeWorks = runnerView.GetProperty("activeWorks");
-            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
-            var firstActive = activeWorks.EnumerateArray().First();
-            Assert.Equal(workflowId, firstActive.GetProperty("ownerId").GetString());
-            Assert.Equal("workflow", firstActive.GetProperty("ownerKind").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_DisconnectedBusyWorkspaceRunner_IsBusyAndStillShowsConnectionDiagnostic()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-disc-busy-api-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*", "workspace-query" },
-            hostname = "disc-busy-host",
-            projectId,
-        });
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.HeartbeatAsync();
-        var workflowId = $"wf-{Guid.NewGuid():N}";
-        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runnerView = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
-            Assert.Equal("disconnected", runnerView.GetProperty("connectionState").GetString());
-            Assert.Equal("busy", runnerView.GetProperty("status").GetString());
-            var activeWorks = runnerView.GetProperty("activeWorks");
-            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
-            var firstActive = activeWorks.EnumerateArray().First();
-            Assert.Equal(workflowId, firstActive.GetProperty("ownerId").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_RunnerFields_UseRunnerTerminology()
     {
@@ -357,137 +198,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task RegisterRunner_WithBuildGitHash_ExposesHashInStatus()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-hash-{Guid.NewGuid():N}";
-        var hash = "abcdef1234567890abcdef1234567890abcdef12";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "hash-host",
-            projectId,
-            buildGitHash = hash,
-        });
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
-            Assert.True(runner.TryGetProperty("buildGitHash", out var reportedHash));
-            Assert.Equal(hash, reportedHash.GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_BusyMultiSlotRunner_ListsEveryActiveWorkIndependently()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-multi-api-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "multi-host",
-            projectId,
-        });
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.UpdateAsync(2);
-        await runner.HeartbeatAsync();
-
-        var workflowA = $"wf-multi-a-{Guid.NewGuid():N}";
-        var workflowB = $"wf-multi-b-{Guid.NewGuid():N}";
-        await AssignActiveWorkForTestAsync(runnerId, workflowA, "task-a.1", "task", "build", "Task A", projectId);
-        await AssignActiveWorkForTestAsync(runnerId, workflowB, "task-b.1", "task", "build", "Task B", projectId);
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runners = payload.GetProperty("data").GetProperty("runners");
-            var runnerView = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
-
-            var activeWorks = runnerView.GetProperty("activeWorks");
-            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
-            Assert.Equal(2, activeWorks.GetArrayLength());
-
-            var ownerIds = activeWorks.EnumerateArray().Select(w => w.GetProperty("ownerId").GetString()).ToArray();
-            Assert.Contains(workflowA, ownerIds);
-            Assert.Contains(workflowB, ownerIds);
-
-            foreach (var work in activeWorks.EnumerateArray())
-            {
-                Assert.Equal("workflow", work.GetProperty("ownerKind").GetString());
-                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("workId").GetString()));
-                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("workType").GetString()));
-                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("stage").GetString()));
-                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("title").GetString()));
-            }
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunners_IdleRunner_HasEmptyActiveWorksArray()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-idle-api-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "idle-host",
-            projectId,
-        });
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.HeartbeatAsync();
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var runnerView = payload.GetProperty("data").GetProperty("runners").EnumerateArray()
-                .First(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.Equal("idle", runnerView.GetProperty("status").GetString());
-            var activeWorks = runnerView.GetProperty("activeWorks");
-            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
-            Assert.Equal(0, activeWorks.GetArrayLength());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_BusyRunner_Returns200WithFullDetail()
     {
@@ -545,45 +255,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunner_IdleRunner_Returns200WithEmptyActiveWorks()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-idle-detail-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "idle-detail-host",
-            projectId,
-        });
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.HeartbeatAsync();
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var detail = payload.GetProperty("data").GetProperty("runner");
-
-            Assert.Equal(runnerId, detail.GetProperty("id").GetString());
-            Assert.Equal("idle", detail.GetProperty("status").GetString());
-            var activeWorks = detail.GetProperty("activeWorks");
-            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
-            Assert.Equal(0, activeWorks.GetArrayLength());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_UnknownRunner_Returns404WithRunnerNotFoundReason()
     {
@@ -598,86 +269,6 @@ public class RunnerStatusApiSpecs
         Assert.False(payload.GetProperty("success").GetBoolean());
         Assert.Equal("runner_not_found", payload.GetProperty("code").GetString());
         Assert.Contains(unknownRunnerId, payload.GetProperty("error").GetString()!);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunner_RunnerWithOtherProjectId_Returns200()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-foreign-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "foreign-host",
-            projectId = "different-project",
-        });
-
-        try
-        {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            Assert.True(payload.GetProperty("success").GetBoolean());
-            var runner = payload.GetProperty("data").GetProperty("runner");
-            Assert.Equal(runnerId, runner.GetProperty("id").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task GetRunner_IsReadOnly_NoDispatchHeartbeatOrUnregisterSideEffect()
-    {
-        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
-
-        var runnerId = $"runner-readonly-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = "readonly-host",
-            projectId,
-        });
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.HeartbeatAsync();
-
-        var workflowId = $"wf-readonly-{Guid.NewGuid():N}";
-        await AssignActiveWorkForTestAsync(runnerId, workflowId, "work-readonly-1", "task", "build", "Readonly Task", projectId);
-
-        try
-        {
-            var beforeRuntime = await runner.GetRuntimeStateAsync();
-            var beforeInfo = await runner.GetInfoAsync();
-            var beforeHeartbeatAt = beforeRuntime.LastHeartbeatAt;
-            var beforeRegisteredAt = beforeInfo!.RegisteredAt;
-
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var afterRuntime = await runner.GetRuntimeStateAsync();
-            var afterInfo = await runner.GetInfoAsync();
-
-            Assert.Single(afterRuntime.ActiveWorks);
-            Assert.Equal(workflowId, afterRuntime.ActiveWorks[0].OwnerId);
-            Assert.False(string.IsNullOrWhiteSpace(afterRuntime.ActiveWorks[0].WorkId));
-
-            Assert.Equal(beforeHeartbeatAt, afterRuntime.LastHeartbeatAt);
-            Assert.NotEqual(RunnerStatus.Offline, afterRuntime.Status);
-            Assert.NotNull(afterInfo);
-            Assert.Equal(beforeRegisteredAt, afterInfo.RegisteredAt);
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
     }
 
     private async Task<string> CreateProjectIdAsync(string name)

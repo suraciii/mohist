@@ -40,8 +40,6 @@ public class OtelOrleansSourceNameSpecs : IClassFixture<BacklogFixture>
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ProductionOtelRegistration_SubscribesAllFourOrleansSourceNames()
     {
@@ -64,8 +62,6 @@ public class OtelOrleansSourceNameSpecs : IClassFixture<BacklogFixture>
             MohistOpenTelemetryRegistration.OrleansActivitySourceNames);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task OrleansGrainCall_EmitsActivityFromConfirmedOrleansSourceNames()
     {

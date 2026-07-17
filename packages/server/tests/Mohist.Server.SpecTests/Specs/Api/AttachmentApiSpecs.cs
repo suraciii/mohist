@@ -27,8 +27,6 @@ public class AttachmentApiSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadBindServeAndRemove_IssueAttachmentLifecycle()
     {
@@ -75,8 +73,6 @@ public class AttachmentApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CommentAttachment_ServesSvgAsDownloadWithOriginalFilename()
     {
@@ -97,8 +93,6 @@ public class AttachmentApiSpecs
         Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadAndBind_RejectSizeAndCountLimit()
     {
@@ -132,8 +126,6 @@ public class AttachmentApiSpecs
         Assert.False(issue.TryGetProperty("body", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RejectedCommentAttachmentBind_DoesNotCreateComment()
     {
@@ -149,8 +141,6 @@ public class AttachmentApiSpecs
         Assert.Empty(issue.GetProperty("comments").EnumerateArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Attachment_IsScopedToProjectAndPersistsInDatabase()
     {
@@ -177,8 +167,6 @@ public class AttachmentApiSpecs
         Assert.False(string.IsNullOrWhiteSpace(persisted.StoragePath));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_BindsPendingAttachments()
     {
@@ -199,8 +187,6 @@ public class AttachmentApiSpecs
         Assert.Null(row.ExpiresAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadAsync_RejectsStreamThatExceedsDeclaredSizeLimit()
     {
@@ -222,8 +208,6 @@ public class AttachmentApiSpecs
         Assert.Equal(0, storage.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CleanupExpiredPending_RemovesRowsAndStoredContent()
     {

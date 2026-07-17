@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -29,22 +28,16 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 /// </summary>
 public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowItemTranslator _translator;
     private readonly IWorkflowArtifactBindService _bindService;
-    private readonly SqliteConnection _keeper;
 
     public WorkflowItemTranslatorSpecs()
     {
-        var connectionString = $"Data Source=translator-specs-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
+        _database = TestSqliteDatabase.CreateMigrated();
 
-        var factory = new TestDbContextFactory(_options);
+        var factory = new TestDbContextFactory(_database.Options);
         var runProfileManager = new WorkflowRunProfileManager(factory);
         var promptLoader = new EmptyPromptLoader();
         _profileManager = new WorkflowProfileManager(
@@ -53,8 +46,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>
@@ -80,7 +71,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -109,7 +100,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private async Task SeedProfileAsync(string projectId, string workflowRunId, WorkflowRun run)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var definitionJson = JsonSerializer.Serialize(
             new WorkflowDefinition("spec/workflow",
             [
@@ -144,8 +135,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // Out-direction: WorkItem → WorkDispatch
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_TaskItem_ProducesDispatchWithResolvedVariablesAndPrompts()
     {
@@ -172,8 +161,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(7, dispatch.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_PreservesExplicitNullAndNumericRecoveryState()
     {
@@ -197,8 +184,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(fresh.Recovery, continuation.Recovery);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_ChecksItem_ProducesDispatchWithChecksPayload()
     {
@@ -219,8 +204,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(7, dispatch.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_TaskItem_DoesNotInjectDispatchId()
     {
@@ -241,8 +224,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // In-direction: WorkResult → TaskReport | CheckReport
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskWithoutDeclaredArtifacts_SucceedsWithOutput()
     {
@@ -261,8 +242,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(task.Value.Detail);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_FailedTaskWithDetail_FailsWithDetailPreserved()
     {
@@ -282,8 +261,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.True(task.Value.Status is TaskReportStatus.Succeeded or TaskReportStatus.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskMissingDeclaredArtifacts_SucceedsWithoutArtifacts()
     {
@@ -301,8 +278,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(task.Value.Artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskWithUploadIds_RecordsArtifactReferences()
     {
@@ -312,7 +287,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         // Seed a pending upload the bind service can locate.
         var uploadId = $"up-{Guid.NewGuid():N}";
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
             {
@@ -344,8 +319,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("review.md", task.Value.Artifacts[0].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_ChecksItem_ParsesRunnerOutputIntoCheckResults()
     {
@@ -373,8 +346,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("nope", checks.Value.Results[1].Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_TimeoutLikeFailedTask_ReportsAsFailed_NotAsDistinctState()
     {
@@ -398,8 +369,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(2, System.Enum.GetValues<TaskReportStatus>().Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_UnknownWorkType_Throws()
     {
@@ -416,8 +385,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // Protocol contract: WorkItem carries declaration only, no dispatch fields
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkItem_TaskVariant_ExposesOnlyDeclarationFields()
     {
@@ -438,8 +405,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(item.Items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkItem_ChecksVariant_ExposesStageAndItems()
     {
@@ -460,8 +425,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(item.With);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskReportStatus_HasExactlyTwoStates_SucceededAndFailed()
     {
@@ -474,8 +437,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Contains(TaskReportStatus.Failed, values);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_AllStatusAliases_CollapseToSucceeded()
     {
@@ -493,8 +454,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_AllFailureAliases_CollapseToFailed_WithMessageAsDetail()
     {
@@ -513,13 +472,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json) ?? new();
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 
     private sealed class NullLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
     {

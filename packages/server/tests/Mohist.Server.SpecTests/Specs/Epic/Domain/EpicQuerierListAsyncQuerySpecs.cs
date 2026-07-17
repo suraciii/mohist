@@ -10,8 +10,6 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
 public class EpicQuerierListAsyncQuerySpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_SearchesTitlesCaseInsensitively()
     {
@@ -26,8 +24,6 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(new[] { 1, 3 }, matches.Select(epic => epic.Number).Order());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_TreatsLikeMetacharactersAsLiterals()
     {
@@ -44,8 +40,6 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(2, Assert.Single(underscore).Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_AppliesSupportedSortAndRejectsUnknownSelectors()
     {

@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -9,20 +8,11 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Data;
 
 public class IssueDerivedColumnsSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DerivedColumn_TracksStateAfterUpdate()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        MigratedSqliteTemplate.CopyTo(connection);
-        await using var db = new MohistDbContext(options);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
 
         var issue = new IssueRow
         {
@@ -44,20 +34,11 @@ public class IssueDerivedColumnsSpecs
         Assert.Equal("[4]", read.PrerequisiteNumbersJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DerivedColumn_MissingOrLegacyKeys_YieldNullSafely()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        MigratedSqliteTemplate.CopyTo(connection);
-        await using var db = new MohistDbContext(options);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
 
         var legacyIssue = new IssueRow
         {
