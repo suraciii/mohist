@@ -54,7 +54,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
         Assert.Equal("task", feedbackTask.WorkType);
         Assert.Equal("plan", feedbackTask.Stage);
-        Assert.Equal("mohist/acp-agent", feedbackTask.Uses);
+        Assert.Equal("mohist/opencode", feedbackTask.Uses);
 
         Assert.NotNull(feedbackTask.Variables);
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);

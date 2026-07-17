@@ -526,4 +526,64 @@ describe("tryRecovery self-retry expect copy", () => {
 
     expect(result?.addTasks?.[1]?.expect).toBeNull()
   })
+
+  it("PropagatesExpectFromHandlerTaskTemplate_NotJustSelfRetry", () => {
+    // Spec requirement "The canonical declaration survives the complete
+    // task lifecycle": recovery handler tasks (not just retrySelf) keep
+    // their top-level `expect` alongside `with`. The handler-task
+    // template carries the completion contract; the recovery scheduling
+    // path MUST NOT drop it.
+    const work: RenderedWorkItem = {
+      workflowRunId: "wf-recovery-handler-expect",
+      workId: "review.4",
+      workType: "task",
+      stage: "check",
+      title: "Review",
+      uses: "test/action",
+      with: { prompt: "review" },
+      expect: undefined,
+      recovery: {
+        budget: 1,
+        handlers: [
+          {
+            when: "promise=FAIL",
+            retrySelf: false,
+            tasks: [
+              {
+                id: "recover:fix-review",
+                title: "Fix review findings",
+                uses: "mohist/opencode",
+                with: { prompt: "fix the review findings" },
+                expect: {
+                  markers: [
+                    {
+                      path: "review.md",
+                      oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+                      failIf: "<promise>FAIL</promise>",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      recoveryRemaining: 1,
+    }
+    const result = tryRecovery(work, {
+      status: "completed",
+      output: JSON.stringify({ promise: "FAIL" }),
+    })
+
+    expect(result?.addTasks?.[0]?.id).toBe("recover:fix-review")
+    expect(result?.addTasks?.[0]?.expect).toEqual({
+      markers: [
+        {
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        },
+      ],
+    })
+  })
 })

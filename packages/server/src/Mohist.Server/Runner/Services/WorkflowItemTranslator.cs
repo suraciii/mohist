@@ -266,6 +266,27 @@ EpicNumber: ReadEpicNumber(run),
                 "'with.expect' is reserved for Action-owned input on the selected Action contract.");
         }
 
+        // Spec scenario "Legacy agent input is invalid": persisted or
+        // in-flight inline-agent tasks that bypassed profile ingestion
+        // MUST fail dispatch with the same actionable errors as profile
+        // loading. `kind` and `type` are legacy execution-backend
+        // discriminators the inline-agent contract does not read.
+        if (with is not null && with.ContainsKey("kind"))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
+                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'kind'. " +
+                "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
+        }
+
+        if (with is not null && with.ContainsKey("type"))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
+                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'type'. " +
+                "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
+        }
+
         _ = expect;
     }
 

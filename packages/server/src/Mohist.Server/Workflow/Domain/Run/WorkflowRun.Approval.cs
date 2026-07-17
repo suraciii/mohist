@@ -9,7 +9,7 @@ public static partial class WorkflowRunExtensions
 {
     public const string DefaultFeedbackTaskId = "apply-feedback";
     public const string DefaultFeedbackTaskTitle = "Apply approval feedback";
-    public const string DefaultFeedbackTaskUses = "mohist/acp-agent";
+    public const string DefaultFeedbackTaskUses = "mohist/opencode";
     public const int FeedbackSummaryMaxLength = 100;
     private const string Ellipsis = "\u2026";
 

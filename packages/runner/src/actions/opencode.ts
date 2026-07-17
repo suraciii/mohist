@@ -57,6 +57,14 @@ async function restoreAgentToolNoise(context: ActionContext) {
  * while the native OpenCode SDK runtime is delivered by the sibling
  * issue). The native SDK replaces this handler; the contract on this
  * side does not change.
+ *
+ * Output projection: the bridge returns a rich diagnostic JSON in
+ * `output` for debug-time inspection only. The Workflow task executor's
+ * `projectTaskOutput` step discards that JSON and projects the public
+ * Action Output to `null | { promise: <value> }` per the
+ * opencode-action-contract spec scenario "Runtime and completion facts
+ * stay out of OpenCode Action Output". Callers MUST NOT rely on the
+ * shape of `output` returned here; treat it as internal debug state.
  */
 export async function opencodeAction(context: ActionContext): Promise<ActionResult> {
   let prompt: string | undefined

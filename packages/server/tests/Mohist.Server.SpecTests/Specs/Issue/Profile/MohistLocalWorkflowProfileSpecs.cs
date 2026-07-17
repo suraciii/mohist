@@ -549,8 +549,66 @@ public class MohistLocalWorkflowProfileSpecs
 
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
         Assert.Contains("verdict marker", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("check definition", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oneOf", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bad-task", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("kind")]
+    [InlineData("type")]
+    public void WorkflowYamlParser_InlineAgentWithLegacyDiscriminator_RejectsWithFieldIdentifyingError(string field)
+    {
+        // opencode-action-contract spec scenario "Legacy agent input is
+        // invalid": a `mohist/opencode` task supplying `agent`, `kind`,
+        // `type`, or Workflow completion policy inside `with` SHALL be
+        // rejected with the offending field identified.
+        var yaml = $"""
+        stages:
+          - stage: build
+            tasks:
+              - id: legacy-discriminator
+                title: Legacy discriminator
+                uses: mohist/opencode
+                with:
+                  prompt: Do work
+                  {field}: opencode
+            checks: []
+        """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
+        Assert.Contains("legacy-discriminator", ex.Message);
+        Assert.Contains($"with.{field}", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_NonInlineAgentWithKindAndType_IsAcceptedAsActionOwnedInput()
+    {
+        // `kind` and `type` are not banned globally — they are banned only
+        // for inline-agent `uses`. Other Actions may own those fields as
+        // part of their own input contract.
+        var yaml = """
+        stages:
+          - stage: build
+            tasks:
+              - id: owns-kind-and-type
+                title: Custom action
+                uses: mohist/custom-action
+                with:
+                  prompt: Do work
+                  kind: builder
+                  type: full
+            checks: []
+        """;
+
+        var definition = MohistWorkflow.ParseYaml(yaml);
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.Equal("owns-kind-and-type", task.Id);
+        Assert.Equal("builder", task.With!["kind"]!.Value.GetString());
+        Assert.Equal("full", task.With!["type"]!.Value.GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

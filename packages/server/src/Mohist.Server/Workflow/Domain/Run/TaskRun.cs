@@ -48,6 +48,14 @@ public static class TaskRunExtensions
     private const string MarkersKey = "markers";
     private const string SessionKey = "session";
 
+    /// <summary>
+    /// Marker path sentinel that evaluates the turn's final assistant text
+    /// instead of a file (workflow-task-completion spec). The sentinel MUST
+    /// NOT be projected as a fetchable file path; required-files evidence
+    /// lists only file-backed markers and <c>expect.files</c> paths.
+    /// </summary>
+    public const string OutputMarkerPath = "_output";
+
     public static string? ExtractSessionName(Dictionary<string, JsonElement?>? withInput)
     {
         if (withInput is null) return null;
@@ -75,6 +83,10 @@ public static class TaskRunExtensions
 
                 var path = entry.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
                 if (string.IsNullOrEmpty(path)) continue;
+                // `_output` is a turn-text requirement, not a file. Projecting
+                // it as a fetchable path would violate the spec scenario
+                // "`_output` is not projected as a file".
+                if (string.Equals(path, OutputMarkerPath, StringComparison.Ordinal)) continue;
 
                 string[]? oneOf = null;
                 if (entry.TryGetProperty("oneOf", out var oneOfEl) && oneOfEl.ValueKind == JsonValueKind.Array)

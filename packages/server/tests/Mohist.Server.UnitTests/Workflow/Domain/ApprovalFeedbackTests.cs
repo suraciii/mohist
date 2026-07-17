@@ -94,7 +94,7 @@ public class ApprovalFeedbackTests
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
-        Assert.Equal("mohist/acp-agent", feedbackTask.Uses);
+        Assert.Equal("mohist/opencode", feedbackTask.Uses);
         Assert.NotNull(feedbackTask.CausedByFeedbackId);
         Assert.Equal(run.Feedback[0].Id, feedbackTask.CausedByFeedbackId);
         Assert.Equal(TaskRunStatus.Pending, feedbackTask.Status);
@@ -283,10 +283,27 @@ public class ApprovalFeedbackTests
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
-        Assert.Equal("mohist/acp-agent", feedbackTask.Uses);
+        Assert.Equal("mohist/opencode", feedbackTask.Uses);
         Assert.Equal("Apply approval feedback", feedbackTask.Title);
         Assert.NotNull(feedbackTask.WithInput);
         Assert.Equal("plan", feedbackTask.WithInput!["session"]?.GetString());
+        // The default feedback task binds options explicitly so approval
+        // feedback honors the issue-level model selection (proposal:
+        // "approval feedback task ... 显式绑定 options: ${{ vars.agent }}").
+        Assert.Equal("${{ vars.agent }}", feedbackTask.WithInput!["options"]?.GetString());
+    }
+
+    [Fact]
+    public void ResolveFeedbackTask_NullConfig_ReturnsBuiltInDefault()
+    {
+        var task = WorkflowRunExtensions.ResolveFeedbackTask(null, "check");
+
+        Assert.Equal("apply-feedback", task.Id);
+        Assert.Equal("Apply approval feedback", task.Title);
+        Assert.Equal("mohist/opencode", task.Uses);
+        Assert.NotNull(task.With);
+        Assert.Equal("check", task.With!["session"]?.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With!["options"]?.GetString());
     }
 
     [Fact]
@@ -315,18 +332,6 @@ public class ApprovalFeedbackTests
         Assert.NotNull(feedbackTask.WithInput);
         Assert.True(feedbackTask.WithInput!.ContainsKey("agent"));
         Assert.Equal("custom-agent", feedbackTask.WithInput["agent"]?.GetString());
-    }
-
-    [Fact]
-    public void ResolveFeedbackTask_NullConfig_ReturnsBuiltInDefault()
-    {
-        var task = WorkflowRunExtensions.ResolveFeedbackTask(null, "check");
-
-        Assert.Equal("apply-feedback", task.Id);
-        Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/acp-agent", task.Uses);
-        Assert.NotNull(task.With);
-        Assert.Equal("check", task.With!["session"]?.GetString());
     }
 
     [Fact]

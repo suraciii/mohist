@@ -81,6 +81,11 @@ marker 的 `path` 可以是特殊值 `_output`，表示对回合最终 assistant
 文件内容。task executor 从 Action result 携带的回合事实中取得该文本；它不进入
 Action Output，也不要求 Action 额外声明。
 
+`_output` 只识别 promise-tag 形式（`<promise>VALUE</promise>`）。多个被接受的值出现
+时，按文本中最后出现的为准（与 file marker 的“声明顺序优先”不同）。若需要按字面
+substring 匹配最终 assistant 文本，请把字面值编码为 `oneOf` 中 promise tag 的内部
+VALUE。`_output` 不读取文件系统，evidence 也不会把它当作可抓取的文件路径。
+
 ## 错误字段与 recovery
 
 Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。

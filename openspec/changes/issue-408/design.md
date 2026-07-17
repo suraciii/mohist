@@ -267,5 +267,8 @@ Rollback: drain workflow dispatch, roll back server and runner together. Existin
 
 ## Open Questions
 
-- **Marker text in `contains` vs `oneOf` during `_output` evaluation**: the generalized `_output` parser extracts `<promise>VALUE</promise>` tags. A `contains`-form marker (without `oneOf`) supplies a single literal search string. Should `_output` support `contains` markers that are not `<promise>` tags, or should `_output` require `oneOf`? Current built-in usage only has `oneOf`. Lean toward: `_output` supports both forms, matching any accepted value as a substring, with last-occurrence precedence for `oneOf` and simple presence for `contains`.
 - **Completion diagnostics granularity**: the spec requires failure detail to identify the missing path or unsatisfied marker. The exact format of this detail (structured JSON in `message` vs human-readable text) is an implementation detail. Lean toward human-readable text in `message`, matching the current `expectations.ts:buildMessage` pattern, since the detail is consumed by task failure display, not by programmatic recovery matching.
+
+## Resolved Questions
+
+- **Marker text in `contains` vs `oneOf` during `_output` evaluation**: resolved — `_output` requires the promise-tag form (`<promise>VALUE</promise>`). The generalized parser extracts the last accepted occurrence in the assistant text; a `contains`-form `_output` marker (without `oneOf`) supplies a literal search string that is not a promise tag, so it cannot match. Current built-in usage only declares `oneOf` with promise-tag values, so no built-in profile is affected. Authors who want literal-substring matching on the final assistant text should encode the literal as the inner VALUE of a promise tag in `oneOf`. This resolution is documented in [`design/workflow/actions.md`](../../../design/workflow/actions.md).

@@ -379,6 +379,54 @@ public class WorkflowRunControlApiSpecs
         AssertGuardDidNotReject(runPayload);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task TasksBatch_PostWithExpect_PropagatesExpectIntoMaterializedTaskRun()
+    {
+        // Spec scenario "A dynamically generated task uses the canonical
+        // declaration": the runner posts a generated task with both `with`
+        // and `expect` to /api/workflow-runs/{wrId}/tasks/batch; the HTTP
+        // DTO MUST carry `expect` through to AddTasksBatchItem.Expect and
+        // the materialized TaskRun MUST observe ExpectInput.
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var body = new
+        {
+            tasks = new[]
+            {
+                new
+                {
+                    id = "T-dynamic",
+                    title = "Dynamic task with completion contract",
+                    uses = "mohist/opencode",
+                    @with = new { prompt = "do work" },
+                    expect = new
+                    {
+                        files = new[] { new { path = "src/FeatureFlags.cs" } },
+                        markers = new[]
+                        {
+                            new { path = "review.md", oneOf = new[] { "<promise>PASS</promise>", "<promise>FAIL</promise>" } },
+                        },
+                    },
+                },
+            },
+        };
+
+        var response = await _client.PostAsJsonAsync($"/api/workflow-runs/{wrId}/tasks/batch", body);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // The materialized TaskRun must carry the `expect` declaration so
+        // the executor's completion evaluator can read it from the dispatch
+        // envelope (workflow-task-contract spec).
+        var run = await LoadRunAsync(wrId);
+        var stage = run.Stages.Single(s => s.Id == "plan");
+        var dynamicTask = stage.Tasks.Single(t => t.DefinitionId == "T-dynamic");
+        Assert.NotNull(dynamicTask.ExpectInput);
+        Assert.True(dynamicTask.ExpectInput!.ContainsKey("files"));
+        Assert.True(dynamicTask.ExpectInput.ContainsKey("markers"));
+    }
+
     private static void AssertGuardDidNotReject(JsonElement payload)
     {
         var hasError = payload.TryGetProperty("error", out var errorEl);

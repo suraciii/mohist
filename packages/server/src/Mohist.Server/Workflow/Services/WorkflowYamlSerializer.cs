@@ -117,8 +117,9 @@ public static class WorkflowYamlSerializer
             var contains = String(markerMap, "contains");
             if (IsVerdictMarker(contains))
                 throw new InvalidOperationException(
-                    $"Workflow task '{taskId}' configures a verdict marker ({contains}) as an artifact expectation. " +
-                    "Move verdict marker requirements into a check definition.");
+                    $"Workflow task '{taskId}' declares verdict marker '{contains}' under 'expect.markers.contains'. " +
+                    "Use 'oneOf' (not 'contains') for promise verdict markers under task-level 'expect', " +
+                    "or move non-verdict literal markers into a check definition.");
         }
     }
 
@@ -241,6 +242,27 @@ public static class WorkflowYamlSerializer
                 $"Workflow task '{taskId}' declares legacy agent configuration under 'with.agent'. " +
                 "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{{{ vars.agent }}}}'.");
         }
+
+        // Spec scenario "Legacy agent input is invalid": inline-agent tasks
+        // MUST NOT carry legacy execution-backend discriminators `kind` or
+        // `type` inside `with`. Only `agent` and Workflow completion policy
+        // have their own actionable errors above; `kind`/`type` get a
+        // shared message that names the offending field.
+        if (withMap.ContainsKey("kind"))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{taskId}' declares legacy execution discriminator 'with.kind'. " +
+                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'kind'. " +
+                "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{{{ vars.agent }}}}'.");
+        }
+
+        if (withMap.ContainsKey("type"))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{taskId}' declares legacy execution discriminator 'with.type'. " +
+                "The 'mohist/opencode' Action is selected by 'uses' and does not read 'type'. " +
+                "Remove 'with.type'; if model configuration is intended, bind 'options: ${{{{ vars.agent }}}}'.");
+        }
     }
 
     private static bool HasLegacyCompletionPolicyShape(object? expectValue)
@@ -265,12 +287,9 @@ public static class WorkflowYamlSerializer
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
         var normalized = value.Trim().ToUpperInvariant();
-        return normalized is "PASS" or "FAIL" ||
-               normalized.Contains("<PROMISE>PASS</PROMISE>", StringComparison.OrdinalIgnoreCase) ||
-               normalized.Contains("<PROMISE>FAIL</PROMISE>", StringComparison.OrdinalIgnoreCase) ||
-               normalized.Contains("PASS", StringComparison.OrdinalIgnoreCase) &&
-               (normalized.Contains("<PROMISE>", StringComparison.OrdinalIgnoreCase) ||
-                normalized.Contains("</PROMISE>", StringComparison.OrdinalIgnoreCase));
+        return normalized is "PASS" or "FAIL"
+            || normalized.Contains("<PROMISE>PASS</PROMISE>", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("<PROMISE>FAIL</PROMISE>", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ApprovalConfig? ToApproval(Dictionary<string, object?>? map)

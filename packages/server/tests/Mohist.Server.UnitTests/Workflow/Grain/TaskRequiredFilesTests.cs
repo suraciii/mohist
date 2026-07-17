@@ -86,6 +86,30 @@ public class TaskRequiredFilesTests
     }
 
     [Fact]
+    public void ExtractRequiredFiles_OutputMarkerPath_IsNotProjectedAsFile()
+    {
+        // Spec scenario: "_output is not projected as a file". The marker
+        // path `_output` is a turn-text requirement; the required-files
+        // projection MUST NOT expose it as a fetchable file path.
+        var expect = new Dictionary<string, JsonElement?>
+        {
+            ["markers"] = JsonSerializer.Deserialize<JsonElement>("""
+                [
+                    {"path": "_output", "oneOf": ["<promise>done</promise>", "<promise>unfinished</promise>"]},
+                    {"path": "review.md", "oneOf": ["<promise>PASS</promise>", "<promise>FAIL</promise>"]}
+                ]
+                """),
+        };
+
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
+
+        Assert.Single(result);
+        Assert.Equal("review.md", result[0].Path);
+        Assert.True(result[0].CanFetchContent);
+        Assert.DoesNotContain(result, r => r.Path == "_output");
+    }
+
+    [Fact]
     public void DeriveClassification_ForCoreAndMohistInternal_UsesOrchestration()
     {
         var classification = TaskRunExtensions.DeriveClassification("core/script", null);
