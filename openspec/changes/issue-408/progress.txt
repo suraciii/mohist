@@ -50,3 +50,41 @@
 
 - Migrating the built-in profile YAMLs was originally in T-005; T-001 picked them up because the legacy validation rejects `mohist/acp-agent` + `with.expect` shapes and the spec suite cannot survive the rejection at T-001 boundary. Migration is mechanical and matches D9 in `design.md`.
 - The verdict-marker rule now applies to top-level `expect`. The rule rejects `<promise>PASS</promise>` etc. inside marker `contains` for all tasks. This matches the spec's intent ("verdict marker requirements belong in a check definition"); a top-level `expect` with verdict markers fails just like `with.expect` did previously.
+
+## T-002 Model config validation and writer convergence
+
+### Codebase patterns discovered
+
+- `IssueModelMetadata.ProviderModelFormat` regex `^[^/\s]+/[^/\s]+$` enforced exactly-one-slash semantics — the model-ID segment rejected further `/` characters. The fix moves to first-slash-split by replacing the model segment with `\S+` (`[^/\s]+/\S+`), which keeps the "non-empty, non-whitespace provider" check but lets the model ID carry any number of `/` segments.
+- `MohistIssueWorkflowProfileBase.BuildAgentConfig` was the only server-side code path that **seeded** `vars.agent.type = "opencode"` on every fresh issue. Project/global agent configs set this key too, but those are user-controlled and remain untouched by the change.
+- `IssueModelSelector.tsx` writes via four `patchIssueWorkflowDefinitionVar` / `patchIssueWorkflowStageDefinitionVar` calls. The test file mirrors each expected call shape; both files had to drop `type: 'opencode'` so writes only carry model/variant.
+- Other code paths (project/global agent config, `IssueVariableBuilder.Build`, runner-side `template.ts`/`openspec.ts` defaults, settings page) still write or consume `type: "opencode"` in fixtures, but they represent persisted state or upstream-runtime tests, not writer surfaces in scope of T-002.
+
+### Gotchas
+
+- Removing the default `type: "opencode"` from `BuildAgentConfig` breaks a single spec test that explicitly asserts on it: `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable`. The new expectation is "the seeded agent block has no `type` key" — covered by `Assert.False(agent.TryGetProperty("type", out _))`. The spec's broader rule (legacy keys are inert under the options contract) still holds; this is a server-side write change, not a runner-side contract change.
+- The new regex `[^/\s]+/\S+` accepts `provider//model` (double slash, with empty segment between them) because `\S+` only forbids whitespace. The spec only requires "non-empty before/after the first `/`", so this is intentionally permissive — openrouter already ships IDs like `openrouter/anthropic/claude-3-opus` and intermediate empty segments are not actionable. The error message remains "expected 'provider/model' format" so the diagnostic surface is unchanged.
+- `[^/\s]+/\S+$` correctly rejects the cases the spec lists (`model-only`, `/model`, `provider/`, `provider/ `, `with space/inside`, `inside/with space`, `/`). `provider/ ` (trailing whitespace) is new — old regex allowed it because `[^/\s]+` was the model ID and the trailing space wasn't matched; new regex anchors `\S+$` and rejects it.
+- `MohistIssueWorkflowProfileBase` does not write the profile-default model; the project's `IssueWorkflowProfile` API path also routes through `BuildAgentConfig` for fresh variable bundles. Tests in `IssueWorkflowProfileStorageIntegritySpecs` and `IssueWorkflowProfileManagerSpecs` set `type = "opencode"` in user fixtures, not via the profile default — those tests remain valid.
+
+### Patterns established
+
+- Model-ID validation now lives entirely in `ValidateModel`, with one shared regex. Both top-level `Validate` and per-stage `Validate` call the same helper, so the multi-slash acceptance is automatically applied to per-stage selectors — verified by a new spec assertion `Validate_AcceptsMultiSlashModelInTopLevelAndStageSelectors` and a sibling rejection `Validate_RejectsInvalidMultiSlashStageModelFormat`.
+- `BuildAgentConfig` starts from an empty `Dictionary<string, object?>` and only merges the optional `globalAgentConfig`. The merge remains set-replace on `agent` (preserves non-overlapping keys), so legacy `type: "opencode"` already persisted in user config still rides through unchanged — only the default seeding goes away.
+- Issue model-selector writes now use the canonical model/variant-only shape `{ model, variant }`. No other keys are added; clearing patches still emit `{ model: null, variant: null }` for idempotent delete semantics.
+
+### Tests touched
+
+- Unit: `IssueModelMetadataTests.ValidateModel_AcceptsProviderSlashModelFormat` extended with `openrouter/vendor/family/model` and `openai/org/team/model-name`. `ValidateModel_RejectsNonProviderSlashModelFormat` adds `model-only`, `/model`, `provider/ ` to lock the spec scenarios.
+- Unit: two new `Validate_AcceptsMultiSlashModelInTopLevelAndStageSelectors` and `Validate_RejectsInvalidMultiSlashStageModelFormat` facts confirm per-stage multi-slash acceptance.
+- Spec: `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable` no longer asserts `agent.type == "opencode"`; uses `TryGetProperty` to confirm the seeded agent has no `type` key.
+- Web: `IssueModelSelector.test.tsx` — 7 assertions across both describe blocks had `type: 'opencode'` removed from the expected `patchIssueWorkflowDefinitionVar` / `patchIssueWorkflowStageDefinitionVar` argument shape.
+
+### Verification
+
+- Server unit tests: 1405 / 1405 passing (added 4 new `InlineData` cases + 2 new facts).
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- Web typecheck: clean.
+- Web vitest: 4698 / 4698 passing.
+

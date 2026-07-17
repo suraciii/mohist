@@ -225,7 +225,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         using var document = JsonDocument.Parse(variables);
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
         Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
     }

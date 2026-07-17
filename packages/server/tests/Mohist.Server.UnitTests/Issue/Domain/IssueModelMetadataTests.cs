@@ -27,19 +27,23 @@ public class IssueModelMetadataTests
     [InlineData("zhipuai-coding-plan/glm-5.2")]
     [InlineData("a/b")]
     [InlineData("z.ai/foo-bar")]
+    [InlineData("openrouter/vendor/family/model")]
+    [InlineData("openai/org/team/model-name")]
     public void ValidateModel_AcceptsProviderSlashModelFormat(string model)
     {
         Assert.Null(IssueModelMetadata.ValidateModel(model));
     }
 
     [Theory]
-    [InlineData("no-slash")]
+    [InlineData("model-only")]
+    [InlineData("/model")]
+    [InlineData("provider/")]
     [InlineData("only-slash-no-name/")]
     [InlineData("/leading-slash")]
     [InlineData("with space/inside")]
     [InlineData("inside/with space")]
-    [InlineData("provider/")]
     [InlineData("/")]
+    [InlineData("provider/ ")]
     public void ValidateModel_RejectsNonProviderSlashModelFormat(string model)
     {
         Assert.NotNull(IssueModelMetadata.ValidateModel(model));
@@ -417,5 +421,34 @@ public class IssueModelMetadataTests
             });
 
         Assert.Null(error);
+    }
+
+    [Fact]
+    public void Validate_AcceptsMultiSlashModelInTopLevelAndStageSelectors()
+    {
+        var error = IssueModelMetadata.Validate(
+            model: "openrouter/vendor/family/model",
+            stageModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["plan"] = "openrouter/vendor/family/model",
+                ["build"] = "anthropic/claude-opus-4-20250514",
+            });
+
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void Validate_RejectsInvalidMultiSlashStageModelFormat()
+    {
+        var error = IssueModelMetadata.Validate(
+            model: null,
+            stageModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["build"] = "openrouter/",
+            });
+
+        Assert.NotNull(error);
+        Assert.Contains("stageModels.build", error);
+        Assert.Contains("provider/model", error);
     }
 }
