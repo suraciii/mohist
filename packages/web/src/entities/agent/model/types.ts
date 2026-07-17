@@ -128,9 +128,9 @@ export type AgentDetailEventMap = {
   'com.mohist.agent-session.runtime-bound': { issueNumber: number; projectId: string }
   'com.mohist.agent-session.usage-recorded': { issueNumber: number; projectId: string }
   'com.mohist.agent-session.model-changed': { issueNumber: number; projectId: string }
-  'com.mohist.agent-session.context-compacted': { issueNumber: number; projectId: string; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
+  'com.mohist.agent-session.context-compacted': { issueNumber: number; projectId: string; sessionId?: string | null; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
   'com.mohist.agent-session.context-exhausted': { issueNumber: number; projectId: string; failureCategory?: string | null; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
-  'com.mohist.agent-session.context-health-updated': { issueNumber: number; projectId: string; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
+  'com.mohist.agent-session.context-health-updated': { issueNumber: number; projectId: string; sessionId?: string | null; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
 }
 
 export interface AgentSessionInfo {

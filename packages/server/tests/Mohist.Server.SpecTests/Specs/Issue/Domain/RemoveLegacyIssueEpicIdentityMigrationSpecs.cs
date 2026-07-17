@@ -38,7 +38,7 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
                        ('/mohist/issues/issue_alpha_42', 2, 'issue_dispatched', 'com.mohist.issue.work-started', '1.0', 'application/json', '{{}}', '{{"issueid":"issue_alpha_42"}}', '2026-07-17 00:00:00+00:00', '2026-07-17 00:01:00+00:00');
 
                 INSERT INTO "WorkflowRunEvents" ("Source", "Id", "EventId", "Type", "SpecVersion", "DataContentType", "Data", "ExtensionsJson", "Time", "DispatchedAt")
-                VALUES ('/mohist/workflows/run_alpha', 1, 'workflow_pending', 'com.mohist.workflow.run.completed', '1.0', 'application/json', '{{}}', '{{"custom":"preserve"}}', '2026-07-17 00:00:00+00:00', NULL);
+                VALUES ('/mohist/workflow-runs/run_alpha', 1, 'workflow_pending', 'com.mohist.workflow.run.completed', '1.0', 'application/json', '{{}}', '{{"custom":"preserve"}}', '2026-07-17 00:00:00+00:00', NULL);
                 """);
 
             await seed.GetService<IMigrator>().MigrateAsync(TargetMigration);

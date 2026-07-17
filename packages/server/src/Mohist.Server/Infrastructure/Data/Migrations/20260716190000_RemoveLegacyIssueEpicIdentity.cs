@@ -37,7 +37,7 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
               AND event."Type" = 'com.mohist.workflow.run.completed'
               AND run."MetadataProjectId" IS NOT NULL
               AND run."IssueNumber" IS NOT NULL
-              AND event."Source" = '/mohist/workflows/' || run."WorkflowRunId";
+              AND event."Source" = '/mohist/workflow-runs/' || run."WorkflowRunId";
             """);
         migrationBuilder.Sql("ALTER TABLE \"WorkflowRuns\" DROP COLUMN \"EpicId\";");
         migrationBuilder.Sql("""

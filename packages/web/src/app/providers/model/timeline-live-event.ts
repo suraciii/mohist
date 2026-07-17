@@ -25,7 +25,7 @@ function readEnvelopeIssueNumber(rawData: unknown): number | null {
   if (typeof issue !== 'string' || issue.trim() === '') return null
 
   const issueNumber = Number(issue)
-  return Number.isFinite(issueNumber) ? issueNumber : null
+  return Number.isSafeInteger(issueNumber) && issueNumber > 0 ? issueNumber : null
 }
 
 export function readTimelineEventId(rawData: unknown): string | null {

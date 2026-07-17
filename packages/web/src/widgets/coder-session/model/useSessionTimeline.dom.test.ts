@@ -789,6 +789,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
         issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         strategy: 'summary',
         contextWindowUsedBefore: 800_000,
         contextWindowUsedAfter: 200_000,
@@ -821,6 +822,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
         issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         contextWindowUsedAfter: 100_000,
         recordedAt: '2024-01-01T00:00:01.000Z',
       })
@@ -838,6 +840,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-health-updated', {
         issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         healthStatus: 'yellow',
         contextUsagePercent: 65,
         contextWindowUsed: 65_000,
