@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class WorkflowRunQuerierSpecs : WorkflowGrainSpecs
 {
     public WorkflowRunQuerierSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

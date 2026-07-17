@@ -22,25 +22,20 @@ namespace Mohist.Server.SpecTests.Support;
 // cluster/fixture, so it never crosses collection boundaries and does not
 // require DisableParallelization. See design/testing.md "Spec parallelism".
 
-// Numbered variants of a collection are load-balancing partitions: same
-// fixture type, same semantics. xUnit runs classes inside one collection
-// serially, so a partition's size bounds how long its serial class chain
-// can get; splitting keeps any single chain from dominating the run's tail.
-
 [CollectionDefinition("MohistIntegration")]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("MohistIntegration2")]
-public class MohistIntegration2Collection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("PlatformIntegration")]
+public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationIssue")]
 public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IntegrationIssue2")]
-public class IntegrationIssue2Collection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("IssueLifecycle")]
+public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IntegrationIssue3")]
-public class IntegrationIssue3Collection : ICollectionFixture<MohistIntegrationFixture>;
+[CollectionDefinition("IssueProfile")]
+public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
@@ -74,11 +69,11 @@ public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
 [CollectionDefinition("WorkflowGrain")]
 public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
 
-[CollectionDefinition("WorkflowGrain2")]
-public class WorkflowGrain2Collection : ICollectionFixture<WorkflowGrainFixture>;
+[CollectionDefinition("WorkflowExecution")]
+public class WorkflowExecutionCollection : ICollectionFixture<WorkflowGrainFixture>;
 
-[CollectionDefinition("WorkflowGrain3")]
-public class WorkflowGrain3Collection : ICollectionFixture<WorkflowGrainFixture>;
+[CollectionDefinition("WorkflowRecovery")]
+public class WorkflowRecoveryCollection : ICollectionFixture<WorkflowGrainFixture>;
 
 [CollectionDefinition("RunnerGrain")]
 public class RunnerGrainCollection : ICollectionFixture<WorkflowGrainFixture>;

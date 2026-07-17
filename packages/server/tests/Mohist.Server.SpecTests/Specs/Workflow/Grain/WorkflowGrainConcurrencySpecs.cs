@@ -16,7 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 /// allowed complete serialized outcomes — without depending on
 /// scheduler order or interleaving timing.
 /// </summary>
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
 {
     public WorkflowGrainConcurrencySpecs(WorkflowGrainFixture fixture) : base(fixture) { }

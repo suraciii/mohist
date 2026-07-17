@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.IssueTemplate;
 
-[Collection("IntegrationIssue3")]
+[Collection("IssueProfile")]
 public class IssueTemplateApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

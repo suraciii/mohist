@@ -12,7 +12,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain2")]
+[Collection("WorkflowExecution")]
 public class FeedbackDispatchSpecs : WorkflowGrainSpecs
 {
     public FeedbackDispatchSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

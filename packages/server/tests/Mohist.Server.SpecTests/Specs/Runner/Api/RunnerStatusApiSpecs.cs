@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class RunnerStatusApiSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);

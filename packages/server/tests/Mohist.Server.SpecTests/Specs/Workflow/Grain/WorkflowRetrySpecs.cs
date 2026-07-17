@@ -10,12 +10,10 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
-
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class WorkflowRetrySpecs : WorkflowGrainSpecs
 {
     public WorkflowRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
-
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_RunnerGetsNextTaskAttempt()
     {

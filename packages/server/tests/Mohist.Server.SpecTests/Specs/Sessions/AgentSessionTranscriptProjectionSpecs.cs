@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
 {
     public AgentSessionTranscriptProjectionSpecs(MohistIntegrationFixture fixture) : base(fixture)

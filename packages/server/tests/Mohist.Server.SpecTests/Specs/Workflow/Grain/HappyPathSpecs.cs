@@ -5,7 +5,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain2")]
+[Collection("WorkflowExecution")]
 public class HappyPathSpecs : WorkflowGrainSpecs
 {
     public HappyPathSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

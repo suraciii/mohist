@@ -10,7 +10,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Foundation;
 
-[Collection("WorkflowGrain2")]
+[Collection("WorkflowExecution")]
 public class WorkflowVariableSpecs : WorkflowGrainSpecs
 {
     public WorkflowVariableSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

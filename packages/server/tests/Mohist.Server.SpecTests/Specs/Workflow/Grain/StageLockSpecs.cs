@@ -11,7 +11,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowRecovery")]
 public class StageLockSpecs : WorkflowGrainSpecs
 {
     public StageLockSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

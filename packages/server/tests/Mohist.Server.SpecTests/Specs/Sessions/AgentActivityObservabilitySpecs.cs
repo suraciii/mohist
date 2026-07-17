@@ -23,7 +23,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
 {
     public AgentActivityObservabilitySpecs(MohistIntegrationFixture fixture) : base(fixture)

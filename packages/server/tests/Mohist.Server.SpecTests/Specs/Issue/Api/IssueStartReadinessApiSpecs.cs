@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue2")]
+[Collection("IssueLifecycle")]
 public class IssueStartReadinessApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

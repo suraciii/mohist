@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
-[Collection("IntegrationIssue3")]
+[Collection("IssueProfile")]
 public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
