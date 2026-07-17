@@ -156,3 +156,137 @@
 - The Action private `verifyExpectations(context, agentText)` API was deleted entirely (not deprecated). Some session-strategies call sites that imported it were also deleted. The Action's `acp-agent.ts` handler now returns the run's `text` as `turnFact.finalAssistantText` and trusts the executor to interpret completion. If future Actions need Action-private verification (we don't expect this), they can re-introduce the function with a non-`ActionContext` API.
 - The branch-stability-evidence attachment (`attachBranchStabilityEvidence`) is now skipped for `mohist/opencode` only. This protects the minimal `null | { promise }` output contract (no `branchStability` key in the opencode output). Other Actions still get the evidence attachment in their wire output because their output contract tolerates it. This trade-off is narrow and reversible once a separate diagnostics channel exists.
 - `RenderedWorkItem.expect` is rendered (`renderTemplate`) before completion evaluation, mirroring `with`. This catches `${{ openspecChangeDir }}`-style references in `expect.markers.*.path`. The same whole-string-unresolved guard fires if the marker path is missing a variable; the error message names the task id and the unresolved reference.
+
+## T-004 mohist/opencode bridge handler and openspec task generator
+
+### Codebase patterns discovered
+
+- The `mohist/opencode` Action contract is wired into the runner's Action
+  registry (`registry.ts:58`), with input validation
+  (`actions/opencode.ts:parseOpencodeInput`) and a bridge handler
+  (`actions/opencode.ts:opencodeAction`) that delegates to the existing
+  ACP runtime. The bridge translates `options.model`/`options.variant`
+  into the equivalent `with.agent` shape so the underlying ACP runtime
+  reads them as before.
+- `acp-agent.ts` no longer references `verifyExpectations`,
+  `expectation`, or any repair-turn logic. The Action only delegates to
+  the ACP runtime and surfaces the raw turn fact via
+  `turnFact.finalAssistantText`.
+- `acp/session-strategies.ts` still exports no implicit repair turn
+  logic — the `satisfyExpectations` / `expectationRepairLimit` /
+  `buildExpectationRepairPrompt` / `appendAgentText` helpers and the
+  `expectation` field on `AcpSessionResult` were removed in T-003.
+- `acp/model-resolution.ts` no longer composes `${model}/${variant}`;
+  `variant` rides as a sibling. `applyRequestedModel` gained an optional
+  `silenceMissingModelWarning` flag, threaded through every session
+  strategy entrypoint (`AcpSessionOptions`), so callers can opt out of
+  the missing-model warning when the contract intentionally allows an
+  unconfigured model.
+- `actions/openspec.ts` defaults `defaultUses` to `mohist/opencode` (the
+  canonical contract), and `mergeTaskExpect(task)` propagates the
+  task-level `expect` declaration into the generated AddTaskInput
+  alongside `with`/`uses` (so the executor's completion evaluator can
+  read it from the dispatch envelope).
+
+### Gotchas
+
+- The test harness mocks `console.warn`/`console.error` and treats any
+  unexpected call as a failure (`tests/setup.common.ts`). The legacy
+  ACP runtime path emits "mohist acp model not configured; using
+  provider default" when no model is set, but the opencode contract
+  intentionally allows no model. To keep the bridge silent, the
+  handler passes `silenceMissingModelWarning: true` whenever the
+  caller did not declare `options.model`. When `options.model` IS set,
+  the flag stays `false` so genuine runtime failures still surface
+  (e.g. the "set requested model failed" warning continues to fire).
+- The `OpencodeTurn_FailureFromAgentTurn_PropagatesAsFailure_WithTurnFact`
+  scenario uses `empty-complete` which produces no text and no work
+  activity; the bridge must still populate `turnFact.finalAssistantText`
+  with the empty string (the text was never assigned). This matches the
+  executor's `_output` semantics — `finalAssistantText: ""` is
+  different from `null` (no fact) and the completion evaluator surfaces
+  the difference correctly.
+- The bridge handler `withOpencodeAgentBinding` deliberately does not
+  inject `with.agent` when no options are present, so the ACP runtime
+  sees the same context shape as `mohist/acp-agent` and the legacy
+  expectations around the runtime contract remain unchanged.
+
+### Patterns established
+
+- The `silenceMissingModelWarning` option travels with `AcpSessionOptions`
+  (`session-strategies.ts:69`), passed through every entrypoint that
+  ultimately calls `applyRequestedModel`. Only the opencode bridge sets
+  the flag; the `mohist/acp-agent` callers stay silent on the option.
+- The `mergeTaskExpect(task)` helper in `openspec.ts` mirrors the
+  shape of `mergeTaskWith`: a single, named, side-effect-free function
+  that returns the field for the AddTaskInput. A missing `expect`
+  becomes `null`; the executor's `evaluateCompletion` skips when
+  `expect` is `null`.
+- The opencode handler's output JSON keeps `kind: "opencode"` (its own
+  shape) and does NOT include any of the legacy `expectation` /
+  `promise` / `failIfMarker` fields — those belong to the executor's
+  completion projection, not the Action contract.
+
+### Tests touched
+
+- **NEW**: `tests/opencode-bridge-handler.spec.ts` (29 tests).
+  - `parseOpencodeInput` validation matrix (no options, explicit null,
+    non-object options, valid model only, multi-segment model ID,
+    missing provider / model-id / trailing slash, non-string model,
+    variant-only, variant-as-sibling, non-string variant, unknown keys
+    ignored, blank model).
+  - Turn delegation + turnFact: basic turn delegates to ACP runtime
+    and populates `turnFact.finalAssistantText`, multi-segment model
+    ID is delivered verbatim, variant is NOT appended to the model ID,
+    no expectation evaluation runs in the Action (single prompt call,
+    no `expectation`/`promise`/`failIfMarker` in output), prompt-only
+    tasks work without `agent`/`kind`/`type`, blank prompt rejected
+    before initialize/newSession, missing prompt rejected before turn,
+    invalid model type rejected before turn, non-provider/slash model
+    rejected before turn, output is `kind: "opencode"` not
+    `kind: "acp-agent"`, agent failure still populates turn fact.
+  - Registry binding: `mohist/opencode` resolves to `opencodeAction`,
+    case-insensitive, `mohist/acp-agent` still registered for legacy
+    fallback.
+
+- **UPDATED**: `tests/openspec-tasks.spec.ts` — added 4 tests:
+  - `OpenSpecTaskWithoutProfileUses_DefaultsToMohistOpencode` (both
+    omitted uses → `mohist/opencode`).
+  - `OpenSpecTaskWithExplicitUses_PreservesCallerChoice` (custom
+    `uses` survives, sibling falls back).
+  - `OpenSpecTaskWithTaskLevelExpect_PropagatesExpectIntoAddTaskInput`
+    (the full `expect` JSON object survives into the AddTaskInput;
+    missing `expect` becomes `null`).
+  - `OpenSpecTaskWithMarkerOnOutputPath_PropagatesExpectAsIs`
+    (`_output` markers propagate verbatim).
+
+### Verification
+
+- `npm run typecheck` (runner src): clean.
+- `npm run typecheck:tests` (runner tests): clean.
+- `npm run test:ci` (runner): 1126 / 1126 passing across 96 test files
+  (added 29 new opencode-bridge-handler tests + 4 new openspec-tasks
+  tests on top of the 1093 baseline from T-003).
+- `npm test` (full monorepo):
+  - Mohist.Cli.Tests: 933 / 933 passing.
+  - Mohist.Server.UnitTests: 1405 / 1405 passing.
+  - Mohist.Server.ArchTests: 27 / 27 passing.
+  - Mohist.Server.SpecTests: 2869 / 2869 passing.
+  - Web Vitest: 4698 / 4698 passing.
+  - Runner Vitest: 1126 / 1126 passing.
+
+### Decisions worth flagging for review
+
+- The `silenceMissingModelWarning` flag is the minimum surgical change
+  to keep the opencode bridge silent when no model is configured. The
+  alternative — making the warning conditional on a context flag like
+  `_bridgeSource` — would have been more semantically explicit but
+  added state to `ActionContext`. The options-parameter approach keeps
+  the `ActionContext` clean and survives future bridge handler
+  variants (e.g. an OpenCode SDK bridge in the sibling issue).
+- The bridge still calls `runAcpWorkflowAgentSession` directly. When
+  the native `@opencode-ai/sdk/v2` runtime lands, the bridge can be
+  replaced with an SDK-native implementation that drops the
+  `silenceMissingModelWarning` indirection entirely. The contract on
+  the executor side (`mohist/opencode` resolves, validates input,
+  populates `turnFact`) does not change.

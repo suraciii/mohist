@@ -67,11 +67,15 @@ export interface AcpPromptRunResult {
 
 export type AcpPromptRunner = (prompt: string) => Promise<AcpPromptRunResult>
 
-export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export interface AcpSessionOptions {
+  silenceMissingModelWarning?: boolean
+}
+
+export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   if (context.ownerKind === "agent-job") {
     return context.agentSessionId
-      ? runAcpGenericAgentSession(context, prompt)
-      : runEphemeralWorkflowAgentSession(context, prompt)
+      ? runAcpGenericAgentSession(context, prompt, options)
+      : runEphemeralWorkflowAgentSession(context, prompt, options)
   }
 
   const sessionName = sessionNameFromContext(context)
@@ -94,14 +98,14 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
       const cached = manager.get(key)
       if (cached?.sessionId === session.runtimeSessionId) {
-        return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+        return runPromptOnExistingWorkflowAgentSession(context, prompt, cached, options)
       }
-      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir, options)
       if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
       return result
     }
 
-    const result = await runNewWorkflowAgentSession(context, prompt)
+    const result = await runNewWorkflowAgentSession(context, prompt, options)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
     return result
   }
@@ -117,17 +121,17 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
     }, context.signal)
   }
 
-  return runEphemeralWorkflowAgentSession(context, prompt)
+  return runEphemeralWorkflowAgentSession(context, prompt, options)
 }
 
-export async function runAcpGenericAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runAcpGenericAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const sessionId = context.agentSessionId
   const manager = context.acpSessionManager
   const projectId = context.projectId
   const serverConnection = context.serverConnection
 
   if (!sessionId || !manager || !serverConnection || !projectId) {
-    return runEphemeralWorkflowAgentSession(context, prompt)
+    return runEphemeralWorkflowAgentSession(context, prompt, options)
   }
 
   const key = manager.genericKey(sessionId)
@@ -148,14 +152,14 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
     const cached = manager.get(key)
     if (cached?.sessionId === session.runtimeSessionId) {
-      return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+      return runPromptOnExistingWorkflowAgentSession(context, prompt, cached, options)
     }
-    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
+    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir, options)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
     return result
   }
 
-  const result = await runNewWorkflowAgentSession(context, prompt)
+  const result = await runNewWorkflowAgentSession(context, prompt, options)
   if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
   return result
 }
@@ -173,7 +177,7 @@ function missingRuntimeBindingResult(): AcpSessionResult {
   }
 }
 
-export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
+export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -217,7 +221,7 @@ export async function runPromptOnExistingWorkflowAgentSession(context: ActionCon
   )
 
   await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
-  await applyRequestedModel(connection, context, entry.sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+  await applyRequestedModel(connection, context, entry.sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
   try {
     const runPrompt = createSharedPromptRunner({
@@ -288,7 +292,7 @@ export function createSharedPromptRunner(options: {
   }
 }
 
-export async function runResumedWorkflowAgentSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string): Promise<AcpSessionResult> {
+export async function runResumedWorkflowAgentSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -327,7 +331,7 @@ export async function runResumedWorkflowAgentSession(context: ActionContext, pro
 
     const resolvedModel = extractResolvedModelId(resumeResult)
 
-    await applyRequestedModel(connection, context, acpSessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, acpSessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     acp.setSessionHandlers(
       acpSessionId,
@@ -374,9 +378,9 @@ export async function runResumedWorkflowAgentSession(context: ActionContext, pro
   }
 }
 
-export async function runNewWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runNewWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
-  if (!acp) return runEphemeralWorkflowAgentSession(context, prompt)
+  if (!acp) return runEphemeralWorkflowAgentSession(context, prompt, options)
 
   const connection = acp.connection
   const agentConfig = resolveAgentConfig(context.with)
@@ -430,7 +434,7 @@ export async function runNewWorkflowAgentSession(context: ActionContext, prompt:
       },
     )
 
-    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
 
@@ -463,7 +467,7 @@ export async function runNewWorkflowAgentSession(context: ActionContext, prompt:
   }
 }
 
-export async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acpProcess = getAcpProcessFactory()(context)
   const agentConfig = resolveAgentConfig(context.with)
   let sessionId = ""
@@ -527,7 +531,7 @@ export async function runEphemeralWorkflowAgentSession(context: ActionContext, p
     const resolvedModel = extractResolvedModelId(session)
     await attachSessionToServer(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
 
-    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
 

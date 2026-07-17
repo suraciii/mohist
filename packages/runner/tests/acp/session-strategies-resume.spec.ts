@@ -96,7 +96,10 @@ describe("mohist/acp-agent resumed shared sessions", () => {
     expect(result.status).toBe("success")
     expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "resumeSession", sessionId: "server-session-1" }))
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
-    expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "unstable_setSessionModel", sessionId: "server-session-1", modelId: "openai/gpt-5.5/high" }))
+    // Spec D8: `variant` is a sibling option and MUST NOT be appended to
+    // or parsed from the model identifier. The model is delivered as-is;
+    // variant rides separately through diagnostic channels.
+    expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "unstable_setSessionModel", sessionId: "server-session-1", modelId: "openai/gpt-5.5" }))
     expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "prompt", sessionId: "server-session-1" }))
   })
 
