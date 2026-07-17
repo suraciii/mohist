@@ -12,11 +12,13 @@ interface AssistantTextPartViewProps {
   text: string
   completedAt: string | null | undefined
   isStreaming?: boolean
+  isRunning?: boolean
 }
 
-export function AssistantTextPartView({ text, completedAt, isStreaming }: AssistantTextPartViewProps) {
+export function AssistantTextPartView({ text, completedAt, isStreaming, isRunning }: AssistantTextPartViewProps) {
   const [copied, setCopied] = useState(false)
   const isIncomplete = completedAt === null || completedAt === undefined
+  const showStreamingGlyph = isRunning === true && (isIncomplete || isStreaming === true)
 
   const handleCopy = () => {
     navigator.clipboard.writeText(text).then(() => {
@@ -29,10 +31,11 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
     <div className="max-w-[90%] sm:max-w-[80%] min-w-0">
       <TranscriptMarkdown content={text} />
       <div className="mt-1 flex items-center gap-2">
-        {(isIncomplete || isStreaming) && (
+        {showStreamingGlyph && (
           <span
             data-testid="assistant-text-streaming-glyph"
             data-tone={isStreaming ? 'info' : 'warning'}
+            aria-hidden="true"
             className="inline-block h-1.5 w-1.5 rounded-full bg-info animate-pulse"
           />
         )}
@@ -88,7 +91,7 @@ export function ErrorPartView({ message, kind, at }: ErrorPartViewProps) {
       data-tone="warning"
       className="flex items-center gap-1.5 text-xs text-warning"
     >
-      <svg className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+      <svg aria-hidden="true" className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
       </svg>
       <span>
@@ -117,15 +120,16 @@ export function DividerPartView({ label }: DividerPartViewProps) {
 
 interface AssistantPartsProps {
   parts: DisplayAssistantPart[]
+  isRunning?: boolean
 }
 
-export function AssistantParts({ parts }: AssistantPartsProps) {
+export function AssistantParts({ parts, isRunning }: AssistantPartsProps) {
   return (
     <div className="space-y-2">
       {parts.map((part) => {
         switch (part.partType) {
           case 'text':
-            return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} />
+            return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} isRunning={isRunning} />
           case 'reasoning':
             return <ReasoningPartView key={part.id} text={part.text} startedAt={part.startedAt} />
           case 'tool':

@@ -1,0 +1,93 @@
+{
+  "project": "mohist-local",
+  "description": "Minimal correctness fix for session transcript rendering fidelity: tool-name 'unknown' floor, streamed-text paragraph preservation, liveness-gated activity indicators, and accessible transcript controls. Web presentation layer only.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Eliminate 'unknown' from tool-call display titles",
+      "spec": "specs/transcript-tool-naming/spec.md#tool-call-display-title-is-never-the-literal-unknown",
+      "description": "Make the tool-call display title never resolve to the literal 'unknown'. Keep normalizedName==='unknown' as an internal registry key, but enforce a readable floor at the user-visible title choke points: FallbackEntry.getTitle and inferDisplayTitle return a generic descriptive label (e.g. 'Tool call') instead of ?? toolName for the unknown case, and getToolDisplayLabel (shared.tsx) is the single choke point covering every consumer. Preserve and rely on the existing inferToolName semantic inference from title and raw input (command, path, query, url, patch, delegation/skill markers). Do not change the event collection/reflow pipeline; if a missing name roots upstream, record evidence for a separate issue.",
+      "acceptanceCriteria": [
+        "getToolDisplayLabel never returns 'unknown' for any input: missing name, recognizable input, and empty input all yield a human-readable title (unit test in collocated *.test.ts).",
+        "When the tool name is missing/'unknown' but raw input carries a command, file path, search/query, or url, the display title surfaces that content via the existing inferToolName inference (unit test).",
+        "Last resort (no inferable name and no recognizable input) yields a generic descriptive label, never 'unknown' (unit test).",
+        "No rendered tool row exposes a visible or accessible title of 'unknown' (render assertion in AssistantParts/SessionTranscriptLayout test).",
+        "npm run typecheck -w packages/web passes.",
+        "npm run test:run -w packages/web passes (new and existing tests green)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated transcript-tool-utils.ts (inferDisplayTitle floor), tool-registry.tsx (FallbackEntry.getTitle floor), tool-views/shared.tsx (getToolDisplayLabel choke point) plus collocated unit/render tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Touch only the production renderer path. The legacy test-only SessionTranscriptView.tsx/ToolCallCard.tsx are out of scope (#427 removes them). Do not alter normalizedName as an internal key (it drives registry lookup, correlation keys, and context-grouping)."
+    },
+    {
+      "id": "T-002",
+      "title": "Pin and fix streamed assistant text paragraph fidelity",
+      "spec": "specs/transcript-text-fidelity/spec.md#streamed-assistant-text-preserves-the-agents-original-paragraph-structure",
+      "description": "Pin the web presentation contract for streamed assistant text with a regression test, then localize the 'usage:Let me' paragraph-fusion symptom. appendTextToTurn is verified lossless; add a unit test asserting lossless concatenation of a multi-paragraph delta sequence (including interleaved message.delta/coder_text_chunk names) and that reasoning-interrupt-then-resume yields distinct text blocks. Add a TranscriptMarkdown render assertion that \\n\\n boundaries render as separate <p> blocks. Localize the real symptom against these tests: if it reproduces in the web live path with deltas carrying \\n\\n, fix the web append/render path; if it reproduces only with separator-less deltas or in persisted turns, the gap is upstream — record evidence and note the follow-up escalation (do not modify the collection pipeline).",
+      "acceptanceCriteria": [
+        "appendTextToTurn concatenates deltas losslessly: accumulated text equals deltas in arrival order with no characters lost/added/reordered/whitespace-stripped (unit test in transcript-state.test.ts).",
+        "A paragraph boundary (\\n\\n) spanning two deltas is preserved so the rendered output shows separate paragraphs, not a run-on like 'usage:Let me' (unit + TranscriptMarkdown render test).",
+        "Reasoning-interrupt-then-resume renders the earlier and later text segments as distinct blocks (unit test).",
+        "Localization outcome is documented in the task result: either a web-path fix was applied, or evidence was recorded pointing to an upstream collection/reflow gap for a follow-up issue.",
+        "npm run typecheck -w packages/web passes.",
+        "npm run test:run -w packages/web passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Regression tests in transcript-state.test.ts and TranscriptMarkdown render test, plus a web-path fix if localization identifies one; localization note in the task result.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do NOT insert a separator between every delta — deltas are token/chunk-level and that would corrupt intra-word splits. Do NOT modify the event collection/reflow pipeline; escalate per the issue non-goals if the root cause is upstream. Fake any timers/time per design/testing.md (no wall-clock)."
+    },
+    {
+      "id": "T-003",
+      "title": "Gate activity indicators on session liveness",
+      "spec": "specs/transcript-activity-indicators/spec.md#activity-indicators-are-gated-on-session-liveness",
+      "description": "Make streaming/thinking activity indicators render only while the session is alive. Add the authoritative render-site gate in SessionTranscriptLayout: render StreamingIndicator and ThinkingPlaceholder only when isRunning && (isStreaming|isThinking). Add defense-in-depth hook hygiene in useSessionTranscript: clear isStreaming/isThinking when isRunning transitions to false (extend the existing isRunning effect to also clearStreaming). Propagate liveness to the per-part streaming glyph (assistant-text-streaming-glyph) so it never shows on a completed part of a non-running session. Leave flag semantics intact so #428 can still consume them.",
+      "acceptanceCriteria": [
+        "StreamingIndicator and ThinkingPlaceholder render only when isRunning is true (spec test in tests/).",
+        "An ended session (isRunning=false) with isStreaming=true renders no streaming/thinking indicator and no per-part streaming glyph (spec test).",
+        "A live session renders the indicators normally while streaming/thinking (spec test).",
+        "When a running session transitions to not running, visible indicators are removed (spec test, using controllable fake time — no wall-clock debounce waits).",
+        "Per-part streaming glyph is hidden when the session is not running (spec test).",
+        "npm run typecheck -w packages/web passes.",
+        "npm run test:run -w packages/web passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated SessionTranscriptLayout.tsx (render gate), useSessionTranscript.ts (flag hygiene on isRunning->false), AssistantParts.tsx (per-part glyph liveness) plus spec tests in tests/.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The render gate is strictly additive (only suppresses on non-running sessions). isRunning is already plumbed to SessionTranscriptLayout and through SessionDataSourceResult. Gate on isRunning, NOT statusKind (which couples to the wall-clock staleness clock). Use vi fake timers for the 2s debounce in tests."
+    },
+    {
+      "id": "T-004",
+      "title": "Make transcript controls accessible",
+      "spec": "specs/transcript-control-accessibility/spec.md#expand-collapse-controls-expose-their-expandedcollapsed-state",
+      "description": "Add accessibility semantics to transcript interaction controls in the production renderer. Add aria-expanded reflecting toggle state to the disclosure controls: ToolRowView (only when showExpandableDetails), ContextGroupView (always), and TurnDiffs (always). Mark all decorative SVGs aria-hidden='true': ToolIcon, ToolStatusDot/RunningIndicator, and the chevron SVGs in those controls. Give StreamingIndicator and ThinkingPlaceholder role='status' so their appearance/removal are announced. Keep TurnList role='log' (already implies aria-live=polite). Rely on existing visible text for accessible names (no redundant aria-labels); the 'never unknown' name floor is delivered by T-001.",
+      "acceptanceCriteria": [
+        "Disclosure controls (ToolRowView when expandable, ContextGroupView, TurnDiffs) expose aria-expanded reflecting their actual toggle state (render test in collocated *.test.tsx).",
+        "ToolRowView exposes aria-expanded only when showExpandableDetails is true; non-disclosing rows do not (render test).",
+        "Decorative icons (ToolIcon, ToolStatusDot/RunningIndicator, chevrons) are marked aria-hidden='true' (render test).",
+        "StreamingIndicator and ThinkingPlaceholder have role='status' (render test).",
+        "TurnList retains role='log' so streamed content is announced as a live region (render test).",
+        "No transcript control's accessible name is 'unknown' or empty (render test, verified after T-001 lands).",
+        "npm run typecheck -w packages/web passes.",
+        "npm run test:run -w packages/web passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated tool-views/index.tsx (ToolRowView, ContextGroupView), tool-views/shared.tsx (ToolIcon/ToolStatusDot aria-hidden), TurnList.tsx (TurnDiffs aria-expanded + chevron aria-hidden), SessionTranscriptLayout.tsx (indicators role=status) plus collocated render tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 so the 'accessible name never unknown' criterion is verifiable end-to-end. Do not add aria-labels where visible text already provides the name. The <details>/<summary> reasoning blocks (AssistantParts.tsx) already have native semantics — leave them. Legacy test-only renderer is out of scope."
+    }
+  ]
+}

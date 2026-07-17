@@ -420,6 +420,8 @@ export function normalizeToolName(toolName: string | undefined, title?: string, 
   return inferred.toLowerCase().replace(/[^a-z0-9]/g, '_')
 }
 
+export const GENERIC_TOOL_LABEL = 'Tool call'
+
 const DISPLAY_TITLES: Record<string, string> = {
   apply_patch: 'Patch',
   read: 'Read',
@@ -439,7 +441,13 @@ export function inferDisplayTitle(toolName: string, title?: string): { displayTi
     return { displayTitle: title }
   }
   const normalized = normalizeToolName(toolName)
-  return { displayTitle: DISPLAY_TITLES[normalized] ?? toolName }
+  if (normalized === 'unknown') {
+    return { displayTitle: GENERIC_TOOL_LABEL }
+  }
+  const mapped = DISPLAY_TITLES[normalized]
+  if (mapped) return { displayTitle: mapped }
+  if (toolName && toolName !== 'unknown') return { displayTitle: toolName }
+  return { displayTitle: GENERIC_TOOL_LABEL }
 }
 
 export function getCorrelationKey(toolName: string, title?: string, target?: string): string {

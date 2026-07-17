@@ -1,0 +1,97 @@
+## Codebase Patterns
+
+- Three-layer tool-naming pipeline: `inferToolName` (semantic inference) → `normalizeToolName` (registry key) → `inferDisplayTitle` (display string). `normalizedName === 'unknown'` is preserved as the internal registry key (drives `findToolByCorrelation`, `getCorrelationKey`, registry lookup).
+- Production render path: `ToolRowView` (tool-views/index.tsx) and `ContextGroupView` both consume `getToolDisplayLabel` (tool-views/shared.tsx) as the single choke point feeding every visible tool label.
+- Legacy `SessionTranscriptView.tsx`/`ToolCallCard.tsx` exist but are not exported from `widgets/session-transcript/index.ts` — they are test-only artifacts (#427 removes them).
+- `inferDisplayTitle` flow: when `title` is set → use it; otherwise look up `DISPLAY_TITLES[normalized]`, finally fall back to `toolName ?? 'unknown'`. The latter branch was the literal-'unknown' leak.
+- `FallbackEntry.getTitle` (tool-registry.tsx): calls `getToolLabel(toolName, rawInput)` (per-tool-name extractor); fall back was `label ?? toolName` which leaked 'unknown'.
+- `getToolDisplayLabel` precedence: `displayTitle` → `displaySubtitle` → registry.getTitle. Prior to the fix any of these could return 'unknown'.
+- `getToolLabel` `default:` branch (used when toolName is unknown) extracts `url`, `filePath`, `description`, `query` — NOT `command`, `script`, `pattern`, or any tool-specific fields. So the semantic inference at `normalizeToolName` is the path that turns command → bash, where `BashEntry.getTitle` then extracts the command.
+- `DISPLAY_TITLES` only covers `apply_patch`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `todowrite`, `membrowse`, `memread`, `memsearch`. `bash`, `webfetch`, `task`, `skill`, etc. fall through to toolName.
+- Disclosure controls in the production renderer: `ToolRowView`, `ContextGroupView`, and `TurnDiffs` each toggle their own `expanded` state and emit `aria-expanded={expanded}` (conditional on `showExpandableDetails` for `ToolRowView`). All decorative SVGs in those controls are `aria-hidden="true"`. `StreamingIndicator` and `ThinkingPlaceholder` get `role="status"`; `TurnList` keeps `role="log"`.
+- React's `Button` primitive (`@base-ui/react/button`) forwards arbitrary `aria-*` props via `{...props}`. No shim required for accessibility attributes.
+
+## Decisions
+
+- D1 floor: introduce `GENERIC_TOOL_LABEL = 'Tool call'` and replace `?? 'unknown'` / `?? toolName` at three choke points with a check `normalizeToolName(...) === 'unknown' ? GENERIC : toolName`.
+- D2 choke point: `getToolDisplayLabel` skips `displayTitle`/`displaySubtitle`/`registryTitle` if they equal 'unknown', and a final `normalizeToolName(normalizedName) !== 'unknown'` check preserves legitimate family names while feeding generic to truly-unidentified tools.
+- D3 unchanged: kept `normalizedName === 'unknown'` as an internal registry key. `inferToolName` / `normalizeToolName` untouched (they still emit 'unknown'); the floor only applies to user-visible display title resolution.
+
+## Gotchas
+
+- `inferDisplayTitle('bash', undefined)` returns `{ displayTitle: 'bash' }` (no DISPLAY_TITLES entry). The full command text only surfaces via `BashEntry.getTitle` in the registry when no displayTitle is provided. In the live tool path (`createToolPart`), `inferDisplayTitle` is called so the user typically sees the family name when no `title` is provided. The acceptance criterion "surfaces content via existing inferToolName inference" is met by the end-to-end pipeline (inference → registry); the choke-point unit tests for `getToolDisplayLabel` exercise the registry path, where command input for an inferred name does surface.
+- `FallbackEntry.getTitle` is not exported from tool-registry.tsx; tests route through `getToolRegistryEntry(name).getTitle(name, input)` instead.
+- Render test must check both visible text ('unknown' inside an element) and an accessible name (also 'unknown'). The current `getToolDisplayLabel` already returns a readable string; `ToolRowView` uses that as visible text inside `<span>`. No separate `aria-label` to verify.
+
+## Test Coverage Notes
+
+- `transcript-tool-utils.test.ts` (new): `inferDisplayTitle` floor + `inferToolName`/`normalizeToolName` regression (still emits 'unknown' as registry key).
+- `tool-registry.test.tsx` (new): `FallbackEntry.getTitle` floor (via registry helper since FallbackEntry isn't exported).
+- `tool-views/shared.test.tsx` (extended): `getToolDisplayLabel` never returns 'unknown'; surfaces via semantic inference (bash/read/grep/apply_patch registry entries); url surfaces via FallbackEntry default branch.
+- `AssistantParts.render.test.tsx` (extended): no rendered tool row exposes visible 'unknown' label, including paths from semantic inference and last-resort generic label.
+- `transcript-state.test.ts` (extended, T-002): lossless concatenation across a multi-paragraph delta sequence (5 deltas including `\n`+`\n` split); character-by-character preservation across many small token-level deltas (split `split('')`); `appendTextToTurn` after a closed text part opens a fresh part (no fusion across the gap); reasoning.interrupt → `closeActiveTextPart` → `appendReasoningToTurn` → `appendTextToTurn` produces two distinct text blocks (different `id`); paragraph boundary (`\n\n`) survives the reasoning gap (`usage:` + `\n\n` + `Let me check.` — never `usage:Let me`).
+- `TranscriptMarkdown.render.test.tsx` (extended, T-002): `\n\n` renders as 2 distinct `<p>` blocks; 3 paragraphs render as 3 distinct `<p>` blocks; single `\n` collapses to 1 `<p>` per GFM. All assertions include `not.toContain('usage:Let me')` and `not.toContain('usage: Let me')` to pin the bug shape.
+- `useSessionTranscript.test.tsx` (extended, T-002): interleaved `message.delta` + `coder_text_chunk` events whose deltas contain `\n`+`\n` produce text `usage:\n\nLet me read the file.` (boundary preserved, no fusion); `reasoning.delta` interrupt closes the open text part and a subsequent `coder_text_chunk` opens a new text part containing `\n\nLet me check the docs.` (interrupted-and-resumed text rendered as distinct blocks).
+
+## T-002 Localization Outcome
+
+The web presentation contract is pinned and verified lossless. Three independent layers confirmed:
+
+1. **Model layer (`appendTextToTurn`, `transcript-state.ts:126`)** — `existing.text + text` is pure string concatenation, no `.trim()`, no whitespace stripping, no character dropping or reordering. Character-by-character lossless even across 60+ single-char deltas.
+2. **Dispatch layer (`useSessionTranscript.ts:338-369`)** — `message.delta` and `coder_text_chunk` both call `appendTextToTurn(lastTurn, detail.text)` with no preprocessing. The dual-name path exercises both handlers and concatenates into the same open text part, so interleaved event names are correctly folded into one lossless stream.
+3. **Render layer (`TranscriptMarkdown.tsx`)** — stock `react-markdown` + `remark-gfm`. `\n\n` in the input renders as separate `<p>` blocks (render test confirms 2 paragraphs → 2 `<p>`, 3 paragraphs → 3 `<p>`).
+
+**Localization conclusion:** the `usage:Let me` fusion cannot reproduce in the web live path when deltas carry `\n\n`. The bug only reproduces when:
+
+- **Deltas omit the inter-paragraph separator.** If the agent/runtime emits `["…usage", "Let me…"]` (no `\n\n`), the web faithfully concatenates to `usage:Let me` — correct behavior for the web layer, but not what the user expected. The gap is in the runtime/agent: it must emit `\n\n` across paragraph boundaries when tokenizing streamed text.
+- **Persisted turns have already lost the separator upstream.** `initialTurns` are a direct passthrough from `transcriptResponse.turns` (no reconstruction); if the persisted text is `usage:Let me`, the web renders `usage:Let me`.
+
+Per the issue non-goals ("if the gap roots upstream, record evidence and open a separate issue rather than touching the pipeline here"), **no web-path fix is applied in this task.** The web presentation contract is now pinned by regression tests at all three layers (model, dispatch, render). The upstream gap (agent/runtime token splitter dropping `\n\n`; or persisted transcript losing the separator) is escalated as **follow-up issue #433** ("Streamed assistant text loses paragraph separators before reaching the web transcript"), not modified here.
+
+**Decision:** T-002 delivers the regression-test net (acceptance criteria 1, 2, 3 green via 9 new tests across 3 files) + the localization evidence/follow-up escalation. No code change to the web append/render path.
+
+## T-003 Liveness Gate — Decisions & Notes
+
+- **Render-site gate is the authoritative fix.** `SessionTranscriptLayout.tsx:91-92` now gates both indicators on `isRunning && (isStreaming|isThinking)`. The gate is strictly additive: it only suppresses on non-running sessions, never removes an indicator from a legitimately live one. `statusKind` is intentionally NOT used (it's coupled to wall-clock staleness in `getSessionStatusKind`).
+- **Defense-in-depth hook hygiene.** `useSessionTranscript.ts` extended the existing `[initialTurns, isRunning]` reset effect to call `clearStreaming()` (which clears the ref + state and cancels the 2s debounce `setTimeout` via `streamingTimerRef`). This prevents stale `isStreaming` from leaking to other consumers (#428).
+- **Per-part glyph liveness.** `AssistantTextPartView` derives `showStreamingGlyph = isRunning === true && (isIncomplete || isStreaming === true)`. The `isRunning` signal flows: `SessionTranscriptLayout` → `TurnList` → `TurnItem` → `AssistantParts` → `AssistantTextPartView`. Single prop addition (`isRunning?: boolean`) at each layer; no shape change to existing props.
+- **Flag semantics preserved.** `isStreaming` / `isThinking` are still mutated by the same event handlers; they remain consumable by #428 (which builds the real-time UI on top). Only the **render-time** gate was added.
+
+## T-003 Gotchas
+
+- `isRunning` flows through `TurnList` and `TurnItem` as an *optional* prop (`isRunning?: boolean`). The strict equality `isRunning === true` in `AssistantTextPartView` is defensive — without it, an undefined prop would let a stale flag render a glyph on a non-running session. This guarantees the gate never falls open.
+- `useSessionTranscript`'s `[initialTurns, isRunning]` reset effect previously called `setIsStreaming(false)` directly. Switching to `clearStreaming()` is functionally equivalent in the effect's context (no debounce timer is set on initial mount since `bumpTranscriptVersion` is not called there), but it correctly clears `isStreamingRef` too, so any future caller that reads the ref gets a consistent cleared value.
+- `vi.useFakeTimers()` does NOT block React state propagation inside `act()` — only `waitFor` (which uses an internal polling `setInterval`). For tests that need to verify hook state after rerender, prefer `await act(async () => { rerender(...) })` + synchronous `expect(latest.isStreaming)` over `await waitFor(...)`. The `fake time` requirement is satisfied: no real wall-clock wait occurs.
+
+## T-003 Test Coverage
+
+- `tests/SessionTranscriptActivityIndicators.spec.tsx` (new, 9 tests):
+  - Layout gating: streaming + thinking indicators render when live; hidden when not running (4 tests).
+  - Per-part glyph: hidden on completed part of non-running session; shown on incomplete part of live session; hidden on incomplete part of non-running session (3 tests).
+  - Hook hygiene: `clearStreaming` fires on `isRunning: true → false` transition (synchronous, fake-timer based, no wall-clock wait) (1 test).
+  - End-to-end: running session with visible streaming indicator → transition to not running → indicator disappears (1 test).
+- All 4759 existing tests still green; typecheck clean.
+
+## T-004 Accessibility — Decisions & Notes
+
+- **Render-site aria-expanded on disclosure controls only.** `aria-expanded={showExpandableDetails ? expanded : undefined}` on `ToolRowView` ensures the attribute is present only when the row actually discloses; rows with no input/output/error/changedFiles (or running/pending rows) emit no `aria-expanded` (so the button isn't misannounced as a disclosure control). `ContextGroupView` and `TurnDiffs` always disclose, so `aria-expanded={expanded}` unconditionally. This matches D4 in `design.md` ("only when the control actually discloses").
+- **Decorative SVGs are hidden at the leaf.** `ToolIcon` clones the registry icon and passes `aria-hidden: true`; `ToolStatusDot` (every variant) and `RunningIndicator` get `aria-hidden="true"` directly; the chevron SVGs in all three controls get `aria-hidden="true"`. The animated `<span>`s inside `StreamingIndicator` and `ThinkingPlaceholder` also get `aria-hidden="true"` to keep them out of the indicator's accessible name. This keeps screen readers from announcing redundant "image" content.
+- **Live regions.** `StreamingIndicator` and `ThinkingPlaceholder` get `role="status"` (which implies `aria-live="polite"` per ARIA), so their appearance/removal is announced. `TurnList` keeps `role="log"` (already implies `aria-live="polite"` per ARIA 1.2; per WAI-ARIA `role="log"` is a live region). No explicit `aria-live` attributes added — they're redundant noise per D4.
+- **No redundant aria-labels.** The visible text (`{toolLabel}`, context-group title prefix, `"N files changed"`) provides the accessible name. Relying on T-001's "never unknown" floor ensures no name is `"unknown"`. The `<details>`/`<summary>` reasoning blocks (AssistantParts.tsx) are unchanged — they already have native disclosure semantics.
+
+## T-004 Gotchas
+
+- `ToolIcon` is a `cloneElement` wrapper that originally only passed `className`. Adding `'aria-hidden'` required widening the `React.ReactElement` type to accept that prop. The registry `icon` elements are inline JSX `<svg>` literals, so the cast is purely a TypeScript allowance — the runtime DOM always receives the attribute.
+- React's `Button` primitive (`@base-ui/react/button`) forwards arbitrary props including `aria-*` via `{...props}`. No shim required.
+- `aria-expanded={undefined}` (vs `false`) is the right way to omit the attribute on non-disclosing controls. Passing `false` would make the button announce as "expanded: false, collapsed" — semantically incorrect for a non-disclosure control.
+- `screen.getByRole('button', { name: /Gathering context/ })` works because all decorative SVGs in `ContextGroupView` carry `aria-hidden="true"`, so the chevron icon does not contribute to the accessible name.
+
+## T-004 Test Coverage
+
+- `src/widgets/session-transcript/ui/tool-views/shared.test.tsx` (extended): `ToolStatusDot` aria-hidden across all 5 status variants (5 tests); `ToolIcon` aria-hidden for known + unknown tool names (2 tests). Total +7 tests.
+- `src/widgets/session-transcript/ui/tool-views/index.test.tsx` (extended):
+  - `ToolRowView accessibility` (new, 8 tests): aria-expanded reflects state (false/true); not exposed when not expandable; not exposed on running rows; chevron + tool icon SVGs aria-hidden; readable accessible name from `toolLabel`; no `"unknown"` leak when name is missing.
+  - `ContextGroupView accessibility` (new, 5 tests): aria-expanded false/true; all SVGs aria-hidden; readable name from title prefix; no `"unknown"` leak.
+- `src/widgets/session-transcript/ui/TurnList.render.test.tsx` (extended, 5 tests): TurnDiffs aria-expanded false/true; both SVGs aria-hidden; readable name from `"N files changed"` text (1 and N variants).
+- `tests/SessionTranscriptActivityIndicators.spec.tsx` (extended, 3 tests): `StreamingIndicator` role=status; `ThinkingPlaceholder` role=status; `TurnList` retains role=log.
+- **Net additions: 28 new tests** (7 shared + 8 ToolRowView + 5 ContextGroupView + 5 TurnDiffs + 3 indicators). All 4787 tests green; typecheck clean.

@@ -2,7 +2,7 @@ import '@testing-library/jest-dom'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { DisplayAssistantPart, DisplayToolPart } from '../model/session-transcript-display'
-import { AssistantParts } from './AssistantParts'
+import { AssistantParts, ErrorPartView } from './AssistantParts'
 
 function makeToolPart(overrides: Partial<DisplayToolPart>): DisplayToolPart {
   return {
@@ -237,5 +237,15 @@ describe('AssistantParts tool views — baseline render', () => {
     expect(screen.getByText('Output')).toBeInTheDocument()
     expect(within(screen.getAllByText('raw-input-text')[0].closest('pre')!).getByText('raw-input-text')).toBeInTheDocument()
     expect(within(screen.getAllByText('raw-output-text')[0].closest('pre')!).getByText('raw-output-text')).toBeInTheDocument()
+  })
+})
+
+describe('ErrorPartView accessibility', () => {
+  it('marks the decorative warning svg aria-hidden so screen readers ignore it', () => {
+    const { container } = render(<ErrorPartView message="boom" kind="failed" at="2026-01-01T00:00:00Z" />)
+
+    const svg = container.querySelector('svg')
+    expect(svg).not.toBeNull()
+    expect(svg?.getAttribute('aria-hidden')).toBe('true')
   })
 })

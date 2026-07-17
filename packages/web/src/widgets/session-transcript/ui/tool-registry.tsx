@@ -8,6 +8,8 @@ import {
   parseEditInput,
   parseEditWriteChanges,
   getFallbackSubtitle,
+  GENERIC_TOOL_LABEL,
+  normalizeToolName,
 } from '../model/transcript-tool-utils'
 
 export type ToolCategory = 'context' | 'file-change' | 'execution' | 'question' | 'network' | 'fallback'
@@ -28,7 +30,9 @@ const FallbackEntry: ToolRegistryEntry = {
   category: 'fallback',
   getTitle: (toolName: string, rawInput?: string) => {
     const label = getToolLabel(toolName, rawInput)
-    return label ?? toolName
+    if (label) return label
+    if (normalizeToolName(toolName) === 'unknown') return GENERIC_TOOL_LABEL
+    return toolName
   },
   getSubtitle: (_toolName: string, rawInput?: string) => {
     return getFallbackSubtitle(rawInput)
