@@ -223,8 +223,15 @@ function buildDisplayToolPart(part: ToolPart): DisplayToolPart {
   }
 }
 
+function readableSummary(value: string | undefined): string | undefined {
+  return value && value !== 'unknown' ? value : undefined
+}
+
 function getContextToolSummary(tool: DisplayToolPart): string | undefined {
-  return tool.displayTitle ?? tool.displaySubtitle ?? tool.target ?? getToolPath(tool.input)
+  return readableSummary(tool.displayTitle)
+    ?? readableSummary(tool.displaySubtitle)
+    ?? readableSummary(tool.target)
+    ?? getToolPath(tool.input)
 }
 
 function buildDisplayErrorPart(part: ErrorPart): DisplayErrorPart {

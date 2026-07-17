@@ -170,6 +170,7 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     )
 
     expect(screen.getByTestId('assistant-text-streaming-glyph')).toBeInTheDocument()
+    expect(screen.getByTestId('assistant-text-streaming-glyph').getAttribute('aria-hidden')).toBe('true')
   })
 
   it('hides the per-part streaming glyph when isRunning is false even on an incomplete part', () => {
