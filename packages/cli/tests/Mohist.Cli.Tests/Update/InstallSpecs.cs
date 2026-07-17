@@ -1,20 +1,14 @@
-using Xunit;
 using Mohist.Cli;
+using Xunit;
 
-namespace Mohist.Server.UnitTests.SystemSpecs;
+namespace Mohist.Cli.Tests.Update;
 
-public class InstallTests
+public class InstallSpecs
 {
     [Fact]
     public async Task InstallServer_CreatesSystemdUnitWithCorrectConfiguration()
     {
-        var files = new FakeFileSystem();
-        var commands = new FakeCommandExecutor();
-        var installer = new SystemdServiceInstaller(
-            new StringWriter(),
-            new StringWriter(),
-            files,
-            commands);
+        var f = new UpdateTestFactory();
 
         var options = new ServiceInstallOptions(
             DryRun: true,
@@ -24,10 +18,10 @@ public class InstallTests
             ServerUrl: null,
             RunnerRoot: null);
 
-        var exitCode = await installer.InstallServerAsync(options);
+        var exitCode = await f.Installer.InstallServerAsync(options);
 
         Assert.Equal(0, exitCode);
-        var unitContent = files.ReadAllText("/units/mohist.service");
+        var unitContent = f.Files.ReadAllText("/units/mohist.service");
         Assert.Contains("Description=Mohist Server", unitContent);
         Assert.Contains("ExecStart=", unitContent);
         Assert.Contains("dotnet run --project", unitContent);
@@ -40,13 +34,7 @@ public class InstallTests
     [Fact]
     public async Task InstallRunner_CreatesSystemdUnitWithCorrectConfiguration()
     {
-        var files = new FakeFileSystem();
-        var commands = new FakeCommandExecutor();
-        var installer = new SystemdServiceInstaller(
-            new StringWriter(),
-            new StringWriter(),
-            files,
-            commands);
+        var f = new UpdateTestFactory();
 
         var options = new ServiceInstallOptions(
             DryRun: true,
@@ -56,10 +44,10 @@ public class InstallTests
             ServerUrl: "http://127.0.0.1:4567",
             RunnerRoot: "/runner");
 
-        var exitCode = await installer.InstallRunnerAsync(options);
+        var exitCode = await f.Installer.InstallRunnerAsync(options);
 
         Assert.Equal(0, exitCode);
-        var unitContent = files.ReadAllText("/units/mohist-runner.service");
+        var unitContent = f.Files.ReadAllText("/units/mohist-runner.service");
         Assert.Contains("Description=Mohist Runner", unitContent);
         Assert.Contains("ExecStart=", unitContent);
         Assert.Contains("node packages/runner/dist/cli.js", unitContent);
@@ -72,13 +60,7 @@ public class InstallTests
     [Fact]
     public async Task InstallServer_WithCustomRepoRoot_ResolvesRepoPath()
     {
-        var files = new FakeFileSystem();
-        var commands = new FakeCommandExecutor();
-        var installer = new SystemdServiceInstaller(
-            new StringWriter(),
-            new StringWriter(),
-            files,
-            commands);
+        var f = new UpdateTestFactory();
 
         var options = new ServiceInstallOptions(
             DryRun: true,
@@ -88,22 +70,16 @@ public class InstallTests
             ServerUrl: null,
             RunnerRoot: null);
 
-        await installer.InstallServerAsync(options);
+        await f.Installer.InstallServerAsync(options);
 
-        var unitContent = files.Read("/units/mohist.service");
+        var unitContent = f.Files.Read("/units/mohist.service");
         Assert.Contains("WorkingDirectory=/custom/path", unitContent);
     }
 
     [Fact]
     public async Task InstallServer_WithoutCustomUrl_OmitsListenUrl()
     {
-        var files = new FakeFileSystem();
-        var commands = new FakeCommandExecutor();
-        var installer = new SystemdServiceInstaller(
-            new StringWriter(),
-            new StringWriter(),
-            files,
-            commands);
+        var f = new UpdateTestFactory();
 
         var options = new ServiceInstallOptions(
             DryRun: true,
@@ -113,27 +89,11 @@ public class InstallTests
             ServerUrl: null,
             RunnerRoot: null);
 
-        await installer.InstallServerAsync(options);
+        await f.Installer.InstallServerAsync(options);
 
-        var unitContent = files.Read("/units/mohist.service");
+        var unitContent = f.Files.Read("/units/mohist.service");
         Assert.DoesNotContain("--urls", unitContent);
         Assert.DoesNotContain("http://", unitContent);
         Assert.Contains("dotnet run --project", unitContent);
-    }
-
-    private sealed class FakeFileSystem : Mohist.Server.UnitTests.Support.FakeFileSystem
-    {
-    }
-
-    private sealed class FakeCommandExecutor : ICommandExecutor
-    {
-        public readonly List<(string FileName, string[] Args, string? WorkingDirectory)> ExecutedCommands = new();
-
-        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
-        {
-            ExecutedCommands.Add((fileName, args, workingDirectory));
-            return Task.FromResult((0, "", ""));
-        }
     }
 }
