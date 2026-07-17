@@ -173,38 +173,15 @@ public static class MohistServiceRegistration
     public const string DbPathEnvironmentVariable = "MOHIST_DB_PATH";
     public const string HomeEnvironmentVariable = "HOME";
 
-    private const int DefaultSqliteBusyTimeoutSeconds = 5;
-
     public static string ResolveSqliteConnectionString(IConfiguration configuration)
     {
         var configured = configuration["Mohist:SqliteConnectionString"];
         if (!string.IsNullOrWhiteSpace(configured))
-            return WithDefaultBusyTimeout(configured);
+            return configured;
 
         var dbPath = ResolveSqliteDatabasePath(configuration);
-        return WithDefaultBusyTimeout($"Data Source={dbPath}");
-    }
 
-    // During a server restart the old and new processes briefly share the
-    // database file; with SQLite's default busy_timeout of 0 the overlap
-    // surfaces as hard SQLITE_BUSY instead of waiting for the lock holder
-    // to release. Apply a non-zero default unless the caller already set one.
-    //
-    // SqliteConnectionStringBuilder does not expose busy_timeout as a typed
-    // keyword, but the underlying connection accepts it as a raw key=value
-    // pair, so we operate on the string form.
-    private static string WithDefaultBusyTimeout(string connectionString)
-    {
-        foreach (var part in connectionString.Split(';'))
-        {
-            var eq = part.IndexOf('=');
-            if (eq < 0) continue;
-            var key = part.AsSpan(0, eq).Trim();
-            if (key.Equals("busy_timeout", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(part.AsSpan(eq + 1).Trim(), System.Globalization.CultureInfo.InvariantCulture, out _))
-                return connectionString;
-        }
-        return $"{connectionString.TrimEnd(';')};busy_timeout={DefaultSqliteBusyTimeoutSeconds}";
+        return $"Data Source={dbPath}";
     }
 
     public static string ResolveSqliteDatabasePath(IConfiguration configuration)
