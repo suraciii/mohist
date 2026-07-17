@@ -202,6 +202,83 @@ public class AgentSessionRecoveryApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task ResetEndpoint_NewIdempotencyKeyJoinsPendingOperationAndReplaysItsResult()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            "reset-join-pending-key",
+            sessionName: "build",
+            attachIdle: true);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            return requests.Count == 1
+                ? new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        using var firstRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset");
+        firstRequest.Headers.Add("Idempotency-Key", "reset-1");
+        using var first = await _client.SendAsync(firstRequest);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+
+        using var joinedRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset");
+        joinedRequest.Headers.Add("Idempotency-Key", "reset-2");
+        using var joined = await _client.SendAsync(joinedRequest);
+        Assert.Equal(HttpStatusCode.OK, joined.StatusCode);
+        Assert.Equal(requests[0].OperationId, requests[1].OperationId);
+
+        using var replayRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset");
+        replayRequest.Headers.Add("Idempotency-Key", "reset-2");
+        using var replay = await _client.SendAsync(replayRequest);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal($"{currentSession.Id}-replacement", (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(currentSession.Id)
+            .GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task ResetEndpoint_CommandNotStartedAllowsANewOperation()
+    {
+        var (project, issue, _, _) = await CreateAndStartSessionAsync(
+            "reset-not-started",
+            sessionName: "build",
+            attachIdle: true);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            return requests.Count == 1
+                ? new SessionCommandResult(Ok: false, Error: SessionCommandError.NotStarted)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        using var first = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
+            content: null);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, first.StatusCode);
+
+        using var retry = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.NotEqual(requests[0].OperationId, requests[1].OperationId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]

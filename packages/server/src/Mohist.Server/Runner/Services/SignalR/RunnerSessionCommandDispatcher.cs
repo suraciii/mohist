@@ -31,7 +31,7 @@ public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
     {
         var connectionId = _connections.GetConnectionId(request.RunnerId);
         if (string.IsNullOrWhiteSpace(connectionId))
-            return Unavailable();
+            return NotStarted();
 
         try
         {
@@ -67,4 +67,7 @@ public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
 
     private static SessionCommandResult Unavailable() =>
         new(false, Error: SessionCommandError.Unavailable);
+
+    private static SessionCommandResult NotStarted() =>
+        new(false, Error: SessionCommandError.NotStarted);
 }

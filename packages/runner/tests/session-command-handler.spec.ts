@@ -182,7 +182,7 @@ describe("SessionCommand contract", () => {
     expect(fakeHandler).not.toHaveBeenCalled()
   })
 
-  it.each<SessionCommandError>(["conflict", "missing"])("persists the %s error vocabulary", async (error) => {
+  it.each<SessionCommandError>(["conflict", "missing", "notStarted"])("persists the %s error vocabulary", async (error) => {
     const invoke = register(async () => ({ ok: false, error }))
 
     await expect(invoke(request("compact"))).resolves.toEqual({ ok: false, error })

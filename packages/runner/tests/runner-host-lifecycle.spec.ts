@@ -138,7 +138,7 @@ beforeEach(() => {
 })
 
 describe("RunnerHost", () => {
-  it.each(["OpenCode", "OPENCODE"])("recognizes %s as the configured runtime", (runtime) => {
+  it.each(["OpenCode", "OPENCODE"])("recognizes %s as the configured runtime", async (runtime) => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -148,7 +148,7 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
 
-    expect(capturedSessionCommandHandler?.({
+    await expect(Promise.resolve(capturedSessionCommandHandler?.({
       sessionId: "session-1",
       runtime,
       runtimeSessionId: "runtime-1",
@@ -156,7 +156,7 @@ describe("RunnerHost", () => {
       workDir: "/tmp/mohist-runner-test",
       command: "compact",
       operationId: "operation-1",
-    })).toEqual({ ok: false, error: "unavailable" })
+    }))).resolves.toEqual({ ok: false, error: "notStarted" })
   })
 
   it("RunnerRegistration_DoesNotReportWorkflowSlots", async () => {

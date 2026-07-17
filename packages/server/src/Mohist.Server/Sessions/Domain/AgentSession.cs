@@ -300,7 +300,8 @@ public sealed record AgentSessionResetReservation(
     DateTime StartedAt,
     string Command = "reset",
     AgentSessionRecoveryOutcome? Outcome = null,
-    string? IdempotencyKey = null);
+    string? IdempotencyKey = null,
+    IReadOnlyList<string>? AdditionalIdempotencyKeys = null);
 
 public sealed record AgentSessionRecoveryOutcome(
     string Id,

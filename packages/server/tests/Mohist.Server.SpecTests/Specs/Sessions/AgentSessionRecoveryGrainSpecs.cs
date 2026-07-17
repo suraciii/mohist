@@ -250,6 +250,26 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task PendingReset_AcceptsAnotherIdempotencyKeyAndReplaysCompletionForBothKeys()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-pending-reset-key");
+        var first = await grain.BeginResetAsync("reset-1");
+
+        var joined = await grain.BeginResetAsync("reset-2");
+        Assert.Equal(first.OperationId, joined.OperationId);
+
+        await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+            first.OperationId,
+            "runtime-pending-reset-key-replacement",
+            "opencode"));
+
+        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-1"));
+        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-2"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task DelayedAttachAfterReset_CannotRestoreThePreviousRuntimeBinding()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-before-reset");

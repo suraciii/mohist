@@ -208,6 +208,13 @@ recovery 语义判断 Workflow 成功；AgentJob 是否完成由其 executor 独
 Session command 是从 Web 或 CLI 经 Server 到 Runner 的请求 / 响应操作。持久化的
 Runtime 绑定是路由事实，Runner 内存 cache 只是优化。
 
+命令结果必须区分「确定没有开始」与「可能已经开始但结果未知」。Server 未找到目标
+Runner 连接、Runner 尚未取得 Runtime connection，或命令在进入 Runtime 前被拒绝时，
+返回 `notStarted`；Server 可以结束这次 reservation，让后续请求创建新 operation。
+一旦 Runtime 调用可能已经开始，timeout、连接丢失和无法确认的 Runtime reply 都返回
+`unavailable`；Server 必须保留原 operation，后续投递继续使用同一 operation id，不能
+通过放弃 reservation 来猜测副作用没有发生。
+
 ### Follow-up
 
 - 对当前物理 Session 调用 `client.session.promptAsync()`，传入 prompt 和可选的当前

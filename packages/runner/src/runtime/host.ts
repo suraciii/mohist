@@ -3,13 +3,13 @@ import { ServerConnection } from "../server/connection.js"
 import {
   RunnerSignalRClient,
   type SessionCommandRequest,
-  type SessionCommandResult,
 } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
+import { executeAcpSessionCommand } from "./acp-session-command.js"
 import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
@@ -164,12 +164,8 @@ export class RunnerHost {
     )
   }
 
-  private handleSessionCommand(request: SessionCommandRequest): SessionCommandResult {
-    if (request.runtime.toLowerCase() !== "opencode") return { ok: false, error: "missing" }
-    if (request.command === "reset" && request.expectedRuntimeSessionId !== request.runtimeSessionId) {
-      return { ok: false, error: "conflict" }
-    }
-    return { ok: false, error: "unavailable" }
+  private handleSessionCommand(request: SessionCommandRequest) {
+    return executeAcpSessionCommand(request, this.sharedAcpConnection?.connection ?? null)
   }
 
   private reconcileStartedSessionCommand(_request: SessionCommandRequest) {

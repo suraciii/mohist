@@ -224,7 +224,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var reservation = session.Status.PendingReset;
         return reservation is not null
             && string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal)
-            && string.Equals(reservation.IdempotencyKey, RecoveryIdempotencyKey(idempotencyKey), StringComparison.Ordinal)
+            && MatchesRecoveryIdempotencyKey(reservation, RecoveryIdempotencyKey(idempotencyKey))
             && reservation.Outcome is not null
             ? ToRecoveryResult(reservation.Outcome)
             : null;
@@ -236,25 +236,37 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
         var key = RecoveryIdempotencyKey(idempotencyKey);
+        var commandName = CommandName(command);
 
         if (session.Status.PendingReset is { } pending)
         {
-            if (pending.Outcome is not null && (!string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal)
-                || !string.Equals(pending.IdempotencyKey, key, StringComparison.Ordinal)))
+            var sameCommand = string.Equals(pending.Command, commandName, StringComparison.Ordinal);
+            if (pending.Outcome is null)
             {
-                session.Status = session.Status with { PendingReset = null };
-                await CommitAsync(session, []);
-            }
-            else
-            {
-            if (string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal)
-                && string.Equals(pending.IdempotencyKey, key, StringComparison.Ordinal))
-            {
+                if (!sameCommand)
+                    throw new RecoveryOperationInProgressException(session.Id, pending.Command);
+
+                if (!MatchesRecoveryIdempotencyKey(pending, key))
+                {
+                    pending = pending with
+                    {
+                        AdditionalIdempotencyKeys = (pending.AdditionalIdempotencyKeys ?? [])
+                            .Append(key)
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray()
+                    };
+                    session.Status = session.Status with { PendingReset = pending };
+                    await CommitAsync(session, []);
+                }
+
                 return BuildSessionCommandRequest(session, command, pending);
             }
 
-            throw new RecoveryOperationInProgressException(session.Id, pending.Command);
-            }
+            if (sameCommand && MatchesRecoveryIdempotencyKey(pending, key))
+                return BuildSessionCommandRequest(session, command, pending);
+
+            session.Status = session.Status with { PendingReset = null };
+            await CommitAsync(session, []);
         }
 
         if (command == SessionCommandKind.Compact)
@@ -273,7 +285,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             session.Status.AgentRuntimeSessionId,
             runtime,
             Now(),
-            CommandName(command),
+            commandName,
             IdempotencyKey: key);
         session.Status = session.Status with { PendingReset = reservation };
         await CommitAsync(session, []);
@@ -450,6 +462,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private static string RecoveryIdempotencyKey(string? value) =>
         string.IsNullOrWhiteSpace(value) ? LegacyRecoveryIdempotencyKey : value;
+
+    private static bool MatchesRecoveryIdempotencyKey(AgentSessionResetReservation reservation, string key) =>
+        string.Equals(reservation.IdempotencyKey, key, StringComparison.Ordinal)
+        || reservation.AdditionalIdempotencyKeys?.Contains(key, StringComparer.Ordinal) == true;
 
     private async Task ExpireAcceptedFollowupsAsync(AgentSession session)
     {
