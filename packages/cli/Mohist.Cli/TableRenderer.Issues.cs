@@ -7,14 +7,15 @@ internal sealed partial class TableRenderer
     private void RenderIssueList(JsonNode? data)
     {
         var rows = AsArray(data);
-        var headers = new[] { "number", "title", "stage", "status", "priority", "state", "labels" };
-        var widths = new[] { 7, TitleSoftCap, 16, 12, 9, TitleSoftCap, TitleSoftCap };
+        var headers = new[] { "number", "title", "repository", "stage", "status", "priority", "state", "labels" };
+        var widths = new[] { 7, TitleSoftCap, 20, 16, 12, 9, TitleSoftCap, TitleSoftCap };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
         {
             var number = NumberOf(row, "number");
             var title = StringOf(row, "title");
+            var repository = StringOf(row, "repositoryName");
             var stage = StringOf(row, "workflowStage");
             var status = StringOf(row, "status");
             var priority = StringOf(row, "priority");
@@ -24,6 +25,7 @@ internal sealed partial class TableRenderer
             {
                 number,
                 Truncate(title, TitleSoftCap),
+                Truncate(repository, 20),
                 Truncate(stage, 16),
                 Truncate(status, 12),
                 Truncate(priority, 9),
@@ -48,6 +50,7 @@ internal sealed partial class TableRenderer
         var stage = StringOf(data, "workflowStage");
         var status = StringOf(data, "status");
         var priority = StringOf(data, "priority");
+        var repository = StringOf(data, "repositoryName");
         var project = StringOf(data, "projectName");
         if (string.IsNullOrEmpty(project))
             project = StringOf(data, "projectId");
@@ -60,6 +63,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"stage:    {stage}");
         _out.WriteLine($"status:   {status}");
         _out.WriteLine($"priority: {priority}");
+        _out.WriteLine($"repository: {repository}");
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
         _out.WriteLine($"labels:   {labels}");

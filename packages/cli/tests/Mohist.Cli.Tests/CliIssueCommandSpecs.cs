@@ -8,6 +8,96 @@ public class CliIssueCommandSpecs
 {
     private const string ActiveProjectId = "proj_test";
 
+    public static IEnumerable<object[]> RemovedRepositoryOptionCases()
+    {
+        yield return [new[] { "issue", "create", "Title", "--repository", "web" }];
+        yield return [new[] { "issue", "update", "1", "--repository", "web" }];
+        yield return [new[] { "issue", "list", "--repository", "web" }];
+        yield return [new[] { "issue", "show", "1", "--repository", "web" }];
+    }
+
+    [Theory]
+    [MemberData(nameof(RemovedRepositoryOptionCases))]
+    public async Task IssueCommands_RepositoryOption_IsRejectedWithoutDispatch(string[] args)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("Issue request must not be sent"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, args, output, error, fileSystem, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--repository", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IssueList_RepoFilter_SendsRepositoryQuery()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "list", "--repo", "SERVER"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_test/issues?repository=SERVER", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task IssueList_Table_RendersStoredRepositoryWithoutMetadata()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new
+                    {
+                        number = 7,
+                        title = "Historical target",
+                        repositoryName = "web",
+                        workflowStage = "done",
+                        status = "done",
+                        priority = "p2",
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "list", "--output", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("repository", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("web", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IssueShow_Table_RendersStoredRepositoryWithoutMetadata()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 7,
+                    title = "Historical target",
+                    repositoryName = "web",
+                    workflowStage = "done",
+                    status = "done",
+                    priority = "p2",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "show", "7", "--output", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("repository: web", output.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ArchiveAllCompleted_Table_PrintsServerResult()
     {

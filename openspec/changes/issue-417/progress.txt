@@ -357,3 +357,21 @@
 - Verification after implementation: Runner typecheck + test typecheck and
   tests pass (1027 tests); Server UnitTests pass (1445) and Server SpecTests
   pass (2829). Server build passes with warnings-as-errors.
+
+## T-008 notes (Issue and repository CLI alignment)
+
+- Issue repository selection is now exposed only as `--repo`: create and update
+  send `repositoryName` in their JSON bodies, while list sends the existing
+  server query key `repository` because the Issue route binds that query to its
+  stored-target filter. No Issue command retains a `--repository` option, so
+  System.CommandLine rejects it before any request is sent.
+- Issue table output reads `repositoryName` directly from list/detail payloads;
+  it does not depend on resolved repository metadata, so terminal historical
+  targets remain visible after their declaration is removed. Update output
+  remains the server response, which preserves the canonical repository casing.
+- Repository delete already uses the shared envelope renderer for both JSON and
+  table modes. The CLI therefore prints server `repository_in_use`, default,
+  and not-found failures to stderr with non-zero status and does not emit a
+  success result; focused specs now pin those behaviors with `RecordingHttpHandler`
+  and `FakeFileSystem`.
+- The repository-native verification was `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore -p:TreatWarningsAsErrors=true` (0 warnings/errors) plus 920 CLI tests. `npm run typecheck -w packages/cli` cannot run because the root npm workspace does not include the .NET `packages/cli` directory.
