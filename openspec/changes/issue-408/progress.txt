@@ -290,3 +290,119 @@
   `silenceMissingModelWarning` indirection entirely. The contract on
   the executor side (`mohist/opencode` resolves, validates input,
   populates `turnFact`) does not change.
+
+## T-005 Built-in profile migration and design doc alignment
+
+### Codebase patterns discovered
+
+- T-001 already performed the mechanical migration on the two built-in
+  profile YAMLs (`mohist-local.workflow.yaml`,
+  `mohist-github-pr.workflow.yaml`) as a precondition for the legacy
+  validation to even let the spec suite boot. After T-001 both YAMLs
+  satisfy every acceptance criterion in T-005: 29 `uses: mohist/opencode`
+  in `mohist-github-pr` and the same count in `mohist-local`, each one
+  binding `options: ${{ vars.agent }}` (no leftover `with.agent`); no
+  `with.expect` anywhere on agent tasks; `expect` is top-level beside
+  `with` / `artifacts` / `setVars` / `recovery`; `variables.agent: {}`
+  on both profiles; the `apply-feedback` task in both profiles carries
+  `options: ${{ vars.agent }}` so approval feedback honors explicit
+  model selection; the `mohist/github-pr-status` check keeps
+  `with.expect: merged` (Action-owned input, not migrated).
+- Previously discarded top-level `expect` declarations in
+  `mohist/github-pr` (`proposal`, `design`, `tasks`, `self-review`,
+  `ai-review`) now take effect — failing the task if the expected file
+  or marker is missing. This is the intentional behavior correction
+  called out in the proposal and design.
+- `design/workflow/builtin-workflows.md` had a "实装差距" section
+  flagging the unfinished migration as a current-state gap. After T-001
+  resolved that gap, the section is stale; T-005 collapses it into a
+  positive invariant note about the migrated shape so the spec remains
+  the target rather than a status report.
+- `design/workflow/actions.md` had prose describing the opencode
+  contract but no explicit input/output types. T-005 adds the
+  `OpenCodeActionInput` and `OpenCodeActionOutput` type declarations
+  mirroring `design/runtimes/opencode.md`, plus a sentence naming the
+  legacy-shape rejection rule (`with.expect` / `with.agent` rejected at
+  profile load) so the contract spec reflects the loader behavior.
+- `design/workflow/task-dispatch.md` previously said "Variables 的解析、
+  deep merge 与动态生效语义见 variables.md". After T-001's
+  deep-merge removal, "deep merge" applied to `with` is misleading even
+  though it still applies to variables scope merging. T-005 rewrites it
+  to "跨 scope merge" and adds an explicit sentence that `with` does
+  not deep-merge anymore and configuration reaches an Action only
+  through explicit whole-value `${{ vars.* }}` bindings.
+
+### Gotchas
+
+- The `mohist/github-pr-status` check's `with.expect: merged` is an
+  Action-owned input that Action-aware legacy validation must NOT
+  migrate to top-level `expect`. It's a string value, not a marker
+  structure, so the verdict-marker rule does not trip on it either —
+  already verified in T-001's spec scenario
+  `AcceptsAnotherActionOwnsInputNamedExpect`.
+- The `apply-feedback` task was promoted to `TaskDefinition` in T-001
+  (FeedbackTaskConfig retired). The migration adds `options: ${{ vars.agent }}`
+  to it so approval feedback honors the issue-level model selection.
+- The github-pr `merge-verified` check still uses
+  `mohist/github-pr-status` with `expect: merged` — Action-owned,
+  untouched.
+- The `_output` marker on `recover:fix-tests` (build stage, mohist/local)
+  is at top-level `expect`, migrated from the old `with.expect`. The
+  completion evaluator (T-003) reads it from the dispatch envelope's
+  `RenderedWorkItem.expect`, matches the last `<promise>VALUE</promise>`
+  in the turn's final assistant text, and uses general `parseLastMarker`
+  semantics (not legacy lowercase `done|unfinished`).
+
+### Patterns established
+
+- T-005 is the documentation-alignment half of the migration. The
+  mechanical YAML side landed in T-001 (with progress.txt noting why);
+  T-005's responsibility is making sure the `design/workflow/*.md`
+  trio reflects the migrated contract, removes stale current-state
+  notes, and explicitly names the input/output types so future readers
+  don't need to cross-reference `design/runtimes/opencode.md`.
+- The "实装差距" pattern remains valid in WIP design docs (variables.md
+  keeps it as a WIP status marker, event-routing.md and eventbus.md
+  keep their own implementation-gap sections). It's only removed when
+  the gap itself has been resolved and the doc is no longer WIP.
+
+### Tests touched
+
+- No new tests were added — the migration landed in T-001 and is
+  verified by the existing profile spec suite. T-005 only re-verified
+  the existing assertions on the migrated shape:
+  - `MohistLocalWorkflowProfileSpecs` — top-level `expect` shape,
+    no legacy keys, `variables.agent` minimal.
+  - `MohistPrIssueWorkflowProfileSpecs` — same, plus
+    `mohist/github-pr-status` `with.expect: merged` preserved.
+  - `WorkflowYamlSerializer_PreservesFailIfInTaskExpect` — top-level
+    `expect` round-trip.
+  - `WorkflowProfileManagerSpecs.ExpandTaskWith_*` — whole-value
+    `${{ vars.* }}` resolution, no deep-merge.
+
+### Verification
+
+- Solution build: 0 warnings, 0 errors.
+- Server unit tests: 1405 / 1405 passing.
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- CLI tests: 933 / 933 passing.
+- Runner tests: 1126 / 1126 passing.
+- Web tests: 4698 / 4698 passing.
+
+### Decisions worth flagging for review
+
+- The `_output` marker on `recover:fix-tests` (build stage, mohist/local)
+  is intentionally at top-level `expect`. When a recovery handler's
+  retry-self path fails to produce a turn text containing
+  `<promise>done</promise>` or `<promise>unfinished</promise>`, the
+  completion evaluator reports an unsatisfied `_output` marker, the
+  executor projects output to `null`, and the task fails. The previous
+  `with.expect` location would have produced the same outcome (failure),
+  so this migration is behavior-preserving for the recovery contract.
+- The two built-in profiles use `expect` only on file-existence checks
+  and on promise-marker checks; `_output` markers appear only inside
+  recovery tasks. If future profiles introduce `_output` markers on
+  the primary task path, the rule from `parseLastMarker` (last
+  accepted occurrence wins) and the `finalAssistantText: null` →
+  unsatisfied behavior apply uniformly.
