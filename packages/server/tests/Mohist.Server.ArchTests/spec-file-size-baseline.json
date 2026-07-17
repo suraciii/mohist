@@ -32,11 +32,6 @@
   "Mohist.Server.SpecTests/Specs/Workflow/Artifacts/WorkflowArtifactUploadServiceSpecs.cs": 34116,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 25955,
   "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 30805,
-  "Mohist.Server.UnitTests/Api/IssueCliStartReadinessTests.cs": 24562,
-  "Mohist.Server.UnitTests/Api/IssueCliTableRendererTests.cs": 38182,
-  "Mohist.Server.UnitTests/CliInfo/InfoCollectorJsonTests.cs": 26229,
-  "Mohist.Server.UnitTests/CliInfo/InfoCollectorTests.cs": 30489,
-  "Mohist.Server.UnitTests/CliInfo/InfoVerboseCollectorTests.cs": 26248,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 27944,
   "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41204
 }
