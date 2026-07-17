@@ -829,26 +829,6 @@ public class IssueCreationSpecs
         Assert.DoesNotContain(issues, issue => issue.Title.Contains("Rejected", StringComparison.Ordinal));
     }
 
-    private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null);
-
-    private sealed record CreateIssueApiDto(
-        int Number,
-        string Title,
-        int[] PrerequisiteNumbers,
-        CreateIssueApiPrerequisiteDto[] Prerequisites,
-        bool CanStart,
-        CreateIssueApiBlockerDto? Blocker);
-
-    private sealed record CreateIssueApiPrerequisiteDto(
-        int Number,
-        string Title,
-        string Status,
-        string Health,
-        bool Completed);
-
-    private sealed record CreateIssueApiBlockerDto(string Kind, CreateIssueApiBlockerIssueDto? Issue);
-
-    private sealed record CreateIssueApiBlockerIssueDto(int Number, string Title);
 
     private async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
     {

@@ -200,7 +200,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var eventStore = new EventStore(new TestDbContextFactory(database.Options), NullLogger<EventStore>.Instance);
-        var runStore = new WorkflowRunStore(new TestDbContextFactory(database.Options), eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var runStore = new WorkflowRunStore(new TestDbContextFactory(database.Options), eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = InboxProjectionTestSupport.BuildWorkflowRun(
             workflowRunId: "wf_store_replay",
             projectId: "proj_a",
@@ -937,86 +937,4 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    /// <summary>
-    /// Minimal <see cref="IGrainFactory"/> stand-in for transactional
-    /// unit specs. The dispatcher is a no-op grain reference; producers
-    /// only need to call DispatchNowAsync without exceptions. Lets the
-    /// store exercise its post-commit poke code path without spinning up
-    /// an Orleans silo.
-    /// </summary>
-    private sealed class NullDispatchGrainFactory : IGrainFactory
-    {
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
-        {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
-            throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-        }
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
-            => throw new NotSupportedException();
-    }
-
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
-    }
 }

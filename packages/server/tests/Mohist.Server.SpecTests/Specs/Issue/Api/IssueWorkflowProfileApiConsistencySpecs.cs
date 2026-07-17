@@ -14,19 +14,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-/// <summary>
-/// HTTP API regression coverage for issue-workflow-profile consistency
-/// (issue #257 T-002). Verifies that:
-///   - POST /api/issues with workflowProfileId persists the selection
-///   - POST without the field inherits the default on reads
-///   - POST with an unknown id is rejected with 400
-///   - PATCH honors three-state semantics on workflowProfileId
-///   - PATCH on a started issue is rejected with 409 and leaves the
-///     selection unchanged
-///   - PUT .../workflow-profile/variables still succeeds on a started
-///     issue and the configured variables are preserved across a
-///     profile-selection update
-/// </summary>
 [Collection("IssueLifecycle")]
 public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 {

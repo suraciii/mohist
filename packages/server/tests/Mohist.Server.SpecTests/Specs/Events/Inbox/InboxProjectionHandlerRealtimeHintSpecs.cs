@@ -9,20 +9,10 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Inbox;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using static Mohist.Server.SpecTests.Support.InboxProjectionRealtimeHintAssertions;
 
 namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 
-/// <summary>
-/// Unit specs for the realtime-hint emission added to
-/// <see cref="InboxProjectionHandler"/>. Covers the spec requirement
-/// "Server emits a project-scoped realtime hint strictly after an inbox
-/// item is persisted": exactly one hint per non-duplicate insert, no
-/// hint on deduplicated inserts, no hint on insert failure, identity-only
-/// payload, canonical lineage extensions (projectid / issue), and publish
-/// failure propagation.
-/// Shared DB / scope / event-builder helpers live in
-/// <see cref="InboxProjectionTestSupport"/>.
-/// </summary>
 public class InboxProjectionHandlerRealtimeHintSpecs
 {
     private const string HintType = "com.mohist.inbox.item-persisted";
@@ -37,7 +27,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 42,
             title: "Issue 42");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -61,7 +51,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             title: "Issue 1");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -70,16 +60,12 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             eventId: "evt-dedup");
 
         await handler.HandleAsync(evt, CancellationToken.None);
-        // After the first call exactly one hint has been published.
         Assert.Single(publisher.Published);
 
-        // Two more deliveries of the same CloudEvent: insert returns
-        // AlreadyExisted, handler must not publish any further hint.
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
         Assert.Single(publisher.Published);
-        // The single inbox row is still there, untouched.
         var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
         Assert.Equal("evt-dedup", item.SourceEventId);
     }
@@ -93,7 +79,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             title: "Issue 1");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         // The first context reads the subscription; the second is the
         // InboxStore insert and fails before persistence.
         var handler = InboxProjectionTestSupport.CreateHandler(
@@ -104,7 +90,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
                 var existing = services.Single(d => d.ServiceType == typeof(IDbContextFactory<MohistDbContext>));
                 services.Remove(existing);
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(
-                    new FailOnSecondAsyncContextFactory(new TestDbContextFactory(database.Options)));
+                    new RealtimeHintFailOnSecondAsyncContextFactory(new TestDbContextFactory(database.Options)));
             });
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -129,7 +115,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 42,
             title: "Approval target");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -167,7 +153,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             title: "X");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -191,7 +177,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 42,
             title: "Lineage");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -242,7 +228,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 4,
             title: "Completed");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
             EventCatalog.ReverseDns.WorkflowRunFailed, "wf_conformance_failed", "evt-cf-failed",
@@ -291,7 +277,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 42,
             title: "Inherited lineage");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var sourceExtensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -334,7 +320,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 42,
             title: "Empty inherited lineage");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var sourceExtensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -369,7 +355,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(
             database,
-            eventPublisher: new ThrowingEventPublisher(),
+            eventPublisher: new RealtimeHintThrowingEventPublisher(),
             configureServices: null);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -382,7 +368,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
 
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var retryHandler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         await retryHandler.HandleAsync(evt, CancellationToken.None);
 
@@ -465,7 +451,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 2,
             title: "Approval issue");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_failed", "evt-f"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approval", "evt-a"), CancellationToken.None);
@@ -496,7 +482,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
             issueStartedEnabled: false);
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -526,7 +512,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             title: "Owned by B");
 
-        var publisher = new CapturingEventPublisher();
+        var publisher = new RealtimeHintCapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
@@ -542,94 +528,4 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal("proj_b", hint.Data!.Value.GetProperty("projectId").GetString());
     }
 
-    private static async Task AssertPersistedCountsAsync(
-        TestSqliteDatabase database,
-        int inbox,
-        int hints)
-    {
-        await using var db = database.CreateContext();
-        Assert.Equal(inbox, await db.InboxItems.CountAsync(item => item.ProjectId == "proj_atomic"));
-        Assert.Equal(hints, await db.WorkflowRunEvents.CountAsync(evt =>
-            evt.Source == HintSource && evt.Type == HintType));
-    }
-
-    private sealed class CapturingEventPublisher : IEventPublisher
-    {
-        private readonly List<RecordedPublish> _published = [];
-
-        public IReadOnlyList<RecordedPublish> Published => _published.ToArray();
-
-        public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
-        {
-            _published.Add(new RecordedPublish(
-                envelope.Type,
-                envelope.Source.ToString(),
-                envelope.Subject,
-                envelope.Extensions.Count == 0 ? null : new Dictionary<string, string>(envelope.Extensions),
-                envelope.Data));
-            return Task.CompletedTask;
-        }
-
-        public Task PublishAsync<TData>(
-            TData data,
-            string type,
-            string source,
-            string? subject = null,
-            IReadOnlyDictionary<string, string>? extensions = null,
-            CancellationToken ct = default)
-        {
-            JsonElement? element = data is not null
-                ? JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions)
-                : null;
-            _published.Add(new RecordedPublish(
-                type,
-                source,
-                subject,
-                extensions is null ? null : new Dictionary<string, string>(extensions),
-                element));
-            return Task.CompletedTask;
-        }
-
-        public sealed record RecordedPublish(
-            string Type,
-            string Source,
-            string? Subject,
-            IReadOnlyDictionary<string, string>? Extensions,
-            JsonElement? Data);
-    }
-
-    private sealed class ThrowingEventPublisher : IEventPublisher
-    {
-        public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default) =>
-            throw new InvalidOperationException("simulated hint-publish failure");
-
-        public Task PublishAsync<TData>(
-            TData data,
-            string type,
-            string source,
-            string? subject = null,
-            IReadOnlyDictionary<string, string>? extensions = null,
-            CancellationToken ct = default) =>
-            throw new InvalidOperationException("simulated hint-publish failure");
-    }
-
-    private sealed class FailOnSecondAsyncContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly IDbContextFactory<MohistDbContext> _inner;
-        private int _asyncCalls;
-
-        public FailOnSecondAsyncContextFactory(IDbContextFactory<MohistDbContext> inner)
-        {
-            _inner = inner;
-        }
-
-        public MohistDbContext CreateDbContext() => _inner.CreateDbContext();
-
-        public Task<MohistDbContext> CreateDbContextAsync(CancellationToken ct = default)
-        {
-            if (Interlocked.Increment(ref _asyncCalls) == 2)
-                return Task.FromException<MohistDbContext>(new InvalidOperationException("simulated insert failure"));
-            return _inner.CreateDbContextAsync(ct);
-        }
-    }
 }
