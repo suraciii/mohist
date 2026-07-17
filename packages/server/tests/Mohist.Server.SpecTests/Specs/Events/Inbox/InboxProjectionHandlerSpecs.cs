@@ -41,7 +41,9 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
             workflowRunId: "wf_1",
-            eventId: "evt-failed");
+            eventId: "evt-failed",
+            projectId: "proj_a",
+            issueNumber: 42);
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
@@ -73,7 +75,9 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.StageApprovalRequested,
             workflowRunId: "wf_2",
-            eventId: "evt-approval");
+            eventId: "evt-approval",
+            projectId: "proj_a",
+            issueNumber: 42);
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
@@ -185,7 +189,9 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
             workflowRunId: "wf_replay",
-            eventId: "evt-wf-replay");
+            eventId: "evt-wf-replay",
+            projectId: "proj_a",
+            issueNumber: 1);
 
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -243,7 +249,9 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
             workflowRunId: "wf_iso",
-            eventId: "evt-iso");
+            eventId: "evt-iso",
+            projectId: "proj_a",
+            issueNumber: 1);
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
@@ -347,7 +355,13 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
             workflowRunId: "wf_bad_ann",
-            eventId: "evt-wf-mismatch-project");
+            eventId: "evt-wf-mismatch-project",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_b",
+                [EventCatalog.Lineage.Issue] = "1",
+                [EventCatalog.Lineage.WorkflowRunId] = "wf_bad_ann",
+            });
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
@@ -374,7 +388,13 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.StageApprovalRequested,
             workflowRunId: "wf_bad_num",
-            eventId: "evt-wf-mismatch-number");
+            eventId: "evt-wf-mismatch-number",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
+                [EventCatalog.Lineage.Issue] = "2",
+                [EventCatalog.Lineage.WorkflowRunId] = "wf_bad_num",
+            });
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
@@ -512,6 +532,37 @@ public class InboxProjectionHandlerSpecs
 
         var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
         Assert.Equal(9, item.IssueNumber);
+    }
+
+    [Fact]
+    public async Task IssueEvent_RoutesByEnvelopeWithoutMutatingPayload()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueNumber: 42,
+            title: "Envelope target");
+
+        var payload = System.Text.Json.JsonSerializer.SerializeToElement(
+            new { issueNumber = 99 }, CloudEvent.JsonOptions);
+        var evt = new CloudEvent(
+            id: "evt-envelope-route",
+            source: new Uri("/mohist/projects/proj_a/issues/99", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: InboxProjectionTestSupport.FixedEventTime,
+            data: payload,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
+                [EventCatalog.Lineage.Issue] = "42",
+            });
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal(42, item.IssueNumber);
+        Assert.Equal(99, payload.GetProperty("issueNumber").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

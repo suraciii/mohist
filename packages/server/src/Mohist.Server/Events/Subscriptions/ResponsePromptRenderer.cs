@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Events.Subscriptions;
@@ -13,17 +12,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <para>
 /// Supported placeholders:
 /// <list type="bullet">
-///   <item><c>{{workflow_run_id}}</c> — parsed from the CloudEvent
-///         <c>source</c> URI
-///         (<c>/mohist/workflow-runs/{runId}</c>) via the shared
-///         <see cref="WorkflowStageLockReleaseHandler.ExtractWorkflowRunId"/>
-///         helper. Empty string when the source is not a workflow-run
-///         URI.</item>
-///   <item><c>{{stage}}</c> — read from the envelope's <c>data.stage</c>
-///         property (case-insensitive: <c>stage</c> or <c>Stage</c>),
-///         unwrapping the WorkflowEvent <c>{"value": {...}}</c> envelope
-///         when present. Empty string when the envelope carries no
-///         stage.</item>
+///   <item><c>{{workflow_run_id}}</c> is read from the envelope's
+///         <c>extensions["workflowrunid"]</c>. Empty string when the
+///         envelope carries no workflow run id.</item>
+///   <item><c>{{stage}}</c> is read from the envelope's
+///         <c>extensions["stage"]</c>. Empty string when the envelope
+///         carries no stage.</item>
 ///   <item><c>{{event_type}}</c> — the CloudEvent <c>type</c>. Empty
 ///         string when the envelope type is null/empty.</item>
 /// </list>
@@ -61,43 +55,16 @@ public static class ResponsePromptRenderer
             return template ?? string.Empty;
 
         var rendered = template;
-        rendered = rendered.Replace(WorkflowRunIdToken, ExtractWorkflowRunId(evt), StringComparison.Ordinal);
-        rendered = rendered.Replace(StageToken, ExtractStage(evt.Data) ?? string.Empty, StringComparison.Ordinal);
+        rendered = rendered.Replace(
+            WorkflowRunIdToken,
+            CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId) ?? string.Empty,
+            StringComparison.Ordinal);
+        rendered = rendered.Replace(
+            StageToken,
+            CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.Stage) ?? string.Empty,
+            StringComparison.Ordinal);
         rendered = rendered.Replace(EventTypeToken, evt.Type ?? string.Empty, StringComparison.Ordinal);
         return rendered;
     }
 
-    private static string ExtractWorkflowRunId(CloudEvent evt)
-    {
-        var source = evt.Source?.ToString();
-        if (string.IsNullOrEmpty(source))
-            return string.Empty;
-        return WorkflowStageLockReleaseHandler.ExtractWorkflowRunId(source);
-    }
-
-    /// <summary>
-    /// Mirrors <see cref="WorkflowStageLockReleaseHandler.ExtractStage"/>
-    /// without coupling to its internal accessibility — kept verbatim so
-    /// the envelope-unwrap semantics match the existing stage lock release
-    /// handler.
-    /// </summary>
-    private static string? ExtractStage(JsonElement? data)
-    {
-        if (data is null || !data.HasValue) return null;
-        var value = data.Value;
-        if (value.ValueKind != JsonValueKind.Object) return null;
-
-        JsonElement inner = value;
-        if (value.TryGetProperty("value", out var wrapped)
-            && wrapped.ValueKind == JsonValueKind.Object)
-        {
-            inner = wrapped;
-        }
-
-        if (inner.TryGetProperty("stage", out var lower) && lower.ValueKind == JsonValueKind.String)
-            return lower.GetString();
-        if (inner.TryGetProperty("Stage", out var upper) && upper.ValueKind == JsonValueKind.String)
-            return upper.GetString();
-        return null;
-    }
 }

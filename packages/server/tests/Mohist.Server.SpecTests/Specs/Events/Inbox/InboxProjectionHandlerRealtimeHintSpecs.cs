@@ -259,9 +259,11 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var publisher = new CapturingEventPublisher();
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
-            EventCatalog.ReverseDns.WorkflowRunFailed, "wf_conformance_failed", "evt-cf-failed"), CancellationToken.None);
+            EventCatalog.ReverseDns.WorkflowRunFailed, "wf_conformance_failed", "evt-cf-failed",
+            projectId: "proj_conformance", issueNumber: 1), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
-            EventCatalog.ReverseDns.StageApprovalRequested, "wf_conformance_approval", "evt-cf-approval"), CancellationToken.None);
+            EventCatalog.ReverseDns.StageApprovalRequested, "wf_conformance_approval", "evt-cf-approval",
+            projectId: "proj_conformance", issueNumber: 2), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted, "proj_conformance", 3, "evt-cf-started"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
@@ -281,7 +283,12 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             ProducerConformance.Assert(
                 EventProducerFamily.InboxItemPersisted,
                 extensions,
-                new(ProjectId: projectId, Issue: issue));
+                new(
+                    ProjectId: projectId,
+                    Issue: issue,
+                    Epic: extensions.GetValueOrDefault(EventCatalog.Lineage.Epic),
+                    WorkflowRunId: extensions.GetValueOrDefault(EventCatalog.Lineage.WorkflowRunId),
+                    Stage: extensions.GetValueOrDefault(EventCatalog.Lineage.Stage)));
         }
     }
 
@@ -345,6 +352,8 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         var sourceExtensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            [EventCatalog.Lineage.ProjectId] = "proj_empty_inherited",
+            [EventCatalog.Lineage.Issue] = "42",
             [EventCatalog.Lineage.Epic] = " ",
             [EventCatalog.Lineage.WorkflowRunId] = "",
             [EventCatalog.Lineage.Stage] = "\t",
@@ -546,7 +555,9 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
             type: EventCatalog.ReverseDns.WorkflowRunFailed,
             workflowRunId: "wf_owned_by_b",
-            eventId: "evt-b");
+            eventId: "evt-b",
+            projectId: "proj_b",
+            issueNumber: 1);
 
         await handler.HandleAsync(evt, CancellationToken.None);
 

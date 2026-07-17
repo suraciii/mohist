@@ -165,6 +165,32 @@ public class ProjectEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task GetProjectEvents_UsesEnvelopeIssueNumberWhenPayloadDisagrees()
+    {
+        var project = await CreateProjectAsync("workflow-envelope-context");
+        var workflowRunId = $"wf_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, number: 42);
+        await SeedWorkflowRunAsync(project.Id, workflowRunId, issueNumber: 42);
+
+        await AppendWorkflowEventAsync(
+            workflowRunId,
+            project.Id,
+            issueNumber: 42,
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            data: new { issueNumber = 42 },
+            envelopeIssueNumber: 99);
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events");
+
+        var workflow = Assert.Single(response, entry => entry.Type == EventCatalog.ReverseDns.WorkflowRunFailed);
+        Assert.Equal(99, workflow.IssueNumber);
+        Assert.Equal(42, workflow.Data.GetProperty("issueNumber").GetInt32());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task GetProjectEvents_ProjectsPersistedSessionLifecycleWithHistoricalContext()
     {
         var project = await CreateProjectAsync("session-lifecycle");
@@ -178,6 +204,7 @@ public class ProjectEventsApiSpecs
         var opened = Assert.Single(response, entry => entry.Type == "coder_session_started");
         Assert.Equal("workflow", opened.SessionSourceKind);
         Assert.Equal(1, opened.IssueNumber);
+        Assert.Equal(7, opened.EpicNumber);
         Assert.Equal("wf-1", opened.WorkflowRunId);
         Assert.Equal("runner-1", opened.RunnerId);
 
@@ -186,7 +213,57 @@ public class ProjectEventsApiSpecs
         Assert.Equal("runner timeout", closed.Data.GetProperty("failureReason").GetString());
         Assert.Equal("workflow", closed.SessionSourceKind);
         Assert.Equal(1, closed.IssueNumber);
+        Assert.Equal(7, closed.EpicNumber);
         Assert.Equal("runner-1", closed.RunnerId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_UsesSessionEnvelopeContextOverStoredMetadataAndPayload()
+    {
+        var project = await CreateProjectAsync("session-envelope-context");
+        var sessionId = $"agent_session_{Guid.NewGuid():N}";
+        await SeedAgentSessionAsync(project.Id, sessionId);
+
+        await AppendAgentSessionEventAsync(
+            sessionId,
+            project.Id,
+            "com.mohist.agent-session.runtime-bound",
+            data: new { issueNumber = 1, epicNumber = 7 },
+            envelopeIssueNumber: 99,
+            envelopeEpicNumber: 8);
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events");
+
+        var entry = Assert.Single(response, item => item.Type == "com.mohist.agent-session.runtime-bound");
+        Assert.Equal(99, entry.IssueNumber);
+        Assert.Equal(8, entry.EpicNumber);
+        Assert.Equal(1, entry.Data.GetProperty("issueNumber").GetInt32());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_DoesNotUseStoredSessionMetadataWhenEnvelopeContextIsAbsent()
+    {
+        var project = await CreateProjectAsync("session-envelope-missing");
+        var sessionId = $"agent_session_{Guid.NewGuid():N}";
+        await SeedAgentSessionAsync(project.Id, sessionId);
+
+        await AppendAgentSessionEventAsync(
+            sessionId,
+            project.Id,
+            "com.mohist.agent-session.runtime-bound",
+            includeIssueContext: false);
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events");
+
+        var entry = Assert.Single(response, item => item.Type == "com.mohist.agent-session.runtime-bound");
+        Assert.Null(entry.IssueNumber);
+        Assert.Null(entry.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -618,6 +695,7 @@ public class ProjectEventsApiSpecs
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
             [AgentSessionQueryMetadataKeys.IssueNumber] = "1",
+            [AgentSessionQueryMetadataKeys.EpicNumber] = "7",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wf-1",
         };
         var state = JsonSerializer.Serialize(new
@@ -714,7 +792,8 @@ public class ProjectEventsApiSpecs
         string type,
         DateTimeOffset? time = null,
         string? subject = null,
-        object? data = null)
+        object? data = null,
+        int? envelopeIssueNumber = null)
     {
         await AppendEventAsync(
             WorkflowRunEventPersistence.WorkflowRunSource(workflowRunId),
@@ -726,7 +805,7 @@ public class ProjectEventsApiSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = projectId,
-                ["issue"] = issueNumber.ToString(),
+                ["issue"] = (envelopeIssueNumber ?? issueNumber).ToString(),
                 ["workflowrunid"] = workflowRunId,
                 ["stage"] = "test",
             });
@@ -738,8 +817,24 @@ public class ProjectEventsApiSpecs
         string type,
         DateTimeOffset? time = null,
         string? subject = null,
-        object? data = null)
+        object? data = null,
+        int? envelopeIssueNumber = 1,
+        int? envelopeEpicNumber = 7,
+        bool includeIssueContext = true)
     {
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectid"] = projectId,
+            ["sessionid"] = sessionId,
+        };
+        if (includeIssueContext)
+        {
+            if (envelopeIssueNumber is > 0)
+                extensions["issue"] = envelopeIssueNumber.Value.ToString();
+            if (envelopeEpicNumber is > 0)
+                extensions["epic"] = envelopeEpicNumber.Value.ToString();
+        }
+
         await AppendEventAsync(
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
             projectId,
@@ -747,11 +842,7 @@ public class ProjectEventsApiSpecs
             time ?? FixedTime,
             subject,
             data,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = projectId,
-                ["sessionid"] = sessionId,
-            });
+            extensions: extensions);
     }
 
     private async Task AppendEpicEventAsync(
@@ -843,6 +934,7 @@ public class ProjectEventsApiSpecs
         JsonElement Data,
         string? RunnerId,
         int? IssueNumber,
+        int? EpicNumber,
         string? SessionSourceKind,
         string? WorkflowRunId,
         string? AgentId,

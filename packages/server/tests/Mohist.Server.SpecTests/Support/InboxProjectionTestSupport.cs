@@ -62,14 +62,21 @@ internal static class InboxProjectionTestSupport
         string type,
         string workflowRunId,
         string eventId,
-        IReadOnlyDictionary<string, string>? extensions = null) =>
+        IReadOnlyDictionary<string, string>? extensions = null,
+        string projectId = "proj_a",
+        int issueNumber = 1) =>
         new(
             id: eventId,
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: type,
             time: TestTime.UtcNow,
             data: null,
-            extensions: extensions);
+            extensions: extensions ?? new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+            });
 
     public static async Task<List<InboxItemView>> GetInboxAsync(TestDatabase database, string projectId)
     {

@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
@@ -96,12 +95,10 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
         var resolved = evt.Type switch
         {
-            EventCatalog.ReverseDns.WorkflowRunFailed =>
-                await ResolveFromWorkflowRunAsync(evt, scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>(), ct).ConfigureAwait(false),
-            EventCatalog.ReverseDns.StageApprovalRequested =>
-                await ResolveFromWorkflowRunAsync(evt, scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>(), ct).ConfigureAwait(false),
-            EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromIssueExtensions(evt),
-            EventCatalog.ReverseDns.IssueCompleted => ResolveFromIssueExtensions(evt),
+            EventCatalog.ReverseDns.WorkflowRunFailed => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.StageApprovalRequested => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.IssueCompleted => ResolveFromEnvelope(evt),
             _ => null,
         };
 
@@ -113,11 +110,14 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             return null;
 
         var stage = evt.Type == EventCatalog.ReverseDns.StageApprovalRequested
-            ? DeserializeData<StageApprovalRequested>(evt)?.Stage
+            ? CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.Stage)
             : null;
         var failureReason = evt.Type == EventCatalog.ReverseDns.WorkflowRunFailed
             ? DeserializeData<WorkflowRunFailed>(evt)?.Message
             : null;
+
+        var workflowRunId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId)
+            ?? ReadWorkflowRunIdFromPayload(evt);
 
         return new HermesIssueNotificationDraft(
             notificationType,
@@ -126,58 +126,27 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             evt.Time,
             resolved.Value.ProjectId,
             resolved.Value.IssueNumber,
+            resolved.Value.EpicNumber,
             issue.Title,
-            resolved.Value.WorkflowRunId,
+            workflowRunId,
             stage,
             failureReason);
     }
 
-    private async Task<ResolvedIdentity?> ResolveFromWorkflowRunAsync(
-        CloudEvent evt,
-        IWorkflowRunStore workflowRunStore,
-        CancellationToken ct)
+    private static ResolvedIdentity? ResolveFromEnvelope(CloudEvent evt)
     {
-        var workflowRunId = WorkflowStageLockReleaseHandler.ExtractWorkflowRunId(evt.Source.ToString());
-        if (string.IsNullOrEmpty(workflowRunId))
-            return null;
-
-        var run = await workflowRunStore.LoadAsync(workflowRunId, ct).ConfigureAwait(false);
-        var annotations = run?.Metadata.Annotations;
-        if (annotations is null
-            || !annotations.TryGetValue("projectId", out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !annotations.TryGetValue("issueNumber", out var issueNumberText) || string.IsNullOrWhiteSpace(issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
-        {
-            return null;
-        }
-
-        return new ResolvedIdentity(projectId, issueNumber, workflowRunId);
+        return CloudEventLineage.TryReadIssueContext(evt, out var context)
+            ? new ResolvedIdentity(context.ProjectId, context.IssueNumber, context.EpicNumber)
+            : null;
     }
 
-    private static ResolvedIdentity? ResolveFromIssueExtensions(CloudEvent evt)
-    {
-        var extensions = evt.Extensions;
-        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId))
-        {
-            return null;
-        }
-
-        if (!extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
-            || string.IsNullOrWhiteSpace(issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
-        {
-            return null;
-        }
-
-        var workflowRunId = evt.Type switch
+    private static string? ReadWorkflowRunIdFromPayload(CloudEvent evt) =>
+        evt.Type switch
         {
             EventCatalog.ReverseDns.IssueWorkStarted => DeserializeData<IssueWorkStarted>(evt)?.WorkflowRunId,
             EventCatalog.ReverseDns.IssueCompleted => DeserializeData<IssueCompleted>(evt)?.WorkflowRunId,
             _ => null,
         };
-
-        return new ResolvedIdentity(projectId, issueNumber, workflowRunId);
-    }
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
@@ -223,5 +192,5 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
     private readonly record struct ResolvedIdentity(
         string ProjectId,
         int IssueNumber,
-        string? WorkflowRunId);
+        int? EpicNumber);
 }

@@ -414,6 +414,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             {
                 [EventCatalog.Lineage.ProjectId] = projectId,
                 [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
             });
 
     private static CloudEvent<IssueWorkStarted> BuildWorkStartedEvent(

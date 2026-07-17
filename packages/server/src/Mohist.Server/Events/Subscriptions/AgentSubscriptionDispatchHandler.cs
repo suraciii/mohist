@@ -59,8 +59,6 @@ namespace Mohist.Server.Events.Subscriptions;
 [Subscription(Type = "*")]
 public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
 {
-    private const string ProjectIdExtension = "projectid";
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AgentSubscriptionDispatchHandler> _log;
 
@@ -162,15 +160,7 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
     /// </summary>
     private static bool TryResolveProjectId(CloudEvent evt, out string projectId)
     {
-        projectId = string.Empty;
-        if (evt.Extensions is null || evt.Extensions.Count == 0)
-            return false;
-        if (!evt.Extensions.TryGetValue(ProjectIdExtension, out var raw))
-            return false;
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-        projectId = raw;
-        return true;
+        return CloudEventLineage.TryReadProjectId(evt.Extensions, out projectId);
     }
 
     /// <summary>

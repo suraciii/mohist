@@ -209,7 +209,7 @@ public class EpicQuerier : IScopedService
 
         if (issueNumberRows.Count == 0) return [];
 
-        var epicIds = await (
+        var epicNumbers = await (
             from issue in db.Issues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
                 on new { issue.ProjectId, EpicNumber = issue.EpicNumber } equals new { epic.ProjectId, EpicNumber = (int?)epic.Number }
@@ -222,7 +222,7 @@ public class EpicQuerier : IScopedService
                 && epic.Status != EpicStatusName.Closed
             select issue.EpicNumber.GetValueOrDefault()
         ).Distinct().ToListAsync();
-        return epicIds;
+        return epicNumbers;
     }
 
     private static EpicWithProgressDto BuildEpicWithProgress(

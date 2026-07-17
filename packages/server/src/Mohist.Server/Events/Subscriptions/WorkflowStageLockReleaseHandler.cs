@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Grains;
@@ -41,16 +40,16 @@ public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
 
     public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        var workflowRunId = ExtractWorkflowRunId(evt.Source.ToString());
+        var workflowRunId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId);
         if (string.IsNullOrEmpty(workflowRunId))
         {
             _log.LogDebug(
-                "Stage lock release skipped: event {EventId} source {Source} does not carry a workflow run id",
-                evt.Id, evt.Source);
+                "Stage lock release skipped: event {EventId} has no workflow run extension",
+                evt.Id);
             return;
         }
 
-        var stage = ExtractStage(evt.Data);
+        var stage = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.Stage);
         if (string.IsNullOrEmpty(stage))
         {
             _log.LogDebug(
@@ -64,38 +63,4 @@ public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
         await grain.ReleaseStageLocksAsync(stage, reason).ConfigureAwait(false);
     }
 
-    internal static string ExtractWorkflowRunId(string source)
-    {
-        const string prefix = "/mohist/workflow-runs/";
-        return source.StartsWith(prefix, StringComparison.Ordinal)
-            ? source[prefix.Length..]
-            : string.Empty;
-    }
-
-    internal static string? ExtractStage(JsonElement? data)
-    {
-        if (data is null || !data.HasValue) return null;
-        var value = data.Value;
-        if (value.ValueKind != JsonValueKind.Object) return null;
-
-        // WorkflowEvent is a union type (C# preview `union` feature) — its
-        // serialized form wraps the active case in a "value" envelope:
-        //   {"value":{"stage":"build"}} for StageCompleted
-        //   {"value":{"stage":"integrate","reason":"..."}} for StageFailed
-        // Unwrap the envelope before reading the case's properties. We also
-        // accept the bare {"stage":"..."} shape so handlers stay tolerant
-        // to direct serializations of the case types themselves.
-        JsonElement inner = value;
-        if (value.TryGetProperty("value", out var wrapped)
-            && wrapped.ValueKind == JsonValueKind.Object)
-        {
-            inner = wrapped;
-        }
-
-        if (inner.TryGetProperty("stage", out var lower) && lower.ValueKind == JsonValueKind.String)
-            return lower.GetString();
-        if (inner.TryGetProperty("Stage", out var upper) && upper.ValueKind == JsonValueKind.String)
-            return upper.GetString();
-        return null;
-    }
 }

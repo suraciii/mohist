@@ -269,30 +269,6 @@ public class WorkflowProfileManager : IScopedService
         return new RunContext(projectId, issueNumber, workflowRun is not null);
     }
 
-    private static string? TryReadAnnotation(string? stateJson, string key)
-    {
-        if (string.IsNullOrWhiteSpace(stateJson)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(stateJson);
-            if (!doc.RootElement.TryGetProperty("metadata", out var metadata)
-                || metadata.ValueKind != JsonValueKind.Object
-                || !metadata.TryGetProperty("annotations", out var annotations)
-                || annotations.ValueKind != JsonValueKind.Object
-                || !annotations.TryGetProperty(key, out var value)
-                || value.ValueKind != JsonValueKind.String)
-            {
-                return null;
-            }
-
-            return value.GetString();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static string? ReadWorkflowProfileId(string? stateJson)
     {
         if (string.IsNullOrWhiteSpace(stateJson)) return null;
@@ -332,7 +308,8 @@ public class WorkflowProfileManager : IScopedService
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
             if (!root.TryGetProperty("workflowRunId", out var workflowRunId)
                 || workflowRunId.GetString() != runId)
                 return null;

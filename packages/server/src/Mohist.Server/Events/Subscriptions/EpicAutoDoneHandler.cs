@@ -296,18 +296,10 @@ internal sealed class EpicProgressRecomputeDispatcher
         bool includePrerequisiteLookup,
         CancellationToken ct)
     {
-        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
+        if (!CloudEventLineage.TryReadIssueContext(extensions, out var context))
         {
             _log.LogDebug(
-                "{EvtType} event missing projectid extension; skipping (event {EventId})",
-                evtType, eventId);
-            return;
-        }
-        var issueNumber = TryReadIssueNumber(extensions);
-        if (issueNumber is null)
-        {
-            _log.LogDebug(
-                "{EvtType} event missing issue extension; skipping (event {EventId})",
+                "{EvtType} event missing canonical Issue context; skipping (event {EventId})",
                 evtType, eventId);
             return;
         }
@@ -316,12 +308,12 @@ internal sealed class EpicProgressRecomputeDispatcher
 
         if (_epicQuerier is not null)
         {
-            var direct = await _epicQuerier.GetEpicNumberForIssueAsync(projectId, issueNumber.Value).ConfigureAwait(false);
+            var direct = await _epicQuerier.GetEpicNumberForIssueAsync(context.ProjectId, context.IssueNumber).ConfigureAwait(false);
             if (direct is not null) epicNumbers.Add(direct.Value);
             if (includePrerequisiteLookup)
             {
                 var dependent = await _epicQuerier
-                    .GetEpicNumbersDependentOnPrerequisiteAsync(projectId, issueNumber.Value)
+                    .GetEpicNumbersDependentOnPrerequisiteAsync(context.ProjectId, context.IssueNumber)
                     .ConfigureAwait(false);
                 foreach (var number in dependent) epicNumbers.Add(number);
             }
@@ -330,12 +322,12 @@ internal sealed class EpicProgressRecomputeDispatcher
         {
             await using var scope = _scopes!.CreateAsyncScope();
             var epicQuerier = scope.ServiceProvider.GetRequiredService<EpicQuerier>();
-            var direct = await epicQuerier.GetEpicNumberForIssueAsync(projectId, issueNumber.Value).ConfigureAwait(false);
+            var direct = await epicQuerier.GetEpicNumberForIssueAsync(context.ProjectId, context.IssueNumber).ConfigureAwait(false);
             if (direct is not null) epicNumbers.Add(direct.Value);
             if (includePrerequisiteLookup)
             {
                 var dependent = await epicQuerier
-                    .GetEpicNumbersDependentOnPrerequisiteAsync(projectId, issueNumber.Value)
+                    .GetEpicNumbersDependentOnPrerequisiteAsync(context.ProjectId, context.IssueNumber)
                     .ConfigureAwait(false);
                 foreach (var number in dependent) epicNumbers.Add(number);
             }
@@ -343,17 +335,9 @@ internal sealed class EpicProgressRecomputeDispatcher
 
         foreach (var epicNumber in epicNumbers)
         {
-            var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epicNumber)));
+            var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(context.ProjectId, epicNumber)));
             await grain.RecomputeProgressAsync().ConfigureAwait(false);
         }
-    }
-
-    internal static int? TryReadIssueNumber(IReadOnlyDictionary<string, string> extensions)
-    {
-        return extensions.TryGetValue(EventCatalog.Lineage.Issue, out var text)
-            && int.TryParse(text, out var number)
-                ? number
-                : null;
     }
 }
 
@@ -381,23 +365,15 @@ internal sealed class EpicEventRecomputeDispatcher
         string evtType,
         CancellationToken ct)
     {
-        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
+        if (!CloudEventLineage.TryReadEpicContext(extensions, out var context))
         {
             _log.LogDebug(
-                "{EvtType} event missing projectid extension; skipping (event {EventId})",
-                evtType, eventId);
-            return;
-        }
-        if (!extensions.TryGetValue(EventCatalog.Lineage.Epic, out var epicNumberText)
-            || !int.TryParse(epicNumberText, out var epicNumber))
-        {
-            _log.LogDebug(
-                "{EvtType} event missing epic extension; skipping (event {EventId})",
+                "{EvtType} event missing canonical Epic context; skipping (event {EventId})",
                 evtType, eventId);
             return;
         }
 
-        var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epicNumber)));
+        var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(context.ProjectId, context.EpicNumber)));
         await grain.RecomputeProgressAsync().ConfigureAwait(false);
     }
 }

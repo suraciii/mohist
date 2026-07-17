@@ -23,17 +23,14 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
 
     public async Task HandleAsync(CloudEvent<IssueWorkStarted> evt, CancellationToken ct)
     {
-        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
-            || string.IsNullOrWhiteSpace(projectId)
-            || !evt.Extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
+        if (!CloudEventLineage.TryReadIssueContext(evt, out var context))
         {
             throw new InvalidOperationException($"IssueWorkStarted event '{evt.Id}' has no project-scoped issue number.");
         }
 
         await using var scope = _scopes.CreateAsyncScope();
         var issues = scope.ServiceProvider.GetRequiredService<IIssueStore>();
-        var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(context.ProjectId, context.IssueNumber)));
         if (issue is null
             || issue.Status != Mohist.Server.Issue.Domain.IssueStatus.InProgress
             || !string.Equals(issue.WorkflowRunId, evt.Data.WorkflowRunId, StringComparison.Ordinal))

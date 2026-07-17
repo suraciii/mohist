@@ -24,17 +24,14 @@ public sealed class IssueEpicChangedHandler : ICloudEventHandler<IssueEpicChange
 
     public async Task HandleAsync(CloudEvent<IssueEpicChanged> evt, CancellationToken ct)
     {
-        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
-            || string.IsNullOrWhiteSpace(projectId)
-            || !evt.Extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueText)
-            || !int.TryParse(issueText, out var issueNumber))
+        if (!CloudEventLineage.TryReadIssueContext(evt, out var context))
         {
             throw new InvalidOperationException($"IssueEpicChanged event '{evt.Id}' has no project-scoped issue number.");
         }
 
         await using var scope = _scopes.CreateAsyncScope();
         var issues = scope.ServiceProvider.GetRequiredService<IIssueStore>();
-        var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(context.ProjectId, context.IssueNumber)));
         if (issue is null) return;
 
         var epicNumbers = new HashSet<int>();
@@ -43,7 +40,7 @@ public sealed class IssueEpicChangedHandler : ICloudEventHandler<IssueEpicChange
         Add(epicNumbers, issue.EpicNumber);
         foreach (var epicNumber in epicNumbers)
         {
-            var epic = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epicNumber)));
+            var epic = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(context.ProjectId, epicNumber)));
             await epic.RecomputeProgressAsync();
         }
 

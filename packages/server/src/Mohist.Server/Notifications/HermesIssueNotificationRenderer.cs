@@ -28,6 +28,7 @@ public sealed class HermesIssueNotificationRenderer
             draft.OccurredAt,
             draft.ProjectId,
             draft.IssueNumber,
+            draft.EpicNumber,
             draft.IssueTitle,
             draft.WorkflowRunId,
             draft.Stage,

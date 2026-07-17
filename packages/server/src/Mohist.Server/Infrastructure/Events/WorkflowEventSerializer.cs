@@ -49,18 +49,6 @@ internal static class WorkflowEventSerializer
             : throw new InvalidOperationException($"No CloudEvents type for {variant.GetType().Name}");
     }
 
-    /// <summary>
-    /// Extract the workflow run id (source) and the issue number subject
-    /// from a workflow run event source URI.
-    /// </summary>
-    public static (string WorkflowRunId, string? IssueNumber) ExtractContextFromSource(string source)
-    {
-        var prefix = "/mohist/workflow-runs/";
-        if (!source.StartsWith(prefix, StringComparison.Ordinal))
-            return (source, null);
-        return (source[prefix.Length..], null);
-    }
-
     public static JsonElement ToData(WorkflowEvent payload) =>
         JsonSerializer.SerializeToElement(Unwrap(payload), JsonOptions);
 

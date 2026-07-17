@@ -536,3 +536,45 @@ ArchTests pass (**27**), and the server build has zero errors. A full SpecTests 
   `IssueRebaseApi_QueuesWorkflowTask` conflict; the isolated retry and complete rerun passed.
 - Final post-verification normalization of optional workflow Issue/Epic numbers (non-positive
   values omitted) passed the server build and **17** focused WorkflowSession/AgentSession specs.
+
+## T-008 implementation follow-up
+
+- Inbox and Hermes now resolve Project + Issue number, and optional Epic number, from canonical
+  envelope extensions. Workflow-run annotations and source URIs are no longer used to choose the
+  target issue. Inbox still snapshots the current Issue title, while its persisted hint inherits
+  only canonical optional envelope context.
+- Stage lock release and subscription response prompts read `workflowrunid` and `stage` from
+  envelope extensions. Runner terminal-status routing also uses the envelope workflow-run id;
+  source-URI extraction helpers were removed from current consumers.
+- Project event feed workflow identity is read from stored envelope extensions instead of current
+  Issue/WorkflowRun state. Workflow-origin session projections carry issue and epic numbers when
+  present, including synthetic session lifecycle entries. The API exposes `epicNumber` alongside
+  `issueNumber`.
+- Workflow profile context prefers the WorkflowRun's canonical Project + Issue columns and keeps
+  the crash-window lookup through the owning Issue's canonical Project + number state until the
+  durable WorkflowRun row exists. No random Issue/Epic id or legacy lineage key is involved.
+  Payloads remain unchanged and are still used only for display/audit fields such as Hermes failure
+  text and Issue event run id.
+- Added envelope disagreement coverage for Inbox, Hermes, response prompts, and project events,
+  plus canonical lineage parser tests. Focused UnitTests and consumer SpecTests pass after the
+  fixture migration.
+
+## T-008 final reconciliation (2026-07-17)
+
+- Centralized current-consumer parsing in `CloudEventLineage`. Typed and untyped CloudEvents now
+  share positive-number validation for `projectid` + `issue` or `projectid` + `epic`; invalid or
+  missing context is skipped/rejected instead of being interpreted as an identity.
+- Issue completion/start, IssueEpicChanged, Epic recompute reactions, and Agent subscription
+  project selection now use the canonical envelope helper. Epic reactions may still re-read Issue
+  to derive current affiliation before commanding Epic, but no payload or source URI supplies the
+  target identity.
+- Project event feed workflow and persisted AgentSession event rows no longer fall back to current
+  WorkflowRun/session metadata when envelope issue/epic context is absent. Synthetic opened/closed
+  session lifecycle entries intentionally use the session's own workflow-origin labels because they
+  are synthesized without a stored CloudEvent. Runner projection reads only canonical `runnerid`.
+- Hermes uses envelope `stage` for approval notifications and envelope Issue/Epic context. Issue
+  event workflow-run IDs and failure messages remain payload display/audit data; payload JSON is
+  never mutated. Inbox hint extensions continue to inherit only canonical optional lineage keys.
+- Added regression coverage for session envelope disagreement/missing context, Hermes stage
+  disagreement, typed lineage parsing, and Epic context validation. Final server verification:
+  UnitTests **1470 passed**, SpecTests **2754 passed**, ArchTests **27 passed**.

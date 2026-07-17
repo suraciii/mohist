@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Inbox;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
@@ -30,23 +29,14 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <see cref="StageApprovalRequested"/>, <see cref="IssueWorkStarted"/>,
 /// <see cref="IssueCompleted"/>) have disjoint shapes and we only
 /// need a small number of fields from each. Branches dispatch through
-/// <see cref="WorkflowStageLockReleaseHandler.ExtractWorkflowRunId"/>
+/// canonical envelope extensions
 /// for workflow events, or read the issue-event
 /// <c>projectid</c>/<c>issue</c> extensions
 /// stamped by <c>IssueStore</c> when it appends the event row.
 ///
-/// Identity resolution starts from event metadata, then validates it
-/// against the loaded issue before writing an inbox item:
-/// <list type="bullet">
-///   <item>Workflow events → <see cref="IWorkflowRunStore.LoadAsync"/> reads
-///         <see cref="WorkflowRunMetadata.Annotations"/> for
-///         <c>projectId</c>/<c>issueNumber</c> — the same
-///         source <c>WorkflowGrain.GetProjectId</c> uses.</item>
-///   <item>Issue events → extensions identify the candidate issue; the
-///         loaded issue is the source of truth for project and number.
-///         The issue number is read from the canonical <c>issue</c>
-///         extension stamped by IssueStore.</item>
-/// </list>
+/// Identity resolution starts from the canonical envelope extensions, then
+/// validates it against the loaded issue before writing an inbox item. The
+/// payload and source URI are never used to select the target issue.
 ///
 /// Idempotency is delegated to <see cref="InboxStore.InsertAsync"/>:
 /// the source plus event id index dedupes replays at the store level,
@@ -102,14 +92,10 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
 
         var resolved = evt.Type switch
         {
-            EventCatalog.ReverseDns.WorkflowRunFailed =>
-                await ResolveFromWorkflowRunAsync(evt, scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>(), ct).ConfigureAwait(false),
-            EventCatalog.ReverseDns.StageApprovalRequested =>
-                await ResolveFromWorkflowRunAsync(evt, scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>(), ct).ConfigureAwait(false),
-            EventCatalog.ReverseDns.IssueWorkStarted =>
-                ResolveFromIssueExtensions(evt),
-            EventCatalog.ReverseDns.IssueCompleted =>
-                ResolveFromIssueExtensions(evt),
+            EventCatalog.ReverseDns.WorkflowRunFailed => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.StageApprovalRequested => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.IssueWorkStarted => ResolveFromEnvelope(evt),
+            EventCatalog.ReverseDns.IssueCompleted => ResolveFromEnvelope(evt),
             _ => null,
         };
 
@@ -170,57 +156,11 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         await transaction.CommitAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task<ResolvedIdentity?> ResolveFromWorkflowRunAsync(CloudEvent evt, IWorkflowRunStore workflowRunStore, CancellationToken ct)
+    private static ResolvedIdentity? ResolveFromEnvelope(CloudEvent evt)
     {
-        var workflowRunId = WorkflowStageLockReleaseHandler.ExtractWorkflowRunId(evt.Source.ToString());
-        if (string.IsNullOrEmpty(workflowRunId))
-        {
-            _log.LogDebug(
-                "Inbox projection skipped: workflow event {EventId} source {Source} has no workflow run id",
-                evt.Id, evt.Source);
-            return null;
-        }
-
-        var run = await workflowRunStore.LoadAsync(workflowRunId, ct).ConfigureAwait(false);
-        if (run is null)
-        {
-            _log.LogDebug(
-                "Inbox projection skipped: workflow run {WorkflowRunId} for event {EventId} not found",
-                workflowRunId, evt.Id);
-            return null;
-        }
-
-        var annotations = run.Metadata?.Annotations;
-        if (annotations is null
-            || !annotations.TryGetValue("projectId", out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !annotations.TryGetValue("issueNumber", out var issueNumberText) || string.IsNullOrWhiteSpace(issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
-        {
-            _log.LogDebug(
-                "Inbox projection skipped: workflow run {WorkflowRunId} for event {EventId} has no projectId/issueNumber annotations",
-                workflowRunId, evt.Id);
-            return null;
-        }
-
-        return new ResolvedIdentity(projectId, issueNumber);
-    }
-
-    private static ResolvedIdentity? ResolveFromIssueExtensions(CloudEvent evt)
-    {
-        var extensions = evt.Extensions;
-        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId))
-        {
-            return null;
-        }
-
-        if (!extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
-            || string.IsNullOrWhiteSpace(issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
-        {
-            return null;
-        }
-
-        return new ResolvedIdentity(projectId, issueNumber);
+        return CloudEventLineage.TryReadIssueContext(evt, out var context)
+            ? new ResolvedIdentity(context.ProjectId, context.IssueNumber)
+            : null;
     }
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)

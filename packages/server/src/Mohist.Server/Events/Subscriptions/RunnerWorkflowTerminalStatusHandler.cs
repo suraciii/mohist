@@ -56,11 +56,11 @@ public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
         if (!TryResolve(evt.Type, out var status))
             return;
 
-        var (workflowRunId, _) = WorkflowEventSerializer.ExtractContextFromSource(evt.Source.ToString());
+        var workflowRunId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId);
         if (string.IsNullOrWhiteSpace(workflowRunId))
         {
             _log.LogDebug(
-                "Terminal status handler: cloud event {EventId} has empty source, skipping",
+                "Terminal status handler: cloud event {EventId} has no workflow run extension, skipping",
                 evt.Id);
             return;
         }

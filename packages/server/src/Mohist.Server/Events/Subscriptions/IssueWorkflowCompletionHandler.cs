@@ -52,27 +52,17 @@ public sealed class IssueWorkflowCompletionHandler : ICloudEventHandler
 
     public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        var (workflowRunId, _) = WorkflowEventSerializer.ExtractContextFromSource(evt.Source.ToString());
-        if (string.IsNullOrWhiteSpace(workflowRunId))
+        var workflowRunId = CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId);
+        if (string.IsNullOrWhiteSpace(workflowRunId)
+            || !CloudEventLineage.TryReadIssueContext(evt, out var context))
         {
             _log.LogDebug(
-                "Workflow-run completed handler: cloud event {EventId} has empty source, skipping",
+                "Workflow-run completed handler: cloud event {EventId} has no canonical workflow or issue context, skipping",
                 evt.Id);
             return;
         }
 
-        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
-            || string.IsNullOrWhiteSpace(projectId)
-            || !evt.Extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
-        {
-            _log.LogDebug(
-                "Workflow-run completed handler: cloud event {EventId} missing project-scoped issue extension, skipping ({WorkflowRunId})",
-                evt.Id, workflowRunId);
-            return;
-        }
-
-        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(context.ProjectId, context.IssueNumber)));
         await grain.CompleteWorkAsync(workflowRunId).ConfigureAwait(false);
     }
 }

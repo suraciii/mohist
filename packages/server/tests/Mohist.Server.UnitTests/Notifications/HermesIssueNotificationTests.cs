@@ -101,6 +101,53 @@ public sealed class HermesIssueNotificationTests
     }
 
     [Fact]
+    public async Task IssueEvent_RoutesByEnvelopeAndPreservesPayloadWorkflowRunId()
+    {
+        var fixture = CreateFixture();
+        var payload = new IssueCompleted("payload-run");
+        var evt = new CloudEvent(
+            id: "evt-envelope-context",
+            source: new Uri("/mohist/projects/proj_1/issues/99", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
+            data: JsonSerializer.SerializeToElement(payload, CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_1",
+                [EventCatalog.Lineage.Issue] = "42",
+                [EventCatalog.Lineage.Epic] = "7",
+            });
+
+        await fixture.Handler.HandleAsync(evt, CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        var sent = Assert.Single(fixture.Client.Sent);
+        Assert.Equal(42, sent.IssueNumber);
+        Assert.Equal(7, sent.EpicNumber);
+        Assert.Equal("payload-run", sent.WorkflowRunId);
+        Assert.Equal("payload-run", evt.Data!.Value.GetProperty("workflowRunId").GetString());
+    }
+
+    [Fact]
+    public async Task ApprovalRequested_UsesEnvelopeStageWithoutMutatingPayload()
+    {
+        var fixture = CreateFixture();
+        var payload = new StageApprovalRequested("payload-stage");
+        var evt = WorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested,
+            "run_1",
+            payload,
+            envelopeStage: "envelope-stage");
+
+        await fixture.Handler.HandleAsync(evt, CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        var sent = Assert.Single(fixture.Client.Sent);
+        Assert.Equal("envelope-stage", sent.Stage);
+        Assert.Equal("payload-stage", evt.Data!.Value.GetProperty("stage").GetString());
+    }
+
+    [Fact]
     public async Task IssueStarted_IsDisabledByDefaultAndCanBeEnabled()
     {
         var defaultFixture = CreateFixture();
@@ -284,9 +331,10 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.StageApprovalRequested,
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
-            "proj_1",
-            42,
-            "Title",
+             "proj_1",
+             42,
+             null,
+             "Title",
             "run_1",
             "plan",
             null,
@@ -363,13 +411,31 @@ public sealed class HermesIssueNotificationTests
         return new NotificationFixture(handler, client, dispatcher, issues, workflowRuns, provider);
     }
 
-    private static CloudEvent WorkflowEvent<T>(string type, string workflowRunId, T data) where T : class =>
-        new(
+    private static CloudEvent WorkflowEvent<T>(
+        string type,
+        string workflowRunId,
+        T data,
+        string? envelopeStage = null) where T : class
+    {
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [EventCatalog.Lineage.ProjectId] = "proj_1",
+            [EventCatalog.Lineage.Issue] = "42",
+            [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+        };
+        if (envelopeStage is not null)
+            extensions[EventCatalog.Lineage.Stage] = envelopeStage;
+        else if (data is StageApprovalRequested approval)
+            extensions[EventCatalog.Lineage.Stage] = approval.Stage;
+
+        return new(
             id: "evt_" + type.Replace(".", "_", StringComparison.Ordinal),
             source: new Uri("/mohist/workflow-runs/" + workflowRunId, UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
-            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions));
+            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
+            extensions: extensions);
+    }
 
     private static CloudEvent IssueEvent<T>(string type, T data) where T : class =>
         new(
@@ -415,9 +481,10 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.IssueCompleted,
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
-            "proj_1",
-            42,
-            "Title",
+             "proj_1",
+             42,
+             null,
+             "Title",
             "run_1",
             null,
             null,
