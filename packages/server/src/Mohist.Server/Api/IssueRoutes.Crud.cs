@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -80,22 +81,36 @@ public static partial class IssueRoutes
 
             var counter = grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id));
             var number = await counter.NextAsync();
-            var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
+            var issueId = $"issue_{Guid.NewGuid():N}";
+            var commandId = $"create:{project.Id}:{issueId}";
+
+            // issue-417 T-005: route the create through the
+            // Project-scoped coordinator so it serializes against the
+            // matching Project repository removal. The coordinator
+            // resolves the canonical name, captures the issue's
+            // pre-existing revision (0 for a fresh slot), fences the
+            // command, and invokes the idempotent Issue participant.
+            var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+            IssueRepositoryBindingResult coordinatorResult;
             try
             {
-                await issueGrain.CreateAsync(
-                    project.Id,
-                    number,
-                    req.Title,
-                    req.Body,
-                    req.Labels,
-                    req.Priority,
-                    resolution.Repository!.Name,
-                    req.Risk,
-                    req.IsDraft ?? true,
-                    req.AttachmentIds,
-                    requestedWorkflowProfileId,
-                    req.PrerequisiteNumbers);
+                coordinatorResult = await coordinator.CreateIssueAsync(
+                    new RepositoryCommandPayload.Create(
+                        ProjectId: project.Id,
+                        IssueNumber: number,
+                        IssueId: issueId,
+                        RepositoryName: resolution.Repository!.Name,
+                        Title: req.Title,
+                        Body: req.Body,
+                        Labels: req.Labels,
+                        Priority: req.Priority,
+                        Risk: req.Risk,
+                        IsDraft: req.IsDraft ?? true,
+                        AttachmentIds: req.AttachmentIds,
+                        WorkflowProfileId: requestedWorkflowProfileId,
+                        PrerequisiteNumbers: req.PrerequisiteNumbers),
+                    commandId: commandId,
+                    expectedRevision: null);
             }
             catch (AttachmentLimitException ex)
             {
@@ -120,7 +135,26 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(ex.Message, code);
             }
 
-            await ApplyCreateModelMetadataAsync(issueProfileManager, project.Id, number, req);
+            // Coordinator-level results are mapped onto the same HTTP
+            // envelopes the direct IssueGrain.CreateAsync throws so
+            // the route surface stays uniform for callers.
+            if (coordinatorResult.Code == IssueRepositoryBindingResultCode.RepositoryUnknown)
+                return ApiResults.BadRequest(coordinatorResult.Message ?? $"Repository '{resolution.Repository!.Name}' is not declared", "repository_not_found");
+            if (coordinatorResult.Code == IssueRepositoryBindingResultCode.RepositoryStaleRevision)
+                return ApiResults.Conflict(coordinatorResult.Message ?? "Repository revision is stale", "repository_stale_revision");
+
+            try
+            {
+                await ApplyCreateModelMetadataAsync(issueProfileManager, project.Id, number, req);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded");
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_attachment");
+            }
 
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
@@ -144,6 +178,7 @@ public static partial class IssueRoutes
             UpdateIssueRequest req,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
+            IssueRepositoryResolver repositoryResolver,
             IssueWorkflowProfileRegistry profileRegistry,
             ProjectWorkflowProfileManager projectProfileManager,
             IssueWorkflowProfileManager issueProfileManager) =>
@@ -180,16 +215,102 @@ public static partial class IssueRoutes
             var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            // Repository reassignment: when present in the PATCH body, the
-            // grain applies it as the first transaction step (before any
-            // other field is touched) and rejects post-start, unknown, and
-            // stale-revision changes with typed conflicts. Pre-validation
-            // here matches the create path so unknown names fail with the
-            // same HTTP code as unknown workflow profiles.
-            var repositoryUpdateName = (string?)null;
-            if (req.Contains(nameof(UpdateIssueRequest.RepositoryName)))
-                repositoryUpdateName = req.RepositoryName;
+            var issueId = await ResolveIssueIdAsync(issueIdentityResolver, project.Id, number);
+            if (issueId is null) return ApiResults.NotFound($"Issue #{number} not found");
 
+            // issue-417 T-005: a repository-bearing PATCH must be routed
+            // through the Project-scoped coordinator so the complete
+            // aggregate PATCH is fenced as a single command — an ambiguous
+            // result cannot commit the repository reassignment while
+            // dropping sibling Issue fields.
+            if (req.Contains(nameof(UpdateIssueRequest.RepositoryName)))
+            {
+                var repositoryUpdateName = req.RepositoryName;
+                if (string.IsNullOrWhiteSpace(repositoryUpdateName))
+                {
+                    return ApiResults.BadRequest(
+                        "Repository name must not be empty when present in the PATCH body",
+                        "repository_not_found");
+                }
+
+                var resolution = repositoryResolver.Resolve(project, repositoryUpdateName);
+                if (resolution.HasProblem)
+                {
+                    return ApiResults.BadRequest(
+                        resolution.Problem!.Message,
+                        IssueRepositoryResolutionHelpers.RepositoryProblemCodeToApiCode(resolution.Problem.Code));
+                }
+                var canonicalRepositoryName = resolution.Repository!.Name;
+
+                var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+                IssueRepositoryBindingResult coordinatorResult;
+                try
+                {
+                    coordinatorResult = await coordinator.ChangeRepositoryAsync(
+                        new RepositoryCommandPayload.Change(
+                            ProjectId: project.Id,
+                            IssueId: issueId,
+                            IssueNumber: number,
+                            RepositoryName: canonicalRepositoryName,
+                            Body: req.Body,
+                            Labels: req.Labels,
+                            Priority: req.Priority,
+                            IsDraft: req.IsDraft,
+                            AttachmentIds: req.AttachmentIds,
+                            WorkflowProfileId: workflowProfileIdForUpdate,
+                            PresentFields: req.Fields,
+                            Title: req.Title),
+                        commandId: $"change:{project.Id}:{issueId}:{Guid.NewGuid():N}",
+                        expectedRevision: null);
+                }
+                catch (IssueDomain.WorkflowProfileLockedException ex)
+                {
+                    return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ApiResults.Conflict(ex.Message);
+                }
+                catch (AttachmentLimitException ex)
+                {
+                    return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded");
+                }
+                catch (AttachmentValidationException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "invalid_attachment");
+                }
+
+                switch (coordinatorResult.Code)
+                {
+                    case IssueRepositoryBindingResultCode.Applied:
+                    case IssueRepositoryBindingResultCode.AlreadyApplied:
+                        break;
+                    case IssueRepositoryBindingResultCode.RepositoryUnknown:
+                        return ApiResults.BadRequest(
+                            coordinatorResult.Message ?? "Repository is not declared",
+                            "repository_not_found");
+                    case IssueRepositoryBindingResultCode.RepositoryLocked:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Target repository is locked",
+                            "repository_locked");
+                    case IssueRepositoryBindingResultCode.RepositoryStaleRevision:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Repository revision is stale",
+                            "repository_stale_revision");
+                    default:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Repository change rejected");
+                }
+
+                await ApplyUpdateModelMetadataAsync(issueProfileManager, issueId, req, req.Raw);
+
+                var info = await issuesQuery.GetAsync(project.Id, number);
+                return ApiResults.Ok(info);
+            }
+
+            // Non-repository PATCHes remain on the direct Issue path
+            // (T-001 / T-003): the coordinator only fences the four
+            // binding-sensitive commands.
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
@@ -200,8 +321,7 @@ public static partial class IssueRoutes
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,
-                    WorkflowProfileId: workflowProfileIdForUpdate,
-                    RepositoryName: repositoryUpdateName));
+                    WorkflowProfileId: workflowProfileIdForUpdate));
             }
             catch (IssueDomain.WorkflowProfileLockedException ex)
             {
@@ -234,8 +354,8 @@ public static partial class IssueRoutes
 
             await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
 
-            var info = await issuesQuery.GetAsync(project.Id, number);
-            return ApiResults.Ok(info);
+            var patched = await issuesQuery.GetAsync(project.Id, number);
+            return ApiResults.Ok(patched);
         });
     }
 

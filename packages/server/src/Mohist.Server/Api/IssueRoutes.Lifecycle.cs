@@ -3,6 +3,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
@@ -110,20 +111,49 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
-            if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
+            var issue = await issuesQuery.GetAsync(project.Id, number);
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            // issue-417 T-005: reopen enters through the Project-scoped
+            // coordinator so repository removal cannot race into an
+            // orphan reopen. The coordinator fences the reopen and
+            // invokes the idempotent Issue participant, which
+            // re-validates the retained target declaration before
+            // committing the cancelled→backlog transition.
+            var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+            IssueRepositoryBindingResult coordinatorResult;
             try
             {
-                await grain.ReopenWithTargetCheckAsync();
-                return ApiResults.Ok();
-            }
-            catch (IssueRepositoryMissingOnReopenException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "repository_missing_on_reopen");
+                coordinatorResult = await coordinator.ReopenAsync(
+                    new RepositoryCommandPayload.Reopen(
+                        ProjectId: project.Id,
+                        IssueId: string.Empty,
+                        IssueNumber: number,
+                        RepositoryName: string.Empty),
+                    commandId: $"reopen:{project.Id}:{number}:{Guid.NewGuid():N}",
+                    expectedRevision: null);
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
+            }
+
+            switch (coordinatorResult.Code)
+            {
+                case IssueRepositoryBindingResultCode.Applied:
+                case IssueRepositoryBindingResultCode.AlreadyApplied:
+                    return ApiResults.Ok();
+                case IssueRepositoryBindingResultCode.RepositoryMissingOnReopen:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? "Target repository is no longer declared",
+                        "repository_missing_on_reopen");
+                case IssueRepositoryBindingResultCode.RepositoryStaleRevision:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? "Repository revision is stale",
+                        "repository_stale_revision");
+                default:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? "Reopen rejected");
             }
         });
 

@@ -13,6 +13,21 @@
   协调者 grain 的命名沿用设计 D2 的 `IssueRepositoryCoordinator` / `IIssueRepositoryCoordinatorGrain`。
 - 设计文档与 OpenSpec `design.md`/`tasks.json` 同步指代：两者都引用同一个
   `IssueRepositoryCoordinatorGrain` 名称，未来 T-005 的实现与命名要继续保持一致。
+- T-005 落地：协调者 grain 跑 Orleans `[PersistentState("coordinator")]`
+  + 自定义 `RepositoryCoordinatorState` 记录，fence 是一个
+  `PendingRepositoryCommand(CommandId, Kind, RepositoryName, ExpectedRevision, PayloadJson)`
+  字段；participant 走 `IIssueBindingParticipant` /
+  `IProjectBindingParticipant` 这两个 narrow 接口，arch test
+  `BindingParticipantInterfaces_OnlyConsumedByCoordinator` 拒绝
+  其他任何生产代码直接依赖它们。
+- T-005 测试约定：两个 `static` 探针
+  (`CoordinatorProbe.AfterFencePersistedAsync` /
+  `BindingParticipantProbe.BeforeParticipantAsync`)，生产代码
+  不调用、保持 zero-overhead；测试用
+  `Install((kind, pid, cmd) => ...)` 注入回调。
+  `SignalAndBlockAsync` 一边 `TrySetResult` 一边 `await release`
+  是「race 起点 + 等测试释放」的标准写法——避免再用
+  `Task.Delay` / `Task.Yield`（被 BannedApiAnalyzer 禁）。
 
 ## Notes
 
@@ -196,4 +211,78 @@
   911 CLI + 1431 unit（含 8 个新增 RepositoryPolicy alias 用例）
   + 27 arch + 2823 spec（含 18 个新增 RepositoryDeletionProtectionSpecs
   + 3 个新增 ProjectApiSpecs alias / in-use case）+ 1016 runner，
+  0 warning 0 error。
+
+## T-005 notes (IssueRepositoryCoordinator)
+
+- 协调者 grain 走 Orleans `[PersistentState]`：key 用 `coordinator`，
+  state 类型是 `RepositoryCoordinatorState { Pending? }`。一个
+  Project 一个 coordinator（grain key = ProjectId），非 reentrant
+  是 Orleans 默认行为，所以同一 Project 的四个 sensitive 命令
+  串行执行。
+- T-003 已经在 `Issue` aggregate 落了 `RepositoryBindingRevision` +
+  `IssueRepositoryBindingReceipt`、在 `ProjectRow` 落了
+  `RepositoryRevision` + `LastRepositoryCommandJson`；T-004 已经
+  在 `ProjectGrain` 落了 `RemoveRepositoryWithReceiptAsync`。
+  T-005 只需要把它们连起来，所以 `IssueGrain` 只补 4 个方法
+  （`CreateWithReceiptAsync` / `ChangeRepositoryWithReceiptAsync` /
+  `ReopenWithReceiptAsync` / `GetRepositoryBindingRevisionAsync`），
+  `ProjectGrain` 只补一个 `GetRepositoryBindingRevisionAsync`。
+  补完以后 `IssueCounterGrain` 那套接口的 `commandId` / `expectedRevision`
+  才真正派上用场。
+- `IssueBindingParticipantProxy` 早就存在，T-005 直接复用；
+  coordinator 通过 `IGrainFactory.GetGrain<IIssueBindingParticipant>(issueId)`
+  拿到它，再让 proxy 去调 `IIssueGrain` 的 `*WithReceiptAsync`。
+  这样 coordinator 永远不直接 `GetGrain<IIssueGrain>`，arch test
+  才能强制"只 coordinator 依赖窄 participant 接口"。
+- fence 写入走 `_state.WriteStateAsync()`（Orleans ADO.NET
+  grain storage），配合 projector 已经有的 `Issues` 走 DB 完全
+  解耦——fence 只关心"有命令在飞"，不关心是 create / change /
+  reopen / remove 哪一种。
+- 协调者使用 `RepositoryCommandPayload`（`[GenerateSerializer]` 标
+  的 union record），序列化走项目内 `JSON.Options`，由
+  `RepositoryCommandPayloadCodec.Serialize` 把 `{kind, data}` 包成
+  envelope，反序列化再按 kind 选 record 类型。这样 fence 落库
+  的 JSON 对每个 kind 是自描述的，replay 时不需要外部
+  schema 知识。
+- 测试钩子：T-005 引入两个 test-only 静态探针
+  (`CoordinatorProbe` / `BindingParticipantProbe`)，调用路径
+  上 `Install(...)` 注入回调。生产代码完全不走这两个钩子，
+  `_hook == null` 时是 zero-overhead 路径；测试代码靠它们
+  await 任意一点（fence 写完后 / participant 调用前），不用
+  任何 `Task.Delay` 也能控制 race。
+- ArchTest：`BindingParticipantInterfaces_OnlyConsumedByCoordinator`
+  规则既排除 `Mohist.Server.*.Grains.Coordinator` 命名空间外
+  的生产类，又排除 proxy 本身（proxy 依赖 participant 接口是
+  by design），任何新代码想直接拿 participant 接口都被这一条
+  拒掉。
+- 几个测试期间踩到的坑：
+  - `Task.Delay` / `Task.Yield` / `CancellationTokenSource(TimeSpan)`
+    在 server 测试里被 BannedApiAnalyzer 禁了，TestWait 的
+    `ForAsync(condition: ...)` 也不支持 `Task` 探针（纯
+    `bool` 轮询）。T-005 改用 `Task` 直接 await + `TestWait`
+    自带的 budget；探针 `SignalAndBlockAsync` 一边
+    `TrySetResult` 一边 `await release`，所以挂起点本身就
+    不会 spin。
+  - 在 probe 测试里，先 `SetResult(release)` 再 `await
+    reopenTask` 容易死锁：silo 线程在 await release，
+    test 线程在 await reopenTask，谁也推不动谁。改成
+    「先 release、再 await」就 OK。Create / Reopen 两个 race
+    测试都按这个顺序写。
+  - Orleans 缺 `[GenerateSerializer]` 时第一次走 grain
+    call 会抛 `Could not find a copier for type
+    RepositoryCommandPayload+Create`。T-003 没补这个是因为
+    那时 `RepositoryCommandPayload` 还没被 coordinator 用
+    上；T-005 给 abstract record + 4 个 sealed record 全
+    加上了 attribute。
+- T-005 的 6 个新 spec 全部跑过：
+  - `Create_RaceDelete_FirstWins_DeleteWaits_AndBlocksBecauseBindingExists`
+  - `Reassign_RaceDelete_ReassignBlockedByPostStart_LeavesBindingUnchanged`
+  - `Reopen_RaceDelete_DeleteBlocks_BecauseReopenRestoresBinding`
+  - `LostResponse_SameCommandReplay_ReturnsAlreadyAppliedWithoutReMutation`
+  - `DeactivationAfterParticipantCommit_ReplayReturnsAlreadyApplied`
+  - `RepositoryRemoval_WithNonTerminalIssue_ReturnsRepositoryInUseWithoutFence`
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1431 unit + 28 arch（+1 BindingParticipantInterfaces_OnlyConsumedByCoordinator）
+  + 2829 spec（+6 IssueRepositoryCoordinatorSpecs）+ 1016 runner，
   0 warning 0 error。

@@ -16,6 +16,7 @@ public interface IProjectGrain : IGrainWithStringKey
     Task<ProjectInfo?> RemoveRepositoryAsync(string repoName);
     Task<ProjectRepositoryRemovalOutcome> RemoveRepositoryWithReceiptAsync(string repoName, string commandId, long? expectedRevision);
     Task<ProjectInfo?> SetDefaultRepositoryAsync(string repoName);
+    Task<long> GetRepositoryBindingRevisionAsync();
     Task<ProjectVariablesBag?> GetVariablesAsync();
     Task<ProjectVariablesBag?> PatchVariableAsync(string name, JsonElement value);
     Task<ProjectVariablesBag?> DeleteVariableAsync(string name);

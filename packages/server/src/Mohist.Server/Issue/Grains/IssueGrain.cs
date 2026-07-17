@@ -465,6 +465,225 @@ public class IssueGrain : Grain, IIssueGrain
         await SaveIssueAsync();
     }
 
+    public async Task<Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(
+        string projectId,
+        int number,
+        string title,
+        string? body,
+        IReadOnlyDictionary<string, string>? labels,
+        string? priority,
+        string repositoryRef,
+        string issueId,
+        string? risk,
+        bool isDraft,
+        string[]? attachmentIds,
+        string? workflowProfileId,
+        int[]? prerequisiteNumbers,
+        string commandId,
+        long? expectedRevision)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryRef))
+            throw new IssueRepositoryUnknownException(repositoryRef ?? string.Empty);
+
+        if (_issue is not null)
+        {
+            // Receipt-match: a prior coordinator activation persisted this
+            // exact command, so replay the outcome without mutating state.
+            // The coordinator only issues Create with a non-null
+            // commandId/expectedRevision, so the absence of a matching
+            // receipt means a different command is reusing the same
+            // grain key — surface that as a fresh-failure conflict rather
+            // than silently allowing a duplicate.
+            if (_issue.LastRepositoryCommand is { } stored
+                && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+                && stored.Kind == "create"
+                && string.Equals(stored.RepositoryName, repositoryRef, StringComparison.Ordinal))
+            {
+                return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+            }
+            throw new InvalidOperationException(
+                $"Issue '{GrainKey}' already exists; cannot replay create command '{commandId}'");
+        }
+
+        var project = await GrainFactory.GetGrain<IProjectGrain>(projectId).GetAsync();
+        if (project is null)
+            throw new IssueRepositoryUnknownException(repositoryRef);
+        var match = project.GetRepository(repositoryRef);
+        if (match is null)
+            throw new IssueRepositoryUnknownException(repositoryRef);
+        var canonicalName = match.Name;
+
+        if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+        {
+            throw new UnknownWorkflowProfileException(workflowProfileId);
+        }
+
+        var issue = Domain.Issue.Create(
+            issueId,
+            projectId,
+            number,
+            title,
+            body,
+            labels,
+            priority ?? "p2",
+            canonicalName,
+            risk,
+            isDraft,
+            workflowProfileId,
+            commandId,
+            expectedRevision);
+
+        _issue = issue;
+
+        try
+        {
+            if (prerequisiteNumbers is { Length: > 0 })
+            {
+                foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+                {
+                    if (prerequisiteNumber == number)
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+                        throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                    if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    _issue!.AddPrerequisite(prerequisiteNumber);
+                }
+            }
+        }
+        catch
+        {
+            _issue = null;
+            throw;
+        }
+
+        await _attachmentService.ValidateIssueBindAsync(projectId, issue.Id, attachmentIds);
+        await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public async Task<Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(
+        IssueChangeRepositoryCommand command,
+        string commandId,
+        long? expectedRevision)
+    {
+        EnsureIssue();
+        if (_issue is null)
+            throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+
+        if (string.IsNullOrWhiteSpace(command.RepositoryName))
+            throw new IssueRepositoryUnknownException(command.RepositoryName ?? string.Empty);
+
+        if (_issue.LastRepositoryCommand is { } stored
+            && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+            && stored.Kind == "change"
+            && string.Equals(stored.RepositoryName, command.RepositoryName, StringComparison.Ordinal))
+        {
+            return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+        }
+
+        var project = await GrainFactory.GetGrain<IProjectGrain>(_issue.ProjectId).GetAsync();
+        if (project is null)
+            throw new IssueRepositoryUnknownException(command.RepositoryName);
+        var match = project.GetRepository(command.RepositoryName);
+        if (match is null)
+            throw new IssueRepositoryUnknownException(command.RepositoryName);
+        var canonicalName = match.Name;
+
+        // Apply the repository reassignment first so a lock / unknown /
+        // stale-revision failure leaves every other field untouched.
+        // ChangeRepository throws IssueRepositoryLockedException when
+        // HasWorkflowStarted is true, IssueRepositoryStaleRevisionException
+        // when expectedRevision mismatches the stored revision, and
+        // ArgumentException when the canonical name is empty.
+        _issue.ChangeRepository(canonicalName, commandId, expectedRevision);
+
+        var present = command.PresentFields ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal);
+        var hasTitle = present.Contains(nameof(command.Title));
+        var hasBody = present.Contains(nameof(command.Body));
+        var hasLabels = present.Contains(nameof(command.Labels));
+        var hasPriority = present.Contains(nameof(command.Priority));
+        var hasIsDraft = present.Contains(nameof(command.IsDraft));
+        var hasAttachments = present.Contains(nameof(command.AttachmentIds));
+        var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
+
+        if (hasWorkflowProfile && _issue.WorkflowRunId is not null)
+        {
+            throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
+        }
+
+        if (hasAttachments && command.AttachmentIds is not null)
+        {
+            await _attachmentService.ValidateIssueBindAsync(_issue.ProjectId, _issue.Id, command.AttachmentIds);
+        }
+
+        IReadOnlyDictionary<string, string>? labelsForUpdate = null;
+        if (hasLabels)
+        {
+            labelsForUpdate = command.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        _issue.Update(
+            hasTitle ? command.Title : null,
+            hasBody ? command.Body : null,
+            labelsForUpdate,
+            hasPriority ? command.Priority : null);
+
+        if (hasIsDraft && command.IsDraft.HasValue)
+            _issue.SetDraft(command.IsDraft.Value);
+
+        if (hasWorkflowProfile)
+        {
+            _issue.ReplaceWorkflowProfile(command.WorkflowProfileId);
+        }
+
+        await SaveIssueAsync();
+
+        if (hasAttachments)
+        {
+            if (command.AttachmentIds is null)
+            {
+                await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Id);
+            }
+            else
+            {
+                await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, command.AttachmentIds);
+            }
+        }
+
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public async Task<Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(
+        string commandId,
+        long? expectedRevision)
+    {
+        EnsureIssue();
+        if (_issue is null)
+            throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+
+        if (_issue.LastRepositoryCommand is { } stored
+            && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+            && stored.Kind == "reopen"
+            && string.Equals(stored.RepositoryName, _issue.RepositoryRef ?? string.Empty, StringComparison.Ordinal))
+        {
+            return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+        }
+
+        var targetExists = await ResolveReopenTargetExistsAsync();
+        _issue.Reopen(targetExists);
+        _issue.RecordRepositoryCommandReceipt(commandId, "reopen", expectedRevision);
+        await SaveIssueAsync();
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public Task<long> GetRepositoryBindingRevisionAsync()
+    {
+        if (_issue is null) return Task.FromResult(0L);
+        return Task.FromResult(_issue.RepositoryBindingRevision);
+    }
+
     public async Task UpdateFullAsync(UpdateIssueData data)
     {
         EnsureIssue();

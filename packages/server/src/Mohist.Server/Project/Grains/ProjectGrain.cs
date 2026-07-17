@@ -330,6 +330,13 @@ public class ProjectGrain : Grain, IProjectGrain
         return (true, row.RepositoryRevision, receipt);
     }
 
+    public async Task<long> GetRepositoryBindingRevisionAsync()
+    {
+        if (_project is null) return 0L;
+        var (hasRow, revision, _) = await ReadReceiptAsync();
+        return hasRow ? revision : 0L;
+    }
+
     private async Task<bool> PersistRepositoriesWithReceiptAsync(
         IReadOnlyList<RepositoryInfo> repositories,
         DateTimeOffset updatedAt,
