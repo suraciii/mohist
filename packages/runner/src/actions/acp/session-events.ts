@@ -243,7 +243,7 @@ export async function emitLivenessStatusEvent(context: ActionContext, state: { l
 }
 
 export function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
-  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.issueNumber != null ? String(context.issueNumber) : null, runtimeSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
+  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueNumber: context.issueNumber ?? null, runtimeSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
 }
 
 export function extractOutputPath(prompt: string) {

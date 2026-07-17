@@ -117,7 +117,7 @@ describe("WorkspaceManager.prepare", () => {
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
 
-    const workspace = await manager.prepare(work("wr-1", "issue-1"), new AbortController().signal)
+    const workspace = await manager.prepare(work("wr-1"), new AbortController().signal)
 
     expect(workspace).toEqual({
       path: join(runnerRoot, "mohist-local", "workspaces", "issue-9"),
@@ -128,7 +128,6 @@ describe("WorkspaceManager.prepare", () => {
     expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", workspace.path])
     expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "checkout", "-b", "mohist/run-wr-1", "origin/master"])
     expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
-      issueId: "issue-1",
       issueNumber: 9,
       workflowRunId: "wr-1",
     }, null, 2))
@@ -137,7 +136,7 @@ describe("WorkspaceManager.prepare", () => {
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
-    const item = work("wr-1", "issue-1")
+    const item = work("wr-1")
 
     const first = await manager.prepare(item, new AbortController().signal)
     await writeFile(join(first.path, "draft.txt"), "draft\n")
@@ -155,11 +154,11 @@ describe("WorkspaceManager.prepare", () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
 
-    const first = await manager.prepare(work("wr-old", "issue-same"), new AbortController().signal)
+    const first = await manager.prepare(work("wr-old"), new AbortController().signal)
     await writeFile(join(first.path, "stale.txt"), "old run data\n")
     gitRunner.calls.length = 0
 
-    const second = await manager.prepare(work("wr-new", "issue-same"), new AbortController().signal)
+    const second = await manager.prepare(work("wr-new"), new AbortController().signal)
 
     expect(second.path).toBe(first.path)
     expect(processModule.exists(join(second.path, "stale.txt"))).toBe(false)
@@ -170,7 +169,7 @@ describe("WorkspaceManager.prepare", () => {
   it("MissingBaseBranch_FailsBeforeClone", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
-    const item = work("wr-1", "issue-1", "does-not-exist")
+    const item = work("wr-1", "does-not-exist")
 
     await expect(manager.prepare(item, new AbortController().signal)).rejects.toThrow(/cannot be resolved/)
 
@@ -184,7 +183,7 @@ describe("WorkspaceManager.prepare", () => {
     const manager = new WorkspaceManager(runnerRoot)
     gitRunner.cloneResult = commandResult(1, "", "remote unavailable")
 
-    await expect(manager.prepare(work("wr-first", "issue-first"), new AbortController().signal)).rejects.toThrow(/git clone failed/)
+    await expect(manager.prepare(work("wr-first"), new AbortController().signal)).rejects.toThrow(/git clone failed/)
 
     expect(processModule.exists(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))).toBe(false)
   })
@@ -200,7 +199,7 @@ describe("WorkspaceManager.prepare", () => {
       timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
     }
 
-    await expect(manager.prepare(work("wr-timeout", "issue-timeout"), new AbortController().signal)).rejects.toMatchObject({
+    await expect(manager.prepare(work("wr-timeout"), new AbortController().signal)).rejects.toMatchObject({
       kind: "workspace-network-timeout",
       step: {
         name: "git-ls-remote",
@@ -225,7 +224,7 @@ describe("WorkspaceManager.prepare", () => {
       timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
     }
 
-    await expect(manager.prepare(work("wr-timeout", "issue-timeout"), new AbortController().signal)).rejects.toMatchObject({
+    await expect(manager.prepare(work("wr-timeout"), new AbortController().signal)).rejects.toMatchObject({
       name: "WorkspaceNetworkTimeoutError",
       step: {
         name: "git-clone",
@@ -241,7 +240,7 @@ describe("WorkspaceManager.prepare", () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
 
-    await manager.prepare(work("wr-1", "issue-1"), new AbortController().signal)
+    await manager.prepare(work("wr-1"), new AbortController().signal)
 
     expect(gitRunner.commandArgs().filter((args) => args.includes("worktree"))).toEqual([])
   })
@@ -250,7 +249,7 @@ describe("WorkspaceManager.prepare", () => {
     const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const suppliedWorkspacePath = join(runnerRoot, "supplied", "workspaces", "issue-9")
-    const item = work("wr-supplied", "issue-1")
+    const item = work("wr-supplied")
     ;(item.variables as Record<string, unknown>).workspace = { path: suppliedWorkspacePath }
     const manager = new WorkspaceManager(runnerRoot)
 
@@ -266,7 +265,7 @@ describe("WorkspaceManager.prepare recovery", () => {
   it("FailedCheckout_AbortsResidualOperationAndResetsRunBranch", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
-    const item = work("wr-recover", "issue-recover")
+    const item = work("wr-recover")
     const workspace = await manager.prepare(item, new AbortController().signal)
     gitRunner.calls.length = 0
     gitRunner.failedCheckouts = 1
@@ -284,7 +283,7 @@ describe("WorkspaceManager.prepare recovery", () => {
   it("CleanReentry_OnlyChecksOutRunBranch", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
-    const item = work("wr-clean", "issue-clean")
+    const item = work("wr-clean")
     const workspace = await manager.prepare(item, new AbortController().signal)
     gitRunner.calls.length = 0
 
@@ -312,7 +311,7 @@ describe("WorkspaceManager.slugify", () => {
   })
 })
 
-function work(workflowRunId: string, issueId: string, baseBranch = "master") {
+function work(workflowRunId: string, baseBranch = "master") {
   return {
     workflowRunId,
     workId: "proposal.1",
@@ -320,7 +319,7 @@ function work(workflowRunId: string, issueId: string, baseBranch = "master") {
     uses: "mohist/acp-agent",
     variables: {
       mohist: { runId: workflowRunId },
-      issue: { id: issueId, number: 9 },
+      issue: { number: 9 },
       project: { id: "project-1", name: "Mohist Local" },
       repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch },
       openspecChangeDir: "openspec/changes/issue-9",

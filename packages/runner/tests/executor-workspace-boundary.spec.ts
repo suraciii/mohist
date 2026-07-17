@@ -109,7 +109,7 @@ function connection(): Pick<ServerConnection, "uploadArtifact" | "report"> {
   } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
 }
 
-function buildWork(repo: string, workflowRunId: string, issueId: string, stage: string, workId: string): RenderedWorkItem {
+function buildWork(repo: string, workflowRunId: string, stage: string, workId: string): RenderedWorkItem {
   return {
     workflowRunId,
     workId,
@@ -120,10 +120,10 @@ function buildWork(repo: string, workflowRunId: string, issueId: string, stage: 
     with: { run: "echo ok" },
     variables: {
       mohist: { runId: workflowRunId },
-      issue: { id: issueId, number: 9 },
+      issue: { number: 9 },
       project: { id: "project-1", name: "Mohist Local" },
       repository: { name: "master", gitUrl: repo, baseBranch: "master" },
-      openspecChangeDir: `openspec/changes/${issueId}`,
+      openspecChangeDir: "openspec/changes/issue-9",
     },
   }
 }

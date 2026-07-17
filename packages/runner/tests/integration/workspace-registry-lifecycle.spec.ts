@@ -115,7 +115,7 @@ function installGitFake() {
   })
 }
 
-function work(workflowRunId: string, issueId: string, issueNumber: number, gitUrl: string) {
+function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
   return {
     workflowRunId,
     workId: "proposal.1",
@@ -123,7 +123,7 @@ function work(workflowRunId: string, issueId: string, issueNumber: number, gitUr
     uses: "mohist/acp-agent",
     variables: {
       mohist: { runId: workflowRunId },
-      issue: { id: issueId, number: issueNumber },
+      issue: { number: issueNumber },
       project: { id: "project-1", name: "Mohist Local" },
       repository: { name: "main", gitUrl, baseBranch: "main" },
       openspecChangeDir: "openspec/changes/sample-change",
@@ -139,11 +139,10 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.prepare(work("wr-001", "issue-42", 42, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-001", 42, repo), new AbortController().signal)
 
     const entry = registry.get("wr-001")
     expect(entry).toMatchObject({
-      issueId: "issue-42",
       issueNumber: 42,
       workflowRunId: "wr-001",
       workspacePath: info.path,
@@ -164,11 +163,11 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.prepare(work("wr-marker", "issue-99", 99, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-marker", 99, repo), new AbortController().signal)
 
     const marker = JSON.parse(await readFile(join(info.path, ".mohist/workspace.json"), "utf8"))
-    expect(Object.keys(marker).sort()).toEqual(["issueId", "issueNumber", "workflowRunId"])
-    expect(marker).toEqual({ issueId: "issue-99", issueNumber: 99, workflowRunId: "wr-marker" })
+    expect(Object.keys(marker).sort()).toEqual(["issueNumber", "workflowRunId"])
+    expect(marker).toEqual({ issueNumber: 99, workflowRunId: "wr-marker" })
   })
 
   it("verification refreshes an existing entry", async () => {
@@ -183,7 +182,7 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const item = work("wr-refresh", "issue-1", 1, repo)
+    const item = work("wr-refresh", 1, repo)
     await manager.prepare(item, new AbortController().signal)
     expect(registry.get("wr-refresh")?.materializedAt).toBe(first.toISOString())
 
@@ -199,7 +198,7 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const item = work("wr-existing-only", "issue-1", 1, repo)
+    const item = work("wr-existing-only", 1, repo)
     await manager.prepare(item, new AbortController().signal)
 
     // Drop the registry entry directly (simulate a stale / pre-registry
@@ -219,7 +218,7 @@ describe("workspace registry lifecycle", () => {
     const registryA = new WorkspaceRegistry(runnerRoot)
     await registryA.load()
     const managerA = new WorkspaceManager(runnerRoot, registryA)
-    await managerA.prepare(work("wr-persist", "issue-1", 1, repo), new AbortController().signal)
+    await managerA.prepare(work("wr-persist", 1, repo), new AbortController().signal)
 
     // Second host: fresh registry instance, simulates restart.
     const registryB = new WorkspaceRegistry(runnerRoot)
@@ -229,7 +228,6 @@ describe("workspace registry lifecycle", () => {
     expect(entry).toMatchObject({
       phase: "active",
       workflowRunId: "wr-persist",
-      issueId: "issue-1",
       issueNumber: 1,
     })
     expect(entry?.terminalAt).toBeNull()
@@ -242,7 +240,7 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.prepare(work("wr-remove", "issue-1", 1, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-remove", 1, repo), new AbortController().signal)
     expect(registry.get("wr-remove")).not.toBeNull()
 
     // Stand up a SignalR client bound to the same registry. The handler
@@ -269,7 +267,7 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.prepare(work("wr-gone", "issue-2", 2, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-gone", 2, repo), new AbortController().signal)
     await rm(info.path, { recursive: true, force: true })
     expect(exists(info.path)).toBe(false)
 
@@ -288,7 +286,7 @@ describe("workspace registry lifecycle", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.prepare(work("wr-out", "issue-3", 3, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-out", 3, repo), new AbortController().signal)
 
     void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
     const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
@@ -316,7 +314,6 @@ describe("workspace registry lifecycle", () => {
     const outsidePath = join(root, "outside-root-workspace")
     await mkdir(outsidePath, { recursive: true })
     await registry.register({
-      issueId: "issue-outside",
       issueNumber: 4,
       workflowRunId: "wr-outside-entry",
       workspacePath: outsidePath,

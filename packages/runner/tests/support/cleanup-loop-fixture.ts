@@ -77,7 +77,6 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     path = workspacePath(issueNumber),
   ): Promise<WorkspaceRegistryEntry> => {
     const entry = await registry.register({
-      issueId: `work-item-${issueNumber}`,
       issueNumber,
       workflowRunId,
       workspacePath: path,
@@ -113,7 +112,6 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
         version: 1,
         entries: {
           [workflowRunId]: {
-            issueId: `work-item-${issueNumber}`,
             issueNumber,
             workflowRunId,
             workspacePath: path,

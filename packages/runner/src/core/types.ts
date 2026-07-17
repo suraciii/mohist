@@ -78,7 +78,6 @@ export type WorkDispatchResponse = {
   stage?: string | null
   title?: string | null
   projectId?: string | null
-  issueId?: string | null
   issueNumber?: number | null
   artifacts?: string | null
   outputs?: string | null

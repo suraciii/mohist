@@ -103,7 +103,7 @@ public sealed record ProjectEventDto(
     private static readonly HashSet<string> ActivityDataFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "agentId", "agentName", "checkName", "failureCategory",
-        "failureReason", "issueNo", "issueNumber", "issue_number", "message", "reason",
+        "failureReason", "issueNumber", "message", "reason",
         "runnerId", "sessionId", "stage", "stageName", "status", "taskId", "title",
     };
 
