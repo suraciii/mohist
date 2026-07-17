@@ -200,6 +200,57 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
 
     expect(screen.queryByTestId('assistant-text-streaming-glyph')).toBeNull()
   })
+
+  it('exposes role="status" on the streaming indicator so its appearance/removal is announced', () => {
+    render(
+      <SessionTranscriptLayout
+        turns={[makeRunningTurn()]}
+        turnCount={1}
+        title="t"
+        statusKind="live"
+        isRunning
+        isStreaming
+        isThinking={false}
+      />,
+    )
+
+    const indicator = screen.getByTestId('transcript-streaming-indicator')
+    expect(indicator.getAttribute('role')).toBe('status')
+  })
+
+  it('exposes role="status" on the thinking indicator so its appearance/removal is announced', () => {
+    render(
+      <SessionTranscriptLayout
+        turns={[makeRunningTurn()]}
+        turnCount={1}
+        title="t"
+        statusKind="live"
+        isRunning
+        isStreaming={false}
+        isThinking
+      />,
+    )
+
+    const indicator = screen.getByTestId('transcript-thinking-indicator')
+    expect(indicator.getAttribute('role')).toBe('status')
+  })
+
+  it('retains role="log" on the TurnList root so streamed content is announced as a live region', () => {
+    const { container } = render(
+      <SessionTranscriptLayout
+        turns={[makeRunningTurn()]}
+        turnCount={1}
+        title="t"
+        statusKind="live"
+        isRunning
+        isStreaming
+        isThinking={false}
+      />,
+    )
+
+    const log = container.querySelector('[role="log"]')
+    expect(log).not.toBeNull()
+  })
 })
 
 describe('useSessionTranscript clears streaming flag when session stops running', () => {

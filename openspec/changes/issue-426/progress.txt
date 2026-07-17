@@ -8,6 +8,8 @@
 - `getToolDisplayLabel` precedence: `displayTitle` → `displaySubtitle` → registry.getTitle. Prior to the fix any of these could return 'unknown'.
 - `getToolLabel` `default:` branch (used when toolName is unknown) extracts `url`, `filePath`, `description`, `query` — NOT `command`, `script`, `pattern`, or any tool-specific fields. So the semantic inference at `normalizeToolName` is the path that turns command → bash, where `BashEntry.getTitle` then extracts the command.
 - `DISPLAY_TITLES` only covers `apply_patch`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `todowrite`, `membrowse`, `memread`, `memsearch`. `bash`, `webfetch`, `task`, `skill`, etc. fall through to toolName.
+- Disclosure controls in the production renderer: `ToolRowView`, `ContextGroupView`, and `TurnDiffs` each toggle their own `expanded` state and emit `aria-expanded={expanded}` (conditional on `showExpandableDetails` for `ToolRowView`). All decorative SVGs in those controls are `aria-hidden="true"`. `StreamingIndicator` and `ThinkingPlaceholder` get `role="status"`; `TurnList` keeps `role="log"`.
+- React's `Button` primitive (`@base-ui/react/button`) forwards arbitrary `aria-*` props via `{...props}`. No shim required for accessibility attributes.
 
 ## Decisions
 
@@ -69,3 +71,27 @@ Per the issue non-goals ("if the gap roots upstream, record evidence and open a 
   - Hook hygiene: `clearStreaming` fires on `isRunning: true → false` transition (synchronous, fake-timer based, no wall-clock wait) (1 test).
   - End-to-end: running session with visible streaming indicator → transition to not running → indicator disappears (1 test).
 - All 4759 existing tests still green; typecheck clean.
+
+## T-004 Accessibility — Decisions & Notes
+
+- **Render-site aria-expanded on disclosure controls only.** `aria-expanded={showExpandableDetails ? expanded : undefined}` on `ToolRowView` ensures the attribute is present only when the row actually discloses; rows with no input/output/error/changedFiles (or running/pending rows) emit no `aria-expanded` (so the button isn't misannounced as a disclosure control). `ContextGroupView` and `TurnDiffs` always disclose, so `aria-expanded={expanded}` unconditionally. This matches D4 in `design.md` ("only when the control actually discloses").
+- **Decorative SVGs are hidden at the leaf.** `ToolIcon` clones the registry icon and passes `aria-hidden: true`; `ToolStatusDot` (every variant) and `RunningIndicator` get `aria-hidden="true"` directly; the chevron SVGs in all three controls get `aria-hidden="true"`. The animated `<span>`s inside `StreamingIndicator` and `ThinkingPlaceholder` also get `aria-hidden="true"` to keep them out of the indicator's accessible name. This keeps screen readers from announcing redundant "image" content.
+- **Live regions.** `StreamingIndicator` and `ThinkingPlaceholder` get `role="status"` (which implies `aria-live="polite"` per ARIA), so their appearance/removal is announced. `TurnList` keeps `role="log"` (already implies `aria-live="polite"` per ARIA 1.2; per WAI-ARIA `role="log"` is a live region). No explicit `aria-live` attributes added — they're redundant noise per D4.
+- **No redundant aria-labels.** The visible text (`{toolLabel}`, context-group title prefix, `"N files changed"`) provides the accessible name. Relying on T-001's "never unknown" floor ensures no name is `"unknown"`. The `<details>`/`<summary>` reasoning blocks (AssistantParts.tsx) are unchanged — they already have native disclosure semantics.
+
+## T-004 Gotchas
+
+- `ToolIcon` is a `cloneElement` wrapper that originally only passed `className`. Adding `'aria-hidden'` required widening the `React.ReactElement` type to accept that prop. The registry `icon` elements are inline JSX `<svg>` literals, so the cast is purely a TypeScript allowance — the runtime DOM always receives the attribute.
+- React's `Button` primitive (`@base-ui/react/button`) forwards arbitrary props including `aria-*` via `{...props}`. No shim required.
+- `aria-expanded={undefined}` (vs `false`) is the right way to omit the attribute on non-disclosing controls. Passing `false` would make the button announce as "expanded: false, collapsed" — semantically incorrect for a non-disclosure control.
+- `screen.getByRole('button', { name: /Gathering context/ })` works because all decorative SVGs in `ContextGroupView` carry `aria-hidden="true"`, so the chevron icon does not contribute to the accessible name.
+
+## T-004 Test Coverage
+
+- `src/widgets/session-transcript/ui/tool-views/shared.test.tsx` (extended): `ToolStatusDot` aria-hidden across all 5 status variants (5 tests); `ToolIcon` aria-hidden for known + unknown tool names (2 tests). Total +7 tests.
+- `src/widgets/session-transcript/ui/tool-views/index.test.tsx` (extended):
+  - `ToolRowView accessibility` (new, 8 tests): aria-expanded reflects state (false/true); not exposed when not expandable; not exposed on running rows; chevron + tool icon SVGs aria-hidden; readable accessible name from `toolLabel`; no `"unknown"` leak when name is missing.
+  - `ContextGroupView accessibility` (new, 5 tests): aria-expanded false/true; all SVGs aria-hidden; readable name from title prefix; no `"unknown"` leak.
+- `src/widgets/session-transcript/ui/TurnList.render.test.tsx` (extended, 5 tests): TurnDiffs aria-expanded false/true; both SVGs aria-hidden; readable name from `"N files changed"` text (1 and N variants).
+- `tests/SessionTranscriptActivityIndicators.spec.tsx` (extended, 3 tests): `StreamingIndicator` role=status; `ThinkingPlaceholder` role=status; `TurnList` retains role=log.
+- **Net additions: 28 new tests** (7 shared + 8 ToolRowView + 5 ContextGroupView + 5 TurnDiffs + 3 indicators). All 4787 tests green; typecheck clean.

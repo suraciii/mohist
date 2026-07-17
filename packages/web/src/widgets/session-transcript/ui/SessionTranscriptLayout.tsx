@@ -103,8 +103,8 @@ export function SessionTranscriptLayout({
 
 function StreamingIndicator() {
   return (
-    <div className="flex items-center gap-2 py-2 pl-4" data-testid="transcript-streaming-indicator" data-tone="info">
-      <span className="relative flex h-2 w-2">
+    <div className="flex items-center gap-2 py-2 pl-4" data-testid="transcript-streaming-indicator" data-tone="info" role="status">
+      <span className="relative flex h-2 w-2" aria-hidden="true">
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-info/70 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-info" />
       </span>
@@ -115,8 +115,8 @@ function StreamingIndicator() {
 
 function ThinkingPlaceholder() {
   return (
-    <div className="flex items-center gap-2 py-4 pl-4" data-testid="transcript-thinking-indicator" data-tone="info">
-      <span className="h-3 w-3 rounded-full bg-info animate-pulse" />
+    <div className="flex items-center gap-2 py-4 pl-4" data-testid="transcript-thinking-indicator" data-tone="info" role="status">
+      <span className="h-3 w-3 rounded-full bg-info animate-pulse" aria-hidden="true" />
       <span className="text-sm text-muted-foreground/70">Thinking...</span>
     </div>
   )

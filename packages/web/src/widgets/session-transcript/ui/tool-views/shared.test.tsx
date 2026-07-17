@@ -51,6 +51,36 @@ describe('tool-views shared', () => {
       expect(wrapper).not.toBeNull()
       expect(indicator?.className).toContain('bg-info')
     })
+
+    it('marks the completed dot aria-hidden so screen readers ignore it', () => {
+      const { container } = render(<ToolStatusDot status="completed" />)
+      const dot = container.querySelector('span[data-tone="success"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the failed dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="failed" />)
+      const dot = container.querySelector('span[data-tone="danger"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the cancelled dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="cancelled" />)
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the pending dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="pending" />)
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the running indicator wrapper aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="running" />)
+      const wrapper = container.querySelector('span[data-tone="info"]')
+      expect(wrapper?.getAttribute('aria-hidden')).toBe('true')
+    })
   })
 
   describe('ToolIcon', () => {
@@ -62,6 +92,19 @@ describe('tool-views shared', () => {
     it('renders an svg for unknown tools via fallback', () => {
       const { container } = render(<ToolIcon normalizedName="totally-unknown-tool" />)
       expect(container.querySelector('svg')).toBeInTheDocument()
+    })
+
+    it('marks the rendered svg aria-hidden so screen readers ignore it', () => {
+      const { container } = render(<ToolIcon normalizedName="bash" />)
+      const svg = container.querySelector('svg')
+      expect(svg).not.toBeNull()
+      expect(svg?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the fallback svg aria-hidden for unknown tool names', () => {
+      const { container } = render(<ToolIcon normalizedName="totally-unknown-tool" />)
+      const svg = container.querySelector('svg')
+      expect(svg?.getAttribute('aria-hidden')).toBe('true')
     })
   })
 

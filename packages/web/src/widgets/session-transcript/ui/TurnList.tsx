@@ -112,9 +112,10 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-green-100/50 transition-colors"
       >
-        <svg className="h-3.5 w-3.5 text-green-600 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+        <svg aria-hidden="true" className="h-3.5 w-3.5 text-green-600 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
         </svg>
         <span className="text-xs font-medium text-green-700">
@@ -125,7 +126,7 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
             {files.map(c => c.path.split('/').pop()).join(', ')}
           </span>
         )}
-        <svg className={`h-3 w-3 text-green-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+        <svg aria-hidden="true" className={`h-3 w-3 text-green-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
       </Button>
