@@ -1,0 +1,51 @@
+{
+  "project": "mohist-local",
+  "description": "Give guard-aborted eligible workspaces a deterministic, persisted exit by adding a terminal `stuck` phase to the workspace registry and an eager, policy-independent resolution pass in the cleanup loop, so a marker-missing / out-of-root / marker-mismatch entry is resolved once, warned once, and never re-evaluated or re-warned on subsequent ticks or after restart.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add `stuck` terminal phase to the workspace registry",
+      "spec": "specs/runner-workspace-cleanup/spec.md#Stuck-entry resolution is persisted and survives runner restart",
+      "description": "Extend `WorkspaceRegistryPhase` with a `\"stuck\"` value (D1). Add an idempotent `markStuck(workflowRunId)` that transitions `eligible -> stuck` (no-op for already-stuck, returns null when absent), persisted through the existing atomic write-through. Widen `loadFromDisk` validation to accept `\"stuck\"` so the state round-trips through restart (D1). Fix `markEligible` so it transitions only `active -> eligible` (guard `phase !== \"active\"`); this keeps an already-eligible entry a no-op AND prevents a redelivered terminal workflow-status event from reviving a `stuck` entry back into the warning loop (D4). Fold in registry unit tests for each transition, the reload round-trip, and the non-revival invariant.",
+      "acceptanceCriteria": [
+        "`WorkspaceRegistryPhase` includes `\"stuck\"` alongside `\"active\"` and `\"eligible\"`",
+        "`markStuck` transitions an eligible entry to stuck, persists it, and returns the updated entry; a second call on an already-stuck entry is a no-op (on-disk file not rewritten); it returns null for an unknown workflowRunId",
+        "A stuck entry round-trips through `loadFromDisk`/`reload` and reloads as `stuck` (it is neither silently dropped nor downgraded to eligible)",
+        "`markEligible` transitions only `active -> eligible`; calling it on a `stuck` entry leaves the entry stuck and unchanged (a redelivered terminal event cannot revive it); calling it on an already-eligible entry remains a no-op",
+        "New registry unit tests cover: eligible->stuck transition + persistence, stuck reload round-trip, `markStuck` idempotency, and `markEligible` non-revival of a stuck entry; existing workspace-registry tests still pass",
+        "`npm run typecheck` and `npm test` pass for the runner package"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/workspace-registry.ts (phase type + markStuck + load validation + markEligible guard) with new/updated unit tests under packages/runner/tests/",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the data-model foundation for both spec requirements: the `stuck` phase is what makes resolution (req 1) and persisted survival across restart (req 2) possible. `register()` is intentionally left to set `active` on re-materialize (a re-dispatched run reusing a workflowRunId legitimately restarts the entry); do not change that behavior. Per D1 do NOT evict the entry or move the directory — the stuck phase only ends re-evaluation, the on-disk workspace is untouched."
+    },
+    {
+      "id": "T-002",
+      "title": "Resolve guard-aborted eligible workspaces in the cleanup loop",
+      "spec": "specs/runner-workspace-cleanup/spec.md#Guard-aborted eligible workspaces are resolved, not retried indefinitely",
+      "description": "Extract the three pre-delete guards (runnerRoot containment, marker readability, marker workflowRunId match) into a shared private `evaluateGuards(entry)` used by both the resolution path and `safeRemove` (D3). Add an eager, policy-independent resolution pass at the top of `runOnce`, after the empty-eligible early-return and BEFORE the `retentionDisabled && budgetDisabled` early-return: for each eligible entry evaluate the guards, and on refusal warn once + `registry.markStuck` + increment a new `stuckResolved` counter (D2). Add `stuckResolved` to `CleanupLoopResult` and surface it in `runCleanupOnce`'s summary log (`stuck=N`) and its log condition (D5). Keep `safeRemove`'s guard checks as a defensive race backstop and leave its delete-failure path retrying (transient failures are not resolved). Update the loop guard tests to the new resolution semantics and add coverage for disabled-policy resolution and restart persistence (D2). Confirm the manual `RemoveWorkspace` handler still resolves a stuck entry phase-agnostically with no code change (D6).",
+      "acceptanceCriteria": [
+        "`evaluateGuards` is the single source of the path/marker/match checks and is shared by the resolution pass and `safeRemove` (no duplicated guard logic)",
+        "A guard refusal for any deterministic reason (path outside runnerRoot, marker missing/unreadable, marker workflowRunId mismatch) transitions the entry to stuck and leaves the workspace directory intact (not deleted, not moved)",
+        "On the cleanup tick after an entry is resolved, the loop does not re-enter the removal path for it and does not re-emit the per-entry `refused to remove` warning (exactly one warning observation per stuck entry)",
+        "Resolution occurs even when both `retentionDays` and `storageBudgetBytes` are disabled (the policy-independent pass runs before the disabled-policy early-return)",
+        "`safeRemove` still removes the directory and deregisters an eligible entry whose guards pass; a `deleteDirectory` failure still leaves the entry eligible for retry on the next tick (transient delete failures are NOT resolved by this change)",
+        "`CleanupLoopResult` carries a `stuckResolved` counter; `runCleanupOnce` in host.ts includes `stuck=${result.stuckResolved}` in the summary line and logs whenever `stuckResolved > 0`",
+        "The pre-existing test 'after guard abort, directory and entry remain intact for next tick' is updated to assert the stuck resolution (entry present as stuck, not re-warned on tick 2); new specs cover each guard-refusal->stuck case, cross-tick no-retry/no-rewarn, disabled-policy resolution, and restart persistence via a registry reload",
+        "The manual `RemoveWorkspace` handler (workspace-removal-handler.ts) requires no change and still resolves a stuck entry via findByWorkspacePath + registry.remove",
+        "`npm run typecheck` and `npm test` pass for the runner package"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/cleanup-loop.ts (evaluateGuards + resolution pass + stuckResolved counter), packages/runner/src/runtime/host.ts (summary log surface), packages/runner/tests/cleanup-loop-guards.spec.ts + support/cleanup-loop-fixture.ts (updated/new specs)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The phase transition is the structural warning de-duplication — do NOT add a separate rate-limiter/log-throttle. In normal operation the resolution pass marks the entry stuck before the retention/budget passes re-list eligible, so `safeRemove`'s guard-refusal branch is only reachable in a marker-deleted-mid-tick race (a rare, single extra warning is acceptable). Per design, persistent `deleteDirectory` failure is explicitly out of scope (would need a retry budget); do not conflate it with deterministic guard refusals."
+    }
+  ]
+}
