@@ -214,6 +214,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "anthropic/claude-sonnet-4-5/high")).toBe(true)
+    // Spec D8: variant is a sibling option, not appended to the model ID.
+    expect(shared.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "anthropic/claude-sonnet-4-5")).toBe(true)
   })
 })

@@ -10,10 +10,22 @@ const REFERENCE_PATTERN = /\$\{\{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-
 // a template. Loader-internal fields like description/notes/output/etc. are
 // not in this list: they are no longer placed in `with` at all (see
 // openspec.ts mergeTaskWith), so the renderer never sees them.
+//
+// The `expect` completion contract now lives beside `with` (a separate
+// render root, not nested under `with.expect`). The matchers below are
+// listed both with the `expect.` prefix and without so that legacy
+// callers rendering `with.expect` and the new contract rendering
+// `expect` standalone both honor the literal-field rule.
 const LITERAL_FIELD_PATHS = new Set<string>([
   // Marker text used as a literal search string by core/artifact-exists,
-  // core/marker, and mohist/acp-agent — not a file path.
+  // core/marker, and the Workflow completion evaluator — not a file path.
   "expect.markers.*.contains",
+  "markers.*.contains",
+  // Marker accepted-value list (string entries). Each entry is a literal
+  // promise shape that must not be template-rendered (templates would
+  // mangle `<promise>PASS</promise>` syntax).
+  "expect.markers.*.oneOf.*",
+  "markers.*.oneOf.*",
 ])
 
 export function renderTemplate(input: JsonObject | null | undefined, variables: JsonObject) {

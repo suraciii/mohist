@@ -200,7 +200,11 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         Assert.Equal("mohist/openspec-tasks", tasks.Uses);
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
         await workflow.AddTasksAsync(new AddTasksBatchRequest([
-            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+            new AddTasksBatchItem(
+                "build-1",
+                "Build task",
+                "mohist/opencode",
+                JsonDocument.Parse("""{"options":"${{ vars.agent }}"}""").RootElement)
         ]));
         await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
 
@@ -208,6 +212,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         Assert.Equal("build", build.Stage);
         Assert.StartsWith("build-1", build.WorkId);
         Assert.NotNull(build.Variables);
+        Assert.NotNull(build.With);
 
         using var doc = JsonDocument.Parse(build.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
@@ -256,7 +261,11 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         Assert.Equal("mohist/openspec-tasks", tasks.Uses);
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
         await workflow.AddTasksAsync(new AddTasksBatchRequest([
-            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+            new AddTasksBatchItem(
+                "build-1",
+                "Build task",
+                "mohist/opencode",
+                JsonDocument.Parse("""{"options":"${{ vars.agent }}"}""").RootElement)
         ]));
         await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
 
@@ -301,7 +310,11 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         var tasks = await PollWorkAnyAsync();
         var tasksWorkflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
         await tasksWorkflow.AddTasksAsync(new AddTasksBatchRequest([
-            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+            new AddTasksBatchItem(
+                "build-1",
+                "Build task",
+                "mohist/opencode",
+                JsonDocument.Parse("""{"options":"${{ vars.agent }}"}""").RootElement)
         ]));
         await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
 
@@ -361,54 +374,53 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         Assert.False(string.IsNullOrWhiteSpace(response.WorkflowRunId));
         Assert.Contains("stages:", response.Yaml);
-        Assert.Contains("agent: ${{ vars.agent }}", response.Yaml);
+        Assert.Contains("options: ${{ vars.agent }}", response.Yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", response.Yaml);
     }
 
     private const string NoArtifactTemplateYaml = """
         id: mohist-test-noartifacts
         variables:
-          agent:
-            type: opencode
+          agent: {}
         stages:
           - stage: plan
             requiresApproval: true
             tasks:
               - id: proposal
                 title: Generate proposal
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.proposal }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: specs
                 title: Write specs
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.specs }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: design
                 title: Create design
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.design }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: tasks
                 title: Generate tasks
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.tasks }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: self-review
                 title: Self review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.self-review }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
             checks:
               - name: health
                 title: Health
@@ -423,9 +435,9 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                 with:
                   path: ${{ openspecChangeDir }}/tasks.json
                   task:
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                     with:
-                      agent: ${{ vars.agent }}
+                      options: ${{ vars.agent }}
                       prompt:
                         uses: mohist/openspec-task-prompt
                         with:
@@ -443,11 +455,11 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
             tasks:
               - id: ai-review
                 title: AI review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: check
                   prompt: ${{ prompts.review }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
             checks:
               - name: health
                 title: Health
@@ -502,7 +514,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                 {
                     var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
                     await workflow.AddTasksAsync(new AddTasksBatchRequest([
-                        new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+                        new AddTasksBatchItem("build-1", "Build task", "mohist/opencode")
                     ]));
                 }
                 await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");

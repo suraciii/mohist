@@ -196,11 +196,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var plan = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "plan");
 
         var selfReview = plan.Tasks.Single(t => t.Id == "self-review");
-        Assert.Equal("mohist/acp-agent", selfReview.Uses);
-        Assert.NotNull(selfReview.With);
-        var expect = GetMap(selfReview.With!, "expect");
-        Assert.NotNull(expect);
-        var markers = GetList(expect!, "markers");
+        Assert.Equal("mohist/opencode", selfReview.Uses);
+        Assert.NotNull(selfReview.Expect);
+        var markers = GetList(selfReview.Expect!, "markers");
         var marker = Assert.Single(markers!.Select(NormalizeToMap));
         var oneOfTexts = ExtractOneOfTexts(marker);
         Assert.Contains("<promise>PASS</promise>", oneOfTexts);
@@ -213,7 +211,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.True(handler.RetrySelf);
         var fixPlanReview = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-plan-review", fixPlanReview.Id);
-        Assert.Equal("mohist/acp-agent", fixPlanReview.Uses);
+        Assert.Equal("mohist/opencode", fixPlanReview.Uses);
         Assert.Equal("${{ prompts.fix-plan-review }}", fixPlanReview.With!["prompt"]!.Value.GetString());
     }
 
@@ -298,11 +296,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(new[] { "workspace-prepare", "ai-review", "push", "mark-pr-ready" }, orderedIds);
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
-        Assert.Equal("mohist/acp-agent", aiReview.Uses);
-        Assert.NotNull(aiReview.With);
-        var expect = GetMap(aiReview.With!, "expect");
-        Assert.NotNull(expect);
-        var markers = GetList(expect!, "markers");
+        Assert.Equal("mohist/opencode", aiReview.Uses);
+        Assert.NotNull(aiReview.Expect);
+        var markers = GetList(aiReview.Expect!, "markers");
         var marker = Assert.Single(markers!.Select(NormalizeToMap));
         var oneOfTexts = ExtractOneOfTexts(marker);
         Assert.Contains("<promise>PASS</promise>", oneOfTexts);
@@ -314,7 +310,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("promise=FAIL", handler.When);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
-        Assert.Equal("mohist/acp-agent", fixReviewFindings.Uses);
+        Assert.Equal("mohist/opencode", fixReviewFindings.Uses);
         Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.With!["prompt"]!.Value.GetString());
 
         var push = check.Tasks.Single(t => t.Id == "push");
@@ -411,7 +407,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var conflictTasks = conflictHandler.Tasks.ToList();
         Assert.Single(conflictTasks);
         var resolveConflicts = conflictTasks.Single(t => t.Id == "recover:resolve-rebase-conflicts");
-        Assert.Equal("mohist/acp-agent", resolveConflicts.Uses);
+        Assert.Equal("mohist/opencode", resolveConflicts.Uses);
         Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", resolveConflicts.With!["prompt"]!.Value.GetString());
 
         var recoverPushBaseMoved = baseMovedTasks.Single(t => t.Id == "recover:push");
@@ -428,7 +424,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, prChecksTasks.Select(t => t.Id).ToArray());
 
         var fixPrChecks = prChecksTasks.Single(t => t.Id == "recover:fix-pr-checks");
-        Assert.Equal("mohist/acp-agent", fixPrChecks.Uses);
+        Assert.Equal("mohist/opencode", fixPrChecks.Uses);
         Assert.Equal("${{ prompts.fix-pr-checks }}", fixPrChecks.With!["prompt"]!.Value.GetString());
 
         var recoverPushPrChecks = prChecksTasks.Single(t => t.Id == "recover:push");
@@ -757,6 +753,16 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         {
             List<object?> list => list,
             JsonElement element when element.ValueKind == JsonValueKind.Array => JsonSerializer.Deserialize<List<object?>>(element.GetRawText()),
+            _ => null,
+        };
+    }
+
+    private static List<object?>? GetList(Dictionary<string, JsonElement?> map, string key)
+    {
+        if (!map.TryGetValue(key, out var value) || value is null) return null;
+        return value.Value.ValueKind switch
+        {
+            JsonValueKind.Array => JsonSerializer.Deserialize<List<object?>>(value.Value.GetRawText()),
             _ => null,
         };
     }

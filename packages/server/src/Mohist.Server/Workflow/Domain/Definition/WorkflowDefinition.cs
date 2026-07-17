@@ -16,6 +16,7 @@ public sealed record TaskDefinition(
     string Title,
     string? Uses = null,
     Dictionary<string, JsonElement?>? With = null,
+    Dictionary<string, JsonElement?>? Expect = null,
     TaskArtifactCapture? Artifacts = null,
     Dictionary<string, string>? SetVars = null,
     RecoveryDefinition? Recovery = null);
@@ -44,13 +45,7 @@ public sealed record StageDefinition(
     string? LockBehavior = null,
     List<string>? Resources = null);
 
-public sealed record FeedbackTaskConfig(
-    string Id,
-    string Title,
-    string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null);
-
-public sealed record ApprovalFeedbackConfig(FeedbackTaskConfig? Task = null);
+public sealed record ApprovalFeedbackConfig(TaskDefinition? Task = null);
 
 public sealed record ApprovalConfig(ApprovalFeedbackConfig? Feedback = null);
 

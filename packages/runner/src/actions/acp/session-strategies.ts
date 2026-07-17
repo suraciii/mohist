@@ -2,7 +2,6 @@ import { ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk"
 import type { ActionContext } from "../../core/types.js"
 import { numberInput } from "../../core/json.js"
-import { verifyExpectations, type TaskArtifactExpectation } from "../expectations.js"
 import type { OpencodeProviderErrorDiagnostic } from "../../runtime/opencode-log-diagnostics.js"
 import { getAcpProcessFactory } from "./process.js"
 import type { AcpProcessHandle } from "./process.js"
@@ -42,7 +41,6 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
 const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
-const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const SUPPORTED_RUNTIME = "opencode"
 
@@ -55,7 +53,6 @@ export interface AcpSessionResult {
   activityCount?: number
   providerError?: OpencodeProviderErrorDiagnostic
   failureCategory?: PromptFailureReason
-  expectation?: TaskArtifactExpectation
 }
 
 export interface AcpPromptRunResult {
@@ -70,11 +67,15 @@ export interface AcpPromptRunResult {
 
 export type AcpPromptRunner = (prompt: string) => Promise<AcpPromptRunResult>
 
-export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export interface AcpSessionOptions {
+  silenceMissingModelWarning?: boolean
+}
+
+export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   if (context.ownerKind === "agent-job") {
     return context.agentSessionId
-      ? runAcpGenericAgentSession(context, prompt)
-      : runEphemeralWorkflowAgentSession(context, prompt)
+      ? runAcpGenericAgentSession(context, prompt, options)
+      : runEphemeralWorkflowAgentSession(context, prompt, options)
   }
 
   const sessionName = sessionNameFromContext(context)
@@ -97,14 +98,14 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
       const cached = manager.get(key)
       if (cached?.sessionId === session.runtimeSessionId) {
-        return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+        return runPromptOnExistingWorkflowAgentSession(context, prompt, cached, options)
       }
-      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir, options)
       if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
       return result
     }
 
-    const result = await runNewWorkflowAgentSession(context, prompt)
+    const result = await runNewWorkflowAgentSession(context, prompt, options)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
     return result
   }
@@ -120,17 +121,17 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
     }, context.signal)
   }
 
-  return runEphemeralWorkflowAgentSession(context, prompt)
+  return runEphemeralWorkflowAgentSession(context, prompt, options)
 }
 
-export async function runAcpGenericAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runAcpGenericAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const sessionId = context.agentSessionId
   const manager = context.acpSessionManager
   const projectId = context.projectId
   const serverConnection = context.serverConnection
 
   if (!sessionId || !manager || !serverConnection || !projectId) {
-    return runEphemeralWorkflowAgentSession(context, prompt)
+    return runEphemeralWorkflowAgentSession(context, prompt, options)
   }
 
   const key = manager.genericKey(sessionId)
@@ -151,14 +152,14 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
     const cached = manager.get(key)
     if (cached?.sessionId === session.runtimeSessionId) {
-      return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+      return runPromptOnExistingWorkflowAgentSession(context, prompt, cached, options)
     }
-    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
+    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir, options)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
     return result
   }
 
-  const result = await runNewWorkflowAgentSession(context, prompt)
+  const result = await runNewWorkflowAgentSession(context, prompt, options)
   if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
   return result
 }
@@ -176,7 +177,7 @@ function missingRuntimeBindingResult(): AcpSessionResult {
   }
 }
 
-export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
+export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -220,7 +221,7 @@ export async function runPromptOnExistingWorkflowAgentSession(context: ActionCon
   )
 
   await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
-  await applyRequestedModel(connection, context, entry.sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+  await applyRequestedModel(connection, context, entry.sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
   try {
     const runPrompt = createSharedPromptRunner({
@@ -241,7 +242,6 @@ export async function runPromptOnExistingWorkflowAgentSession(context: ActionCon
       return { text: agentText, success: false, error: run.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount, providerError: run.providerError, failureCategory: run.failureCategory }
     }
     const result: AcpSessionResult = { text: agentText, success: true, acpSessionId: entry.sessionId, exitCode: 0, activityCount }
-    result.expectation = await satisfyExpectations(context, result, runPrompt)
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -292,7 +292,7 @@ export function createSharedPromptRunner(options: {
   }
 }
 
-export async function runResumedWorkflowAgentSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string): Promise<AcpSessionResult> {
+export async function runResumedWorkflowAgentSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -331,7 +331,7 @@ export async function runResumedWorkflowAgentSession(context: ActionContext, pro
 
     const resolvedModel = extractResolvedModelId(resumeResult)
 
-    await applyRequestedModel(connection, context, acpSessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, acpSessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     acp.setSessionHandlers(
       acpSessionId,
@@ -369,7 +369,6 @@ export async function runResumedWorkflowAgentSession(context: ActionContext, pro
     }
 
     const result: AcpSessionResult = { text: agentText, success: true, acpSessionId, exitCode: 0, activityCount }
-    result.expectation = await satisfyExpectations(context, result, runPrompt)
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -379,9 +378,9 @@ export async function runResumedWorkflowAgentSession(context: ActionContext, pro
   }
 }
 
-export async function runNewWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runNewWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acp = context.acpConnection
-  if (!acp) return runEphemeralWorkflowAgentSession(context, prompt)
+  if (!acp) return runEphemeralWorkflowAgentSession(context, prompt, options)
 
   const connection = acp.connection
   const agentConfig = resolveAgentConfig(context.with)
@@ -435,7 +434,7 @@ export async function runNewWorkflowAgentSession(context: ActionContext, prompt:
       },
     )
 
-    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
 
@@ -459,7 +458,6 @@ export async function runNewWorkflowAgentSession(context: ActionContext, prompt:
     }
 
     const result: AcpSessionResult = { text: agentText, success: true, acpSessionId: sessionId, exitCode: 0, activityCount }
-    result.expectation = await satisfyExpectations(context, result, runPrompt)
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -469,7 +467,7 @@ export async function runNewWorkflowAgentSession(context: ActionContext, prompt:
   }
 }
 
-export async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+export async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: string, options: AcpSessionOptions = {}): Promise<AcpSessionResult> {
   const acpProcess = getAcpProcessFactory()(context)
   const agentConfig = resolveAgentConfig(context.with)
   let sessionId = ""
@@ -533,7 +531,7 @@ export async function runEphemeralWorkflowAgentSession(context: ActionContext, p
     const resolvedModel = extractResolvedModelId(session)
     await attachSessionToServer(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
 
-    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData, { silenceMissingModelWarning: options.silenceMissingModelWarning })
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
 
@@ -558,7 +556,6 @@ export async function runEphemeralWorkflowAgentSession(context: ActionContext, p
     }
 
     const result: AcpSessionResult = { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0, activityCount }
-    result.expectation = await satisfyExpectations(context, result, runPrompt)
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -578,61 +575,4 @@ export function truncateAgentText(text: string) {
   const head = text.slice(0, keepLength)
   const tail = text.slice(-keepLength)
   return `${head}\n\n...[truncated ${text.length - MAX_AGENT_TEXT_LENGTH} characters]...\n\n${tail}`
-}
-
-function appendAgentText(existing: string, addition: string): string {
-  if (!addition) return existing
-  const combined = existing ? `${existing}\n${addition}` : addition
-  return combined.length > MAX_AGENT_TEXT_LENGTH ? truncateAgentText(combined) : combined
-}
-
-export async function satisfyExpectations(context: ActionContext, result: AcpSessionResult, runPrompt: AcpPromptRunner): Promise<TaskArtifactExpectation> {
-  let verification = await verifyExpectations(context)
-  if (verification.satisfied) return verification
-  if (verification.failIfMatches.length > 0) return verification
-
-  const repairLimit = expectationRepairLimit(context)
-  for (let attempt = 1; attempt <= repairLimit && !verification.satisfied && verification.failIfMatches.length === 0; attempt += 1) {
-    const repair = await runPrompt(buildExpectationRepairPrompt(verification, attempt, repairLimit))
-    result.activityCount = (result.activityCount ?? 0) + repair.activityCount
-    if (repair.usageText) result.text = appendAgentText(result.text, repair.usageText)
-    if (!repair.completed) {
-      result.success = false
-      result.error = repair.error
-      result.providerError = repair.providerError
-      result.failureCategory = repair.failureCategory
-      result.exitCode = result.exitCode ?? 1
-      return verification
-    }
-    if (repair.workActivityCount <= 0) {
-      result.success = false
-      result.error = "ACP agent prompt completed without any session activity"
-      result.exitCode = result.exitCode ?? 1
-      return verification
-    }
-    verification = await verifyExpectations(context)
-  }
-
-  return verification
-}
-
-function expectationRepairLimit(context: ActionContext): number {
-  const configured = numberInput(context.with, "expectationRepairLimit")
-  if (configured === undefined) return DEFAULT_EXPECTATION_REPAIR_LIMIT
-  return Math.max(0, Math.floor(configured))
-}
-
-function buildExpectationRepairPrompt(expectation: TaskArtifactExpectation, attempt: number, limit: number): string {
-  const missingFiles = expectation.missingFiles.map((file) => `- Missing file: ${file.path}`)
-  const missingMarkers = expectation.missingArtifactMarkers.map((marker) => `- Missing marker in ${marker.path}: ${marker.contains}`)
-  return [
-    "Your previous response did not satisfy this task's completion requirements.",
-    "",
-    "Fix the missing required artifact output now. Do not redo unrelated work.",
-    "",
-    ...missingFiles,
-    ...missingMarkers,
-    "",
-    `This is artifact repair attempt ${attempt} of ${limit}.`,
-  ].join("\n")
 }

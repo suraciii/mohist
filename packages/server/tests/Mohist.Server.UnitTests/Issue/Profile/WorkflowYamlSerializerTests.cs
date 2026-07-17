@@ -16,7 +16,7 @@ public class WorkflowYamlSerializerTests
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
         Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
-        Assert.Contains("agent: ${{ vars.agent }}", yaml);
+        Assert.Contains("options: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
         Assert.DoesNotContain("repairTask:", yaml);
         Assert.DoesNotContain("repairLimit:", yaml);
@@ -49,7 +49,7 @@ public class WorkflowYamlSerializerTests
             tasks:
               - id: declare
                 title: Declare
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: hi
                 artifacts:
@@ -92,7 +92,7 @@ public class WorkflowYamlSerializerTests
         Assert.Contains("task:", yaml);
         Assert.Contains("id: apply-feedback", yaml);
         Assert.Contains("title: Apply approval feedback", yaml);
-        Assert.Contains("uses: mohist/acp-agent", yaml);
+        Assert.Contains("uses: mohist/opencode", yaml);
         Assert.Contains("session: ${{ stage.name }}", yaml);
         Assert.Contains("prompt: ${{ prompts.apply-feedback }}", yaml);
 
@@ -102,7 +102,7 @@ public class WorkflowYamlSerializerTests
         var task = reparsed.Approval!.Feedback!.Task;
         Assert.NotNull(task);
         Assert.Equal("apply-feedback", task!.Id);
-        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.Equal("mohist/opencode", task.Uses);
     }
 
     [Fact]

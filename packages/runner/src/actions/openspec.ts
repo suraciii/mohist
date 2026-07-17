@@ -93,7 +93,7 @@ function isCrossDeviceError(err: unknown): boolean {
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
 export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return { status: "failure", message: "OpenSpec task loader requires 'path'" }
   if (!exists(path)) return { status: "failure", message: `tasks.json not found: ${path}` }
 
@@ -102,7 +102,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   if (!Array.isArray(root.tasks)) return { status: "failure", message: "tasks.json must contain a tasks array" }
 
   const taskDefaults = objectInput(context.with, "task")
-  const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/acp-agent"
+  const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(context.with, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH
   const tasks = sourceTasks.flatMap((task) => {
@@ -111,7 +111,8 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
     const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, context.variables)
-    return [{ id, title, uses, with: mergedWith ?? null }]
+    const expect = mergeTaskExpect(task)
+    return [{ id, title, uses, with: mergedWith ?? null, expect }]
   })
 
   if (!context.serverConnection) return { status: "failure", message: "Server connection not available" }
@@ -422,6 +423,18 @@ function mergeTaskWith(
   return Object.keys(merged).length === 0 ? null : merged
 }
 
+/**
+ * Propagate the task-level `expect` declaration from the OpenSpec
+ * task template into the generated AddTaskInput. The executor's
+ * completion evaluator owns the contract; the loader must NOT
+ * swallow `expect`. A missing `expect` becomes `null` (the executor
+ * then skips completion evaluation).
+ */
+function mergeTaskExpect(task: JsonObject): JsonObject | null {
+  const expect = objectInput(task, "expect")
+  return expect ?? null
+}
+
 function injectOpenSpecTaskPromptSelector(prompt: JsonValue, taskId: string | undefined): JsonValue {
   if (!isObject(prompt)) return prompt
   if (prompt["uses"] !== OPENSPEC_TASK_PROMPT_LOADER_NAME) return prompt
@@ -460,7 +473,7 @@ function resolveBuildPrompt(variables?: JsonObject): string | undefined {
 function resolveChangeDir(context: ActionContext) {
   const changeDir = stringInput(context.with, "changeDir")
   if (!changeDir?.trim()) return undefined
-  return resolveActionPath(context, changeDir)
+  return resolveActionPath(context.workDir, changeDir)
 }
 
 function validateArchivePrefix(prefix: string): string | null {

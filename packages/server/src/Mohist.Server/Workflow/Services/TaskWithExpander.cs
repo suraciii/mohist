@@ -12,17 +12,17 @@ internal static class TaskWithExpander
 
     public static Dictionary<string, JsonElement?>? Expand(
         VariableBundle? effectiveVars,
-        Dictionary<string, JsonElement?>? taskWith)
+        Dictionary<string, JsonElement?>? taskValues)
     {
-        if (taskWith is null || taskWith.Count == 0) return taskWith;
-        if (effectiveVars?.Vars is null || effectiveVars.Vars.Value.ValueKind != JsonValueKind.Object) return taskWith;
+        if (taskValues is null || taskValues.Count == 0) return taskValues;
+        if (effectiveVars?.Vars is null || effectiveVars.Vars.Value.ValueKind != JsonValueKind.Object) return taskValues;
 
         using var varsDoc = JsonDocument.Parse(effectiveVars.Vars.Value.GetRawText());
         var varsRoot = varsDoc.RootElement;
 
-        var result = new Dictionary<string, JsonElement?>(taskWith.Count, StringComparer.Ordinal);
+        var result = new Dictionary<string, JsonElement?>(taskValues.Count, StringComparer.Ordinal);
 
-        foreach (var (key, value) in taskWith)
+        foreach (var (key, value) in taskValues)
         {
             if (!value.HasValue)
             {
@@ -34,15 +34,6 @@ internal static class TaskWithExpander
             if (TryResolveWholeTemplate(v, varsRoot, out var resolvedValue))
             {
                 result[key] = resolvedValue.Clone();
-                continue;
-            }
-
-            if (v.ValueKind == JsonValueKind.Object
-                && varsRoot.ValueKind == JsonValueKind.Object
-                && varsRoot.TryGetProperty(key, out var varsOverride)
-                && varsOverride.ValueKind == JsonValueKind.Object)
-            {
-                result[key] = VariableBundle.DeepMerge(v, varsOverride);
                 continue;
             }
 

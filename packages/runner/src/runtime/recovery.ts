@@ -48,6 +48,7 @@ export function tryRecovery(
       setVars: work.setVars ?? null,
       recovery: work.recovery,
       recoveryRemaining: remaining - 1,
+      expect: work.expect ?? null,
     })
   }
 
@@ -102,6 +103,11 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
       title: stringField(entry, "title") ?? id,
       uses: stringField(entry, "uses"),
       with: objectField(entry, "with"),
+      // Spec requirement "The canonical declaration survives the complete
+      // task lifecycle": recovery handler tasks keep their top-level
+      // `expect` alongside `with`. Dropping it here would silently lose
+      // the completion contract on the recovery path.
+      expect: objectField(entry, "expect"),
       artifacts: objectField(entry, "artifacts"),
       setVars: recordField(entry, "setVars"),
       recovery,

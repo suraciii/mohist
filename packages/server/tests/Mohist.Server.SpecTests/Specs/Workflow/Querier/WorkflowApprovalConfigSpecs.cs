@@ -34,7 +34,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
     {
         var runId = "wr_approval_defined";
         var feedbackConfig = new ApprovalFeedbackConfig(
-            Task: new FeedbackTaskConfig(
+            Task: new TaskDefinition(
                 Id: "apply-feedback",
                 Title: "Apply Feedback",
                 Uses: "spec/task",

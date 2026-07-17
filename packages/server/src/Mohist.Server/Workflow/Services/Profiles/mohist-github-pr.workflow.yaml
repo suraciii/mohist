@@ -7,18 +7,18 @@ description: |
   Requires the `gh` CLI on the runner host and `gh auth login` against the target repository.
 
 variables:
-  agent:
-    type: opencode
+  agent: {}
 
 approval:
   feedback:
     task:
       id: apply-feedback
       title: Apply approval feedback
-      uses: mohist/acp-agent
+      uses: mohist/opencode
       with:
         session: ${{ stage.name }}
         prompt: ${{ prompts.apply-feedback }}
+        options: ${{ vars.agent }}
 
 stages:
   - stage: plan
@@ -29,11 +29,11 @@ stages:
         uses: mohist/workspace-prepare
       - id: proposal
         title: Generate proposal
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: plan
           prompt: ${{ prompts.proposal }}
-          agent: ${{ vars.agent }}
+          options: ${{ vars.agent }}
         expect:
           files:
             - path: ${{ openspecChangeDir }}/proposal.md
@@ -43,22 +43,22 @@ stages:
 
       - id: specs
         title: Write specs
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: plan
           prompt: ${{ prompts.specs }}
-          agent: ${{ vars.agent }}
+          options: ${{ vars.agent }}
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/specs
 
       - id: design
         title: Create design
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: plan
           prompt: ${{ prompts.design }}
-          agent: ${{ vars.agent }}
+          options: ${{ vars.agent }}
         expect:
           files:
             - path: ${{ openspecChangeDir }}/design.md
@@ -68,11 +68,11 @@ stages:
 
       - id: tasks
         title: Generate tasks
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: plan
           prompt: ${{ prompts.tasks }}
-          agent: ${{ vars.agent }}
+          options: ${{ vars.agent }}
         expect:
           files:
             - path: ${{ openspecChangeDir }}/tasks.json
@@ -82,18 +82,18 @@ stages:
 
       - id: self-review
         title: Self review
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: plan
           prompt: ${{ prompts.self-review }}
-          agent: ${{ vars.agent }}
-          expect:
-            markers:
-              - path: ${{ openspecChangeDir }}/self-review.md
-                oneOf:
-                  - <promise>PASS</promise>
-                  - <promise>FAIL</promise>
-                failIf: <promise>FAIL</promise>
+          options: ${{ vars.agent }}
+        expect:
+          markers:
+            - path: ${{ openspecChangeDir }}/self-review.md
+              oneOf:
+                - <promise>PASS</promise>
+                - <promise>FAIL</promise>
+              failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:
@@ -101,11 +101,11 @@ stages:
               tasks:
                 - id: recover:fix-plan-review
                   title: Fix plan review findings
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     session: plan
                     prompt: ${{ prompts.fix-plan-review }}
-                    agent: ${{ vars.agent }}
+                    options: ${{ vars.agent }}
               retrySelf: true
         artifacts:
           files:
@@ -143,9 +143,9 @@ stages:
         with:
           path: ${{ openspecChangeDir }}/tasks.json
           task:
-            uses: mohist/acp-agent
+            uses: mohist/opencode
             with:
-              agent: ${{ vars.agent }}
+              options: ${{ vars.agent }}
               prompt:
                 uses: mohist/openspec-task-prompt
                 with:
@@ -165,11 +165,11 @@ stages:
               tasks:
                 - id: recover:fix-tests
                   title: Fix failing tests/build
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     session: build
                     prompt: ${{ prompts.fix-tests }}
-                    agent: ${{ vars.agent }}
+                    options: ${{ vars.agent }}
               retrySelf: true
     checks: []
 
@@ -181,18 +181,18 @@ stages:
         uses: mohist/workspace-prepare
       - id: ai-review
         title: AI review
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
           session: check
           prompt: ${{ prompts.review }}
-          agent: ${{ vars.agent }}
-          expect:
-            markers:
-              - path: ${{ openspecChangeDir }}/review.md
-                oneOf:
-                  - <promise>PASS</promise>
-                  - <promise>FAIL</promise>
-                failIf: <promise>FAIL</promise>
+          options: ${{ vars.agent }}
+        expect:
+          markers:
+            - path: ${{ openspecChangeDir }}/review.md
+              oneOf:
+                - <promise>PASS</promise>
+                - <promise>FAIL</promise>
+              failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:
@@ -200,11 +200,11 @@ stages:
               tasks:
                 - id: recover:fix-review-findings
                   title: Fix review findings
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     session: check
                     prompt: ${{ prompts.auto-fix }}
-                    agent: ${{ vars.agent }}
+                    options: ${{ vars.agent }}
               retrySelf: true
         artifacts:
           files:
@@ -285,11 +285,11 @@ stages:
                         tasks:
                           - id: recover:resolve-rebase-conflicts
                             title: Resolve rebase conflicts
-                            uses: mohist/acp-agent
+                            uses: mohist/opencode
                             with:
                               session: integrate
                               prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              agent: ${{ vars.agent }}
+                              options: ${{ vars.agent }}
                 - id: recover:push
                   title: Push
                   uses: mohist/push
@@ -303,11 +303,11 @@ stages:
               tasks:
                 - id: recover:fix-pr-checks
                   title: Fix failing GitHub PR checks
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     session: integrate
                     prompt: ${{ prompts.fix-pr-checks }}
-                    agent: ${{ vars.agent }}
+                    options: ${{ vars.agent }}
                 - id: recover:push
                   title: Push
                   uses: mohist/push

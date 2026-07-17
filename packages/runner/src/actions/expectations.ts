@@ -1,6 +1,6 @@
 import { join } from "node:path"
-import type { ActionContext, JsonValue } from "../core/types.js"
-import { arrayInput, isObject, objectInput, stringInput } from "../core/json.js"
+import type { JsonObject, JsonValue } from "../core/types.js"
+import { isObject, stringInput } from "../core/json.js"
 import { exists, readText } from "../system/process.js"
 
 export interface FailIfMatch {
@@ -9,39 +9,66 @@ export interface FailIfMatch {
   path: string
 }
 
-export interface TaskArtifactExpectation {
+export interface CompletionEvaluation {
   satisfied: boolean
   matched?: string
   missingFiles: Array<{ path: string }>
-  missingArtifactMarkers: Array<{ path: string; contains: string }>
+  missingMarkers: Array<{ path: string; contains: string }>
   failIfMatches: FailIfMatch[]
   message: string
 }
 
 const OUTPUT_MARKER_PATH = "_output"
 
-export async function verifyExpectations(context: ActionContext, agentText?: string): Promise<TaskArtifactExpectation> {
-  const expect = objectInput(context.with, "expect")
-  const files = arrayInput(expect, "files").filter(isObject)
-  const markers = arrayInput(expect, "markers").filter(isObject)
-  const missingFiles = files.map((file) => resolveActionPath(context, stringValue(file.path))).filter((path): path is string => !!path && !exists(path)).map((path) => ({ path }))
+/**
+ * Workflow-owned completion evaluator. Reads the expanded task-level
+ * `expect` declaration (a JSON object), checks declared files exist,
+ * matches file-backed markers against configured `oneOf` / `contains`
+ * values, applies `failIf`, and evaluates the `_output` private
+ * fact-channel marker against the turn's final assistant text.
+ *
+ * The completion evaluator is intentionally agnostic to which Action
+ * returned. It does NOT read `ActionContext.with.expect` (the Action
+ * never receives `expect`); the executor passes the rendered `expect`
+ * object directly.
+ *
+ * Marker precedence is asymmetric by design:
+ *  - File-backed markers: the matched value is the first present value
+ *    in `oneOf` declaration order.
+ *  - `_output` markers: the matched value is the last accepted
+ *    occurrence in the assistant text (so later verdicts override
+ *    earlier ones; the final answer wins).
+ *
+ * Missing files or unsatisfied markers fail the task with a
+ * human-readable `message` that the runner returns to the server.
+ */
+export async function evaluateCompletion(
+  expect: JsonObject | null | undefined,
+  workDir: string,
+  finalAssistantText?: string | null,
+): Promise<CompletionEvaluation> {
+  const files = readFilesArray(expect)
+  const markers = readMarkersArray(expect)
+  const missingFiles: Array<{ path: string }> = []
+  for (const file of files) {
+    const path = typeof file?.path === "string" ? resolveLocalPath(workDir, file.path) : null
+    if (!path) continue
+    if (!exists(path)) missingFiles.push({ path })
+  }
 
   let matched: string | undefined
-  const missingArtifactMarkers: Array<{ path: string; contains: string }> = []
+  const missingMarkers: Array<{ path: string; contains: string }> = []
   const failIfMatches: FailIfMatch[] = []
 
   for (const marker of markers) {
-    const rawPath = stringValue(marker.path)
+    if (!isObject(marker)) continue
+    const rawPath = typeof marker.path === "string" ? marker.path : undefined
     const accepted = resolveAcceptedMarkers(marker)
-    const failIf = resolveFailIf(marker)
     if (accepted.length === 0) continue
+    const failIf = resolveFailIf(marker)
 
     if (rawPath === OUTPUT_MARKER_PATH) {
-      if (!agentText) {
-        missingArtifactMarkers.push({ path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) })
-        continue
-      }
-      const last = parseLastMarker(agentText)
+      const last = finalAssistantText ? parseLastMarker(finalAssistantText, accepted) : null
       if (last && accepted.includes(last)) {
         matched = last
         if (failIf && last === failIf) {
@@ -49,14 +76,14 @@ export async function verifyExpectations(context: ActionContext, agentText?: str
         }
         continue
       }
-      missingArtifactMarkers.push({ path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) })
+      missingMarkers.push({ path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) })
       continue
     }
 
-    const path = resolveActionPath(context, rawPath)
+    const path = rawPath ? resolveLocalPath(workDir, rawPath) : null
     if (!path) continue
     if (!exists(path)) {
-      missingArtifactMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
+      missingMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
       continue
     }
     const content = await readText(path)
@@ -68,42 +95,76 @@ export async function verifyExpectations(context: ActionContext, agentText?: str
       }
       continue
     }
-    missingArtifactMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
+    missingMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
   }
 
+  const satisfied = missingFiles.length === 0 && missingMarkers.length === 0 && failIfMatches.length === 0
   return {
-    satisfied: missingFiles.length === 0 && missingArtifactMarkers.length === 0 && failIfMatches.length === 0,
+    satisfied,
     matched,
     missingFiles,
-    missingArtifactMarkers,
+    missingMarkers,
     failIfMatches,
-    message: buildMessage(missingFiles, missingArtifactMarkers, failIfMatches),
+    message: buildMessage(missingFiles, missingMarkers, failIfMatches),
   }
 }
 
-function buildMessage(missingFiles: Array<{ path: string }>, missingArtifactMarkers: Array<{ path: string; contains: string }>, failIfMatches: FailIfMatch[]): string {
-  if (missingFiles.length === 0 && missingArtifactMarkers.length === 0 && failIfMatches.length === 0) {
-    return "Agent completion requirements satisfied"
+function readFilesArray(expect: JsonObject | null | undefined) {
+  const raw = expect?.files
+  return Array.isArray(raw) ? raw.filter(isObject) : []
+}
+
+function readMarkersArray(expect: JsonObject | null | undefined) {
+  const raw = expect?.markers
+  return Array.isArray(raw) ? raw.filter(isObject) : []
+}
+
+function buildMessage(
+  missingFiles: Array<{ path: string }>,
+  missingMarkers: Array<{ path: string; contains: string }>,
+  failIfMatches: FailIfMatch[],
+): string {
+  if (missingFiles.length === 0 && missingMarkers.length === 0 && failIfMatches.length === 0) {
+    return "Workflow completion requirements satisfied"
   }
   const parts: string[] = []
-  for (const file of missingFiles) parts.push(`missing artifact file: ${file.path}`)
-  for (const marker of missingArtifactMarkers) parts.push(`missing artifact marker in ${marker.path}: ${marker.contains}`)
+  for (const file of missingFiles) parts.push(`missing required file: ${file.path}`)
+  for (const marker of missingMarkers) parts.push(`missing marker in ${marker.path}: ${marker.contains}`)
   for (const fail of failIfMatches) parts.push(`failIf marker matched in ${fail.path}: ${fail.marker}`)
-  return `Agent completion requirements were not satisfied: ${parts.join("; ")}`
+  return `Workflow completion requirements were not satisfied: ${parts.join("; ")}`
 }
 
-function parseLastMarker(text: string): string | null {
-  const matches = [...text.matchAll(/<promise>\s*(done|unfinished)\s*<\/promise>/g)]
+/**
+ * Generalized `<promise>VALUE</promise>` parser. Returns the last
+ * occurrence whose `VALUE` is one of the marker's accepted values, or
+ * null if no accepted occurrence is present. The legacy parser only
+ * recognized lowercase `done|unfinished`; this version accepts
+ * arbitrary `VALUE`s declared in the marker's `oneOf` (or `contains`)
+ * list, matching the spec scenario for arbitrary `<promise>` markers.
+ *
+ * `accepted` lets callers restrict the parser to the marker's
+ * configured value set so a stray `<promise>other</promise>` in the
+ * text does not falsely match. The bare marker
+ * `<promise>VALUE</promise>` is returned (caller compares against
+ * `accepted.includes(...)`, mirroring the file-marker shape).
+ */
+export function parseLastMarker(text: string, accepted: string[]): string | null {
+  if (!text || accepted.length === 0) return null
+  const matches = [...text.matchAll(/<promise>\s*([^<>\s]+)\s*<\/promise>/g)]
   if (matches.length === 0) return null
-  const last = matches[matches.length - 1]
-  return `<promise>${last[1]}</promise>`
+  for (let i = matches.length - 1; i >= 0; i -= 1) {
+    const value = matches[i][1]
+    const marker = `<promise>${value}</promise>`
+    if (accepted.includes(marker)) return marker
+  }
+  return null
 }
 
 function resolveAcceptedMarkers(marker: JsonValue): string[] {
   if (!isObject(marker)) return []
-  const oneOf = arrayInput(marker, "oneOf")
-  if (oneOf.length > 0) {
-    const values = oneOf.filter((value): value is string => typeof value === "string" && value.length > 0)
+  const oneOfRaw = marker.oneOf
+  if (Array.isArray(oneOfRaw) && oneOfRaw.length > 0) {
+    const values = oneOfRaw.filter((value): value is string => typeof value === "string" && value.length > 0)
     if (values.length > 0) return values
   }
   const contains = stringInput(marker, "contains")
@@ -122,25 +183,30 @@ function formatAcceptedMarkers(values: string[]): string {
   return `oneOf: ${values.join(" | ")}`
 }
 
-export function resolveActionPath(context: ActionContext, value?: string) {
-  if (!value) return undefined
-  return value.match(/^[A-Za-z]:[\\/]|^\//) ? value : join(context.workDir, value)
-}
-
-function stringValue(value: JsonValue | undefined) {
-  return typeof value === "string" ? value : undefined
+function resolveLocalPath(workDir: string, value: string): string {
+  return value.match(/^[A-Za-z]:[\\/]|^\//) ? value : join(workDir, value)
 }
 
 /**
  * Extract the bare verdict from a `<promise>VALUE</promise>` marker —
- * e.g. "PASS", "FAIL", "done", "unfinished". Returns null when the marker
- * is absent or not a promise marker. The acp-agent action exposes this as
- * `output.promise` so workflow onFailure cases can match on the verdict the
- * agent actually produced (rather than an errorCode the action never
- * synthesizes).
+ * e.g. "PASS", "FAIL", "done", "unfinished". Returns null when the
+ * marker is absent or not a promise marker. The mohist/opencode Action
+ * uses this to project the matched value into its
+ * `{ "promise": "<value>" }` output so workflow onFailure cases can
+ * match on the verdict the agent actually produced.
  */
 export function promiseValue(marker: string | undefined | null): string | null {
   if (!marker) return null
   const match = marker.match(/^<promise>\s*([^<>\s]+)\s*<\/promise>$/)
   return match ? match[1] : null
+}
+
+/**
+ * Resolve a relative path against the action's working directory.
+ * Absolute paths (including POSIX `/` and Windows drive-letter forms)
+ * pass through unchanged.
+ */
+export function resolveActionPath(workDir: string, value?: string) {
+  if (!value) return undefined
+  return value.match(/^[A-Za-z]:[\\/]|^\//) ? value : join(workDir, value)
 }

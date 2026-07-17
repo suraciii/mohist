@@ -6,6 +6,7 @@ import { stringAt } from "../core/json-path.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { timeoutSignal } from "../system/timeout-signal.js"
 import { acpAgentAction } from "./acp-agent.js"
+import { opencodeAction } from "./opencode.js"
 import { resolveActionPath } from "./expectations.js"
 import {
   createGitHubPrAction,
@@ -54,6 +55,7 @@ export function createDefaultRegistry() {
   registry.register("core/artifact-exists", artifactExistsAction)
   registry.register("core/marker", markerAction)
   registry.register("mohist/acp-agent", acpAgentAction)
+  registry.register("mohist/opencode", opencodeAction)
   registry.register("mohist/openspec-tasks", openspecTasksAction)
   registry.register("mohist/openspec-artifacts", openspecArtifactsAction)
   registry.register("mohist/archive-change", archiveChangeAction)
@@ -109,7 +111,7 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
 }
 
 async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return { status: "failure", message: "Artifact check requires 'path'" }
   const found = exists(path)
   const output = JSON.stringify({ kind: "artifact-exists", path, exists: found })
@@ -117,7 +119,7 @@ async function artifactExistsAction(context: ActionContext): Promise<ActionResul
 }
 
 async function markerAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
   if (!path || !expect) return { status: "failure", message: "Marker check requires 'path' and 'expect'" }
   if (!exists(path)) return { status: "failure", message: `Marker file missing: ${path}` }

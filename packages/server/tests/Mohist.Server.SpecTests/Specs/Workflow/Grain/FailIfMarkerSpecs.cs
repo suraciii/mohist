@@ -12,7 +12,7 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
     public FailIfMarkerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public void WorkflowYamlSerializer_PreservesFailIfInTaskWith()
+    public void WorkflowYamlSerializer_PreservesFailIfInTaskExpect()
     {
         // The engine stays failIf-agnostic — it does not interpret
         // expect.markers[*].failIf; the runner does. The serializer's job
@@ -24,15 +24,16 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
             tasks:
               - id: ai-review
                 title: AI review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
-                  expect:
-                    markers:
-                      - path: review.md
-                        oneOf:
-                          - "<promise>PASS</promise>"
-                          - "<promise>FAIL</promise>"
-                        failIf: "<promise>FAIL</promise>"
+                  session: check
+                expect:
+                  markers:
+                    - path: review.md
+                      oneOf:
+                        - "<promise>PASS</promise>"
+                        - "<promise>FAIL</promise>"
+                      failIf: "<promise>FAIL</promise>"
             checks: []
         """;
 
@@ -41,6 +42,8 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
 
         Assert.Contains("failIf:", emitted);
         Assert.Contains("oneOf:", emitted);
+        Assert.Contains("expect:", emitted);
+        Assert.Contains("session: check", emitted);
     }
 
     [Fact]
@@ -50,22 +53,20 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         // failIf marker as a required file entry carrying oneOf and
         // failIf metadata so downstream views can show "this marker, if
         // matched, fails the task".
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
-            ["expect"] = JsonSerializer.Deserialize<JsonElement>("""
-                {
-                  "markers": [
-                    {
-                      "path": "review.md",
-                      "oneOf": ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
-                      "failIf": "<promise>FAIL</promise>"
-                    }
-                  ]
-                }
+            ["markers"] = JsonSerializer.Deserialize<JsonElement>("""
+                [
+                  {
+                    "path": "review.md",
+                    "oneOf": ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+                    "failIf": "<promise>FAIL</promise>"
+                  }
+                ]
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         var entry = Assert.Single(result);
         Assert.Equal("review.md", entry.Path);
@@ -81,25 +82,25 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         // same path, only one RequiredFile entry is returned. The
         // marker-derived entry wins because it carries the failIf/oneOf
         // metadata.
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
-            ["expect"] = JsonSerializer.Deserialize<JsonElement>("""
-                {
-                  "files": [
-                    {"path": "review.md", "markers": ["<promise>PASS</promise>"]}
-                  ],
-                  "markers": [
-                    {
-                      "path": "review.md",
-                      "oneOf": ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
-                      "failIf": "<promise>FAIL</promise>"
-                    }
-                  ]
-                }
+            ["files"] = JsonSerializer.Deserialize<JsonElement>("""
+                [
+                  {"path": "review.md", "markers": ["<promise>PASS</promise>"]}
+                ]
+                """),
+            ["markers"] = JsonSerializer.Deserialize<JsonElement>("""
+                [
+                  {
+                    "path": "review.md",
+                    "oneOf": ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+                    "failIf": "<promise>FAIL</promise>"
+                  }
+                ]
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         var entry = Assert.Single(result);
         Assert.Equal("review.md", entry.Path);

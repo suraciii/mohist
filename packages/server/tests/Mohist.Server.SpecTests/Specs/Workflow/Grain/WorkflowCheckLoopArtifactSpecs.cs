@@ -65,7 +65,8 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
                         "AI review",
                         "spec/review",
                         ReviewWith(),
-                        ReviewArtifacts(),
+                        Expect: null,
+                        Artifacts: ReviewArtifacts(),
                         Recovery: ReviewRecovery())
                 ],
                 [])

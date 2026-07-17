@@ -84,10 +84,7 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
 
     private static Dictionary<string, object?> BuildAgentConfig(Dictionary<string, object?>? globalAgentConfig)
     {
-        var agentConfig = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["type"] = "opencode",
-        };
+        var agentConfig = new Dictionary<string, object?>(StringComparer.Ordinal);
         MergeAgentConfig(agentConfig, globalAgentConfig);
         return agentConfig;
     }

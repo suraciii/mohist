@@ -247,7 +247,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     async (modelId: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId, variant: null }, projectId)
+        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: modelId, variant: null }, projectId)
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(null)
         addRecent(modelId)
@@ -265,7 +265,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     async (modelId: string, variant: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId, variant }, projectId)
+        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: modelId, variant }, projectId)
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(variant)
         addRecent(modelId)
@@ -301,7 +301,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId, variant: null }, projectId)
+        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant: null }, projectId)
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
           const next = { ...prev }
@@ -344,7 +344,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       try {
         if (!projectId) throw new Error('Project is required')
         if (variant) {
-          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId, variant }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant }, projectId)
         } else {
           await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant: null }, projectId)
         }

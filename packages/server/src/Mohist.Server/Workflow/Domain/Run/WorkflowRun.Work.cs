@@ -12,6 +12,7 @@ public sealed record WorkflowTaskWork(
     string Title,
     string? Uses,
     Dictionary<string, JsonElement?>? With,
+    Dictionary<string, JsonElement?>? Expect = null,
     TaskArtifactCapture? Artifacts = null,
     Dictionary<string, string>? SetVars = null,
     RecoveryDefinition? Recovery = null,
@@ -47,7 +48,7 @@ public static partial class WorkflowRunExtensions
 
             var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
-                return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
+                return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.ExpectInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
@@ -209,7 +210,8 @@ public static partial class WorkflowRunExtensions
         var workId = task.WorkId ?? task.Id;
         var item = WorkItem.Task(
             stage.Id, workId, task.Title, task.Uses,
-            task.WithInput, task.Artifacts, task.SetVars, task.Recovery, task.RecoveryRemaining);
+            task.WithInput, task.Artifacts, task.SetVars, task.Recovery, task.RecoveryRemaining,
+            task.ExpectInput);
         return new WorkflowActiveWork(item, task.Id);
     }
 

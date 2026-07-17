@@ -72,6 +72,7 @@ Recovery 机制本身见 [`recovery.md`](recovery.md)，action 契约见 [`actio
 - `push` 不声明业务 recovery：push 失败意味着权限/网络问题或远程 branch 被外部写入，应作为普通 task failure 暴露。
 - 恢复 agent 的职责边界：`recover:resolve-rebase-conflicts` 解冲突并完成 rebase；`recover:fix-pr-checks` 只修 checks——push 一律由后续显式 `recover:push` 承担。
 
-## 实装差距
-
-- Agent task 目前仍用 `mohist/acp-agent` 与 `agent` input；目标接口是 `mohist/opencode` + `options`（见 [`actions.md`](actions.md)）。部分 task 的 `expect` 也还挂在 `with` 下，目标是提升为 task 顶层的完成契约。
+所有 agent task 都使用 `mohist/opencode` 与 `options: ${{ vars.agent }}`；`expect` 是
+task-level 完成契约，存放在 `with` / `artifacts` / `setVars` / `recovery` 同一层；approval
+feedback 的 `apply-feedback` 显式绑定 `options`，尊重 issue 级模型选择。完整的 Action
+契约见 [`actions.md`](actions.md)。

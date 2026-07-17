@@ -42,16 +42,19 @@ namespace Mohist.Server.Issue.Services;
 public static class IssueModelMetadata
 {
     /// <summary>
-    /// <c>provider/model</c> shape: a non-empty <c>provider</c> segment, a
-    /// single <c>/</c>, then a non-empty <c>model</c> segment; both segments
-    /// contain no whitespace or further <c>/</c>. Empty/whitespace values
+    /// Splits a model identifier at the first <c>/</c>: the segment before
+    /// must be a non-empty, non-whitespace <c>provider</c>; the segment
+    /// after must be a non-empty, non-whitespace <c>model ID</c> that may
+    /// itself contain further <c>/</c> characters (e.g.
+    /// <c>openrouter/vendor/family/model</c>). Empty/whitespace values
     /// are NOT rejected here — they mean "no model" and are cleared atomically.
     /// </summary>
-    private static readonly Regex ProviderModelFormat = new(@"^[^/\s]+/[^/\s]+$", RegexOptions.Compiled);
+    private static readonly Regex ProviderModelFormat = new(@"^[^/\s]+/\S+$", RegexOptions.Compiled);
 
     /// <summary>
-    /// Validate that a model string conforms to <c>provider/model</c> format.
-    /// Returns null on success, or a user-facing error message on failure.
+    /// Validate that a model string conforms to <c>provider/model</c> format
+    /// where the model ID may contain additional <c>/</c> segments. Returns
+    /// null on success, or a user-facing error message on failure.
     /// Null/whitespace <paramref name="model"/> is allowed (means clear).
     /// </summary>
     public static string? ValidateModel(string? model)

@@ -63,7 +63,8 @@ public static partial class WorkflowRoutes
                 request.Uses,
                 request.With,
                 request.Stage,
-                request.InvalidateChecks));
+                request.InvalidateChecks,
+                Expect: request.Expect));
 
             return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.TaskId });
         });
@@ -80,7 +81,8 @@ public static partial class WorkflowRoutes
                 t.Id ?? throw new InvalidOperationException("Task id is required"),
                 t.Title ?? throw new InvalidOperationException("Task title is required"),
                 t.Uses,
-                t.With)).ToList();
+                t.With,
+                t.Expect)).ToList();
 
             var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
             var result = await workflow.AddTasksAsync(new AddTasksBatchRequest(items));
@@ -122,9 +124,21 @@ public static partial class WorkflowRoutes
         return app;
     }
 
-    public sealed record AddTaskRequestDto(string? Id, string? Title, string? Uses, JsonElement? With, string? Stage, bool InvalidateChecks = false);
+    public sealed record AddTaskRequestDto(
+        string? Id,
+        string? Title,
+        string? Uses,
+        JsonElement? With,
+        string? Stage,
+        bool InvalidateChecks = false,
+        JsonElement? Expect = null);
     public sealed record AddTasksRequestDto(IReadOnlyList<AddTasksRequestTaskDto>? Tasks);
-    public sealed record AddTasksRequestTaskDto(string? Id, string? Title, string? Uses, JsonElement? With);
+    public sealed record AddTasksRequestTaskDto(
+        string? Id,
+        string? Title,
+        string? Uses,
+        JsonElement? With,
+        JsonElement? Expect = null);
 
     internal static async Task<IResult?> EnsureWorkflowRunExistsAsync(string workflowRunId, WorkflowQuerier reader)
     {

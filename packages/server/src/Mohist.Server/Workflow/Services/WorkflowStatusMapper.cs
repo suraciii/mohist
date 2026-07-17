@@ -121,7 +121,7 @@ public static class WorkflowStatusMapper
                 t.Title,
                 t.Uses,
                 "pending",
-                TaskRunExtensions.ExtractRequiredFiles(t.With),
+                TaskRunExtensions.ExtractRequiredFiles(t.Expect),
                 TaskRunExtensions.DeriveClassification(t.Uses, null),
                 TaskRunExtensions.ExtractSessionName(t.With)))
             .ToList();

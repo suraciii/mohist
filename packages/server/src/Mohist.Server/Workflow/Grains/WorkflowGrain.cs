@@ -309,8 +309,9 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             throw new InvalidOperationException("Runtime task requires title");
 
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
+        var expect = WorkflowDispatchHelpers.ParseWith(task.Expect);
         var events = _run.AddRuntimeTask(
-            new TaskDefinition(task.Id, task.Title, task.Uses, with, Recovery: task.Recovery),
+            new TaskDefinition(task.Id, task.Title, task.Uses, with, expect, Recovery: task.Recovery),
             Now(),
             task.Stage,
             task.InvalidateChecks);
@@ -410,7 +411,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             if (string.IsNullOrWhiteSpace(t.Title))
                 throw new InvalidOperationException("Task title is required");
 
-            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With)));
+            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With), WorkflowDispatchHelpers.ParseWith(t.Expect)));
         }
 
         var events = _run.AddRuntimeTasks(tasksToInsert, Now());

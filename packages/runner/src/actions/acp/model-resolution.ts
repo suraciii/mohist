@@ -16,17 +16,10 @@ export interface RequestedModel {
 
 export function resolveRequestedModel(context: ActionContext, agentConfig?: { model?: string; variant?: string }): RequestedModel {
   const agentModel = agentConfig?.model
-  if (agentModel?.trim()) return composeRequestedModel(agentModel, agentConfig?.variant, "agent.model")
+  if (agentModel?.trim()) return { model: agentModel.trim(), variant: agentConfig?.variant, source: "agent.model" }
   const withModel = stringInput(context.with, "model")
-  if (withModel?.trim()) return composeRequestedModel(withModel, stringInput(context.with, "variant"), "with.model")
+  if (withModel?.trim()) return { model: withModel.trim(), variant: stringInput(context.with, "variant"), source: "with.model" }
   return { source: "none" }
-}
-
-function composeRequestedModel(model: string, variant: string | undefined, source: "agent.model" | "with.model"): RequestedModel {
-  const trimmedModel = model.trim()
-  const trimmedVariant = variant?.trim()
-  if (!trimmedVariant) return { model: trimmedModel, source }
-  return { model: `${trimmedModel}/${trimmedVariant}`, variant, source }
 }
 
 export async function applyRequestedModel(
@@ -35,9 +28,12 @@ export async function applyRequestedModel(
   sessionId: string,
   requested: RequestedModel,
   notify: (activityType?: string) => void,
+  options: { silenceMissingModelWarning?: boolean } = {},
 ) {
   if (!requested.model?.trim()) {
-    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested, null))
+    if (!options.silenceMissingModelWarning) {
+      console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested, null))
+    }
     return
   }
 

@@ -164,10 +164,19 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         var (load, r1) = await PollWorkAnyAsync();
 
+        var withJson = JsonDocument.Parse("""
+            { "prompt": "Add the feature flag service.\n- service is registered" }
+            """).RootElement;
+        var expectJson = JsonDocument.Parse("""
+            {
+              "files": [{ "path": "src/FeatureFlags.cs" }],
+              "markers": [{ "path": "openspec/changes/issue-1/tasks.json", "contains": "\"passes\": true" }]
+            }
+            """).RootElement;
+
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
             new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent",
-                    JsonSerializer.Deserialize<JsonElement>("""{"prompt":"Add the feature flag service.\n- service is registered","expect":{"files":[{"path":"src/FeatureFlags.cs"}],"markers":[{"path":"openspec/changes/issue-1/tasks.json","contains":"\"passes\": true"}]}}"""))
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", withJson, expectJson)
             ]));
 
         await ReportAsync(r1, load.WorkId, "completed");
@@ -175,13 +184,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
         Assert.StartsWith("T-001.", dynamicTask.WorkId);
-        Assert.Equal("mohist/acp-agent", dynamicTask.Uses);
+        Assert.Equal("mohist/opencode", dynamicTask.Uses);
         Assert.NotNull(dynamicTask.With);
         Assert.Contains("Add the feature flag service.", dynamicTask.With);
         Assert.Contains("service is registered", dynamicTask.With);
-        Assert.Contains("expect", dynamicTask.With);
-        Assert.Contains("contains", dynamicTask.With);
-        Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
+        Assert.NotNull(dynamicTask.Expect);
+        Assert.Contains("contains", dynamicTask.Expect!);
+        Assert.Contains("src/FeatureFlags.cs", dynamicTask.Expect!);
+        Assert.DoesNotContain("expect", dynamicTask.With!);
     }
 
     [Fact]
@@ -206,7 +216,9 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
             new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent", JsonSerializer.Deserialize<JsonElement>("""{"prompt":"Implement feature"}"""))
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
+                    {"prompt":"Implement feature","options":"${{ vars.agent }}"}
+                    """))
             ]));
 
         await ReportAsync(r1, load.WorkId, "completed");
@@ -225,9 +237,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         [
             new StageDefinition(
                 "build",
-                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                [new("T-001", "Implement feature", "mohist/opencode", new Dictionary<string, JsonElement?>
                 {
-                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature")
+                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
+                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
                 [],
                 Variables: new Dictionary<string, JsonElement?>
@@ -254,11 +267,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         [
             new StageDefinition(
                 "check",
-                [new("ai-review", "AI review", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                [new("ai-review", "AI review", "mohist/opencode", new Dictionary<string, JsonElement?>
                 {
                     ["session"] = JsonSerializer.SerializeToElement("check"),
                     ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.review }}"),
-                    ["agent"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
+                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
                 [],
                 Variables: new Dictionary<string, JsonElement?>
@@ -274,7 +287,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         Assert.StartsWith("ai-review.", task.WorkId);
         using var with = JsonDocument.Parse(task.With!);
-        var agent = with.RootElement.GetProperty("agent");
+        var agent = with.RootElement.GetProperty("options");
         Assert.Equal(JsonValueKind.Object, agent.ValueKind);
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
         Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
@@ -293,9 +306,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         [
             new StageDefinition(
                 "build",
-                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                [new("T-001", "Implement feature", "mohist/opencode", new Dictionary<string, JsonElement?>
                 {
-                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature")
+                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
+                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
                 [])
         ], Variables: new Dictionary<string, JsonElement?>
@@ -334,10 +348,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         [
             new StageDefinition(
                 "build",
-                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                [new("T-001", "Implement feature", "mohist/opencode", new Dictionary<string, JsonElement?>
                 {
                     ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
-                    ["agent"] = JsonSerializer.SerializeToElement(initialAgent)
+                    ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
                 [],
                 Variables: new Dictionary<string, JsonElement?>
