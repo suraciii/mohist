@@ -58,6 +58,11 @@ public static class MohistServiceRegistration
     {
         services.AddMohistConventionalServices();
 
+        services.AddRouting(options =>
+        {
+            options.ConstraintMap["notstaticfile"] = typeof(NotStaticFileConstraint);
+        });
+
         // IAgentLauncher is an interface on top of the concrete
         // AgentLauncher (registered by conventional services via
         // IScopedService/AsSelf). Forward-registration so route handlers

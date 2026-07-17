@@ -23,7 +23,7 @@ public static class MohistWebRegistration
             ContentTypeProvider = new FileExtensionContentTypeProvider(),
         });
 
-        app.MapFallback(async context =>
+        app.MapFallback("{*path:notstaticfile}", async context =>
         {
             var path = context.Request.Path;
             if (path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase) ||

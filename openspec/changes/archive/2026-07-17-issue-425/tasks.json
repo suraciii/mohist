@@ -1,0 +1,29 @@
+{
+  "project": "mohist-local",
+  "description": "Fix SPA fallback so dotted session-name deep links (e.g. T-001.1) are served the Web UI entry page on refresh/direct open, while /api and /otel/v1 keep returning 404 and real static assets are served unchanged.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Serve Web UI entry page for dotted-path SPA fallback requests",
+      "spec": "specs/web-hosting-fallback/spec.md#requirement-frontend-owned-routes-shall-fall-back-to-the-web-ui-entry-page",
+      "description": "In packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistWebRegistration.cs, change app.MapFallback(handler) to app.MapFallback(\"{*path}\", handler) so the implicit :nonfile route constraint (which excludes any path whose final segment has a dot, e.g. workflow task-session names like T-001.1) is dropped and all unmatched non-carve-out paths reach the handler. Keep the handler body unchanged so /api and /otel/v1 still return 404 and everything else still serves index.html; UseStaticFiles still runs first for real assets. Extend the existing SPA-fallback spec in RuntimeEntrySpecs.cs to assert dotted and dot-free session names both serve the entry page, an unknown /api path 404s, and a real static asset is served.",
+      "acceptanceCriteria": [
+        "A direct GET to /issues/12/workflow/sessions/T-001.1 returns HTTP 200 with text/html and the Web UI entry page body, not 404.",
+        "Dot-free frontend routes (/ , /issues/1, /issues/1/workflow/sessions/plan) still return the Web UI entry page body.",
+        "An unknown /api path (e.g. /api/missing-route) returns HTTP 404 and does not serve the entry page body.",
+        "A path under /otel/v1 (e.g. /otel/v1/traces) returns HTTP 404 and does not serve the entry page body.",
+        "A real static asset present in the web content root is served with its correct content type and does not reach the fallback.",
+        "A file-like path that resolves to no real static asset is served the entry page body instead of 404.",
+        "Existing specs continue to pass: WebRoot_WhenConfigured_ServesIndexAndSpaFallback, ApiFallback_WhenUnknownApiPath_ReturnsNotFound, AgentStatus_OnLegacyRoute_ReturnsNotFound, OtlpRoutesIntegrationSpecs, and OtelPortIsolationMiddlewareSpecs.",
+        "`npm test` (server) is green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MohistWebRegistration.cs fallback registration plus extended RuntimeEntrySpecs.cs SPA-fallback assertions; all server tests green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Single change site: only the fallback registration line changes (pattern becomes \"{*path}\"); the handler body, /api + /otel/v1 carve-outs, and UseStaticFiles ordering are unchanged. The InMemoryWebContentProvider already seeds index.html; add a sample asset file to assert real-asset serving. No web/runner/CLI changes, no API or data changes."
+    }
+  ]
+}
