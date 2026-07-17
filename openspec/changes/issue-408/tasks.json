@@ -31,7 +31,7 @@
     {
       "id": "T-002",
       "title": "Model config validation and writer convergence",
-      "spec": "specs/opencode-action-contract/spec.md#model-identifiers-split-only-at-the-first-slash",
+      "spec": "specs/opencode-action-contract/spec.md",
       "description": "Change the model ID validation regex in IssueModelMetadata from exactly-one-slash to first-slash-split, so model IDs containing additional slashes (e.g. openrouter/vendor/family/model) are accepted while missing provider or model-ID portions are rejected. Stop adding the type: opencode execution-backend key in MohistIssueWorkflowProfileBase and in the Web IssueModelSelector variable patch calls. These surfaces persist only the model and variant meaning of vars.agent.",
       "acceptanceCriteria": [
         "IssueModelMetadata.ValidateModel accepts 'openrouter/vendor/family/model' and returns null (success)",
