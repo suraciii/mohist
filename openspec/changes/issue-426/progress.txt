@@ -1,0 +1,29 @@
+## Codebase Patterns
+
+- Three-layer tool-naming pipeline: `inferToolName` (semantic inference) → `normalizeToolName` (registry key) → `inferDisplayTitle` (display string). `normalizedName === 'unknown'` is preserved as the internal registry key (drives `findToolByCorrelation`, `getCorrelationKey`, registry lookup).
+- Production render path: `ToolRowView` (tool-views/index.tsx) and `ContextGroupView` both consume `getToolDisplayLabel` (tool-views/shared.tsx) as the single choke point feeding every visible tool label.
+- Legacy `SessionTranscriptView.tsx`/`ToolCallCard.tsx` exist but are not exported from `widgets/session-transcript/index.ts` — they are test-only artifacts (#427 removes them).
+- `inferDisplayTitle` flow: when `title` is set → use it; otherwise look up `DISPLAY_TITLES[normalized]`, finally fall back to `toolName ?? 'unknown'`. The latter branch was the literal-'unknown' leak.
+- `FallbackEntry.getTitle` (tool-registry.tsx): calls `getToolLabel(toolName, rawInput)` (per-tool-name extractor); fall back was `label ?? toolName` which leaked 'unknown'.
+- `getToolDisplayLabel` precedence: `displayTitle` → `displaySubtitle` → registry.getTitle. Prior to the fix any of these could return 'unknown'.
+- `getToolLabel` `default:` branch (used when toolName is unknown) extracts `url`, `filePath`, `description`, `query` — NOT `command`, `script`, `pattern`, or any tool-specific fields. So the semantic inference at `normalizeToolName` is the path that turns command → bash, where `BashEntry.getTitle` then extracts the command.
+- `DISPLAY_TITLES` only covers `apply_patch`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `todowrite`, `membrowse`, `memread`, `memsearch`. `bash`, `webfetch`, `task`, `skill`, etc. fall through to toolName.
+
+## Decisions
+
+- D1 floor: introduce `GENERIC_TOOL_LABEL = 'Tool call'` and replace `?? 'unknown'` / `?? toolName` at three choke points with a check `normalizeToolName(...) === 'unknown' ? GENERIC : toolName`.
+- D2 choke point: `getToolDisplayLabel` skips `displayTitle`/`displaySubtitle`/`registryTitle` if they equal 'unknown', and a final `normalizeToolName(normalizedName) !== 'unknown'` check preserves legitimate family names while feeding generic to truly-unidentified tools.
+- D3 unchanged: kept `normalizedName === 'unknown'` as an internal registry key. `inferToolName` / `normalizeToolName` untouched (they still emit 'unknown'); the floor only applies to user-visible display title resolution.
+
+## Gotchas
+
+- `inferDisplayTitle('bash', undefined)` returns `{ displayTitle: 'bash' }` (no DISPLAY_TITLES entry). The full command text only surfaces via `BashEntry.getTitle` in the registry when no displayTitle is provided. In the live tool path (`createToolPart`), `inferDisplayTitle` is called so the user typically sees the family name when no `title` is provided. The acceptance criterion "surfaces content via existing inferToolName inference" is met by the end-to-end pipeline (inference → registry); the choke-point unit tests for `getToolDisplayLabel` exercise the registry path, where command input for an inferred name does surface.
+- `FallbackEntry.getTitle` is not exported from tool-registry.tsx; tests route through `getToolRegistryEntry(name).getTitle(name, input)` instead.
+- Render test must check both visible text ('unknown' inside an element) and an accessible name (also 'unknown'). The current `getToolDisplayLabel` already returns a readable string; `ToolRowView` uses that as visible text inside `<span>`. No separate `aria-label` to verify.
+
+## Test Coverage Notes
+
+- `transcript-tool-utils.test.ts` (new): `inferDisplayTitle` floor + `inferToolName`/`normalizeToolName` regression (still emits 'unknown' as registry key).
+- `tool-registry.test.tsx` (new): `FallbackEntry.getTitle` floor (via registry helper since FallbackEntry isn't exported).
+- `tool-views/shared.test.tsx` (extended): `getToolDisplayLabel` never returns 'unknown'; surfaces via semantic inference (bash/read/grep/apply_patch registry entries); url surfaces via FallbackEntry default branch.
+- `AssistantParts.render.test.tsx` (extended): no rendered tool row exposes visible 'unknown' label, including paths from semantic inference and last-resort generic label.

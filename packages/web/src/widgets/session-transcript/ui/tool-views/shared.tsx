@@ -1,6 +1,6 @@
 import React from 'react'
 import { getToolRegistryEntry } from '../tool-registry'
-import { getFallbackSubtitle } from '../../model/transcript-tool-utils'
+import { GENERIC_TOOL_LABEL, getFallbackSubtitle, normalizeToolName } from '../../model/transcript-tool-utils'
 
 export function ToolIcon({ normalizedName }: { normalizedName: string }) {
   const entry = getToolRegistryEntry(normalizedName)
@@ -9,10 +9,13 @@ export function ToolIcon({ normalizedName }: { normalizedName: string }) {
 }
 
 export function getToolDisplayLabel(normalizedName: string, displayTitle?: string, displaySubtitle?: string, rawInput?: string): string {
-  if (displayTitle) return displayTitle
-  if (displaySubtitle) return displaySubtitle
+  if (displayTitle && displayTitle !== 'unknown') return displayTitle
+  if (displaySubtitle && displaySubtitle !== 'unknown') return displaySubtitle
   const entry = getToolRegistryEntry(normalizedName)
-  return entry.getTitle(normalizedName, rawInput)
+  const registryTitle = entry.getTitle(normalizedName, rawInput)
+  if (registryTitle && registryTitle !== 'unknown') return registryTitle
+  if (normalizeToolName(normalizedName) !== 'unknown') return registryTitle
+  return GENERIC_TOOL_LABEL
 }
 
 export function getToolDisplayArgs(normalizedName: string, rawInput?: string): string[] {

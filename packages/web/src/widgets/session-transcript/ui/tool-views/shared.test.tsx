@@ -78,6 +78,79 @@ describe('tool-views shared', () => {
       const input = JSON.stringify({ command: 'echo hi' })
       expect(getToolDisplayLabel('bash', undefined, undefined, input)).toBe('echo hi')
     })
+
+    it('never returns the literal "unknown" when the name is missing', () => {
+      const label = getToolDisplayLabel('unknown')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('never returns "unknown" when name is missing and input is empty', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('surfaces a command from raw input when name resolves via semantic inference to "bash"', () => {
+      const input = JSON.stringify({ command: 'npm install --save-dev typescript' })
+      const label = getToolDisplayLabel('bash', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('npm install')
+    })
+
+    it('surfaces a file path from raw input when name resolves via semantic inference to "read"', () => {
+      const input = JSON.stringify({ filePath: '/repo/src/widgets/transcript/foo.ts' })
+      const label = getToolDisplayLabel('read', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('foo.ts')
+    })
+
+    it('surfaces a query string from raw input when name resolves via semantic inference to "grep"', () => {
+      const input = JSON.stringify({ query: 'transcript gating' })
+      const label = getToolDisplayLabel('grep', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('transcript gating')
+    })
+
+    it('surfaces a url from raw input even when name is "unknown" (FallBackEntry extracts url)', () => {
+      const input = JSON.stringify({ url: 'https://example.com/page' })
+      const label = getToolDisplayLabel('unknown', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toBe('https://example.com/page')
+    })
+
+    it('surfaces a patch marker from raw input when name resolves via inference to "apply_patch"', () => {
+      const input = JSON.stringify({
+        patchText: '*** Begin Patch\n*** Update File: src/widgets/foo.ts\n-old\n+new\n*** End Patch',
+      })
+      const label = getToolDisplayLabel('apply_patch', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('foo.ts')
+    })
+
+    it('ignores displayTitle "unknown" and falls through to a generic label', () => {
+      const label = getToolDisplayLabel('unknown', 'unknown', undefined, undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('ignores displaySubtitle "unknown" and falls through to a generic label', () => {
+      const label = getToolDisplayLabel('unknown', undefined, 'unknown', undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('returns a generic descriptive label as last resort for unknown name with no recognizable input', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, '{"unrelated":"value"}')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('returns a generic descriptive label for unknown name and unparseable input', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, 'not-json')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
   })
 
   describe('getToolDisplayArgs', () => {
