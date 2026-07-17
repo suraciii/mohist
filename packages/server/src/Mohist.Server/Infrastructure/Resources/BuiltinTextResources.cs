@@ -9,9 +9,6 @@ internal static class BuiltinTextResources
     public static string ReadWorkflowProfile(string fileName) =>
         ReadRequired($"Workflow.Services.Profiles.{fileName}");
 
-    public static string ReadPrompt(string fileName) =>
-        ReadRequired($"Workflow.Services.Prompts.builtins.{fileName}");
-
     private static string ReadRequired(string resourcePath)
     {
         var resourceName = ResourcePrefix + resourcePath;

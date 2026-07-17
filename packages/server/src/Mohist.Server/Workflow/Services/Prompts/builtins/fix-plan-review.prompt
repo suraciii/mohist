@@ -4,11 +4,6 @@ description: "Fixes plan-stage self-review findings within scope"
 tags: [plan, review]
 stage: plan
 ---
-Read the current Mohist issue details before interpreting this task:
-
-```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
-```
 
 ## Input
 

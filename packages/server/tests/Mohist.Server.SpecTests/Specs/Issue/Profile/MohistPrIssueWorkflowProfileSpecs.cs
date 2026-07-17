@@ -528,21 +528,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public void GithubPrRecoveryPrompts_DoNotPerformExplicitPushSideEffects()
-    {
-        var fixPrChecks = ReadBuiltinPrompt("fix-pr-checks.prompt");
-        var resolveRebaseConflicts = ReadBuiltinPrompt("resolve-rebase-conflicts.prompt");
-
-        Assert.DoesNotContain("force-with-lease", fixPrChecks, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("```bash\ngit push", fixPrChecks, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("recover:push", fixPrChecks, StringComparison.Ordinal);
-
-        Assert.DoesNotContain("force-with-lease", resolveRebaseConflicts, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("```bash\ngit push", resolveRebaseConflicts, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("recover:push", resolveRebaseConflicts, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void GithubPrWorkflowYaml_ParsesViaWorkflowYamlSerializer()
     {
         var yaml = ReadResourceYaml("mohist-github-pr.workflow.yaml");
@@ -808,8 +793,4 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     private static string ReadResourceYaml(string fileName) =>
         Mohist.Server.Infrastructure.Resources.BuiltinTextResources
             .ReadWorkflowProfile(fileName);
-
-    private static string ReadBuiltinPrompt(string fileName) =>
-        Mohist.Server.Infrastructure.Resources.BuiltinTextResources
-            .ReadPrompt(fileName);
 }

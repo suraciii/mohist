@@ -46,13 +46,17 @@ Read `${{ openspecChangeDir }}/proposal.md`, `${{ openspecChangeDir }}/design.md
 - No circular dependencies exist.
 - Task granularity is appropriate: each task is a complete feature slice.
   
-  检查任务是否过细：
-  - 如果任务的标题包含"定义接口"、"提取类"、"注册DI"、"创建文件"等技术动作，说明过细
-  - 如果任务只涉及代码移动/重命名而没有实现功能，说明过细
-  - 如果安装/启动/停止/卸载被拆成独立任务，说明过细
-  - 如果存在单独的"测试"任务（如"添加XXX测试"），说明过细——测试应在实现任务中完成
-  
-  修复方式：将过细的任务合并到其功能切面任务中，而不是单独修复。
+  A task is too fine-grained when:
+  - Its title names a technical action such as "define interface",
+    "extract class", "register in DI", or "create file"
+  - It only moves or renames code without delivering functionality
+  - Lifecycle operations (install/start/stop/uninstall) are split into
+    separate tasks
+  - It is a standalone "test" task (e.g. "add tests for X") — tests belong
+    inside the implementation task
+
+  Repair: merge too-fine tasks into their feature-slice task instead of
+  patching them individually.
 </feasibility>
 
 <dependency_completeness>

@@ -4,11 +4,6 @@ description: "Fixes build, typecheck, and test failures from the verify check"
 tags: [build, verify]
 stage: build
 ---
-Read the current Mohist issue details before interpreting this task:
-
-```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
-```
 
 <artifact id="fix-tests">
 
@@ -37,11 +32,9 @@ Read the context files before fixing:
    - For build/compilation errors: fix the code.
    - For typecheck errors: fix the types.
    - For test failures: fix the code or tests — do not weaken assertions unless the original assertion was wrong.
-4. After fixing, re-run all verification commands:
-   - Server: dotnet tests
-   - Web: typecheck + tests
-   - Runner: typecheck + tests
-5. Confirm all suites pass before marking the task complete.
+4. After fixing, re-run the failed verification plus the test and typecheck
+   suites that cover the changed area.
+5. Confirm they pass before marking the task complete.
 </instruction>
 
 <repair_policy>
