@@ -59,6 +59,54 @@ describe('TranscriptMarkdown wrapper', () => {
     expect(highlightedTokens && highlightedTokens.length).toBeGreaterThan(0)
   })
 
+  it('renders \\n\\n paragraph boundaries as distinct <p> blocks (no paragraph fusion)', () => {
+    const content = 'First paragraph about usage:\n\nLet me read the file.'
+    const { container } = render(<TranscriptMarkdown content={content} />)
+
+    const wrapper = container.querySelector('.transcript-md')
+    expect(wrapper).not.toBeNull()
+
+    const paragraphs = wrapper?.querySelectorAll('p')
+    expect(paragraphs?.length).toBe(2)
+
+    const paragraphTexts = Array.from(paragraphs ?? []).map((p) => p.textContent ?? '')
+    expect(paragraphTexts).toEqual([
+      'First paragraph about usage:',
+      'Let me read the file.',
+    ])
+
+    expect(wrapper?.textContent).not.toContain('usage:Let me')
+    expect(wrapper?.textContent).not.toContain('usage: Let me')
+  })
+
+  it('renders three paragraphs with two \\n\\n separators as three distinct <p> blocks', () => {
+    const content = 'One.\n\nTwo with usage:\n\nLet me check the third.'
+    const { container } = render(<TranscriptMarkdown content={content} />)
+
+    const wrapper = container.querySelector('.transcript-md')
+    const paragraphs = wrapper?.querySelectorAll('p')
+    expect(paragraphs?.length).toBe(3)
+
+    const paragraphTexts = Array.from(paragraphs ?? []).map((p) => p.textContent ?? '')
+    expect(paragraphTexts).toEqual([
+      'One.',
+      'Two with usage:',
+      'Let me check the third.',
+    ])
+
+    expect(wrapper?.textContent).not.toContain('usage:Let me')
+  })
+
+  it('does not fuse two lines joined by a single \\n (collapses to one <p> per markdown rules)', () => {
+    const content = 'first line\nsecond line'
+    const { container } = render(<TranscriptMarkdown content={content} />)
+
+    const wrapper = container.querySelector('.transcript-md')
+    const paragraphs = wrapper?.querySelectorAll('p')
+    expect(paragraphs?.length).toBe(1)
+    expect(paragraphs?.[0]?.textContent).toBe('first line\nsecond line')
+  })
+
   it('still renders fenced code blocks without a language tag as block code', () => {
     const content = '```\nplain code\n```'
     const { container } = render(<TranscriptMarkdown content={content} />)

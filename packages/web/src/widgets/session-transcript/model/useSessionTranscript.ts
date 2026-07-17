@@ -144,9 +144,9 @@ export function useSessionTranscript({
     pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
     setIsThinking(false)
-    setIsStreaming(false)
+    clearStreaming()
     setTranscriptVersion((version) => version + 1)
-  }, [initialTurns, isRunning])
+  }, [initialTurns, isRunning, clearStreaming])
 
   useEffect(() => {
     if (!isRunning) {

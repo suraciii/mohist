@@ -51,6 +51,36 @@ describe('tool-views shared', () => {
       expect(wrapper).not.toBeNull()
       expect(indicator?.className).toContain('bg-info')
     })
+
+    it('marks the completed dot aria-hidden so screen readers ignore it', () => {
+      const { container } = render(<ToolStatusDot status="completed" />)
+      const dot = container.querySelector('span[data-tone="success"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the failed dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="failed" />)
+      const dot = container.querySelector('span[data-tone="danger"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the cancelled dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="cancelled" />)
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the pending dot aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="pending" />)
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the running indicator wrapper aria-hidden', () => {
+      const { container } = render(<ToolStatusDot status="running" />)
+      const wrapper = container.querySelector('span[data-tone="info"]')
+      expect(wrapper?.getAttribute('aria-hidden')).toBe('true')
+    })
   })
 
   describe('ToolIcon', () => {
@@ -62,6 +92,19 @@ describe('tool-views shared', () => {
     it('renders an svg for unknown tools via fallback', () => {
       const { container } = render(<ToolIcon normalizedName="totally-unknown-tool" />)
       expect(container.querySelector('svg')).toBeInTheDocument()
+    })
+
+    it('marks the rendered svg aria-hidden so screen readers ignore it', () => {
+      const { container } = render(<ToolIcon normalizedName="bash" />)
+      const svg = container.querySelector('svg')
+      expect(svg).not.toBeNull()
+      expect(svg?.getAttribute('aria-hidden')).toBe('true')
+    })
+
+    it('marks the fallback svg aria-hidden for unknown tool names', () => {
+      const { container } = render(<ToolIcon normalizedName="totally-unknown-tool" />)
+      const svg = container.querySelector('svg')
+      expect(svg?.getAttribute('aria-hidden')).toBe('true')
     })
   })
 
@@ -77,6 +120,79 @@ describe('tool-views shared', () => {
     it('uses the tool registry title when neither display title nor subtitle are set', () => {
       const input = JSON.stringify({ command: 'echo hi' })
       expect(getToolDisplayLabel('bash', undefined, undefined, input)).toBe('echo hi')
+    })
+
+    it('never returns the literal "unknown" when the name is missing', () => {
+      const label = getToolDisplayLabel('unknown')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('never returns "unknown" when name is missing and input is empty', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('surfaces a command from raw input when name resolves via semantic inference to "bash"', () => {
+      const input = JSON.stringify({ command: 'npm install --save-dev typescript' })
+      const label = getToolDisplayLabel('bash', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('npm install')
+    })
+
+    it('surfaces a file path from raw input when name resolves via semantic inference to "read"', () => {
+      const input = JSON.stringify({ filePath: '/repo/src/widgets/transcript/foo.ts' })
+      const label = getToolDisplayLabel('read', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('foo.ts')
+    })
+
+    it('surfaces a query string from raw input when name resolves via semantic inference to "grep"', () => {
+      const input = JSON.stringify({ query: 'transcript gating' })
+      const label = getToolDisplayLabel('grep', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('transcript gating')
+    })
+
+    it('surfaces a url from raw input even when name is "unknown" (FallBackEntry extracts url)', () => {
+      const input = JSON.stringify({ url: 'https://example.com/page' })
+      const label = getToolDisplayLabel('unknown', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toBe('https://example.com/page')
+    })
+
+    it('surfaces a patch marker from raw input when name resolves via inference to "apply_patch"', () => {
+      const input = JSON.stringify({
+        patchText: '*** Begin Patch\n*** Update File: src/widgets/foo.ts\n-old\n+new\n*** End Patch',
+      })
+      const label = getToolDisplayLabel('apply_patch', undefined, undefined, input)
+      expect(label).not.toBe('unknown')
+      expect(label).toContain('foo.ts')
+    })
+
+    it('ignores displayTitle "unknown" and falls through to a generic label', () => {
+      const label = getToolDisplayLabel('unknown', 'unknown', undefined, undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('ignores displaySubtitle "unknown" and falls through to a generic label', () => {
+      const label = getToolDisplayLabel('unknown', undefined, 'unknown', undefined)
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('returns a generic descriptive label as last resort for unknown name with no recognizable input', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, '{"unrelated":"value"}')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
+    })
+
+    it('returns a generic descriptive label for unknown name and unparseable input', () => {
+      const label = getToolDisplayLabel('unknown', undefined, undefined, 'not-json')
+      expect(label).not.toBe('unknown')
+      expect(label.length).toBeGreaterThan(0)
     })
   })
 

@@ -133,6 +133,7 @@ export function ToolRowView({ part }: ToolRowViewProps) {
         variant="ghost"
         size="sm"
         onClick={showExpandableDetails ? () => setExpanded(!expanded) : undefined}
+        aria-expanded={showExpandableDetails ? expanded : undefined}
         className={`flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none transition-colors ${showExpandableDetails ? 'hover:bg-muted cursor-pointer' : 'cursor-default'}`}
       >
         <ToolStatusDot status={part.status} />
@@ -174,7 +175,7 @@ export function ToolRowView({ part }: ToolRowViewProps) {
           </span>
         )}
         {showExpandableDetails && (
-          <svg className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
           </svg>
         )}
@@ -211,9 +212,10 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-muted transition-colors"
       >
-        <svg className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+        <svg aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
         </svg>
         <span className="text-xs font-medium text-foreground">{titlePrefix}</span>
@@ -229,7 +231,7 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
             failed
           </span>
         )}
-        <svg className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+        <svg aria-hidden="true" className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
       </Button>
