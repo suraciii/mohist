@@ -15,6 +15,7 @@ let _summaryError = false
 let _transcriptData: unknown = null
 const _followupHandler = vi.fn()
 const _cancelHandler = vi.fn()
+const _useGenericSessionTranscript = vi.fn(() => ({ data: _transcriptData }) as never)
 
 let _blockCancel = false
 let _cancelResolve: (() => void) | null = null
@@ -26,7 +27,7 @@ const genericSessionPageDependencies: GenericSessionPageDependencies = {
       isLoading: _summaryLoading,
       isError: _summaryError,
     }) as never,
-    useGenericSessionTranscript: () => ({ data: _transcriptData }) as never,
+    useGenericSessionTranscript: _useGenericSessionTranscript,
     useGenericFollowup: () => useMutation({
       mutationFn: async ({ text }: { sessionId: string; text: string }) => {
         _followupHandler({ text })
@@ -61,56 +62,43 @@ const genericSessionPageDependencies: GenericSessionPageDependencies = {
       <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
     ),
     ContextHealthBar: () => <div data-testid="context-health-bar" />,
-    CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
+    CompactionLineageLink: ({ runtimeSessionLineage, buildTargetPath }: { runtimeSessionLineage?: Array<{ runtimeSessionId: string }> | null; buildTargetPath: (runtimeId: string) => string }) => (
+      <a data-testid="compaction-lineage-link" href={buildTargetPath(runtimeSessionLineage![0].runtimeSessionId)} />
+    ),
   },
 }
-
-
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 function baseSummary(overrides: Record<string, any> = {}) {
   return {
-    sessionId: 'sess-abc',
-    agentId: 'agent-1',
-    agentName: 'Test Agent',
-    status: 'completed',
-    createdAt: '2026-06-15T10:00:00.000Z',
-    lastActivityAt: '2026-06-15T10:30:00.000Z',
-    resolvedModel: 'gpt-4',
-    failureCategory: null,
-    toolCallCount: 5,
-    toolErrorCount: 0,
-    contextRefs: null,
-    usage: null,
+    sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
+    runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'completed',
+    createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
+    resolvedModel: 'gpt-4', failureCategory: null,
+    toolCallCount: 5, toolErrorCount: 0, contextRefs: null, usage: null,
     ...overrides,
   }
 }
 
 function makeTurn(overrides: Record<string, any> = {}) {
   return {
-    id: 'turn-1',
-    startedAt: '2026-01-01T00:00:00Z',
-    completedAt: null,
+    id: 'turn-1', startedAt: '2026-01-01T00:00:00Z', completedAt: null,
     user: { role: 'mohist', text: 'hi', kind: 'task', sentAt: '2026-01-01T00:00:00Z' },
-    assistant: [],
-    ...overrides,
+    assistant: [], ...overrides,
   }
 }
 
-async function renderPage() {
+async function renderPage(initialEntry = '/agent-sessions/sess-abc') {
   const queryClient = createQueryClient()
   const result = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1',
-        name: 'Test',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        repositories: [],
+        id: 'proj-1', name: 'Test', createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z', repositories: [],
       }]}>
-        <MemoryRouter initialEntries={['/agent-sessions/sess-abc']}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path="/agent-sessions/:sessionId" element={<GenericSessionPage dependencies={genericSessionPageDependencies} />} />
           </Routes>
@@ -130,6 +118,7 @@ describe('GenericSessionPage', () => {
     mocks.transcriptTurns = []
     _followupHandler.mockClear()
     _cancelHandler.mockClear()
+    _useGenericSessionTranscript.mockClear()
     _blockCancel = false
     _cancelResolve = null
   })
@@ -242,46 +231,6 @@ describe('GenericSessionPage', () => {
     })
   })
 
-  describe('recovery region', () => {
-    it('renders ContextHealthBar when usage data is present and turns exist', async () => {
-      _summaryData = baseSummary({
-        usage: { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' },
-      })
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        const bars = screen.getAllByTestId('context-health-bar')
-        expect(bars.length).toBeGreaterThanOrEqual(1)
-      })
-    })
-
-    it('omits ContextHealthBar when no usage data', async () => {
-      _summaryData = baseSummary({ usage: null })
-      renderPage()
-      await waitFor(() => {
-        expect(screen.queryByTestId('context-health-bar')).not.toBeInTheDocument()
-      })
-    })
-
-    it('omits Compact/Reset recovery actions', async () => {
-      _summaryData = baseSummary()
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        expect(screen.queryByTestId('session-recovery-actions')).not.toBeInTheDocument()
-      })
-    })
-
-    it('renders no sibling sidebar for generic sessions', async () => {
-      _summaryData = baseSummary()
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        expect(screen.queryByTestId('session-sibling-sidebar')).not.toBeInTheDocument()
-      })
-    })
-  })
-
   describe('transcript rendering', () => {
     it('passes session transcript to SessionTranscriptLayout', async () => {
       _summaryData = baseSummary()
@@ -290,6 +239,56 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-transcript-scroll-container')).toBeInTheDocument()
       })
+    })
+  })
+
+  describe('runtime lineage', () => {
+    it('links generic predecessor bindings back to the same stable session route', async () => {
+      _summaryData = baseSummary({
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      renderPage('/agent-sessions/sess-abc?from=activity')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('compaction-lineage-link')).toHaveAttribute(
+          'href',
+          '/Test/agent-sessions/sess-abc?rt=rt-old&from=activity',
+        )
+      })
+    })
+
+    it('requests the selected runtime transcript for a history link', async () => {
+      _summaryData = baseSummary({
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      renderPage('/agent-sessions/sess-abc?rt=rt-old')
+
+      await waitFor(() => {
+        expect(_useGenericSessionTranscript).toHaveBeenCalledWith('sess-abc', 'rt-old')
+      })
+    })
+
+    it('makes a historical runtime view read-only for followup and cancel', async () => {
+      _summaryData = baseSummary({
+        status: 'running',
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage('/agent-sessions/sess-abc?rt=rt-old')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-disabled', 'true')
+      })
+      expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
     })
   })
 
@@ -305,7 +304,6 @@ describe('GenericSessionPage', () => {
         })
       },
     )
-
     it.each(['completed', 'failed', 'cancelled', 'stopped'])(
       'does not render the cancel trigger when the session is terminal (%s)',
       async (status) => {
@@ -318,7 +316,6 @@ describe('GenericSessionPage', () => {
         expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
       },
     )
-
     it('does not render the cancel trigger inside the followup composer', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -330,7 +327,6 @@ describe('GenericSessionPage', () => {
       expect(composer.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
       expect(composer.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
     })
-
     it('opens a destructive-toned AlertDialog without sending the cancel request', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -338,19 +334,14 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
       })
-
       expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       expect(_cancelHandler).not.toHaveBeenCalled()
-
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
-
       const dialog = screen.getByTestId('session-cancel-alert')
       expect(dialog).toBeInTheDocument()
       expect(dialog).toHaveAttribute('data-tone', 'destructive')
-
       expect(_cancelHandler).not.toHaveBeenCalled()
     })
-
     it('dismissing the dialog sends no cancel request and leaves the session running', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -358,20 +349,15 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
       })
-
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
       expect(screen.getByTestId('session-cancel-alert')).toBeInTheDocument()
-
       fireEvent.click(screen.getByTestId('session-cancel-alert-cancel'))
-
       await waitFor(() => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
       expect(_cancelHandler).not.toHaveBeenCalled()
-
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
-
     it('confirming the dialog calls the cancel endpoint with the session id', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -388,7 +374,6 @@ describe('GenericSessionPage', () => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
     })
-
     it('closes the confirmation dialog after the cancel mutation settles while the session remains non-terminal', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -405,7 +390,6 @@ describe('GenericSessionPage', () => {
       })
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
-
     it('AlertDialog confirm button reflects cancel.isPending (dismissing disabled while in flight)', async () => {
       _blockCancel = true
 

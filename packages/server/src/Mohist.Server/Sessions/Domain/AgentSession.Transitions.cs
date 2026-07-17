@@ -33,17 +33,25 @@ public static partial class AgentSessionExtensions
             string? workDir,
             string? changeDir,
             int? processPid,
-            DateTime now)
+            DateTime now,
+            string? runtime = null)
         {
             _ = changeDir;
             _ = processPid;
             var oldModel = session.Settings.Model;
             var existingAgentSessionId = session.Status.AgentRuntimeSessionId;
+            if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} is already bound to runtime session {existingAgentSessionId}; use Reset to replace the binding.");
+            }
             var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal);
 
             session.Runtime = session.Runtime with
             {
-                WorkDir = session.Runtime.WorkDir ?? workDir
+                WorkDir = string.IsNullOrWhiteSpace(session.Runtime.WorkDir) ? workDir : session.Runtime.WorkDir,
+                Runtime = string.IsNullOrWhiteSpace(session.Runtime.Runtime) ? NormalizeRuntime(runtime) : session.Runtime.Runtime,
             };
             session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
             session.Status = session.Status with
@@ -52,12 +60,13 @@ public static partial class AgentSessionExtensions
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
                 RuntimeSessionLineage = isNewRuntimeBinding
-                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now)
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now,
+                         runtime: session.Runtime.Runtime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
-                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId, session.Runtime.Runtime));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
@@ -76,7 +85,7 @@ public static partial class AgentSessionExtensions
 
         public IReadOnlyList<AgentSessionEvent> RecordActivity(DateTime now)
         {
-            session.Status = session.Status with { LastDataAt = now };
+            session.Status = session.Status with { LastDataAt = now, CurrentTurnEndedAt = null };
             return [];
         }
 
@@ -118,10 +127,16 @@ public static partial class AgentSessionExtensions
             string newAgentSessionId,
             long? contextWindowUsedAfter,
             long? contextWindowSizeAfter,
-            DateTime now)
+            DateTime now,
+            string? runtime = null)
         {
             var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
-            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal);
+            var oldRuntime = session.Runtime.Runtime;
+            var nextRuntime = NormalizeRuntime(runtime) ?? oldRuntime;
+            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal)
+                || !string.Equals(oldRuntime, nextRuntime, StringComparison.Ordinal);
+            if (rebinds)
+                session.Runtime = session.Runtime with { Runtime = nextRuntime };
             session.Status = session.Status with
             {
                 AgentRuntimeSessionId = newAgentSessionId,
@@ -139,32 +154,28 @@ public static partial class AgentSessionExtensions
                 // still answers "who came before?".
                 RuntimeSessionLineage = rebinds
                     ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
-                        seedPrevious: oldAgentSessionId)
+                        seedPrevious: oldAgentSessionId,
+                        seedPreviousRuntime: oldAgentSessionId is null ? null : oldRuntime,
+                        seedPreviousBoundAt: session.Status.BoundAt,
+                        runtime: nextRuntime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (rebinds)
-                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId));
+                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId, session.Runtime.Runtime));
             return events;
         }
 
-        public IReadOnlyList<AgentSessionEvent> ClearRuntimeSession(
-            long? contextWindowUsedAfter,
-            long? contextWindowSizeAfter,
-            DateTime now)
+        public void EnsureExpectedRuntimeSession(string? expectedRuntimeSessionId)
         {
-            session.Status = session.Status with
+            var actualRuntimeSessionId = session.Status.AgentRuntimeSessionId;
+            if (!string.Equals(expectedRuntimeSessionId, actualRuntimeSessionId, StringComparison.Ordinal))
             {
-                AgentRuntimeSessionId = null,
-                BoundAt = null,
-                LastDataAt = now,
-                UsageSummary = (session.Status.UsageSummary ?? new AgentUsageSummary()) with
-                {
-                    ContextWindowUsed = contextWindowUsedAfter,
-                    ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
-                }
-            };
-            return [];
+                throw new StaleRuntimeSessionBindingException(
+                    session.Id,
+                    expectedRuntimeSessionId,
+                    actualRuntimeSessionId);
+            }
         }
 
         public IReadOnlyList<AgentSessionEvent> RecordCompaction(
@@ -275,7 +286,10 @@ public static partial class AgentSessionExtensions
             IReadOnlyList<RuntimeSessionLineageEntry>? lineage,
             string newAgentSessionId,
             DateTime now,
-            string? seedPrevious = null)
+            string? seedPrevious = null,
+            string? seedPreviousRuntime = null,
+            DateTime? seedPreviousBoundAt = null,
+            string? runtime = null)
         {
             var entries = lineage is null
                 ? new List<RuntimeSessionLineageEntry>()
@@ -285,11 +299,27 @@ public static partial class AgentSessionExtensions
                 && !string.IsNullOrEmpty(seedPrevious)
                 && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
             {
-                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now));
+                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, seedPreviousBoundAt ?? now, seedPreviousRuntime));
             }
 
-            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now));
+            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now, runtime));
             return entries;
+        }
+
+        private static string? NormalizeRuntime(string? runtime) =>
+            string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
+
+        public bool IsRuntimeSessionMissing(Func<string, bool> isRuntimeRegistered)
+        {
+            ArgumentNullException.ThrowIfNull(isRuntimeRegistered);
+            if (string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId))
+                return true;
+
+            var runtime = session.Runtime.Runtime;
+            if (string.IsNullOrWhiteSpace(runtime))
+                return true;
+
+            return !isRuntimeRegistered(runtime);
         }
 
         /// <summary>

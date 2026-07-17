@@ -72,7 +72,12 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
 const unresolvedAgentJobTargetWarned = new WeakSet<ActionContext>()
 const missingServerConnectionWarned = new WeakSet<ActionContext>()
 
-export async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
+export async function emitSessionEvent(
+  context: ActionContext,
+  type: string,
+  payload: JsonObject,
+  runtimeSessionId: string | null = stringField(payload, "runtimeSessionId") ?? null,
+) {
   const target = sessionTargetFromContext(context)
   if (!target) {
     if (context.ownerKind === "agent-job" && !unresolvedAgentJobTargetWarned.has(context)) {
@@ -98,7 +103,9 @@ export async function emitSessionEvent(context: ActionContext, type: string, pay
     return
   }
 
-  const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] }
+  if (!runtimeSessionId) return
+
+  const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeSessionId, runtimeEvents: [{ type, payload }] }
   if (target.kind === "workflow") {
     await context.serverConnection.workflowAgentSessionRuntimeEvents(
       target.projectId,
@@ -115,10 +122,10 @@ export async function emitSessionEvent(context: ActionContext, type: string, pay
     context.signal)
 }
 
-export function buildResolvedModelEventPayload(context: ActionContext, acpSessionId: string, resolvedModel: string, source: "newSession" | "resumeSession" | "config_option_update"): JsonObject {
+export function buildResolvedModelEventPayload(context: ActionContext, runtimeSessionId: string, resolvedModel: string, source: "newSession" | "resumeSession" | "config_option_update"): JsonObject {
   return cleanJson({
     sessionName: sessionNameFromContext(context),
-    acpSessionId,
+    runtimeSessionId,
     workId: context.workId,
     workType: context.workType,
     stage: context.stage ?? null,
@@ -127,10 +134,10 @@ export function buildResolvedModelEventPayload(context: ActionContext, acpSessio
   })
 }
 
-export function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, source: "prompt_response" | "usage_update" | "compaction", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown, compaction?: CompactionEventPayload }): JsonObject {
+export function buildUsageUpdatePayload(context: ActionContext, runtimeSessionId: string, source: "prompt_response" | "usage_update" | "compaction", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown, compaction?: CompactionEventPayload }): JsonObject {
   const payload: JsonObject = cleanJson({
     sessionName: sessionNameFromContext(context),
-    acpSessionId,
+    runtimeSessionId,
     workId: context.workId,
     workType: context.workType,
     stage: context.stage ?? null,
@@ -181,10 +188,10 @@ export function hasUsageUpdateContent(payload: JsonObject): boolean {
     || payload.compactionStrategy !== undefined
 }
 
-export function buildCompactionEventPayload(context: ActionContext, acpSessionId: string, compaction: CompactionEventPayload): JsonObject {
+export function buildCompactionEventPayload(context: ActionContext, runtimeSessionId: string, compaction: CompactionEventPayload): JsonObject {
   return cleanJson({
     sessionName: sessionNameFromContext(context),
-    acpSessionId,
+    runtimeSessionId,
     workId: context.workId,
     workType: context.workType,
     stage: context.stage ?? null,
@@ -196,7 +203,7 @@ export function buildCompactionEventPayload(context: ActionContext, acpSessionId
 }
 
 export function buildLivenessEventPayload(context: ActionContext, state: { lastDataAt: number; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion: number }, status: "probing" | "running" | "failed", extras?: {
-  acpSessionId?: string
+  runtimeSessionId?: string
   activeProbeVersion?: number
   satisfiedProbeVersion?: number
   failureReason?: string
@@ -205,7 +212,7 @@ export function buildLivenessEventPayload(context: ActionContext, state: { lastD
 }): JsonObject {
   return cleanJson({
     sessionName: sessionNameFromContext(context),
-    acpSessionId: extras?.acpSessionId ?? null,
+    runtimeSessionId: extras?.runtimeSessionId ?? null,
     workId: context.workId,
     workType: context.workType,
     stage: context.stage ?? null,
@@ -225,18 +232,18 @@ export function buildLivenessEventPayload(context: ActionContext, state: { lastD
 }
 
 export async function emitLivenessStatusEvent(context: ActionContext, state: { lastDataAt: number; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion: number }, status: "probing" | "running" | "failed", extras?: {
-  acpSessionId?: string
+  runtimeSessionId?: string
   activeProbeVersion?: number
   satisfiedProbeVersion?: number
   failureReason?: string
   providerError?: unknown
   postProbeActivity?: boolean
 }) {
-  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras))
+  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras), extras?.runtimeSessionId ?? null)
 }
 
 export function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
-  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.issueNumber != null ? String(context.issueNumber) : null, acpSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
+  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.issueNumber != null ? String(context.issueNumber) : null, runtimeSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
 }
 
 export function extractOutputPath(prompt: string) {
@@ -395,18 +402,18 @@ export function inferToolName(payload: unknown): string | undefined {
 
 export function createObservabilityAwareEmitter(
   context: ActionContext,
-  getAcpSessionId: () => string,
+  getRuntimeSessionId: () => string,
   toolIds: ToolCallIdGenerator,
 ): (type: string, update: SessionNotification["update"]) => Promise<void> {
   return async (type, update) => {
-    const acpSessionId = getAcpSessionId()
-    const normalized = normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds)
-    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized)
+    const runtimeSessionId = getRuntimeSessionId()
+    const normalized = normalizeSessionUpdate(update as unknown as JsonObject, runtimeSessionId, toolIds)
+    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized, runtimeSessionId)
 
     if (type === "config_option_update") {
       const resolvedModel = extractResolvedModelFromConfigUpdateLocal(update as unknown)
       if (resolvedModel) {
-        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
+        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, runtimeSessionId, resolvedModel, "config_option_update"), runtimeSessionId)
       }
     }
 
@@ -416,16 +423,16 @@ export function createObservabilityAwareEmitter(
       if (compaction && compaction.contextWindowSize === undefined && typeof u.size === "number") {
         compaction.contextWindowSize = u.size
       }
-      const payload = buildUsageUpdatePayload(context, acpSessionId, compaction ? "compaction" : "usage_update", undefined, {
+      const payload = buildUsageUpdatePayload(context, runtimeSessionId, compaction ? "compaction" : "usage_update", undefined, {
         cost: u.cost,
         size: u.size,
         used: u.used,
         compaction,
       })
       if (hasUsageUpdateContent(payload)) {
-        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
+        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload, runtimeSessionId)
         if (compaction) {
-          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, acpSessionId, compaction))
+          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, runtimeSessionId, compaction), runtimeSessionId)
         }
       }
     }
@@ -510,11 +517,19 @@ export function createAcpSessionUpdateHandler(options: {
   }
 }
 
-export async function attachSessionToServer(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: { model?: string } | undefined, resolvedModel?: string) {
+export async function attachSessionToServer(context: ActionContext, runtimeSessionId: string, processPid: number | null, agentConfig: { model?: string } | undefined, resolvedModel?: string) {
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
-  const body = { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }
+  const body = {
+    runtimeSessionId,
+    workDir: context.workDir,
+    processPid,
+    model: agentConfig?.model ?? stringInput(context.with, "model"),
+    workId: context.workId,
+    agentJobId: context.ownerKind === "agent-job" ? context.agentJobId ?? null : null,
+    ...(resolvedModel ? { resolvedModel } : {}),
+  }
   if (target.kind === "workflow") {
     await context.serverConnection.attachWorkflowAgentSession(
       target.projectId,

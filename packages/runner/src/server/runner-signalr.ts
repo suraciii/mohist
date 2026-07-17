@@ -24,8 +24,18 @@ import {
 } from "./workspace-git-handlers.js"
 import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
+import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
+import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
+import {
+  registerSessionCommandHandler,
+  type SessionCommand,
+  type SessionCommandError,
+  type SessionCommandHandler,
+  type SessionCommandRequest,
+  type SessionCommandResult,
+} from "./session-command-handler.js"
 
 export {
   isUnderRunnerRoot,
@@ -41,6 +51,11 @@ export type {
   FollowupTargetResolver,
   ReceiveFollowupPayload,
   ReceiveWorkflowRunStatusPayload,
+  SessionCommand,
+  SessionCommandError,
+  SessionCommandHandler,
+  SessionCommandRequest,
+  SessionCommandResult,
   WorkspaceQuery,
 }
 
@@ -49,6 +64,10 @@ export interface RunnerSignalRClientOptions {
   onReconnected?: (connectionId: string) => void
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
+  followupFailureOutbox?: FollowupFailureOutboxStore | null
+  sessionCommandHandler?: SessionCommandHandler | null
+  sessionCommandJournal?: SessionCommandJournalStore | null
+  reconcileStartedSessionCommand?: import("./session-command-handler.js").SessionCommandReconciler | null
   registry?: WorkspaceRegistry | null
 }
 
@@ -60,6 +79,10 @@ export class RunnerSignalRClient {
   private readonly onReconnected: ((connectionId: string) => void) | undefined
   private readonly serverConnection: ServerConnection | null
   private readonly followupTargetResolver: FollowupTargetResolver | null
+  private readonly followupFailureOutbox: FollowupFailureOutboxStore | null
+  private readonly sessionCommandHandler: SessionCommandHandler | null
+  private readonly sessionCommandJournal: SessionCommandJournalStore | null
+  private readonly reconcileStartedSessionCommand: import("./session-command-handler.js").SessionCommandReconciler | null
 
   constructor(
     serverUrl: string,
@@ -82,13 +105,20 @@ export class RunnerSignalRClient {
     this.workspaceManager = new WorkspaceManager(runnerRoot, this.registry)
     this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
+    this.followupFailureOutbox = options.followupFailureOutbox ?? null
+    this.sessionCommandHandler = options.sessionCommandHandler ?? null
+    this.sessionCommandJournal = options.sessionCommandJournal ?? null
+    this.reconcileStartedSessionCommand = options.reconcileStartedSessionCommand ?? null
 
     this.registerHandlers()
     this.registerLifecycleCallbacks()
   }
 
   async start(): Promise<void> {
+    if (this.followupFailureOutbox) await this.followupFailureOutbox.load()
     await this.connection.start()
+    if (this.followupFailureOutbox && this.serverConnection)
+      await this.followupFailureOutbox.drain(this.serverConnection)
   }
 
   async stop(): Promise<void> {
@@ -110,6 +140,8 @@ export class RunnerSignalRClient {
   private registerLifecycleCallbacks(): void {
     this.connection.onreconnected((connectionId) => {
       notifyReconnected(this.connection, this.onReconnected, connectionId)
+      if (this.followupFailureOutbox && this.serverConnection)
+        void this.followupFailureOutbox.drain(this.serverConnection).catch(() => {})
     })
   }
 
@@ -126,10 +158,17 @@ export class RunnerSignalRClient {
     registerFollowupHandler(this.connection, {
       serverConnection: this.serverConnection,
       followupTargetResolver: this.followupTargetResolver,
+      followupFailureOutbox: this.followupFailureOutbox,
     })
 
     registerCancelHandler(this.connection, {
       followupTargetResolver: this.followupTargetResolver,
+    })
+
+    registerSessionCommandHandler(this.connection, {
+      handler: this.sessionCommandHandler,
+      journal: this.sessionCommandJournal,
+      reconcileStarted: this.reconcileStartedSessionCommand,
     })
 
     registerWorkflowRunStatusHandler(this.connection, {

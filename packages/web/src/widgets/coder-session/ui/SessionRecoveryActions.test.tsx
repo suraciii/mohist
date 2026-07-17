@@ -153,7 +153,7 @@ describe('SessionRecoveryActions — compact action', () => {
     await waitFor(() => {
       expect(compactClient).toHaveBeenCalledTimes(1)
     })
-    expect(compactClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    expect(compactClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1', expect.any(String))
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })
@@ -215,7 +215,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
 
     const dialog = screen.getByTestId('session-recovery-reset-dialog')
     expect(dialog).toBeInTheDocument()
-    expect(dialog).toHaveTextContent('This will clear all session context. The agent will lose all conversation history.')
+    expect(dialog).toHaveTextContent('A new runtime session will start without prior context. Transcript and audit history remain available.')
   })
 
   it('renders Cancel and "Reset Session" buttons inside the dialog', () => {
@@ -264,7 +264,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     await waitFor(() => {
       expect(resetClient).toHaveBeenCalledTimes(1)
     })
-    expect(resetClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    expect(resetClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1', expect.any(String))
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })

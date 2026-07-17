@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentSessionTranscriptResponse, AgentSessionUsage } from '../../coder-session/@x/agent-session'
+import type {
+  AgentSessionTranscriptResponse,
+  AgentSessionUsage,
+  RuntimeSessionLineageEntry,
+} from '../../coder-session/@x/agent-session'
 import { useProject } from '../../project/@x/project-context'
 import { projectApiPath, request } from '../../../shared/api/client'
 
@@ -29,6 +33,8 @@ export interface GenericAgentSessionSummaryDto {
   sessionId: string
   agentId: string
   agentName: string
+  runtimeSessionId: string | null
+  runtime: string | null
   status: string
   createdAt: string
   lastActivityAt: string | null
@@ -38,6 +44,8 @@ export interface GenericAgentSessionSummaryDto {
   toolErrorCount: number | null
   contextRefs: AgentSessionListContextRefsDto | null
   usage: AgentSessionUsage
+  runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
+  recoveryAvailable: boolean
 }
 
 export interface AgentSessionLaunchResponse {
@@ -82,9 +90,12 @@ export function getGenericSessionSummary(projectId: string, sessionId: string) {
   )
 }
 
-export function getGenericSessionTranscript(projectId: string, sessionId: string) {
+export function getGenericSessionTranscript(projectId: string, sessionId: string, runtimeSessionId?: string | null) {
+  const search = runtimeSessionId
+    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
+    : ''
   return request<AgentSessionTranscriptResponse>(
-    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/transcript`),
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/transcript${search}`),
   )
 }
 
@@ -138,10 +149,14 @@ export function useGenericSessionSummary(sessionId: string) {
   return useQuery<GenericAgentSessionSummaryDto>(genericSessionSummaryQueryOptions(projectId, sessionId))
 }
 
-export function genericSessionTranscriptQueryOptions(projectId: string | null | undefined, sessionId: string) {
+export function genericSessionTranscriptQueryOptions(
+  projectId: string | null | undefined,
+  sessionId: string,
+  runtimeSessionId?: string | null,
+) {
   return {
-    queryKey: ['agent-session', projectId, sessionId, 'transcript'],
-    queryFn: () => getGenericSessionTranscript(projectId!, sessionId),
+    queryKey: ['agent-session', projectId, sessionId, 'transcript', runtimeSessionId ?? null],
+    queryFn: () => getGenericSessionTranscript(projectId!, sessionId, runtimeSessionId),
     enabled: !!projectId && !!sessionId,
     refetchInterval: (query: { state: { data: AgentSessionTranscriptResponse | undefined } }) => {
       const data = query.state.data
@@ -152,9 +167,9 @@ export function genericSessionTranscriptQueryOptions(projectId: string | null | 
   }
 }
 
-export function useGenericSessionTranscript(sessionId: string) {
+export function useGenericSessionTranscript(sessionId: string, runtimeSessionId?: string | null) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>(genericSessionTranscriptQueryOptions(projectId, sessionId))
+  return useQuery<AgentSessionTranscriptResponse>(genericSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId))
 }
 
 /* ── Mutation hooks ─────────────────────────────────────── */

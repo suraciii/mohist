@@ -4,6 +4,7 @@ import type { DisplayTurn } from '../../../widgets/session-transcript'
 export type StatusKind = SessionStatusKind
 
 export interface SessionCancelOptions {
+  onSuccess?: (result: { state: string }) => void
   onSettled?: () => void
 }
 
@@ -13,16 +14,17 @@ export interface SessionDataSourceResult {
   notFound: boolean
 
   sessionKey: string
-  acpSessionId: string
+  runtimeSessionId: string
   meta: SessionMetadata | null
   transcriptResponse: AgentSessionTranscriptResponse | null
   initialTurns: SessionTurn[]
 
   statusKind: StatusKind
   isRunning: boolean
+  canFollowup?: boolean
 
   followupIsPending: boolean
-  sendFollowup: (text: string) => void
+  sendFollowup: (text: string) => Promise<void>
 
   cancel: {
     mutate: (options?: SessionCancelOptions) => void
@@ -35,7 +37,9 @@ export interface SessionDataSourceResult {
   healthStatus: string | null
 
   hasRecoveryActions: boolean
+  recoveryAvailable?: boolean
   recoverySessionName: string | null
+  recoverySessionId?: string | null
   runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
   viewedRuntimeSessionId: string | null
   buildLineageTargetPath: ((runtimeId: string) => string) | null

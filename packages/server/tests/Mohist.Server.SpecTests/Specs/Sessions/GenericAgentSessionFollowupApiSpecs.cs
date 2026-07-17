@@ -57,6 +57,9 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsSent()
     {
         var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-ok");
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
+        var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
+        Assert.NotEmpty(activeWorksBefore);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
@@ -69,7 +72,9 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
-            Assert.Equal("sent", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
+            Assert.Equal("sent", data.GetProperty("status").GetString());
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-gen-followup-1", sent.ConnectionId);
@@ -81,6 +86,76 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             Assert.Equal("generic", target.GetProperty("kind").GetString());
             Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
             Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
+            Assert.Equal(activeWorksBefore, await GetActiveWorkSnapshotAsync(runner));
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GenericFollowupEndpoint_IdleSession_StartsUserTurnWithoutCreatingWorkUnit()
+    {
+        var (project, sessionId, runtimeSessionId) = await CreateIdleGenericSessionAsync("gen-followup-idle");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())?.Status);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
+        var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
+        Assert.Empty(activeWorksBefore);
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(_runnerId, "conn-gen-followup-idle");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "start an idle turn" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
+            Assert.Equal("sent", data.GetProperty("status").GetString());
+
+            var sent = Assert.Single(runnerHub.SentMessages);
+            Assert.Equal("ReceiveFollowup", sent.Method);
+            Assert.Equal(activeWorksBefore, await GetActiveWorkSnapshotAsync(runner));
+
+            var unchanged = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
+            Assert.Equal(sessionId, unchanged?.Id);
+            Assert.Equal(runtimeSessionId, unchanged?.AgentSessionId);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GenericFollowupEndpoint_RunnerCannotResolveRestartedSession_ReturnsResetHint()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-restarted");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(false, "missing"));
+        tracker.Register(_runnerId, "conn-gen-followup-restarted");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "resume after restart" });
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", body.RootElement.GetProperty("code").GetString());
+            Assert.Equal(sessionId, body.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+            Assert.Equal("reset", body.RootElement.GetProperty("details").GetProperty("hint").GetString());
         }
         finally
         {
@@ -100,7 +175,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
 
         using var get = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}");
         using var open = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/open", new { workId = "bad-open" });
-        using var attach = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/attach", new { agentSessionId = "bad-acp" });
+        using var attach = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/attach", new { runtimeSessionId = "bad-acp" });
         using var events = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/runtime-events", new
         {
             runtimeEvents = new[] { new { type = "session.input", payload = new { text = "bad" } } }
@@ -143,8 +218,11 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         using var existing = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}");
         Assert.Equal(HttpStatusCode.OK, existing.StatusCode);
         var existingPayload = await existing.Content.ReadFromJsonAsync<JsonElement>();
-        if (existingPayload.TryGetProperty("acpSessionId", out var acpSessionId))
-            Assert.True(acpSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(acpSessionId.GetString()));
+        if (existingPayload.TryGetProperty("runtimeSessionId", out var runtimeSessionId))
+            Assert.True(runtimeSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(runtimeSessionId.GetString()));
+        Assert.Equal("opencode", existingPayload.GetProperty("runtime").GetString());
+        Assert.False(existingPayload.TryGetProperty("acpSessionId", out _));
+        Assert.False(existingPayload.TryGetProperty("coderSessionId", out _));
 
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
@@ -230,18 +308,16 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task GenericFollowupEndpoint_InactiveSessionBeforeRunnerOpens_ReturnsConflict()
+    public async Task GenericFollowupEndpoint_MissingBindingBeforeRunnerOpens_ReturnsRuntimeSessionMissing()
     {
-        // Mint the session but never call the runner's open endpoint: the
-        // session stays "inactive" (no LastDataAt yet), and the runner
-        // never bound itself via the open call.
         var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-inactive");
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -260,7 +336,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
@@ -286,7 +362,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -306,7 +382,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
@@ -326,7 +402,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
 
         // The runner opened the session, so it's marked active, but
         // there's no SignalR connection tracked for this runner id.
@@ -365,7 +441,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
@@ -424,7 +500,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         // payload must still populate `workflowRunId`/`sessionName` for
         // older runners. The unified `target` field is added on top so the
         // newer runner can route by kind, but the legacy fields stay.
-        var (project, issue, workflowRunId, sessionName) = await CreateWorkflowSessionAsync("gen-issue-scoped-shape");
+        var (project, issue, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("gen-issue-scoped-shape");
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -438,6 +514,10 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
                 new { text = "ship it" });
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var responseData = responseDoc.RootElement.GetProperty("data");
+            Assert.Equal(sessionId, responseData.GetProperty("sessionId").GetString());
+            Assert.Equal("sent", responseData.GetProperty("status").GetString());
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("ReceiveFollowup", sent.Method);
@@ -452,6 +532,163 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
             Assert.Equal(workflowRunId, target.GetProperty("workflowRunId").GetString());
             Assert.Equal(sessionName, target.GetProperty("sessionName").GetString());
+            Assert.Equal("opencode", target.GetProperty("binding").GetProperty("runtime").GetString());
+            Assert.Equal(sessionId, target.GetProperty("binding").GetProperty("runtimeSessionId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task CanonicalFollowupRoute_WorkflowSession_UsesWorkflowTarget()
+    {
+        var (project, _, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("canonical-workflow-shape");
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+            var persisted = await querier.ResolveCanonicalFollowupTargetAsync(project.Id, sessionId);
+            Assert.NotNull(persisted);
+            Assert.Equal("opencode", persisted!.Runtime);
+            Assert.Equal(WorkDirFor(project.Id), persisted.WorkDir);
+            Assert.Equal(sessionId, persisted.RuntimeSessionId);
+            Assert.Equal(_runnerId, persisted.RunnerId);
+        }
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(_runnerId, "conn-canonical-workflow-shape");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ship through canonical route" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(sessionId, responseDoc.RootElement.GetProperty("data").GetProperty("sessionId").GetString());
+
+            var invocation = Assert.Single(runnerHub.Invocations);
+            Assert.Equal("ReceiveFollowup", invocation.Method);
+            var payload = JsonSerializer.SerializeToElement(invocation.Arguments.Single());
+            var target = payload.GetProperty("target");
+            Assert.Equal("workflow", target.GetProperty("kind").GetString());
+            Assert.Equal(workflowRunId, target.GetProperty("workflowRunId").GetString());
+            Assert.Equal(sessionName, target.GetProperty("sessionName").GetString());
+            var binding = target.GetProperty("binding");
+            Assert.True(binding.ValueKind == JsonValueKind.Object, payload.GetRawText());
+            Assert.Equal(sessionId, binding.GetProperty("runtimeSessionId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Followup_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
+    {
+        var (project, sessionId, firstRuntimeSessionId) = await CreateIdleGenericSessionAsync("followup-reset-terminal");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, """{"status":"completed"}"""),
+        }, firstRuntimeSessionId));
+        await grain.FlushForTestAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        await grain.ResetAsync(new ResetAgentSessionCommand(firstRuntimeSessionId, "runtime-replacement"));
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(true));
+        tracker.Register(_runnerId, "conn-followup-reset-terminal");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "continue on the replacement" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = JsonSerializer.SerializeToElement(Assert.Single(runnerHub.Invocations).Arguments.Single());
+            Assert.Equal("runtime-replacement", payload.GetProperty("target").GetProperty("binding").GetProperty("runtimeSessionId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task IdleFollowupReservation_BlocksRecoveryUntilDeliveryCompletes()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-recovery-race");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delivery = new TaskCompletionSource<RunnerFollowupDeliveryResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("ReceiveFollowup", _ =>
+        {
+            started.TrySetResult();
+            return delivery.Task;
+        });
+        tracker.Register(_runnerId, "conn-followup-recovery-race");
+        try
+        {
+            var followup = PostGenericFollowupAsync(project.Id, sessionId, new { text = "start and hold" });
+            await started.Task;
+
+            using var compact = await _client.PostAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}/compact", content: null);
+            using var reset = await _client.PostAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}/reset", content: null);
+
+            Assert.Equal(HttpStatusCode.Conflict, compact.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, reset.StatusCode);
+            Assert.Equal("session_active", JsonDocument.Parse(await compact.Content.ReadAsStringAsync()).RootElement.GetProperty("code").GetString());
+            Assert.Equal("session_active", JsonDocument.Parse(await reset.Content.ReadAsStringAsync()).RootElement.GetProperty("code").GetString());
+            Assert.DoesNotContain(runnerHub.Invocations, invocation => invocation.Method == "SessionCommand");
+
+            delivery.SetResult(new RunnerFollowupDeliveryResult(true));
+            using var accepted = await followup;
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task RejectedIdleFollowup_AbandonsReservationAndAllowsRecovery()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("followup-recovery-abandon");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(false, "missing"));
+        tracker.Register(_runnerId, "conn-followup-recovery-abandon");
+        try
+        {
+            using var rejected = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "reject this turn" });
+            Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+            Assert.Equal("runtime_session_missing", JsonDocument.Parse(await rejected.Content.ReadAsStringAsync()).RootElement.GetProperty("code").GetString());
+
+            runnerHub.SetInvocationResponse("SessionCommand", new SessionCommandResult(Ok: true));
+            using var compact = await _client.PostAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}/compact", content: null);
+
+            Assert.Equal(HttpStatusCode.OK, compact.StatusCode);
+            Assert.Contains(runnerHub.Invocations, invocation => invocation.Method == "SessionCommand");
         }
         finally
         {
@@ -461,6 +698,12 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
 
     private Task<HttpResponseMessage> PostGenericFollowupAsync(string projectId, string sessionId, object body) =>
         _client.PostAsJsonAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/followup", body);
+
+    private static async Task<string[]> GetActiveWorkSnapshotAsync(IRunnerGrain runner) =>
+        (await runner.GetRuntimeStateAsync()).ActiveWorks
+            .OrderBy(work => work.WorkId, StringComparer.Ordinal)
+            .Select(work => $"{work.WorkId}|{work.OwnerKind}|{work.OwnerId}|{work.WorkType}")
+            .ToArray();
 
     private async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchGenericSessionAsync(string name)
     {
@@ -513,7 +756,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             $"/api/runner/{runnerId}/agent-sessions/{launched.Project.Id}/{launched.SessionId}/attach",
             new
             {
-                agentSessionId = launched.SessionId,
+                runtimeSessionId = launched.SessionId,
                 workDir = WorkDirFor(launched.Project.Id),
                 processPid = 1234,
             });
@@ -523,13 +766,37 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         return (launched.Project, launched.Agent, launched.SessionId, info);
     }
 
+    private async Task<(ProjectRef Project, string SessionId, string RuntimeSessionId)> CreateIdleGenericSessionAsync(string name)
+    {
+        var project = await CreateProjectAsync(name);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+
+        var sessionId = $"idle-{Guid.NewGuid():N}";
+        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: _runnerId,
+            AgentRuntime: "opencode",
+            WorkDir: WorkDirFor(project.Id),
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                $"agent-{Guid.NewGuid():N}",
+                "idle-agent"))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            runtimeSessionId,
+            WorkDir: WorkDirFor(project.Id)));
+
+        return (project, sessionId, runtimeSessionId);
+    }
+
     /// <summary>
     /// Creates a workflow-shaped session via the runner's
     /// <c>POST /api/runner/{id}/sessions/{project}/{wf}/{name}/open</c>
     /// endpoint and attaches a physical session so the existing issue-scoped
     /// followup route is exercised with the same shape production uses.
     /// </summary>
-    private async Task<(ProjectRef Project, IssueRef Issue, string WorkflowRunId, string SessionName)> CreateWorkflowSessionAsync(string name)
+    private async Task<(ProjectRef Project, IssueRef Issue, string WorkflowRunId, string SessionName, string SessionId)> CreateWorkflowSessionAsync(string name)
     {
         var project = await CreateProjectAsync(name);
 
@@ -570,6 +837,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
                 stage = "Build",
                 title = $"session for {name}",
                 issueNumber = issue.Number,
+                workDir = WorkDirFor(project.Id),
             });
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
@@ -578,14 +846,17 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             .Select(s => s.Id)
             .SingleAsync();
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+        var attached = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             AgentSessionId: sessionId,
             Model: null,
             WorkDir: WorkDirFor(project.Id),
             ChangeDir: null,
-            ProcessPid: 1234));
+             ProcessPid: 1234,
+             Runtime: "opencode"));
+        Assert.Equal(WorkDirFor(project.Id), attached.WorkDir);
+        Assert.Equal("opencode", attached.Runtime);
 
-        return (project, new IssueRef(issue.Id, issue.Number), workflowRunId, sessionName);
+        return (project, new IssueRef(issue.Id, issue.Number), workflowRunId, sessionName, sessionId);
     }
 
     private async Task<ProjectRef> CreateProjectAsync(string name)

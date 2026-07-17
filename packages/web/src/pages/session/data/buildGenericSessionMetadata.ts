@@ -27,9 +27,9 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
   return {
     sessionId: summary.sessionId,
     sessionName: summary.agentName,
-    coderSessionId: summary.sessionId,
     issueId: '',
-    acpSessionId: summary.sessionId,
+    runtimeSessionId: summary.runtimeSessionId ?? '',
+    runtime: summary.runtime,
     executionId: null,
     title: summary.agentName,
     status: summary.status,
@@ -68,5 +68,6 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
           contextUsagePercent: summary.usage.contextUsagePercent ?? null,
         }
       : undefined,
+    runtimeSessionLineage: summary.runtimeSessionLineage,
   }
 }

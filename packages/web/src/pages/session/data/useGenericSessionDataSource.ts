@@ -62,11 +62,13 @@ export function useGenericSessionDataSource(
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
+  const [searchParams] = useSearchParams()
+  const requestedRuntimeSessionId = searchParams.get('rt')
 
   useDocumentTitle(`Session — Mohist`)
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
-  const { data: transcriptResponse } = useTranscriptResponse(sessionId)
+  const { data: transcriptResponse } = useTranscriptResponse(sessionId, requestedRuntimeSessionId)
   const genericFollowup = useFollowup()
   const cancelGeneric = useCancel()
 
@@ -80,6 +82,11 @@ export function useGenericSessionDataSource(
   const rawStatus = summary?.status ?? ''
   const apiStatusKind = meta?.statusKind
   const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const terminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'stopped' || rawStatus === 'cancelled'
+  const runtimeLineage = summary?.runtimeSessionLineage ?? null
+  const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
+  const isCurrentRuntimeView = viewedRuntimeSessionId === summary?.runtimeSessionId
+  const canFollowup = !terminal && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
 
   const statusKind: StatusKind = meta
     ? (meta.statusKind ?? getSessionStatusKind(rawStatus, meta.lastActivityAt, isRunning))
@@ -90,13 +97,14 @@ export function useGenericSessionDataSource(
     [projectId, sessionId],
   )
   const transcriptQueryKey = useMemo(
-    () => ['agent-session', projectId, sessionId, 'transcript'] as const,
-    [projectId, sessionId],
+    () => ['agent-session', projectId, sessionId, 'transcript', requestedRuntimeSessionId] as const,
+    [projectId, sessionId, requestedRuntimeSessionId],
   )
 
   const handleRecoverySuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
   }, [queryClient, metadataQueryKey, transcriptQueryKey])
 
   const {
@@ -111,7 +119,8 @@ export function useGenericSessionDataSource(
   } = useTranscript({
     issueNumber: 0,
     sessionId,
-    acpSessionId: sessionId,
+    runtimeSessionId: requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? '',
+    runtime: summary?.runtime ?? null,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -127,8 +136,15 @@ export function useGenericSessionDataSource(
   // carries an issue context ref, link to that issue; otherwise link to the
   // agent profile (and never fabricate issue/workflow links for sessions
   // without an issue binding).
-  const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
+  const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
+    ? (runtimeId: string) => {
+        const base = toProjectPath(`/agent-sessions/${encodeURIComponent(sessionId)}`)
+        const params = new URLSearchParams({ rt: runtimeId })
+        if (fromActivity) params.set('from', 'activity')
+        return `${base}?${params}`
+      }
+    : null
   const hasIssueContextRef = summary?.contextRefs?.issueNumber != null
   const backPath = fromActivity
     ? toProjectPath('/activity')
@@ -150,22 +166,25 @@ export function useGenericSessionDataSource(
     : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
-  const hasData = meta?.usage?.contextWindowUsed != null || meta?.usage?.contextWindowSize != null
-
-  const sendFollowup = useCallback((text: string) => {
-    genericFollowup.mutate({ sessionId, text })
+  const sendFollowup = useCallback(async (text: string) => {
+    await genericFollowup.mutateAsync({ sessionId, text })
   }, [genericFollowup, sessionId])
 
   const cancelSession = useCallback((options?: SessionCancelOptions) => {
     cancelGeneric.mutate(
       { sessionId, agentRef: summary?.agentId },
-      { onSettled: options?.onSettled },
+      {
+        onSuccess: (result) => options?.onSuccess?.({ state: result.state ?? 'not-cancellable' }),
+        onSettled: options?.onSettled,
+      },
     )
   }, [cancelGeneric, sessionId, summary?.agentId])
 
   const cancel = useMemo(
-    () => ({ mutate: cancelSession, isPending: cancelGeneric.isPending }),
-    [cancelSession, cancelGeneric.isPending],
+    () => isRunning && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
+      ? { mutate: cancelSession, isPending: cancelGeneric.isPending }
+      : null,
+    [cancelSession, cancelGeneric.isPending, isCurrentRuntimeView, isRunning, summary?.runtime, summary?.runtimeSessionId],
   )
 
   return {
@@ -173,12 +192,13 @@ export function useGenericSessionDataSource(
     isError: summaryError,
     notFound: !sessionId || (!summary && !summaryLoading && !summaryError),
     sessionKey: sessionId,
-    acpSessionId: sessionId,
+    runtimeSessionId: viewedRuntimeSessionId ?? sessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,
     statusKind: displayStatusKind,
     isRunning,
+    canFollowup,
     followupIsPending: genericFollowup.isPending,
     sendFollowup,
     cancel,
@@ -186,11 +206,13 @@ export function useGenericSessionDataSource(
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,
     healthStatus: meta?.usage?.healthStatus ?? null,
-    hasRecoveryActions: hasData,
+    hasRecoveryActions: !!summary,
+    recoveryAvailable: summary?.recoveryAvailable ?? false,
     recoverySessionName: null,
-    runtimeSessionLineage: null,
-    viewedRuntimeSessionId: null,
-    buildLineageTargetPath: null,
+    recoverySessionId: sessionId || null,
+    runtimeSessionLineage: runtimeLineage,
+    viewedRuntimeSessionId,
+    buildLineageTargetPath,
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,

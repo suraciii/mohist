@@ -20,6 +20,8 @@ internal sealed class TranscriptAccumulator
         RuntimeEventTypes.ToolCallUpdated,
         RuntimeEventTypes.ToolCallCompleted,
         RuntimeEventTypes.SessionLiveness,
+        RuntimeEventTypes.SessionFollowupFailed,
+        RuntimeEventTypes.SessionFollowupCompleted,
         RuntimeEventTypes.UsageUpdated,
         RuntimeEventTypes.ModelResolved,
         RuntimeEventTypes.SessionClosed,
@@ -33,6 +35,7 @@ internal sealed class TranscriptAccumulator
 
     private string? _promptText;
     private string? _promptKind;
+    private string? _runtimeSessionId;
     private DateTime? _inputCreatedAt;
 
     public bool HasPending => _pending is not null || _accumulatedParts.Count > 0 || _promptText is not null;
@@ -41,6 +44,7 @@ internal sealed class TranscriptAccumulator
     {
         foreach (var row in rows)
         {
+            CaptureRuntime(row);
             var textType = ToTextPartType(row.Type);
             if (textType is not null)
             {
@@ -57,6 +61,9 @@ internal sealed class TranscriptAccumulator
                 CaptureInput(row);
                 continue;
             }
+
+            if (row.Type == RuntimeEventTypes.Compaction || row.Type == RuntimeEventTypes.CompactionEvent)
+                CaptureRecoveryRuntime(row);
 
             var type = ToTranscriptPartType(row.Type);
             _accumulatedParts.Add(CreatePartDelta(
@@ -91,6 +98,7 @@ internal sealed class TranscriptAccumulator
         _accumulatedParts.Clear();
         _promptText = null;
         _promptKind = null;
+        _runtimeSessionId = null;
         _inputCreatedAt = null;
     }
 
@@ -163,6 +171,23 @@ internal sealed class TranscriptAccumulator
         _promptKind = AgentSessionJsonHelper.GetStringProp(payload, "kind")
             ?? AgentSessionJsonHelper.GetStringProp(payload, "source")
             ?? "task";
+        _runtimeSessionId = row.AgentSessionId;
+        _inputCreatedAt = row.CreatedAt;
+    }
+
+    private void CaptureRuntime(RuntimeEventEnvelope row)
+    {
+        if (_runtimeSessionId is null && !string.IsNullOrWhiteSpace(row.AgentSessionId))
+            _runtimeSessionId = row.AgentSessionId;
+    }
+
+    private void CaptureRecoveryRuntime(RuntimeEventEnvelope row)
+    {
+        if (_promptText is not null || string.IsNullOrWhiteSpace(row.AgentSessionId))
+            return;
+
+        _promptKind = "recovery";
+        _runtimeSessionId = row.AgentSessionId;
         _inputCreatedAt = row.CreatedAt;
     }
 
@@ -192,11 +217,12 @@ internal sealed class TranscriptAccumulator
 
         return new AgentSessionTranscriptTurnUpsert(
             session.Id,
-            Sequence: _inputCreatedAt.HasValue ? 1 : 0,
+            Sequence: 0,
             promptText,
             AgentSessionJsonHelper.NormalizePromptKind(promptKind),
             _inputCreatedAt ?? session.Status.CreatedAt,
-            now);
+            now,
+            RuntimeSessionId: _runtimeSessionId);
     }
 
     private static string? ToTextPartType(string eventType) => eventType switch
@@ -211,6 +237,8 @@ internal sealed class TranscriptAccumulator
         RuntimeEventTypes.SessionInput => TranscriptPartTypes.Input,
         RuntimeEventTypes.ToolCallStarted or RuntimeEventTypes.ToolCallUpdated or RuntimeEventTypes.ToolCallCompleted => TranscriptPartTypes.Tool,
         RuntimeEventTypes.SessionLiveness => TranscriptPartTypes.Status,
+        RuntimeEventTypes.SessionFollowupFailed => TranscriptPartTypes.Status,
+        RuntimeEventTypes.SessionFollowupCompleted => TranscriptPartTypes.Status,
         RuntimeEventTypes.UsageUpdated => TranscriptPartTypes.Usage,
         RuntimeEventTypes.ModelResolved => TranscriptPartTypes.Model,
         RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,

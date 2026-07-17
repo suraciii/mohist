@@ -3,12 +3,12 @@ import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useIssue } from '../../../entities/issue'
-import { useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript } from '../../../entities/coder-session'
+import { useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSessionDetail, SessionTurn, WorkflowRunSession } from '../../../entities/coder-session'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import type { SessionDataSourceResult, StatusKind } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 export interface IssueSessionDataSourceDependencies {
@@ -19,6 +19,8 @@ export interface IssueSessionDataSourceDependencies {
   useSiblingSessions?: typeof useSiblingSessions
   getAgentSessionMetadata?: typeof getAgentSessionMetadata
   getAgentSessionTranscript?: typeof getAgentSessionTranscript
+  useFollowupMutation?: typeof useFollowupMutation
+  useCancelSessionMutation?: typeof useCancelSessionMutation
 }
 
 const defaultDependencies: Required<IssueSessionDataSourceDependencies> = {
@@ -29,21 +31,23 @@ const defaultDependencies: Required<IssueSessionDataSourceDependencies> = {
   useSiblingSessions,
   getAgentSessionMetadata,
   getAgentSessionTranscript,
+  useFollowupMutation,
+  useCancelSessionMutation,
 }
 
 function buildSessionMetadata(
   meta: AgentSessionMetadata,
   lastEventAt: string | null,
   turnCount: number,
-  acpSessionId: string,
+  runtimeSessionId: string,
 ) {
   const isRunning = meta.status === 'active' || meta.status === 'running' || meta.status === 'probing'
   return {
     sessionId: meta.id,
     sessionName: meta.sessionName,
-    coderSessionId: meta.id,
     issueId: '',
-    acpSessionId: meta.acpSessionId ?? acpSessionId,
+    runtimeSessionId: meta.runtimeSessionId ?? runtimeSessionId,
+    runtime: meta.runtime ?? null,
     executionId: null,
     title: meta.title,
     status: meta.status,
@@ -121,11 +125,14 @@ export function useIssueSessionDataSource(
     useSiblingSessions: useSiblingSessionsHook,
     getAgentSessionMetadata: fetchAgentSessionMetadata,
     getAgentSessionTranscript: fetchAgentSessionTranscript,
+    useFollowupMutation: useFollowup,
+    useCancelSessionMutation: useCancel,
   } = { ...defaultDependencies, ...dependencies }
   const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
   const issueNumber = Number(numberStr)
   const decodedSessionId = sessionId ? decodeURIComponent(sessionId) : undefined
   const decodedSessionName = sessionName ? decodeURIComponent(sessionName) : undefined
@@ -170,15 +177,18 @@ export function useIssueSessionDataSource(
     [issueNumber, projectId, lookupKey],
   )
   const transcriptQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey] as const,
-    [issueNumber, projectId, lookupKey],
+    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey, searchParams.get('rt') ?? null] as const,
+    [issueNumber, projectId, lookupKey, searchParams],
   )
 
   const handleRecoverySuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
-    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions'] })
-  }, [queryClient, metadataQueryKey, transcriptQueryKey, issueNumber])
+    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'coder-sessions'] })
+    if (issue?.workflowRunId) {
+      queryClient.invalidateQueries({ queryKey: ['workflow-runs', issue.workflowRunId, 'sessions'] })
+    }
+  }, [queryClient, metadataQueryKey, transcriptQueryKey, issueNumber, projectId, issue?.workflowRunId])
 
   const {
     data: metadata,
@@ -197,7 +207,7 @@ export function useIssueSessionDataSource(
     queryKey: transcriptQueryKey,
     queryFn: async () => {
       if (!lookupKey) return null
-      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId)
+      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId, searchParams.get('rt'))
     },
     enabled: hasRoute && !!metadata,
   })
@@ -213,26 +223,26 @@ export function useIssueSessionDataSource(
     const turnCount = transcriptResponse?.turns.length ?? 0
     return {
       id: metadata.id,
-      acpSessionId: metadata.acpSessionId,
+      runtimeSessionId: metadata.runtimeSessionId ?? session?.runtimeSessionId ?? '',
       executionId: null,
       taskDescription: metadata.title,
       status: metadata.status,
       createdAt: metadata.createdAt,
       completedAt: metadata.completedAt,
       model: metadata.model,
-      coderType: null,
+      runtime: metadata.runtime ?? null,
       stage: metadata.stage,
       title: metadata.title,
-      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.acpSessionId),
+      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.runtimeSessionId ?? session?.runtimeSessionId ?? ''),
       turns: initialTurns,
       incomplete: false,
     }
-  }, [metadata, transcriptResponse, initialTurns, lastEventAt])
+  }, [metadata, transcriptResponse, initialTurns, lastEventAt, session?.runtimeSessionId])
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
   const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
-  const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
+  const runtimeSessionId = detail?.runtimeSessionId ?? session?.runtimeSessionId ?? ''
 
   const statusKind: StatusKind = detail
     ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
@@ -250,7 +260,8 @@ export function useIssueSessionDataSource(
   } = useTranscript({
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
-    acpSessionId,
+    runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
+    runtime: detail?.runtime ?? null,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -261,11 +272,30 @@ export function useIssueSessionDataSource(
   const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
-
-  const [searchParams] = useSearchParams()
-  const fromActivity = searchParams.get('from') === 'activity'
+  const followup = useFollowup()
+  const cancelMutation = useCancel()
+  const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
   const runtimeLineage = metadata?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.acpSessionId ?? null
+  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null
+  const isCurrentRuntimeView = viewedRuntimeSessionId === runtimeSessionId
+  const canFollowup = !isTerminal && isCurrentRuntimeView && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
+  const sendFollowup = useCallback(async (text: string) => {
+    await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
+  }, [followup, issueNumber, recoverySessionName])
+  const cancelSession = useCallback((options?: SessionCancelOptions) => {
+    cancelMutation.mutate(
+      { issueNumber, sessionName: recoverySessionName },
+      { onSuccess: options?.onSuccess, onSettled: options?.onSettled },
+    )
+  }, [cancelMutation, issueNumber, recoverySessionName])
+  const cancel = useMemo(
+    () => isRunning && isCurrentRuntimeView && runtimeSessionId && detail?.runtime && recoverySessionName
+      ? { mutate: cancelSession, isPending: cancelMutation.isPending }
+      : null,
+    [cancelMutation.isPending, cancelSession, detail?.runtime, isCurrentRuntimeView, isRunning, recoverySessionName, runtimeSessionId],
+  )
+
+  const fromActivity = searchParams.get('from') === 'activity'
 
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
@@ -311,21 +341,23 @@ export function useIssueSessionDataSource(
     isError: isDetailError,
     notFound: !lookupKey || isNaN(issueNumber) || issueNumber <= 0 || (!detail && !sessionsLoading && !metadataLoading && !isDetailError),
     sessionKey: lookupKey ?? '',
-    acpSessionId,
+    runtimeSessionId,
     meta: detail?.metadata ?? null,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,
     statusKind: displayStatusKind,
     isRunning,
-    followupIsPending: false,
-    sendFollowup: () => {},
-    cancel: null,
+    canFollowup,
+    followupIsPending: followup.isPending,
+    sendFollowup,
+    cancel,
     contextWindowUsed: detail?.metadata?.usage?.contextWindowUsed ?? null,
     contextWindowSize: detail?.metadata?.usage?.contextWindowSize ?? null,
     contextUsagePercent: detail?.metadata?.usage?.contextUsagePercent ?? null,
     healthStatus: detail?.metadata?.usage?.healthStatus ?? null,
     hasRecoveryActions,
     recoverySessionName: recoverySessionNameStr,
+    recoverySessionId: null,
     runtimeSessionLineage: runtimeLineage,
     viewedRuntimeSessionId,
     buildLineageTargetPath,

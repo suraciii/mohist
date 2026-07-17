@@ -29,7 +29,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -41,9 +41,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: ' More content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -70,7 +70,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -83,9 +83,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: ' More content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -101,7 +101,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -126,7 +126,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -139,9 +139,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: 'New streaming content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -156,7 +156,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -168,9 +168,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: 'New streaming content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -183,7 +183,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -196,9 +196,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: 'New content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -232,7 +232,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -244,9 +244,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: ' More content',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -310,7 +310,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        acpSessionId: 'acp-123',
+        runtimeSessionId: 'acp-123',
         initialTurns,
         isRunning: true,
       }))
@@ -320,9 +320,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: 'First chunk',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 
@@ -331,9 +331,9 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
           issueId: '123',
           projectId: 'project-1',
           executionId: 'exec-123',
-          acpSessionId: 'acp-123',
+          runtimeSessionId: 'acp-123',
           text: ' second chunk',
-          coderSessionId: 'session-123',
+          sessionId: 'session-123',
         })
       })
 

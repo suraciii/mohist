@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -106,7 +107,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
         {
-            agentSessionId = "acp-1",
+            runtimeSessionId = "acp-1",
             workDir = "/workspace",
             model = "openai/gpt-4o",
             processPid = 123,
@@ -115,6 +116,7 @@ public class WorkflowSessionSpecs
 
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
+            runtimeSessionId = "acp-1",
             workId = "proposal",
             workType = "task",
             stage = "plan",
@@ -127,6 +129,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
+            runtimeSessionId = "acp-1",
             runtimeEvents = new object[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -142,17 +145,20 @@ public class WorkflowSessionSpecs
 
         Assert.Equal(workflowRunId, opened.Key.WorkflowRunId);
         Assert.Equal(workflowRunId, fetched.Key.WorkflowRunId);
-        Assert.Equal("acp-1", fetched.AcpSessionId);
+        Assert.Equal("acp-1", fetched.RuntimeSessionId);
+        Assert.Equal("opencode", fetched.Runtime);
         Assert.Equal("/workspace", fetched.WorkDir);
         Assert.Equal(sessionName, detail.Session.SessionName);
-        Assert.Equal("acp-1", detail.Session.AcpSessionId);
+        Assert.Equal("acp-1", detail.Session.RuntimeSessionId);
+        Assert.Equal("opencode", detail.Session.Runtime);
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("plan", detail.Session.Stage);
         Assert.NotNull(detail.Session.CompletedAt);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
-        Assert.Equal("acp-1", listed.AcpSessionId);
+        Assert.Equal("acp-1", listed.RuntimeSessionId);
+        Assert.Equal("opencode", listed.Runtime);
         Assert.Equal("completed", listed.Status);
         Assert.Equal("plan", listed.Stage);
         Assert.NotNull(listed.CompletedAt);
@@ -163,6 +169,22 @@ public class WorkflowSessionSpecs
         Assert.Equal("write proposal", turn.User.Text);
         Assert.Contains(turn.Assistant, p => p.Type == "text" && p.Text == "done");
         Assert.Null(turn.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task GivenWorkflowSessionWithoutPhysicalBinding_WhenListed_ThenRuntimeSessionIdIsOmitted()
+    {
+        var (project, _, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-unbound-runtime");
+
+        using var response = await _client.GetAsync($"/api/workflow-runs/{workflowRunId}/sessions");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var listed = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+
+        Assert.Equal(sessionName, listed.GetProperty("sessionName").GetString());
+        Assert.False(listed.TryGetProperty("runtimeSessionId", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -180,12 +202,13 @@ public class WorkflowSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
-            agentSessionId = sessionId,
+            runtimeSessionId = sessionId,
             workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
+            runtimeSessionId = sessionId,
             runtimeEvents = new object[]
             {
                 new
@@ -331,9 +354,9 @@ public class WorkflowSessionSpecs
             .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
             .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 
-    private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
+    private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? RuntimeSessionId, string Status, string? WorkDir, string? Model, string? Runtime);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? RuntimeSessionId, string? Runtime, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);

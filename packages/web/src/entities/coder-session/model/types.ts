@@ -67,7 +67,7 @@ export type AgentSessionEvent = SessionEvent
 /**
  * One entry in the ordered lineage of runtime sessions bound to a
  * Mohist session over its lifetime. The Mohist `sessionId` is the
- * stable identity; each `agentRuntimeSessionId` is a mutable runtime
+ * stable identity; each `runtimeSessionId` is a mutable runtime
  * facet created by compact/reset rebinds (see `design/conventions.md`
  * identity rules). The chain starts with the original runtime
  * session; each subsequent entry records a compact/reset rebind
@@ -80,14 +80,16 @@ export type AgentSessionEvent = SessionEvent
  * link automatically.
  */
 export interface RuntimeSessionLineageEntry {
-  agentRuntimeSessionId: string
+  runtimeSessionId: string
+  runtime?: string | null
   boundAt: string
 }
 
 export interface AgentSessionMetadata {
   id: string
   sessionName: string
-  acpSessionId: string
+  runtimeSessionId: string | null
+  runtime?: string | null
   status: string
   statusKind?: SessionStatusKind
   model: string | null
@@ -128,14 +130,14 @@ export interface FileChangeSummary {
 export interface CoderSessionSummary {
   id: string
   sessionName?: string | null
-  acpSessionId: string
+  runtimeSessionId: string | null
   executionId: string | null
   taskDescription: string | null
   status: string
   createdAt: string
   completedAt: string | null
   model: string | null
-  coderType: string | null
+  runtime: string | null
   stage: string | null
   title: string | null
   lastDataAt: string | null
@@ -144,13 +146,15 @@ export interface CoderSessionSummary {
   failureReason: string | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface WorkflowRunSession {
   id: string
   workflowRunId: string
   sessionName: string
-  acpSessionId: string | null
+  runtimeSessionId: string | null
+  runtime?: string | null
   projectId: string | null
   issueNumber: number | null
   runnerId: string | null
@@ -190,9 +194,9 @@ export interface PromptSummary {
 export interface SessionMetadata {
   sessionId: string
   sessionName?: string | null
-  coderSessionId: string
   issueId: string
-  acpSessionId: string
+  runtimeSessionId: string
+  runtime?: string | null
   executionId: string | null
   title: string | null
   status: string
@@ -218,6 +222,7 @@ export interface SessionMetadata {
   hasUnknownTools?: boolean
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface TextPart {
@@ -284,6 +289,7 @@ export interface SessionTurn {
     text: string
     kind: PromptKind
     sentAt: string
+    runtimeSessionId?: string | null
     summary?: PromptSummary
   }
   assistant: SessionPart[]
@@ -291,14 +297,14 @@ export interface SessionTurn {
 
 export interface CoderSessionDetail {
   id: string
-  acpSessionId: string
+  runtimeSessionId: string
   executionId: string | null
   taskDescription: string | null
   status: string
   createdAt: string
   completedAt: string | null
   model: string | null
-  coderType: string | null
+  runtime: string | null
   stage: string | null
   title: string | null
   metadata: SessionMetadata
@@ -322,7 +328,7 @@ export interface ToolCallEntry {
   duration?: number
   stepIndex?: number
   timestamp: number
-  acpSessionId?: string
+  runtimeSessionId?: string
   toolCallId?: string
   rawInput?: string
   rawOutput?: string
@@ -350,6 +356,6 @@ export interface LoopProgress {
 
 export interface CoderTextBuffer {
   executionId: string
-  acpSessionId: string
+  runtimeSessionId: string
   text: string
 }

@@ -15,20 +15,26 @@ public sealed class AgentSession
         string runnerId,
         string? workDir,
         AgentSessionMetadata? metadata = null,
-        DateTime? now = null)
+        DateTime? now = null,
+        string? runtime = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
-        return new AgentSession
+        var session = new AgentSession
         {
             Id = id,
             Metadata = metadata ?? new AgentSessionMetadata(),
-            Runtime = new AgentSessionRuntime(runnerId, workDir),
+            Runtime = new AgentSessionRuntime(runnerId, workDir, NormalizeRuntime(runtime)),
             Settings = new AgentSessionSettings(),
             Status = AgentSessionStatusSnapshot.Created(createdAt)
         };
+        session.ValidateState();
+        return session;
     }
 
-    public void ValidateState()
+    private static string? NormalizeRuntime(string? runtime) =>
+        string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
+
+    public void ValidateState(bool allowLegacySource = false)
     {
         if (string.IsNullOrWhiteSpace(Id))
             throw new InvalidOperationException("AgentSession state requires a non-empty Id.");
@@ -36,7 +42,98 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
+        Metadata.ValidateSource(allowLegacySource);
     }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class RuntimeSessionMissingException : InvalidOperationException
+{
+    public RuntimeSessionMissingException(string sessionId, string? runtimeSessionId, string? runtime)
+        : base(BuildMessage(sessionId, runtimeSessionId, runtime))
+    {
+        SessionId = sessionId;
+        RuntimeSessionId = runtimeSessionId;
+        Runtime = runtime;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string? RuntimeSessionId { get; }
+    [Id(2)]
+    public string? Runtime { get; }
+
+    private static string BuildMessage(string sessionId, string? runtimeSessionId, string? runtime)
+    {
+        var details = string.IsNullOrEmpty(runtimeSessionId)
+            ? "no runtime session is bound"
+            : $"runtime session {runtimeSessionId} uses unavailable runtime '{runtime ?? "unknown"}'";
+        return $"Runtime session missing for AgentSession {sessionId}: {details}. Reset the session to establish a new binding.";
+    }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class StaleRuntimeSessionBindingException : InvalidOperationException
+{
+    public StaleRuntimeSessionBindingException(
+        string sessionId,
+        string? expectedRuntimeSessionId,
+        string? actualRuntimeSessionId)
+        : base(BuildMessage(sessionId, expectedRuntimeSessionId, actualRuntimeSessionId))
+    {
+        SessionId = sessionId;
+        ExpectedRuntimeSessionId = expectedRuntimeSessionId;
+        ActualRuntimeSessionId = actualRuntimeSessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string? ExpectedRuntimeSessionId { get; }
+    [Id(2)]
+    public string? ActualRuntimeSessionId { get; }
+
+    private static string BuildMessage(
+        string sessionId,
+        string? expectedRuntimeSessionId,
+        string? actualRuntimeSessionId) =>
+        $"Reset rejected for AgentSession {sessionId}: expected runtime session " +
+        $"'{expectedRuntimeSessionId ?? "none"}', but the current binding is " +
+        $"'{actualRuntimeSessionId ?? "none"}'.";
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class RecoveryOperationInProgressException : InvalidOperationException
+{
+    public RecoveryOperationInProgressException(string sessionId, string operation)
+        : base($"AgentSession {sessionId} already has a {operation} recovery operation in progress.")
+    {
+        SessionId = sessionId;
+        Operation = operation;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string Operation { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class FollowupOperationInProgressException : InvalidOperationException
+{
+    public FollowupOperationInProgressException(string sessionId)
+        : base($"AgentSession {sessionId} already has a follow-up delivery in progress.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
 }
 
 [GenerateSerializer]
@@ -60,12 +157,62 @@ public sealed record AgentSessionMetadata(
         var next = this;
         if (other.Labels is not null)
             foreach (var (key, value) in other.Labels)
+            {
+                if (IsSourceLabel(key))
+                {
+                    var current = next.Label(key);
+                    if (current is null)
+                        throw new InvalidOperationException($"AgentSession source label '{key}' cannot be added after creation.");
+                    if (!string.Equals(current, value, StringComparison.Ordinal))
+                        throw new InvalidOperationException($"AgentSession source label '{key}' is immutable.");
+                    continue;
+                }
                 next = next.WithLabel(key, value);
+            }
         if (other.Annotations is not null)
             foreach (var (key, value) in other.Annotations)
                 next = next.WithAnnotation(key, value);
+        next.ValidateSource();
         return next;
     }
+
+    public void ValidateSource(bool allowLegacySource = false)
+    {
+        var kind = Label(SourceKindKey);
+        if (kind is null)
+        {
+            if (allowLegacySource) return;
+            throw new InvalidOperationException("AgentSession source requires exactly one known source kind.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Label(ProjectIdKey)))
+            throw new InvalidOperationException("AgentSession source requires a project label.");
+
+        if (string.Equals(kind, "workflow", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey)) || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
+                throw new InvalidOperationException("Workflow AgentSession source requires workflow run and session name labels.");
+            return;
+        }
+
+        if (string.Equals(kind, "agent-launch", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+                throw new InvalidOperationException("Agent-launch AgentSession source requires an agent label.");
+            return;
+        }
+
+        throw new InvalidOperationException($"Unknown AgentSession source kind '{kind}'.");
+    }
+
+    private const string ProjectIdKey = "mohist.io/project-id";
+    private const string SourceKindKey = "mohist.io/source-kind";
+    private const string WorkflowRunIdKey = "mohist.io/source-id";
+    private const string SessionNameKey = "mohist.io/session-name";
+    private const string AgentIdKey = "mohist.io/agent-id";
+
+    private static bool IsSourceLabel(string key) =>
+        key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey;
 
     private static IReadOnlyDictionary<string, string> With(IReadOnlyDictionary<string, string>? source, string key, string value)
     {
@@ -79,7 +226,8 @@ public sealed record AgentSessionMetadata(
 
 public sealed record AgentSessionRuntime(
     string RunnerId,
-    string? WorkDir);
+    string? WorkDir,
+    string? Runtime = null);
 
 public sealed record AgentSessionSettings(string? Model = null);
 
@@ -95,11 +243,14 @@ public sealed record AgentSessionSettings(string? Model = null);
 /// holds all such entries — predecessor/successor are derived by
 /// position. Entries are append-only on rebind; the first entry
 /// records the original runtime session bound by AttachPhysicalSession.
+/// <see cref="Runtime"/> carries the execution-backend name that owned
+/// the binding and remains null on legacy entries.
 /// </summary>
 [GenerateSerializer]
 public sealed record RuntimeSessionLineageEntry(
     [property: Id(0)] string AgentRuntimeSessionId,
-    [property: Id(1)] DateTime BoundAt);
+    [property: Id(1)] DateTime BoundAt,
+    [property: Id(2)] string? Runtime = null);
 
 public sealed record AgentSessionStatusSnapshot(
     string? AgentRuntimeSessionId = null,
@@ -108,7 +259,12 @@ public sealed record AgentSessionStatusSnapshot(
     DateTime? LastDataAt = null,
     AgentUsageSummary? UsageSummary = null,
     IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
-    IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null)
+    IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
+    AgentSessionResetReservation? PendingReset = null,
+    AgentSessionFollowupLease? PendingFollowup = null,
+    IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
+    IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
+    DateTime? CurrentTurnEndedAt = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
@@ -136,3 +292,38 @@ public sealed record AgentUsageSummary(
 public sealed record ContextUsageHistoryEntry(
     [property: JsonPropertyName("at")] DateTime At,
     [property: JsonPropertyName("percent")] double Percent);
+
+public sealed record AgentSessionResetReservation(
+    string OperationId,
+    string? ExpectedRuntimeSessionId,
+    string Runtime,
+    DateTime StartedAt,
+    string Command = "reset",
+    AgentSessionRecoveryOutcome? Outcome = null,
+    string? IdempotencyKey = null);
+
+public sealed record AgentSessionRecoveryOutcome(
+    string Id,
+    string Status,
+    long? ContextWindowSize,
+    long? ContextWindowUsed,
+    double? ContextUsagePercent,
+    long? ContextWindowUsedBefore,
+    string? Operation,
+    bool WasCompacted);
+
+[GenerateSerializer]
+public sealed record AgentSessionFollowupLease(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string RuntimeSessionId,
+    [property: Id(2)] bool Accepted = false,
+    [property: Id(3)] DateTime? AcceptedAt = null,
+    [property: Id(4)] DateTime? StartedAt = null);
+
+public sealed record AgentSessionTranscriptEvidence(
+    string Id,
+    string? RuntimeSessionId,
+    string Type,
+    string PayloadJson,
+    DateTime CreatedAt,
+    string PromptKind);

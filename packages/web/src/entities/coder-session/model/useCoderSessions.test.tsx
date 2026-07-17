@@ -56,14 +56,14 @@ function makeSession(overrides: SessionOverrides = {}): CoderSessionItem {
   const { inputTokens, outputTokens, costAmount, costCurrency, ...rest } = overrides
   return {
     id: 'session-1',
-    acpSessionId: 'acp-1',
+    runtimeSessionId: 'acp-1',
     executionId: null,
     taskDescription: null,
     status: 'running',
     createdAt: '2024-01-01T10:00:00.000Z',
     completedAt: null,
     model: null,
-    coderType: null,
+    runtime: null,
     stage: null,
     title: null,
     lastDataAt: null,
@@ -210,14 +210,14 @@ describe('CoderSessionItem type contract', () => {
   it('CoderSessionItem includes all summary fields', () => {
     const session = makeSession({
       id: 'test-id',
-      acpSessionId: 'acp-test',
+      runtimeSessionId: 'acp-test',
       executionId: 'exec-1',
       taskDescription: 'Test task',
       status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
       completedAt: '2024-01-01T11:00:00.000Z',
       model: 'claude-3',
-      coderType: 'coder',
+      runtime: 'coder',
       stage: 'build',
       title: 'Test Session',
       lastDataAt: '2024-01-01T10:30:00.000Z',
@@ -227,7 +227,7 @@ describe('CoderSessionItem type contract', () => {
     })
 
     expect(session.id).toBe('test-id')
-    expect(session.acpSessionId).toBe('acp-test')
+    expect(session.runtimeSessionId).toBe('acp-test')
     expect(session.executionId).toBe('exec-1')
     expect(session.taskDescription).toBe('Test task')
     expect(session.status).toBe('completed')
@@ -249,7 +249,7 @@ describe('useCoderSessions live event handling', () => {
 
     act(() => {
       dispatchAgentEvent('usage.updated', {
-        coderSessionId: 'session-1',
+        sessionId: 'session-1',
         inputTokens: 100,
         outputTokens: 50,
         totalTokens: 150,
@@ -287,7 +287,7 @@ describe('useCoderSessions live event handling', () => {
 
     act(() => {
       dispatchAgentEvent('usage.updated', {
-        coderSessionId: 'session-unknown',
+        sessionId: 'session-unknown',
         inputTokens: 100,
       } as any)
     })
@@ -314,7 +314,7 @@ describe('useCoderSessions live event handling', () => {
 
     act(() => {
       dispatchAgentEvent('usage.updated', {
-        coderSessionId: 'session-1',
+        sessionId: 'session-1',
         outputTokens: 25,
       } as any)
     })

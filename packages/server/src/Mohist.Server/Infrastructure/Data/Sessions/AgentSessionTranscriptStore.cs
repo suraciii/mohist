@@ -19,7 +19,8 @@ public sealed record AgentSessionTranscriptTurnUpsert(
     string PromptText,
     string PromptKind,
     DateTime StartedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? RuntimeSessionId = null);
 
 public sealed record AgentSessionTranscriptPartDelta(
     string Type,
@@ -29,7 +30,8 @@ public sealed record AgentSessionTranscriptPartDelta(
     string PayloadJson,
     DateTime FirstSeenAt,
     DateTime LastSeenAt,
-    int RawEventCount);
+    int RawEventCount,
+    bool IsIdempotent = false);
 
 public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
 {
@@ -46,11 +48,15 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
+            var turns = db.AgentSessionTranscriptTurns
+                .Where(t => t.SessionId == transcript.Turn.SessionId);
+            if (!string.IsNullOrWhiteSpace(transcript.Turn.RuntimeSessionId))
+                turns = turns.Where(t => t.RuntimeSessionId == transcript.Turn.RuntimeSessionId);
             var turn = transcript.StartNewTurn
                 ? null
-                : await db.AgentSessionTranscriptTurns
+                : await turns
                     .OrderByDescending(t => t.Sequence)
-                    .FirstOrDefaultAsync(t => t.SessionId == transcript.Turn.SessionId, ct);
+                    .FirstOrDefaultAsync(ct);
             if (turn is null)
             {
                 var sequence = transcript.StartNewTurn || transcript.Turn.Sequence <= 0
@@ -62,6 +68,7 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
                 turn = new AgentSessionTranscriptTurnRow
                 {
                     SessionId = transcript.Turn.SessionId,
+                    RuntimeSessionId = transcript.Turn.RuntimeSessionId,
                     Sequence = sequence,
                     PromptText = transcript.Turn.PromptText,
                     PromptKind = transcript.Turn.PromptKind,
@@ -75,6 +82,8 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
             {
                 if (!string.IsNullOrWhiteSpace(transcript.Turn.PromptText))
                     turn.PromptText = transcript.Turn.PromptText;
+                if (!string.IsNullOrWhiteSpace(transcript.Turn.RuntimeSessionId))
+                    turn.RuntimeSessionId = transcript.Turn.RuntimeSessionId;
                 turn.PromptKind = transcript.Turn.PromptKind;
                 turn.UpdatedAt = transcript.Turn.UpdatedAt;
             }
@@ -115,6 +124,8 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
             var partKey = PartKey(delta.Type, delta.CorrelationKey);
             if (existingByKey.TryGetValue(partKey, out var part))
             {
+                if (delta.IsIdempotent)
+                    continue;
                 part.CorrelationId = delta.CorrelationId ?? part.CorrelationId;
                 if (!string.IsNullOrEmpty(delta.TextDelta))
                     part.Text += delta.TextDelta;

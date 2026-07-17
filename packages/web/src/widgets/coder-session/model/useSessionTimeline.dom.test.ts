@@ -4,7 +4,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createElement, type ReactNode } from 'react'
 import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../../entities/agent'
-import { deriveToolCallTitle, reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
+import { reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
 import { useMswServer } from '../../../../tests/support/msw'
 
 useMswServer(
@@ -26,14 +26,14 @@ function renderTimelineHook() {
   return renderHook(
     () => useSessionTimeline(123, {
       id: 'coder-1',
-      acpSessionId: 'acp-1',
+      runtimeSessionId: 'acp-1',
       executionId: null,
       taskDescription: null,
       status: 'active',
       createdAt: '2024-01-01T00:00:00.000Z',
       completedAt: null,
       model: null,
-      coderType: null,
+      runtime: null,
       stage: null,
       title: null,
       lastDataAt: null,
@@ -48,53 +48,6 @@ function renderTimelineHook() {
     },
   )
 }
-
-describe('deriveToolCallTitle', () => {
-  it('returns title when title differs from toolName', () => {
-    expect(deriveToolCallTitle('read', 'server.ts', '{}')).toBe('server.ts')
-  })
-
-  it('derives filename from JSON file_path for read tool', () => {
-    expect(
-      deriveToolCallTitle('read', 'read', '{"file_path":"packages/server/src/Mohist.Server/Program.cs"}')
-    ).toBe('Program.cs')
-  })
-
-  it('derives command from JSON command for bash tool', () => {
-    expect(
-      deriveToolCallTitle('bash', 'bash', '{"command":"npm run build"}')
-    ).toBe('npm run build')
-  })
-
-  it('returns rawInput string when JSON parse fails', () => {
-    expect(deriveToolCallTitle('bash', 'bash', 'npm test')).toBe('npm test')
-  })
-
-  it('returns toolName when rawInput is null', () => {
-    expect(deriveToolCallTitle('unknown', 'unknown', null as unknown as string)).toBe('unknown')
-  })
-
-  it('returns toolName when rawInput is undefined', () => {
-    expect(deriveToolCallTitle('read', 'read', undefined)).toBe('read')
-  })
-
-  it('truncates long bash commands', () => {
-    const longCmd = 'a'.repeat(100)
-    expect(deriveToolCallTitle('bash', 'bash', `{"command":"${longCmd}"}`)).toBe(
-      'a'.repeat(57) + '...'
-    )
-  })
-
-  it('derives pattern from glob tool', () => {
-    expect(deriveToolCallTitle('glob', 'glob', '{"pattern":"**/*.ts"}')).toBe('**/*.ts')
-  })
-
-  it('handles filePath variant for read tool', () => {
-    expect(
-      deriveToolCallTitle('read_file', 'read_file', '{"filePath":"src/main.ts"}')
-    ).toBe('main.ts')
-  })
-})
 
 function makeSessionEvent(overrides: Partial<{
   id: number
@@ -304,8 +257,8 @@ describe('useSessionTimeline context health events', () => {
 
     act(() => {
       dispatchAgentEvent('usage.updated', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         contextWindowUsed: 45_000,
         contextWindowSize: 100_000,
         contextUsagePercent: 72,
@@ -326,8 +279,8 @@ describe('useSessionTimeline context health events', () => {
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         contextWindowUsed: 72_000,
         contextWindowSize: 100_000,
         contextUsagePercent: 72,
@@ -348,8 +301,8 @@ describe('useSessionTimeline context health events', () => {
 
     act(() => {
       dispatchAgentEvent('compaction_event', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         contextWindowUsedAfter: 90_000,
         contextWindowSize: 100_000,
         recordedAt: '2024-01-01T00:00:00.000Z',
@@ -385,7 +338,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -417,7 +370,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'custom-step',
         roundLabel: 'Custom Step',
         roundIndex: 7,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -440,7 +393,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Should be dropped',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -454,11 +407,50 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Should also be dropped',
         roundIndex: 0,
-        coderSessionId: 'wrong-coder',
+        sessionId: 'wrong-coder',
       })
     })
 
     expect(hook.result.current.rounds).toHaveLength(0)
+  })
+
+  it('plan_round_start drops an old runtime event for the current logical session', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Stale runtime',
+        roundIndex: 0,
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-old',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(0)
+  })
+
+  it('drops runtime events that only identify the current logical session', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        sessionId: 'coder-1',
+      })
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'coder-1',
+        text: ' stale',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('')
   })
 
   it('plan_round_complete stamps verdict and extends with auto-fix / re-self-review on FAIL', () => {
@@ -471,7 +463,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -507,7 +499,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'specs',
         roundLabel: 'Specs',
         roundIndex: 1,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -540,7 +532,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -583,7 +575,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -592,7 +584,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         issueId: '123',
         projectId: 'proj-1',
         executionId: 'exec-1',
-        acpSessionId: 'acp-1',
+        runtimeSessionId: 'acp-1',
         status: 'recovering',
         attempt: 2,
         reason: 'lost contact',
@@ -616,7 +608,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         issueId: '123',
         projectId: 'proj-1',
         executionId: 'exec-1',
-        acpSessionId: 'acp-1',
+        runtimeSessionId: 'acp-1',
         status: 'recovered',
         attempt: 2,
       })
@@ -637,14 +629,14 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         activeProbeVersion: 3,
@@ -673,14 +665,14 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         satisfiedProbeVersion: 7,
@@ -692,8 +684,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         probeVersion: 9,
@@ -704,8 +696,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
       })
@@ -724,14 +716,14 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         status: 'failed',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         failureReason: 'no response',
@@ -758,14 +750,14 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
     act(() => {
       dispatchAgentEvent('compaction_event', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         strategy: 'summary',
         contextWindowUsedBefore: 950_000,
         contextWindowUsedAfter: 400_000,
@@ -802,7 +794,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -887,14 +879,14 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
     act(() => {
       dispatchAgentEvent('tool_call.started', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         toolName: 'read',
         state: 'started',
         toolCallId: 'call-1',
@@ -915,8 +907,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('tool_call.updated', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         toolName: 'read',
         state: 'timeout',
         toolCallId: 'call-1',
@@ -932,8 +924,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('tool_call.completed', {
-        coderSessionId: 'coder-1',
-        acpSessionId: 'acp-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
         toolName: 'read',
         state: 'completed',
         toolCallId: 'call-1',
@@ -956,7 +948,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -968,7 +960,8 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundIndex: 0,
         sessionUpdate: 'message.delta',
         data: { text: 'hello ' },
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
       dispatchAgentEvent('plan_session_update', {
         issueId: '123',
@@ -977,7 +970,8 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundIndex: 0,
         sessionUpdate: 'message.delta',
         data: { text: 'world' },
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 
@@ -1007,7 +1001,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
       })
     })
 
@@ -1019,7 +1013,8 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundIndex: 0,
         sessionUpdate: 'message.delta',
         data: { text: 'first ' },
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 
@@ -1044,7 +1039,8 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundIndex: 0,
         sessionUpdate: 'message.delta',
         data: { text: 'second' },
-        coderSessionId: 'coder-1',
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 

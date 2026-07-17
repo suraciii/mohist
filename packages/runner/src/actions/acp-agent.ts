@@ -44,8 +44,8 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const failureReason = ok ? null : failIfTriggered
     ? `failIf marker matched: ${failIfMatch.marker}`
     : result.error ?? verification.message
-  if (context.ownerKind !== "agent-job" || !context.agentSessionId || !ok) {
-    await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+  if (context.ownerKind !== "agent-job" || !context.agentSessionId) {
+    await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) }, result.acpSessionId ?? null)
   }
   return {
     status: ok ? "success" : "failure",
@@ -53,7 +53,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     output: JSON.stringify({
       kind: "acp-agent",
       status: ok ? "success" : "failure",
-      acpSessionId: result.acpSessionId,
+      runtimeSessionId: result.acpSessionId,
       model: agentConfig?.model,
       text: result.text,
       error: result.error,

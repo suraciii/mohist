@@ -327,7 +327,8 @@ export class ServerConnection {
 }
 
 export interface WorkflowAgentSession {
-  acpSessionId?: string | null
+  runtimeSessionId?: string | null
+  runtime?: string | null
   workDir?: string | null
   model?: string | null
   resolvedModel?: string | null

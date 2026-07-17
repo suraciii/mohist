@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -149,6 +150,7 @@ public static class MohistServiceRegistration
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
+        services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {

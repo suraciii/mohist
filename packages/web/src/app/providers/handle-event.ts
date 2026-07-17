@@ -145,6 +145,10 @@ function workflowRunHandler(ctx: HandlerContext): void {
   ctx.queryClient.invalidateQueries({ queryKey: ['agent-status'] })
   ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
   ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
+  if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound) {
+    ctx.queryClient.invalidateQueries({ queryKey: ['agent-session'] })
+    ctx.queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
+  }
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused) {
     const evt = ctx.parsed as { issueId: string }
     notifyRunLifecycleToast(ctx.queryClient, ctx.viewedIssue, evt.issueId, 'pause')

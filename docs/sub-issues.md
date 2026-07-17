@@ -98,7 +98,3 @@ prerequisite 的规则不变，复合结构下的常见用法：
 ## 实装差距
 
 本篇是产品 spec，所述能力当前均未实装（父子关系、复合推进、状态汇总、Plan 背景上下文注入），由对应 issue 立项推进。历史决策沿革见 [`design/issue-breakdown.md`](../design/issue-breakdown.md)。
-
----
-
-对应源码：`packages/server/src/Mohist.Server/Issue/`；CLI `packages/cli/`。

@@ -97,13 +97,13 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     expect(fixture.serverConnection.calls).toContainEqual(expect.objectContaining({
       event: "attachWorkflowAgentSession",
       sessionName: "check",
-      body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
+      body: expect.objectContaining({ runtimeSessionId: "fake-session-1" }),
     }))
   })
 
   it("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "shared-session-1", runtime: "opencode" } })
 
     const action = runDefaultModelAction(contextWithOverrides({
       prompt: "long shared task",
@@ -128,7 +128,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
 
   it("ExistingSharedSessionWithRequestedModel_SetsModelBeforePromptWithoutResume", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1", model: "openai/gpt-5.5" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "shared-session-1", runtime: "opencode", model: "openai/gpt-5.5" } })
 
     const action = acpAgentAction(contextWithOverrides({
       prompt: "reuse shared session",
@@ -153,7 +153,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
   it("SameNamedWorkflowSessionAcrossTasksAndModelChange_ReusesOnePhysicalSession", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      sessionRecord: { acpSessionId: "shared-session-1", model: "kimi-for-coding/k2p6" },
+      sessionRecord: { runtimeSessionId: "shared-session-1", runtime: "opencode", model: "kimi-for-coding/k2p6" },
     })
 
     const firstAction = acpAgentAction(contextWithOverrides({
@@ -187,7 +187,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     expect(prompts.every((entry) => entry.sessionId === "shared-session-1")).toBe(true)
     const attachCalls = shared.serverConnection.calls.filter((entry) => entry.event === "attachWorkflowAgentSession")
     expect(attachCalls).not.toHaveLength(0)
-    expect(attachCalls.every((entry) => (entry.body as { agentSessionId?: string }).agentSessionId === "shared-session-1")).toBe(true)
+    expect(attachCalls.every((entry) => (entry.body as { runtimeSessionId?: string }).runtimeSessionId === "shared-session-1")).toBe(true)
     const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "shared-session-1" && entry.text === "second task with another model")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
@@ -197,7 +197,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
   it("ExistingSharedSessionSameModelDifferentVariant_ReusesPhysicalSessionAndDeliversNewVariant", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5/max" },
+      sessionRecord: { runtimeSessionId: "shared-session-1", runtime: "opencode", model: "anthropic/claude-sonnet-4-5/max" },
     })
 
     const action = acpAgentAction(contextWithOverrides({

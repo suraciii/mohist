@@ -10,6 +10,8 @@ public interface IAgentJobGrain : IGrainWithStringKey
     Task<AgentJobStatus> GetStatusAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task AssignRunnerAsync(string runnerId, string workId);
+    Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
+        Task.FromResult(false);
     Task SubmitAsync(AgentJobInput input);
     Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();

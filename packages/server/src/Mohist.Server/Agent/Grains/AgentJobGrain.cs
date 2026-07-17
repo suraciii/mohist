@@ -146,6 +146,28 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && string.Equals(State.WorkId, workId, StringComparison.Ordinal));
     }
 
+    public async Task<bool> RecordRuntimeSessionBindingAsync(
+        string runnerId,
+        string workId,
+        string sessionId,
+        string runtimeSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(runtimeSessionId)
+            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(State.Input?.AgentSessionId, sessionId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(State.RuntimeSessionId))
+            return string.Equals(State.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal);
+
+        State.RuntimeSessionId = runtimeSessionId;
+        await SaveAsync();
+        return true;
+    }
+
     public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (IsTerminal)
@@ -205,7 +227,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (isSuccess)
             await CloseGenericSessionAsync("completed", result.ExitCode ?? 0, null, null, null);
         else
-            await CloseGenericSessionAsync("failed", result.ExitCode ?? 1, State.FailureReason, result.Status, State.FailureReason);
+            await CloseGenericSessionAsync(
+                "failed",
+                result.ExitCode ?? 1,
+                State.FailureReason,
+                FailureCategoryFrom(result.Output) ?? result.Status,
+                State.FailureReason);
 
         return new AgentJobReportResult(true);
     }
@@ -628,6 +655,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         string? reason)
     {
         var sessionId = State.Input?.AgentSessionId;
+        var runtimeSessionId = State.RuntimeSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
             return;
 
@@ -643,15 +671,42 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 ["reason"] = reason,
                 ["recordedAt"] = _timeProvider.GetUtcNow().ToString("o"),
             });
+            var close = new[] { new AgentSessionRuntimeEventInput("session.closed", payload) };
+            if (string.IsNullOrWhiteSpace(runtimeSessionId))
+            {
+                var session = await grain.GetAsync();
+                if (string.IsNullOrWhiteSpace(session?.AgentSessionId))
+                    await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(close));
+                return;
+            }
             await grain.AppendRuntimeEventsAsync(
-                new AppendAgentSessionRuntimeEventsCommand(
-                    new[] { new AgentSessionRuntimeEventInput("session.closed", payload) }));
+                new AppendAgentSessionRuntimeEventsCommand(close, runtimeSessionId));
         }
         catch (Exception ex)
         {
             _log.LogError(ex,
                 "AgentJob {Id} failed to close generic session {SessionId} with status {Status}",
                 Key, sessionId, status);
+        }
+    }
+
+    private static string? FailureCategoryFrom(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("failureCategory", out var category)
+                && category.ValueKind == JsonValueKind.String
+                ? category.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

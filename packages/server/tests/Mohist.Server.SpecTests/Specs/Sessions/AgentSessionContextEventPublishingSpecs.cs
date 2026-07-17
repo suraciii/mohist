@@ -38,7 +38,8 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -47,21 +48,21 @@ public class AgentSessionContextEventPublishingSpecs
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":300,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Cross green→yellow (60% threshold) at 65%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":650,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Cross yellow→red (80% threshold) at 85%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":850,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         var healthEvents = _fixture.RecordingTranscriptPublisher.Published
             .Where(e => e.Type == "context_health_update")
@@ -95,7 +96,9 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-compact"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -115,22 +118,24 @@ public class AgentSessionContextEventPublishingSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task ResetAsync_EmitsCompactionEventWithoutSummary()
+    public async Task ResetAsync_DoesNotEmitCompactionEvent()
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-reset"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
-        await grain.ResetAsync(new ResetAgentSessionCommand());
+        await grain.ResetAsync(new ResetAgentSessionCommand(
+            ExpectedRuntimeSessionId: "runtime-before-reset",
+            ReplacementRuntimeSessionId: "runtime-after-reset"));
 
         var compactionEvents = _fixture.RecordingTranscriptPublisher.Published
             .Where(e => e.Type == "compaction_event")
             .ToList();
-        Assert.Single(compactionEvents);
-        var envelope = compactionEvents[0];
-        Assert.Equal("reset", envelope.Payload.GetProperty("strategy").GetString());
+        Assert.Empty(compactionEvents);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -140,21 +145,22 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":960,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Trigger the exhaustion classification.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("session.closed", """{"status":"failed","exitCode":1}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Force a flush so the post-state-save event rows are
         // committed before we read them.
@@ -176,14 +182,15 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         // Bring usage to 50% (green) — first snapshot.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":500,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         await grain.FlushForTestAsync();
 
@@ -195,4 +202,10 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal("green", health.Envelope.Data!.Value.GetProperty("healthStatus").GetString());
         Assert.Equal(50d, health.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
+
+    private OpenAgentSessionCommand OpenCommand() => new(
+        _runnerId,
+        "opencode",
+        WorkDir: "/work",
+        Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
 }

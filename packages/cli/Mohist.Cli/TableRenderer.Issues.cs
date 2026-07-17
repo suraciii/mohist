@@ -380,7 +380,7 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var agentSessionId = StringOf(data, "agentSessionId");
+        var sessionId = StringOf(data, "id");
         var operation = StringOf(data, "operation");
         var wasCompacted = BoolOf(data, "wasCompacted") ? "true" : "false";
         var contextWindowUsedBefore = NumberOf(data, "contextWindowUsedBefore");
@@ -388,9 +388,7 @@ internal sealed partial class TableRenderer
         var contextUsagePercent = NumberOf(data, "contextUsagePercent");
         var status = StringOf(data, "status");
 
-        _out.WriteLine(string.IsNullOrWhiteSpace(agentSessionId)
-            ? "Runtime session: will be created on the next task"
-            : $"Runtime session: {agentSessionId}");
+        _out.WriteLine($"session id: {sessionId}");
         _out.WriteLine($"operation:   {operation}");
         _out.WriteLine($"compacted:   {wasCompacted}");
         _out.WriteLine($"context:     {contextWindowUsedBefore} → {contextWindowUsed} ({contextUsagePercent})");

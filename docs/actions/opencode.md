@@ -139,6 +139,7 @@ OpenCode 判断。
 ## 实装差距
 
 当前可用 Action 仍是 `mohist/acp-agent`，Action Input 仍包含旧的 `agent.type`
-形状，Workflow schema 也仍把 `expect` 放在 `with` 中。Session Compact 尚未完全
-采用这里定义的 OpenCode 原生语义。
-`mohist/opencode`、新的 Session 身份以及本篇 Session 操作语义尚待实现。
+形状，Workflow schema 也仍把 `expect` 放在 `with` 中。issue-407 已交付稳定的
+Session 身份、来源解析和 Compact、Reset、Follow-up、Cancel 的命令语义；Session
+在这些操作后仍保持同一身份。
+`mohist/opencode` 的原生 OpenCode 执行仍由 issue-409 实现。

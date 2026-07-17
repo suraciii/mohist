@@ -5,6 +5,8 @@ internal static class RuntimeEventTypes
     public const string SessionInput = "session.input";
     public const string SessionLiveness = "session.liveness";
     public const string SessionClosed = "session.closed";
+    public const string SessionFollowupFailed = "session.followup_failed";
+    public const string SessionFollowupCompleted = "session.followup_completed";
     public const string MessageDelta = "message.delta";
     public const string ReasoningDelta = "reasoning.delta";
     public const string ToolCallStarted = "tool_call.started";

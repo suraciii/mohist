@@ -104,8 +104,13 @@ export function normalizeTranscriptDetail(
   eventName: string,
   innerPayload?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const agentSessionId = readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
+  const runtimeSessionId = readEnvelopeField(candidate, 'runtimeSessionId', 'RuntimeSessionId')
+    ?? readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
+    ?? (innerPayload && readEnvelopeField(innerPayload, 'runtimeSessionId', 'RuntimeSessionId'))
+  const runtime = readEnvelopeField(candidate, 'runtime', 'Runtime')
+    ?? (innerPayload && readEnvelopeField(innerPayload, 'runtime', 'Runtime'))
   const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
+    ?? (innerPayload && readEnvelopeField(innerPayload, 'sessionId', 'SessionId'))
   const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
   const normalized: Record<string, unknown> = {
     ...candidate,
@@ -136,11 +141,14 @@ export function normalizeTranscriptDetail(
   if (innerPayload) {
     normalized.payload = innerPayload
   }
-  if (normalized.acpSessionId === undefined) {
-    normalized.acpSessionId = agentSessionId ?? sessionId
+  if (normalized.runtimeSessionId === undefined && runtimeSessionId !== undefined) {
+    normalized.runtimeSessionId = runtimeSessionId
   }
-  if (normalized.coderSessionId === undefined) {
-    normalized.coderSessionId = sessionId
+  if (normalized.runtime === undefined && runtime !== undefined) {
+    normalized.runtime = runtime
+  }
+  if (normalized.sessionId === undefined) {
+    normalized.sessionId = sessionId
   }
   if (normalized.executionId === undefined) {
     normalized.executionId = workId

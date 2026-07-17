@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
@@ -38,10 +39,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             string name,
+            string? runtimeSessionId,
             AgentSessionQuerier sessions) =>
         {
             var project = GetRequiredProject(ctx);
-            var transcript = await sessions.GetSessionTranscriptAsync(project.Id, number, name);
+            var transcript = await sessions.GetSessionTranscriptAsync(project.Id, number, name, runtimeSessionId);
             return transcript is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(transcript);
         });
 
@@ -52,22 +54,15 @@ public static partial class IssueRoutes
             string name,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
-            try
-            {
-                var result = await grain.CompactAsync(new CompactAgentSessionCommand());
-                return ApiResults.Ok(result);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResults.Conflict("Cannot compact while session is active", "session_active", new { sessionId });
-            }
+            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(
+                sessionId, AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx), grains, commands, ct);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/reset", async (
@@ -77,22 +72,19 @@ public static partial class IssueRoutes
             string name,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
-            try
-            {
-                var result = await grain.ResetAsync(new ResetAgentSessionCommand());
-                return ApiResults.Ok(result);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResults.Conflict("Cannot reset while session is active", "session_active", new { sessionId });
-            }
+            return await AgentSessionRecoveryRoutes.ExecuteResetAsync(
+                sessionId,
+                AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx),
+                grains,
+                commands,
+                ct);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/followup", async (
@@ -102,6 +94,7 @@ public static partial class IssueRoutes
             string name,
             FollowupRequest body,
             AgentSessionQuerier sessions,
+            IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections) =>
         {
@@ -110,44 +103,46 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("text is required", "followup_text_missing");
 
             var project = GetRequiredProject(ctx);
-            var target = await sessions.ResolveFollowupTargetAsync(project.Id, number, name, ctx.RequestAborted);
-            if (target is null)
+            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ctx.RequestAborted);
+            if (sessionId is null)
                 return ApiResults.NotFound($"Session {name} not found");
 
-            if (!target.IsActive)
-                return ApiResults.Conflict("Session is no longer active", "session_inactive");
+            return await AgentSessionFollowupRoutes.ExecuteFollowupAsync(
+                project.Id,
+                sessionId,
+                text,
+                sessions,
+                grains,
+                runnerHub,
+                connections,
+                ctx.RequestAborted);
+        });
 
-            var connectionId = connections.GetConnectionId(target.RunnerId);
-            if (string.IsNullOrWhiteSpace(connectionId))
-                return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
+        group.MapPost("/{number:int}/sessions/{name}/cancel", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            string name,
+            AgentSessionQuerier sessions,
+            IGrainFactory grains,
+            IHubContext<RunnerHub> runnerHub,
+            RunnerConnectionTracker connections,
+            CancellationToken ct) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            // Workflow followup payload: keep `workflowRunId` / `sessionName`
-            // populated on the top level so older runners (that branch on
-            // those fields) continue to work, AND emit the unified
-            // `target: SessionTarget` shape (issue-129 T-004 / D3) so the
-            // newer runner can route by target.kind. The runner resolver
-            // prefers `target` when present and falls back to the
-            // top-level workflow fields for backwards compatibility.
-            await runnerHub.Clients.Client(connectionId).SendAsync(
-                "ReceiveFollowup",
-                new
-                {
-                    workflowRunId = target.WorkflowRunId,
-                    sessionName = target.SessionName,
-                    target = new
-                    {
-                        kind = "workflow",
-                        projectId = project.Id,
-                        workflowRunId = target.WorkflowRunId,
-                        sessionName = target.SessionName,
-                    },
-                    text,
-                });
-
-            return ApiResults.Ok(new { status = "sent" });
+            return await AgentSessionCancelRoutes.ExecuteCancelAsync(
+                project.Id,
+                sessionId,
+                sessions,
+                grains,
+                runnerHub,
+                connections,
+                ct);
         });
     }
-
 }
 
 public sealed record FollowupRequest(string? Text);

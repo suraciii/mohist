@@ -113,14 +113,14 @@ describe('SessionPage header and states', () => {
   function makeMockSession() {
     return {
       id: 'session-123',
-      acpSessionId: 'acp-123',
+      runtimeSessionId: 'acp-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
       status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
       completedAt: '2024-01-01T11:00:00.000Z',
       model: 'claude-3-5-sonnet',
-      coderType: null,
+      runtime: null,
       stage: 'build',
       title: 'Test Session',
     }
@@ -129,9 +129,8 @@ describe('SessionPage header and states', () => {
   function makeMockMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
     return {
       sessionId: 'session-123',
-      coderSessionId: 'coder-session-123',
       issueId: 'issue-1',
-      acpSessionId: 'acp-123',
+      runtimeSessionId: 'acp-123',
       executionId: 'exec-123',
       title: 'Test Session',
       status: 'completed',
@@ -151,14 +150,14 @@ describe('SessionPage header and states', () => {
   function makeMockDetail(overrides: Partial<{ id: string; metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
     return {
       id: 'session-123',
-      acpSessionId: 'acp-123',
+      runtimeSessionId: 'acp-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
       status: 'completed',
       createdAt: '2024-01-01T10:00:00.000Z',
       completedAt: '2024-01-01T11:00:00.000Z',
       model: 'claude-3-5-sonnet',
-      coderType: null,
+      runtime: null,
       stage: 'build',
       title: 'Test Session',
       metadata: makeMockMetadata(),

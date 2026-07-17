@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
 
 
 interface CapturedBuilder {
@@ -176,6 +177,13 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(cancel).not.toHaveBeenCalled()
   })
 
+  it("RuntimeInitializing_ResolverReturnsUnavailable_RepliesUnavailable", async () => {
+    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE, serverConnection: null })
+
+    await expect(emitCancel(lastBuilder(), genericCancelPayload("gen-session-1")))
+      .resolves.toEqual({ state: "unavailable" })
+  })
+
   it("NoResolverRegistered_RepliesNotCancellableAndDoesNotCallCancel", async () => {
     const cancel = vi.fn(async () => undefined)
     const connection: MockConnection = { prompt: vi.fn(), cancel }
@@ -261,11 +269,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(cancel).not.toHaveBeenCalled()
   })
 
-  it("WorkflowShapedTarget_RepliesNotCancellable", async () => {
-    // The product cancel endpoint only addresses generic sessions today;
-    // a `workflow` target through this method is treated as
-    // not-cancellable (the issue-scoped session lifecycle has no cancel
-    // surface) rather than being misrouted to the followup code path.
+  it("WorkflowShapedTarget_ResolvesAndCancelsTheWorkflowRuntimeSession", async () => {
     const cancel = vi.fn(async () => undefined)
     const connection: MockConnection = { prompt: vi.fn(), cancel }
     const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
@@ -277,8 +281,8 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" },
     })) as { state: string }
 
-    expect(reply).toEqual({ state: "not-cancellable" })
-    expect(cancel).not.toHaveBeenCalled()
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(cancel).toHaveBeenCalledWith({ sessionId: "acp-1" })
   })
 
   it("GenericTargetWithoutSessionId_RepliesNotCancellable", async () => {

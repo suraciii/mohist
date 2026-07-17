@@ -99,7 +99,7 @@ describe('planRoundStartReducer', () => {
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }
     const next = planRoundStartReducer(prev, detail, ENV)
 
@@ -122,7 +122,7 @@ describe('planRoundStartReducer', () => {
       roundType: 'custom-step',
       roundLabel: 'Custom Step',
       roundIndex: 7,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
 
     const custom = next.planProgress?.steps.find((s) => s.roundType === 'custom-step')
@@ -142,7 +142,7 @@ describe('planRoundStartReducer', () => {
       roundType: 'proposal',
       roundLabel: undefined as unknown as string,
       roundIndex: 0,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }
     const next = planRoundStartReducer(prev, detail, ENV)
     expect(next.rounds[0].label).toBe('Round 1')
@@ -157,7 +157,7 @@ describe('planRoundStartReducer', () => {
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
     expect(JSON.stringify(prev)).toBe(snapshot)
   })
@@ -171,7 +171,7 @@ describe('planRoundCompleteReducer', () => {
       roundType: 'specs',
       roundLabel: 'Specs',
       roundIndex: 1,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
 
     const next = planRoundCompleteReducer(start, {
@@ -198,7 +198,7 @@ describe('planRoundCompleteReducer', () => {
       roundType: 'self-review',
       roundLabel: 'Self Review',
       roundIndex: 4,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
 
     const after = planRoundCompleteReducer(start, {
@@ -227,7 +227,7 @@ describe('planRoundCompleteReducer', () => {
       roundType: 'self-review',
       roundLabel: 'Self Review',
       roundIndex: 4,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
 
     state = planRoundCompleteReducer(state, {
@@ -260,7 +260,7 @@ describe('planRoundCompleteReducer', () => {
       roundType: 'proposal',
       roundLabel: 'Proposal',
       roundIndex: 0,
-      coderSessionId: 'c',
+      sessionId: 'c',
     }, ENV)
 
     state = planRoundCompleteReducer(state, {
@@ -286,7 +286,7 @@ describe('coderRecoveryStatusReducer', () => {
       issueId: '1',
       projectId: 'p',
       executionId: 'exec-1',
-      acpSessionId: 'acp-1',
+      runtimeSessionId: 'acp-1',
       status: 'recovering',
       attempt: 2,
       reason: 'lost contact',
@@ -315,7 +315,7 @@ describe('coderRecoveryStatusReducer', () => {
       issueId: '1',
       projectId: 'p',
       executionId: 'exec-1',
-      acpSessionId: 'acp-1',
+      runtimeSessionId: 'acp-1',
       status: 'recovered',
       attempt: 2,
     }, ENV)
@@ -330,7 +330,7 @@ describe('coderRecoveryStatusReducer', () => {
       issueId: '1',
       projectId: 'p',
       executionId: 'exec-1',
-      acpSessionId: 'acp-1',
+      runtimeSessionId: 'acp-1',
       status: 'recovering',
       attempt: 1,
     }, ENV)
@@ -347,8 +347,8 @@ describe('sessionLivenessReducer', () => {
     ]))
 
     const next = sessionLivenessReducer(state, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'probing',
       lastDataAt: '2024-01-01T00:00:00.000Z',
       activeProbeVersion: 3,
@@ -368,8 +368,8 @@ describe('sessionLivenessReducer', () => {
     ]))
 
     const a = sessionLivenessReducer(state, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'probing',
       lastDataAt: '2024-01-01T00:00:00.000Z',
       satisfiedProbeVersion: 7,
@@ -378,8 +378,8 @@ describe('sessionLivenessReducer', () => {
     expect(a.recoveryStatus?.attempt).toBe(7)
 
     const b = sessionLivenessReducer(a, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'probing',
       lastDataAt: '2024-01-01T00:00:00.000Z',
       probeVersion: 9,
@@ -387,8 +387,8 @@ describe('sessionLivenessReducer', () => {
     expect(b.recoveryStatus?.attempt).toBe(9)
 
     const c = sessionLivenessReducer(b, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'probing',
       lastDataAt: '2024-01-01T00:00:00.000Z',
     }, ENV)
@@ -401,8 +401,8 @@ describe('sessionLivenessReducer', () => {
     ]))
 
     const running = sessionLivenessReducer(state, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'running',
       lastDataAt: '2024-01-01T00:00:00.000Z',
     }, ENV)
@@ -410,8 +410,8 @@ describe('sessionLivenessReducer', () => {
     expect(running.rounds[0].recoveryEvents[0].status).toBe('recovered')
 
     const failed = sessionLivenessReducer(state, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       status: 'failed',
       lastDataAt: '2024-01-01T00:00:00.000Z',
       failureReason: 'no response',
@@ -430,16 +430,16 @@ describe('usageUpdatedReducer', () => {
   it('returns prev unchanged when all four fields are absent', () => {
     const state = emptyTimelineState()
     const next = usageUpdatedReducer(state, {
-      acpSessionId: 'a',
-      coderSessionId: 'c',
+      runtimeSessionId: 'a',
+      sessionId: 'c',
     }, ENV)
     expect(next).toBe(state)
   })
 
   it('applies server-provided values verbatim and does not derive from window ratio', () => {
     const next = usageUpdatedReducer(emptyTimelineState(), {
-      acpSessionId: 'a',
-      coderSessionId: 'c',
+      runtimeSessionId: 'a',
+      sessionId: 'c',
       contextWindowUsed: 45_000,
       contextWindowSize: 100_000,
       contextUsagePercent: 72,
@@ -458,7 +458,7 @@ describe('usageUpdatedReducer', () => {
   it('merges with prev via mergeContextHealth', () => {
     const initial = emptyTimelineState()
     const a = usageUpdatedReducer(initial, {
-      acpSessionId: 'a',
+      runtimeSessionId: 'a',
       contextWindowUsed: 100,
       contextWindowSize: 1000,
       contextUsagePercent: 10,
@@ -466,7 +466,7 @@ describe('usageUpdatedReducer', () => {
     }, ENV)
 
     const b = usageUpdatedReducer(a, {
-      acpSessionId: 'a',
+      runtimeSessionId: 'a',
       contextWindowUsed: 100,
       contextWindowSize: 1000,
       contextUsagePercent: 10,
@@ -475,7 +475,7 @@ describe('usageUpdatedReducer', () => {
     expect(b.contextHealth).toBe(a.contextHealth)
 
     const c = usageUpdatedReducer(b, {
-      acpSessionId: 'a',
+      runtimeSessionId: 'a',
       contextWindowUsed: 200,
       contextWindowSize: 1000,
       contextUsagePercent: 20,
@@ -488,8 +488,8 @@ describe('usageUpdatedReducer', () => {
 describe('contextHealthUpdateReducer', () => {
   it('applies server-provided values verbatim', () => {
     const next = contextHealthUpdateReducer(emptyTimelineState(), {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       healthStatus: 'green',
       contextWindowUsed: 72_000,
       contextWindowSize: 100_000,
@@ -508,8 +508,8 @@ describe('contextHealthUpdateReducer', () => {
 
   it('normalises an unknown healthStatus to null', () => {
     const next = contextHealthUpdateReducer(emptyTimelineState(), {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       healthStatus: undefined as unknown as 'green',
       contextWindowUsed: 1,
       contextWindowSize: 1,
@@ -526,8 +526,8 @@ describe('compactionEventReducer', () => {
     ]))
 
     const next = compactionEventReducer(state, {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       strategy: 'summary',
       contextWindowUsedBefore: 950_000,
       contextWindowUsedAfter: 400_000,
@@ -557,8 +557,8 @@ describe('compactionEventReducer', () => {
 
   it('synthesises a placeholder Compaction round when no round exists', () => {
     const next = compactionEventReducer(emptyTimelineState(), {
-      coderSessionId: 'c',
-      acpSessionId: 'a',
+      sessionId: 'c',
+      runtimeSessionId: 'a',
       contextWindowUsedAfter: 100_000,
       recordedAt: '2024-01-01T00:00:01.000Z',
     }, ENV)

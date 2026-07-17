@@ -39,7 +39,7 @@ function findViewedIndex(
   viewedRuntimeSessionId: string | null | undefined,
 ): number {
   if (!viewedRuntimeSessionId) return -1
-  return lineage.findIndex((entry) => entry.agentRuntimeSessionId === viewedRuntimeSessionId)
+  return lineage.findIndex((entry) => entry.runtimeSessionId === viewedRuntimeSessionId)
 }
 
 /**
@@ -111,21 +111,21 @@ export function CompactionLineageLink({
           />
         </svg>
         <span className="uppercase tracking-wide text-info" data-testid="compaction-lineage-link-label">
-          Compaction chain
+          Runtime session history
         </span>
         {predecessor && (
           <>
             <span className="text-info/60" aria-hidden="true">·</span>
             <Link
-              to={buildTargetPath(predecessor.agentRuntimeSessionId)}
+              to={buildTargetPath(predecessor.runtimeSessionId)}
               className="inline-flex items-center gap-1 rounded border border-info-border bg-background px-1.5 py-0.5 font-mono text-info transition-colors hover:border-info hover:bg-info-subtle hover:text-info"
               data-testid="compaction-lineage-link-predecessor"
-              data-target-runtime-session-id={predecessor.agentRuntimeSessionId}
-              title={`Previous runtime session: ${predecessor.agentRuntimeSessionId}`}
-              aria-label={`Navigate to previous runtime session ${predecessor.agentRuntimeSessionId}`}
+              data-target-runtime-session-id={predecessor.runtimeSessionId}
+              title={`Previous runtime session: ${predecessor.runtimeSessionId}`}
+              aria-label={`Navigate to previous runtime session ${predecessor.runtimeSessionId}`}
             >
               <ChevronLeftIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{predecessor.agentRuntimeSessionId}</span>
+              <span className="truncate">{predecessor.runtimeSessionId}</span>
             </Link>
           </>
         )}
@@ -133,14 +133,14 @@ export function CompactionLineageLink({
           <>
             <span className="text-info/60" aria-hidden="true">·</span>
             <Link
-              to={buildTargetPath(successor.agentRuntimeSessionId)}
+              to={buildTargetPath(successor.runtimeSessionId)}
               className="inline-flex items-center gap-1 rounded border border-info-border bg-background px-1.5 py-0.5 font-mono text-info transition-colors hover:border-info hover:bg-info-subtle hover:text-info"
               data-testid="compaction-lineage-link-successor"
-              data-target-runtime-session-id={successor.agentRuntimeSessionId}
-              title={`Next runtime session: ${successor.agentRuntimeSessionId}`}
-              aria-label={`Navigate to next runtime session ${successor.agentRuntimeSessionId}`}
+              data-target-runtime-session-id={successor.runtimeSessionId}
+              title={`Next runtime session: ${successor.runtimeSessionId}`}
+              aria-label={`Navigate to next runtime session ${successor.runtimeSessionId}`}
             >
-              <span className="truncate">{successor.agentRuntimeSessionId}</span>
+              <span className="truncate">{successor.runtimeSessionId}</span>
               <ChevronRightIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
             </Link>
           </>
