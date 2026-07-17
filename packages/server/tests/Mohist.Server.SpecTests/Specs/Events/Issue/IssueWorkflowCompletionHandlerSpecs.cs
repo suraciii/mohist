@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -665,5 +666,34 @@ public class IssueWorkflowCompletionHandlerSpecs
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
         public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+    }
+}
+
+file sealed class InMemoryStateStore<T> : IStateStore<T> where T : class
+{
+    private readonly ConcurrentDictionary<string, T> _data = new();
+
+    public Task<T?> LoadAsync(string key)
+    {
+        _data.TryGetValue(key, out var value);
+        return Task.FromResult(value);
+    }
+
+    public Task SaveAsync(string key, T state)
+    {
+        _data[key] = state;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(string key)
+    {
+        _data.TryRemove(key, out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<T>> ListAsync()
+    {
+        IReadOnlyList<T> result = _data.Values.ToList();
+        return Task.FromResult(result);
     }
 }

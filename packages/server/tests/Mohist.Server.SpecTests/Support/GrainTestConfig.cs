@@ -194,7 +194,6 @@ public static class GrainTestConfig
         FakeTimeProvider? timeProvider = null)
     {
         siloBuilder.UseInMemoryReminderService();
-        DecorateReminderTable(siloBuilder.Services);
         // Issue-362: the dispatcher grain registers a ~1s reminder; the
         // in-memory reminder service still enforces MinimumReminderPeriod
         // by default, so lower the floor for the test silo as the
@@ -278,25 +277,6 @@ public static class GrainTestConfig
         // WorkCompletionTimeout knob has been removed (no server-side
         // work-completion wall clock under the reconciliation model).
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
-    }
-
-    private static void DecorateReminderTable(IServiceCollection services)
-    {
-        var descriptor = services.Last(d => d.ServiceType == typeof(IReminderTable));
-        services.Remove(descriptor);
-        services.AddSingleton(provider => new ControllableReminderTable(CreateReminderTable(provider, descriptor)));
-        services.AddSingleton<IReminderTable>(provider => provider.GetRequiredService<ControllableReminderTable>());
-    }
-
-    private static IReminderTable CreateReminderTable(IServiceProvider provider, ServiceDescriptor descriptor)
-    {
-        if (descriptor.ImplementationInstance is IReminderTable instance)
-            return instance;
-
-        if (descriptor.ImplementationFactory is not null)
-            return (IReminderTable)descriptor.ImplementationFactory(provider)!;
-
-        return (IReminderTable)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!);
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
