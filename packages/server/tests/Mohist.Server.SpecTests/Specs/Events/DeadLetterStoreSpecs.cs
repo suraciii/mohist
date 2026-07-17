@@ -1,7 +1,5 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -11,31 +9,21 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class DeadLetterStoreSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset FirstTime = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondTime = new(2026, 7, 1, 12, 5, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset ThirdTime = new(2026, 7, 1, 12, 10, 0, TimeSpan.Zero);
 
-    private SqliteConnection _keeper = null!;
-    private DbContextOptions<MohistDbContext> _options = null!;
-    private Factory _factory = null!;
+    private TestSqliteDatabase _database = null!;
+    private TestDbContextFactory _factory = null!;
     private DeadLetterStore _store = null!;
     private EventStore _events = null!;
 
     public Task InitializeAsync()
     {
-        var connectionString = $"Data Source=dead-letter-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        MigratedSqliteTemplate.CopyTo(_keeper);
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-        _factory = new Factory(_options);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _factory = new TestDbContextFactory(_database.Options);
         _store = new DeadLetterStore(_factory);
         _events = new EventStore(_factory, NullLogger<EventStore>.Instance);
         return Task.CompletedTask;
@@ -43,7 +31,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -517,14 +505,5 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
         Assert.Equal(expected.ErrorStack, actual.ErrorStack);
         Assert.Equal(expected.AttemptCount, actual.AttemptCount);
         Assert.Equal(expected.DeadLetteredAt, actual.DeadLetteredAt);
-    }
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 }

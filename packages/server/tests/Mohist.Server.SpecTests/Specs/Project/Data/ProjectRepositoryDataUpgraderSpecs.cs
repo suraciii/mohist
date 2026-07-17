@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -14,13 +13,11 @@ public class ProjectRepositoryDataUpgraderSpecs
     private static readonly DateTimeOffset CreatedAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
     private static readonly DateTimeOffset UpdatedAt = DateTimeOffset.Parse("2026-01-02T00:00:00Z");
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_NormalizesDefaultsAndPreservesRepositoryMetadataAndProjectIdentity()
     {
-        await using var connection = await OpenDatabaseAsync();
-        await using var db = CreateContext(connection);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
         await SeedProjectAsync(db, "proj_single", "single", [
             Repository("server", "git@example.com:server.git", "release", false),
         ]);
@@ -62,13 +59,11 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(UpdatedAt, single.UpdatedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_WhenCalledTwice_IsIdempotent()
     {
-        await using var connection = await OpenDatabaseAsync();
-        await using var db = CreateContext(connection);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
         await SeedProjectAsync(db, "proj_legacy", "legacy", [
             Repository("server", "git@example.com:server.git", "main", false),
         ]);
@@ -80,13 +75,11 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(firstJson, (await LoadProjectAsync(db, "proj_legacy")).RepositoriesJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_MigratesLegacyRemoteOrPathIntoGitUrl()
     {
-        await using var connection = await OpenDatabaseAsync();
-        await using var db = CreateContext(connection);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
         await SeedProjectJsonAsync(db, "proj_legacy_locations", "legacy locations", """
             [
               { "Name": "local", "Path": "/repos/local", "Remote": null, "BaseBranch": "main", "IsDefault": true },
@@ -123,8 +116,6 @@ public class ProjectRepositoryDataUpgraderSpecs
         { JSON.Serialize(new[] { Repository("server", "git@example.com:one.git", "main", false), Repository("SERVER", "git@example.com:two.git", "main", false) }), "Project 'broken' (proj_broken)", "Duplicate repository name 'SERVER'" },
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [MemberData(nameof(InvalidProjects))]
     public async Task UpgradeAsync_UnrecoverableProject_FailsWithDiagnosticAndLeavesAllRowsUnchanged(
@@ -132,8 +123,8 @@ public class ProjectRepositoryDataUpgraderSpecs
         string projectDiagnostic,
         string declarationDiagnostic)
     {
-        await using var connection = await OpenDatabaseAsync();
-        await using var db = CreateContext(connection);
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await using var db = database.CreateContext();
         var validJson = JSON.Serialize(new[] {
             Repository("server", "git@example.com:server.git", "release", false),
         });
@@ -150,15 +141,13 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(invalidJson, (await LoadProjectAsync(db, "proj_broken")).RepositoriesJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_WhenPersistenceFails_RollsBackEveryPreparedProject()
     {
-        await using var connection = await OpenDatabaseAsync();
+        await using var database = TestSqliteDatabase.CreateMigrated();
         var firstJson = JSON.Serialize(new[] { Repository("server", "git@example.com:server.git", "main", false) });
         var secondJson = JSON.Serialize(new[] { Repository("web", "git@example.com:web.git", "develop", false) });
-        await using (var seed = CreateContext(connection))
+        await using (var seed = database.CreateContext())
         {
             await SeedProjectJsonAsync(seed, "proj_first", "first", firstJson);
             await SeedProjectJsonAsync(seed, "proj_second", "second", secondJson);
@@ -166,7 +155,7 @@ public class ProjectRepositoryDataUpgraderSpecs
 
         var normalizedFirstJson = JSON.Serialize(new[] { Repository("server", "git@example.com:server.git", "main", true) });
         var triggerName = $"fail_second_project_upgrade_{Guid.NewGuid():N}";
-        await using (var createTrigger = connection.CreateCommand())
+        await using (var createTrigger = database.Keeper.CreateCommand())
         {
             createTrigger.CommandText = $"""
                 CREATE TRIGGER {triggerName}
@@ -182,39 +171,23 @@ public class ProjectRepositoryDataUpgraderSpecs
 
         try
         {
-            await using var failing = CreateContext(connection);
+            await using var failing = database.CreateContext();
             await Assert.ThrowsAsync<DbUpdateException>(() => ProjectRepositoryDataUpgrader.UpgradeAsync(failing));
         }
         finally
         {
-            await using var dropTrigger = connection.CreateCommand();
+            await using var dropTrigger = database.Keeper.CreateCommand();
             dropTrigger.CommandText = $"DROP TRIGGER IF EXISTS {triggerName}";
             await dropTrigger.ExecuteNonQueryAsync();
         }
 
-        await using var verify = CreateContext(connection);
+        await using var verify = database.CreateContext();
         var first = await LoadProjectAsync(verify, "proj_first");
         var second = await LoadProjectAsync(verify, "proj_second");
         Assert.Equal(firstJson, first.RepositoriesJson);
         Assert.Equal(UpdatedAt, first.UpdatedAt);
         Assert.Equal(secondJson, second.RepositoriesJson);
         Assert.Equal(UpdatedAt, second.UpdatedAt);
-    }
-
-    private static async Task<SqliteConnection> OpenDatabaseAsync()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        MigratedSqliteTemplate.CopyTo(connection);
-        return connection;
-    }
-
-    private static MohistDbContext CreateContext(SqliteConnection connection)
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        return new MohistDbContext(options);
     }
 
     private static RepositoryInfo Repository(

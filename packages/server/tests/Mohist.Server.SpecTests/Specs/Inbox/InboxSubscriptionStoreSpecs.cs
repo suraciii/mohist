@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Inbox;
@@ -13,8 +12,6 @@ public class InboxSubscriptionStoreSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_NoStoredRow_ReturnsAllEnabledDefault()
     {
@@ -29,8 +26,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_FirstWrite_PersistsNewRow()
     {
@@ -44,7 +39,7 @@ public class InboxSubscriptionStoreSpecs
             IssueStartedEnabled: false,
             IssueCompletedEnabled: true));
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var row = Assert.Single(db.InboxSubscriptions);
         Assert.Equal("proj_a", row.ProjectId);
         Assert.False(row.WorkflowFailedEnabled);
@@ -53,8 +48,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(row.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_ThenGetAsync_ReturnsPersistedToggleStates()
     {
@@ -76,8 +69,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_SecondWrite_MutatesExistingRowInPlace()
     {
@@ -97,7 +88,7 @@ public class InboxSubscriptionStoreSpecs
             IssueStartedEnabled: false,
             IssueCompletedEnabled: true));
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Single(db.InboxSubscriptions);
         var row = db.InboxSubscriptions.Single();
         Assert.True(row.WorkflowFailedEnabled);
@@ -106,8 +97,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(row.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_SecondWrite_UpdatesUpdatedAt()
     {
@@ -126,8 +115,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(secondUpdatedAt > firstUpdatedAt, "UpdatedAt should advance on second write");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_AfterDisablingAllKinds_ReturnsAllDisabled()
     {
@@ -149,8 +136,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.False(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_ProjectIsolation_ReturnsDefaultForOtherProject()
     {
@@ -164,8 +149,6 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(stateB.WorkflowFailedEnabled); // proj_b has no row → all-enabled
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_MissingProject_FailsForeignKey()
     {
@@ -176,20 +159,20 @@ public class InboxSubscriptionStoreSpecs
             store.SetAsync("proj_missing", new InboxSubscriptionState()));
     }
 
-    private static async Task<DateTimeOffset> ReadUpdatedAtAsync(TestDatabase database, string projectId)
+    private static async Task<DateTimeOffset> ReadUpdatedAtAsync(TestSqliteDatabase database, string projectId)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var row = await db.InboxSubscriptions.AsNoTracking()
             .FirstAsync(r => r.ProjectId == projectId);
         return row.UpdatedAt;
     }
 
-    private static InboxSubscriptionStore NewStore(TestDatabase database, FakeTimeProvider? timeProvider = null) =>
-        new(database.Factory, timeProvider ?? new FakeTimeProvider(StartTime));
+    private static InboxSubscriptionStore NewStore(TestSqliteDatabase database, FakeTimeProvider? timeProvider = null) =>
+        new(new TestDbContextFactory(database.Options), timeProvider ?? new FakeTimeProvider(StartTime));
 
-    private static async Task SeedProjectAsync(TestDatabase database, string projectId)
+    private static async Task SeedProjectAsync(TestSqliteDatabase database, string projectId)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.Projects.Add(new ProjectRow
         {
             Id = projectId,
@@ -201,41 +184,5 @@ public class InboxSubscriptionStoreSpecs
         await db.SaveChangesAsync();
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 }

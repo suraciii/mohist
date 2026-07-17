@@ -15,13 +15,11 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain2")]
+[Collection("WorkflowExecution")]
 public class RerunFromStageSpecs : WorkflowGrainSpecs
 {
     public RerunFromStageSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_TargetStageInitializedInSameCommit()
     {
@@ -48,8 +46,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Pending, planStage.Tasks[0].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_LaterStageLazilyInitializedOnAdvance()
     {
@@ -80,8 +76,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Equal(StageRunStatus.Pending, buildStage.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_ActiveTaskInLaterStage_Rejected()
     {
@@ -101,8 +95,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Equal("active_work_in_range", result.Code);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_RuntimeVariablesPreservedAndReadableByNewAttempt()
     {
@@ -146,8 +138,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Equal(42, withDoc.RootElement.GetProperty("answer").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_SequentialStageLockInRange_Released()
     {
@@ -189,8 +179,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Null(stateAfter!.Owner);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_LockBeforeTarget_NotReleased()
     {
@@ -241,8 +229,6 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.Equal(_workflowId, stateAfter.Owner.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_ActiveTaskInLaterStage_LockNotReleasedStateUnchanged()
     {

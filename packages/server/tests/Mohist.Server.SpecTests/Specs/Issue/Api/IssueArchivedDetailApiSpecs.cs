@@ -55,8 +55,6 @@ public class IssueArchivedDetailApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedDoneIssue_ReturnsPreservedWorkflowRunId_AndArchivedAt()
     {
@@ -86,8 +84,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.NotNull(detail.Attachments);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedDoneIssue_JsonWireShape_KeepsReferenceAndArchivedAt()
     {
@@ -113,8 +109,6 @@ public class IssueArchivedDetailApiSpecs
             "archived detail must not expose the legacy activeWorkflowRunId alias");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedAndNonArchivedDoneIssue_ReturnIdenticalExecutionHistoryFields()
     {
@@ -174,8 +168,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.Equal("non-archived feedback body", nonArchivedDetail.Feedback[0].Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_WorkflowArtifacts_ForArchivedDoneIssue_ReturnsRecordedArtifacts()
     {
@@ -200,8 +192,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.Equal("openspec/changes/issue-1/proposal.md", entry.GetProperty("path").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_WorkflowEvents_ForArchivedDoneIssue_ReturnsMergedTimeline()
     {
@@ -236,8 +226,6 @@ public class IssueArchivedDetailApiSpecs
             "archived detail events must still include workflow-run events for the preserved reference");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_WorkflowStatus_ForArchivedDoneIssue_ReturnsCompletedRunSnapshot()
     {
@@ -261,8 +249,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.Equal("completed", status.Workflow!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedDoneIssue_HealthAndStatus_IndicateDoneNotActive()
     {
@@ -299,8 +285,6 @@ public class IssueArchivedDetailApiSpecs
             "archived Done issue must not surface an 'attention' indicator");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("resume")]
     [InlineData("approve")]
@@ -330,8 +314,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.Contains("not active", raw, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("resume")]
     [InlineData("approve")]
@@ -358,8 +340,6 @@ public class IssueArchivedDetailApiSpecs
         Assert.Contains("not active", raw, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedDoneIssue_JsonWireShape_DoesNotExposeLegacyActiveAlias()
     {
@@ -380,8 +360,6 @@ public class IssueArchivedDetailApiSpecs
             "archived detail must not expose the legacy 'activeWorkflowRunId' alias; only 'workflowRunId' is canonical");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ForArchivedAndNonArchivedDoneIssue_WorkflowRunIdField_IsIdenticallyNamed()
     {

@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -9,13 +8,11 @@ namespace Mohist.Server.SpecTests.Specs.Inbox;
 
 public class InboxStoreSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_GeneratesIdAndPersistsRow()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var result = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
@@ -29,7 +26,7 @@ public class InboxStoreSpecs
         Assert.False(string.IsNullOrEmpty(result.Id));
         Assert.StartsWith("inb_", result.Id);
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var row = Assert.Single(db.InboxItems);
         Assert.Equal(result.Id, row.Id);
         Assert.Equal("proj_a", row.ProjectId);
@@ -42,13 +39,11 @@ public class InboxStoreSpecs
         Assert.Null(row.ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_RepeatedSourceEventId_IsIdempotent()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var first = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
@@ -70,19 +65,17 @@ public class InboxStoreSpecs
         Assert.True(second.AlreadyExisted);
         Assert.Equal(first.Id, second.Id);
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var row = Assert.Single(db.InboxItems);
         Assert.Equal(first.Id, row.Id);
         Assert.Equal("Hello", row.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_SameSourceEventIdAcrossDifferentSources_CreatesDistinctItems()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         var first = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
@@ -104,17 +97,15 @@ public class InboxStoreSpecs
         Assert.False(second.AlreadyExisted);
         Assert.NotEqual(first.Id, second.Id);
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Equal(2, db.InboxItems.Count());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_InvalidNotificationKind_ThrowsAndDoesNotPersist()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
 
         await Assert.ThrowsAsync<ArgumentException>(() => store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
@@ -124,36 +115,32 @@ public class InboxStoreSpecs
             SourceEventSource: "/mohist/issues/issue_42",
             SourceEventId: "evt-invalid")));
 
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Empty(db.InboxItems);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_SetsReadAtOnMatchingItem()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var result = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
 
         var affected = await store.MarkReadAsync("proj_a", result.Id);
 
         Assert.Equal(1, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var rows = db.InboxItems.OrderBy(r => r.IssueNumber).ToList();
         Assert.NotNull(rows[0].ReadAt);
         Assert.Null(rows[1].ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_DoesNotMatchItemInOtherProject()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var inA = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         var inB = await store.InsertAsync(Draft("proj_b", "issue_1", 1, "evt-b-1"));
 
@@ -162,18 +149,16 @@ public class InboxStoreSpecs
         var affected = await store.MarkReadAsync("proj_b", inA.Id);
 
         Assert.Equal(0, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Null(db.InboxItems.Single(r => r.Id == inA.Id).ReadAt);
         Assert.Null(db.InboxItems.Single(r => r.Id == inB.Id).ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_DoesNotTouchArchivedItems()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var archived = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-arch"));
         await store.ArchiveAsync("proj_a", archived.Id);
 
@@ -182,13 +167,25 @@ public class InboxStoreSpecs
         Assert.Equal(0, affected);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task MarkReadAsync_RepeatedCall_StillMatches()
+    {
+        await using var database = CreateDatabase();
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
+        var result = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
+
+        var first = await store.MarkReadAsync("proj_a", result.Id);
+        var second = await store.MarkReadAsync("proj_a", result.Id);
+
+        Assert.Equal(1, first);
+        Assert.Equal(1, second);
+    }
+
     [Fact]
     public async Task MarkAllReadAsync_OnlyTouchesTargetProject()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-a-2"));
         await store.InsertAsync(Draft("proj_b", "issue_1", 1, "evt-b-1"));
@@ -196,20 +193,18 @@ public class InboxStoreSpecs
         var affected = await store.MarkAllReadAsync("proj_a");
 
         Assert.Equal(2, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var aRows = db.InboxItems.Where(r => r.ProjectId == "proj_a").ToList();
         var bRows = db.InboxItems.Where(r => r.ProjectId == "proj_b").ToList();
         Assert.All(aRows, r => Assert.NotNull(r.ReadAt));
         Assert.All(bRows, r => Assert.Null(r.ReadAt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkAllReadAsync_SkipsAlreadyReadItems()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var already = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.MarkReadAsync("proj_a", already.Id);
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
@@ -220,13 +215,11 @@ public class InboxStoreSpecs
         Assert.Equal(1, affected);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkAllReadAsync_SkipsArchivedItems()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         var archived = await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
         await store.ArchiveAsync("proj_a", archived.Id);
@@ -234,53 +227,47 @@ public class InboxStoreSpecs
         var affected = await store.MarkAllReadAsync("proj_a");
 
         Assert.Equal(1, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Null(db.InboxItems.Single(r => r.Id == archived.Id).ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_SetsArchivedAt()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var first = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.InsertAsync(Draft("proj_a", "issue_2", 2, "evt-2"));
 
         var affected = await store.ArchiveAsync("proj_a", first.Id);
 
         Assert.Equal(1, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         var rows = db.InboxItems.OrderBy(r => r.IssueNumber).ToList();
         Assert.NotNull(rows[0].ArchivedAt);
         Assert.Null(rows[1].ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_DoesNotMatchItemInOtherProject()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var inA = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-a-1"));
         await store.InsertAsync(Draft("proj_b", "issue_1", 1, "evt-b-1"));
 
         var affected = await store.ArchiveAsync("proj_b", inA.Id);
 
         Assert.Equal(0, affected);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Null(db.InboxItems.Single(r => r.Id == inA.Id).ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_IsIdempotent()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var item = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
 
         var first = await store.ArchiveAsync("proj_a", item.Id);
@@ -290,13 +277,11 @@ public class InboxStoreSpecs
         Assert.Equal(0, second);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_AfterArchive_DoesNothing()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var item = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
         await store.ArchiveAsync("proj_a", item.Id);
 
@@ -314,41 +299,5 @@ public class InboxStoreSpecs
             SourceEventSource: $"/mohist/issues/{issueId}",
             SourceEventId: sourceEventId);
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 }

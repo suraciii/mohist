@@ -1,6 +1,4 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -29,31 +27,20 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// <c>stage</c> from structural inspection of the union variant (D2);
 /// every emitted envelope satisfies the WorkflowRun producer-family rule.
 /// </summary>
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class TransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
-    private readonly SqliteConnection _keeper;
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly NullDispatchGrainFactory _grainFactory = new();
+    private readonly NullEventDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
     public TransactionalEventAppendSpecs()
     {
-        var connectionString = $"Data Source=transactional-event-append-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-        _dbFactory = new Factory(_options);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
@@ -76,7 +63,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -112,7 +99,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // out of SaveAsync, and neither the state row nor any event row
         // may be persisted — there is no bare catch to swallow the
         // failure.
-        var store = new WorkflowRunStore(_dbFactory, new ThrowingEventStore(), _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var store = new WorkflowRunStore(_dbFactory, new WorkflowTransactionalThrowingEventStore(), _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_fail", includeAnnotations: true);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -122,7 +109,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             ]));
         Assert.Contains("event write failed", ex.Message);
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         Assert.Empty(await verify.WorkflowRuns.AsNoTracking().ToListAsync());
         Assert.Empty(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
     }
@@ -140,7 +127,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
 
         await store.SaveAsync(run, [new WorkflowRunCompleted()]);
 
-        await using var freshDb = new MohistDbContext(_options);
+        await using var freshDb = new MohistDbContext(_database.Options);
         var rows = await freshDb.WorkflowRunEvents.AsNoTracking()
             .Where(r => r.Source == "/mohist/workflow-runs/wr_txn_crash")
             .ToListAsync();
@@ -510,148 +497,5 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             StageRequired: WorkflowRunLineage.CarriesStage(evt));
     }
 
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
 
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
-
-    /// <summary>
-    /// Minimal <see cref="IGrainFactory"/> stand-in for transactional
-    /// unit specs. The dispatcher is a no-op grain reference; producers
-    /// only need to call DispatchNowAsync without exceptions. Lets the
-    /// store exercise its post-commit poke code path without spinning up
-    /// an Orleans silo.
-    /// </summary>
-    private sealed class NullDispatchGrainFactory : IGrainFactory
-    {
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
-        {
-            if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
-                return (TGrainInterface)(object)new NullEventDispatcherGrain();
-            throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-        }
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
-            => throw new NotSupportedException();
-    }
-
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
-    private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
-    {
-        public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
-            Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
-        public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
-        public GrainId GrainId => default;
-        public string Key => string.Empty;
-    }
-
-    /// <summary>
-    /// <see cref="IEventStore"/> that throws on the second append in a
-    /// save transaction, simulating an event-row write failure (e.g.
-    /// constraint violation). Used to verify that the store does NOT
-    /// swallow the exception and that the state transaction is rolled
-    /// back.
-    /// </summary>
-    private sealed class ThrowingEventStore : IEventStore
-    {
-        private int _callCount;
-
-        public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default) => Task.CompletedTask;
-
-        public async Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
-        {
-            _callCount++;
-            if (_callCount >= 2)
-            {
-                throw new InvalidOperationException("simulated event write failed");
-            }
-            await db.WorkflowRunEvents.AddAsync(new WorkflowRunEventRow
-            {
-                Id = _callCount,
-                Source = envelope.Source.ToString(),
-                EventId = envelope.Id,
-                Type = envelope.Type,
-                Time = envelope.Time,
-                SpecVersion = envelope.SpecVersion,
-                Subject = envelope.Subject,
-                DataContentType = envelope.DataContentType ?? "application/json",
-                Data = envelope.Data ?? System.Text.Json.JsonDocument.Parse("null").RootElement,
-                ExtensionsJson = "{}",
-            }, ct);
-        }
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
-    }
 }

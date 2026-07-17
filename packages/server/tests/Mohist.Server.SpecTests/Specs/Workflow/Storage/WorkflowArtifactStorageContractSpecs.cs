@@ -4,8 +4,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
 public class WorkflowArtifactStorageContractSpecs
 {
     private readonly InMemoryWorkflowArtifactStorage _storage = new();

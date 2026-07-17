@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -17,32 +16,8 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// <see cref="AgentSessionQuerier.GetGenericSessionSummaryAsync"/> that
 /// exercise the enriched generic-session summary read model
 /// (<see cref="GenericAgentSessionSummaryDto"/>), the absent-workflow-fields
-/// invariant, and the not-found paths. Uses the same
-/// <c>FakeDbContextFactory</c> on <c>SqliteConnection(":memory:")</c>
-/// pattern as <see cref="AgentSessionQuerySpecs"/>.
+/// invariant, and the not-found paths.
 /// </summary>
-public sealed class FakeAgentSessionSummaryDbContextFactory : IDbContextFactory<MohistDbContext>, IDisposable
-{
-    private readonly SqliteConnection _connection;
-
-    public FakeAgentSessionSummaryDbContextFactory()
-    {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        MigratedSqliteTemplate.CopyTo(_connection);
-    }
-
-    public MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-        return new MohistDbContext(options);
-    }
-
-    public void Dispose() => _connection.Dispose();
-}
-
 public class GenericAgentSessionSummarySpecs
 {
     private const string ProjectA = "proj-summary-A";
@@ -62,12 +37,11 @@ public class GenericAgentSessionSummarySpecs
     private static readonly DateTime CreatedAt = new(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
     private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesEnrichedFields()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: true);
         var querier = CreateQuerier(fixture);
 
@@ -87,12 +61,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(1, result.ToolErrorCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesFailureCategory_WhenTranscriptHasClosedEvent()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: true, terminalStatus: "failed");
         var querier = CreateQuerier(fixture);
 
@@ -103,12 +76,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal("failed", result.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ReportsRecoveryUnavailableForAnActiveTurn()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, active: true);
         var querier = CreateQuerier(fixture);
 
@@ -119,12 +91,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.False(result.RecoveryAvailable);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
         await SeedOutOfOrderTranscriptPartsAsync(fixture, SessionId);
         var querier = CreateQuerier(fixture);
@@ -136,12 +107,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal("sequence-last-failure", result.FailureCategory);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesContextRefs_WhenPresent()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, withContextRefs: true);
         var querier = CreateQuerier(fixture);
 
@@ -155,12 +125,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(AgentWorkspacePath, result.ContextRefs.WorkspacePath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ContextRefsIsNull_WhenNoContextReferences()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, withContextRefs: false);
         var querier = CreateQuerier(fixture);
 
@@ -170,12 +139,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result!.ContextRefs);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_NoWorkflowFields()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
         var querier = CreateQuerier(fixture);
 
@@ -193,12 +161,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.False(doc.RootElement.TryGetProperty("stage", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_UnknownSessionId_ReturnsNull()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
         var querier = CreateQuerier(fixture);
 
@@ -207,12 +174,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_DifferentProject_ReturnsNull()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
         var querier = CreateQuerier(fixture);
 
@@ -221,12 +187,11 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_WorkflowSession_ReturnsNull()
     {
-        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         await SeedWorkflowSessionAsync(fixture);
         var querier = CreateQuerier(fixture);
 

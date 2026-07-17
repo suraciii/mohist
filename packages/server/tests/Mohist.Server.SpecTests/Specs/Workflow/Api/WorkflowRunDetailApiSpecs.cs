@@ -56,8 +56,6 @@ public class WorkflowRunDetailApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_ReturnsFullDetailWithAssociatedIssue()
     {
@@ -86,8 +84,6 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_WhenIssueRowIsTerminal_IssueRefStillCarriesCorrelationContext()
     {
@@ -113,8 +109,6 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_WhenIssueRowIsMissing_IssueRefIsNull()
     {
@@ -134,8 +128,6 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal(JsonValueKind.Null, data.GetProperty("issueRef").ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_OnUnknownWorkflowRun_Returns404()
     {
@@ -147,8 +139,6 @@ public class WorkflowRunDetailApiSpecs
         Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("/api/workflow-runs/wr_does_not_exist/yaml")]
     [InlineData("/api/workflow-runs/wr_does_not_exist/variables/effective")]
@@ -165,8 +155,6 @@ public class WorkflowRunDetailApiSpecs
         Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_DoesNotMutateRunState()
     {

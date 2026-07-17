@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -9,35 +8,23 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Data;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogStoreSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly TaskLogStore _store;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
-    // Shared-cache in-memory SQLite needs a keeper connection to stay alive
-    // across DbContext instances created from the same connection string.
-    private readonly SqliteConnection _keeper;
 
     public TaskLogStoreSpecs()
     {
-        var connectionString = $"Data Source=task-log-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        _store = new TaskLogStore(new Factory(_options), _timeProvider);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _store = new TaskLogStore(new TestDbContextFactory(_database.Options), _timeProvider);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -55,7 +42,7 @@ public class TaskLogStoreSpecs : IAsyncLifetime
 
         await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var rows = await db.TaskLogEntries.AsNoTracking()
             .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
             .OrderBy(e => e.Seq)
@@ -189,7 +176,7 @@ public class TaskLogStoreSpecs : IAsyncLifetime
         Assert.Equal(["first", "second", "third", "fourth"], page.Lines.Select(l => l.Text).ToArray());
         Assert.True(page.Truncated);
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var batchCount = await db.TaskLogBatches.AsNoTracking()
             .CountAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId);
         Assert.Equal(1, batchCount);
@@ -432,14 +419,5 @@ public class TaskLogStoreSpecs : IAsyncLifetime
         Assert.Empty(page.Lines);
         Assert.Null(page.NextCursor);
         Assert.False(page.Truncated);
-    }
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 }

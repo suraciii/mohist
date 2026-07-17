@@ -44,8 +44,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         return (runnerId, workflowIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Redelivery_RedeliversRunningWork_WhenProcessDoesNotReportIt()
     {
@@ -64,8 +62,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Equal(workId, redelivery.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Redelivery_DoesNotRedeliver_WhenProcessReportsTheWorkInFlight()
     {
@@ -82,8 +78,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Empty(resp.Dispatches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Redelivery_DoesNotRedeliver_WhenWorkIsAwaitingAck()
     {
@@ -100,8 +94,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Empty(resp.Dispatches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task FindRunningAssignedToAsync_ReturnsOnlyRunningForTheRunner()
     {
@@ -127,8 +119,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Empty(await querier.FindRunningAssignedToAsync($"{prefix}-runner-unknown"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAsync_OfflineRunner_ReturnsEmptyRound()
     {
@@ -143,8 +133,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.Empty(resp.Dispatches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAsync_UnregisterAfterInfoRead_DoesNotAssignWorkflow()
     {
@@ -172,8 +160,6 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAsync_CapacityReducedAfterInfoRead_ClaimsAtMostNewCapacity()
     {

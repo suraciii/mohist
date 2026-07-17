@@ -12,8 +12,6 @@ namespace Mohist.Server.SpecTests.Specs.Inbox;
 
 public class InboxSubscriptionsMigrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_CreatesInboxSubscriptionsTableWithExpectedColumns()
     {
@@ -29,8 +27,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.Equal("TEXT", columnTypes["UpdatedAt"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_HasPrimaryKeyOnProjectId()
     {
@@ -41,8 +37,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.Equal(new[] { "ProjectId" }, pks);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_HasForeignKeyToProjectsOnProjectId()
     {
@@ -57,8 +51,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.Equal("CASCADE", fk.OnDelete);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_StoresAndReadsSubscriptionRow()
     {
@@ -93,8 +85,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.True(row.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DatabaseMigrate_AppliesMigration()
     {
@@ -108,8 +98,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.Contains(applied, m => m == "20260629003200_AddInboxSubscriptionsTable");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Down_DropsInboxSubscriptionsTable()
     {
@@ -124,8 +112,6 @@ public class InboxSubscriptionsMigrationSpecs
         Assert.False(await TableExistsAsync(verify, "InboxSubscriptions"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DbContext_ExposesInboxSubscriptionsDbSet()
     {

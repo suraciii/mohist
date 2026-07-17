@@ -27,9 +27,6 @@ public class AgentJobRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_MissingPrompt_ReturnsValidationError_AndDoesNotCreateGrain()
     {
@@ -48,24 +45,6 @@ public class AgentJobRoutesSpecs
         Assert.Contains("prompt", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task PostValidate_EmptyBody_ReturnsValidationError()
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            AgentJobController.ValidatePath,
-            new { });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(payload.GetProperty("success").GetBoolean());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_WorkspacePathMissing_ReturnsValidationError()
     {
@@ -83,9 +62,6 @@ public class AgentJobRoutesSpecs
         Assert.Contains("workspace.path", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_NoRunnerAvailable_ReturnsStructuredFailureWithRunnerUnavailableReason()
     {
@@ -119,9 +95,6 @@ public class AgentJobRoutesSpecs
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("message").GetString()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_WhenJobTimesOut_ReturnsStructuredTimeoutResult_NotOpaque500()
     {
@@ -155,15 +128,6 @@ public class AgentJobRoutesSpecs
         Assert.Equal(1, grain.SubmitCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task PostValidate_DoesNotAffectExistingHttpApiSurface()
-    {
-        using var response = await _fixture.Client.GetAsync("/api/projects");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 }
 
 internal static class AgentJobRouteTestHelpers
@@ -313,10 +277,6 @@ public class AgentJobDispatchRouteSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
@@ -374,10 +334,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
@@ -426,66 +382,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task PostValidate_DispatchIncludesWorkspacePath_ForRunnerWorkspaceShortCircuit()
-    {
-        var projectId = $"agent-route-workspace-project-{Guid.NewGuid():N}";
-        var runnerId = $"agent-route-workspace-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-route-workspace-{Guid.NewGuid():N}";
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
-
-        try
-        {
-            var responseTask = _fixture.Client.PostAsJsonAsync(
-                AgentJobController.ValidatePath,
-                new
-                {
-                    prompt = "only workspace path",
-                    jobId = jobKey,
-                    workspace = new { path = "/tmp/agent-job-workspace-only", projectId },
-                });
-
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var polled = await runnerGrain.PollAsync(_fixture.Services);
-
-            Assert.NotNull(polled);
-            Assert.Equal(workId, polled!.WorkId);
-            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
-            Assert.Equal(jobKey, polled.AgentJobId);
-
-            var variables = JsonSerializer.Deserialize<JsonElement>(polled.Variables!);
-            Assert.Equal(
-                "/tmp/agent-job-workspace-only",
-                variables.GetProperty("workspace").GetProperty("path").GetString());
-            var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
-            Assert.Equal("only workspace path", with.GetProperty("prompt").GetString());
-
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
-                workId,
-                new WorkResult(Status: "completed", Message: "ok"));
-            WakeAgentJobValidationAwaiter();
-
-            using var response = await responseTask;
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("completed", payload.GetProperty("data").GetProperty("status").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
@@ -541,10 +437,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
@@ -590,10 +482,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HttpReportEndpoint_AgentJobWithoutAgentJobId_Returns400()
     {

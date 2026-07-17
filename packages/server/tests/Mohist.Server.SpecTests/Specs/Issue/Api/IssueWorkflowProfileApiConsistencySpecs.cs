@@ -14,20 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-/// <summary>
-/// HTTP API regression coverage for issue-workflow-profile consistency
-/// (issue #257 T-002). Verifies that:
-///   - POST /api/issues with workflowProfileId persists the selection
-///   - POST without the field inherits the default on reads
-///   - POST with an unknown id is rejected with 400
-///   - PATCH honors three-state semantics on workflowProfileId
-///   - PATCH on a started issue is rejected with 409 and leaves the
-///     selection unchanged
-///   - PUT .../workflow-profile/variables still succeeds on a started
-///     issue and the configured variables are preserved across a
-///     profile-selection update
-/// </summary>
-[Collection("IntegrationIssue2")]
+[Collection("IssueLifecycle")]
 public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -51,8 +38,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithPrWorkflowProfile_PersistsAndReadModelAgrees()
     {
@@ -82,8 +67,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", profile.GetProperty("data").GetProperty("profileId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithoutWorkflowProfile_InheritsDefaultOnAllReadSurfaces()
     {
@@ -103,8 +86,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/local", profileData.GetProperty("profileId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithUnknownWorkflowProfile_ReturnsBadRequest()
     {
@@ -120,8 +101,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Contains("team/missing", body.GetProperty("error").GetString(), StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_ReplacesWorkflowProfile_WhenPresent()
     {
@@ -151,8 +130,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", profileData.GetProperty("profileId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithoutWorkflowProfile_PreservesExistingSelection()
     {
@@ -168,8 +145,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", patched.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_NullWorkflowProfile_ClearsSelectionAndReadsInheritDefault()
     {
@@ -190,8 +165,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/local", detail.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithUnknownWorkflowProfile_ReturnsBadRequest()
     {
@@ -209,8 +182,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_ProfileOnStartedIssue_ReturnsConflictAndLeavesSelectionUnchanged()
     {
@@ -240,8 +211,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PutVariables_OnStartedIssue_StillSucceeds()
     {
@@ -274,8 +243,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_ProfileUpdate_PreservesConfiguredVariablesAndPrompts()
     {
@@ -329,8 +296,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("PLAN_PROMPT_BODY", prompts["plan"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowProfile_AfterStageVariableNullClear_DoesNotExposeInternalBookkeeping()
     {
@@ -388,8 +353,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.DoesNotContain("stagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PromptPreview_WithoutVariablesBody_UsesStoredIssueVariables()
     {
@@ -421,8 +384,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("Plan with bar.", data.GetProperty("rendered").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_WithPrProfile_UsesPrSystemTemplate()
     {
@@ -460,8 +421,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Contains("open-draft-pr", yaml!, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_WithDefaultProfile_UsesDefaultSystemTemplate()
     {
@@ -495,8 +454,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.DoesNotContain("integrate:open-pr", yaml!, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkflowProfileEndpoint_AgreesWithEffectiveProfile_ForPrIssue()
     {
@@ -528,8 +485,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.False(profileData.GetProperty("hasCustomTemplate").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_WithCustomYamlOverride_TakesPrecedenceOverPrProfile()
     {
@@ -590,8 +545,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
     // ===================== Enable/disable workflow profiles =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithDisabledWorkflowProfile_ReturnsBadRequest()
     {
@@ -612,8 +565,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithDisabledWorkflowProfileInDifferentCase_ReturnsBadRequest()
     {
@@ -632,8 +583,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithDisabledWorkflowProfile_ReturnsBadRequestAndLeavesSelectionUnchanged()
     {
@@ -658,8 +607,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/local", detail.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithDisabledWorkflowProfileInDifferentCase_ReturnsBadRequestAndLeavesSelectionUnchanged()
     {
@@ -684,8 +631,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/local", detail.WorkflowProfileId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WhenNoProfileEnabled_ReturnsBadRequest()
     {
@@ -727,8 +672,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("no_enabled_workflow_profile", body.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithExplicitProfile_WhenNoProfileEnabled_ReturnsNoEnabledWorkflowProfile()
     {
@@ -766,8 +709,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("no_enabled_workflow_profile", body.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ExistingIssue_WhenAllProfilesDisabled_ReadSurfacesReportUnresolvedAndStartFails()
     {
@@ -824,8 +765,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
     private Task DispatchEventsAsync() =>
         _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DisableLastEnabledProfile_ReturnsBadRequest()
     {
@@ -851,8 +790,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Contains(profiles, p => p.Id == "mohist/github-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DisableUnknownWorkflowProfile_ReturnsBadRequestAndLeavesBlacklistUnchanged()
     {
@@ -876,8 +813,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", onlyEnabled.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DiscoveryReflectsDisabledProfile()
     {
@@ -909,8 +844,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal(2, restored.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DiscoveryWithoutProject_ReturnsFullCatalog()
     {
@@ -922,8 +855,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Contains(full, t => t.Id == "mohist/github-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkflowProfilesDiscovery_WithProject_FiltersDisabled()
     {
@@ -941,8 +872,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.DoesNotContain("mohist/github-pr", profileIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Discovery_WithMixedCaseDisabledProfile_FiltersDisabled()
     {

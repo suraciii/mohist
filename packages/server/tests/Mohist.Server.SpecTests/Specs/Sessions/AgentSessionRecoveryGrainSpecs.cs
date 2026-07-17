@@ -17,8 +17,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         _fixture.Reset();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_PreservesBindingAndLineageAndRecordsOnlyCompaction()
     {
@@ -41,8 +39,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.DoesNotContain(recoveryEvents, candidate => candidate.Value is AgentSessionRuntimeBound);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reset_CurrentExpectedBinding_AppliesReplacementAndAppendsLineage()
     {
@@ -72,8 +68,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             candidate => candidate.Value is AgentSessionContextCompacted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reset_StaleExpectedBinding_RejectsWithoutMutation()
     {
@@ -106,8 +100,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             entry => Assert.Equal("runtime-current", entry.AgentRuntimeSessionId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reset_ConcurrentBeginsReuseOneReservationAndReturnOneCompletion()
     {
@@ -132,8 +124,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactAndReset_CompetingReservationsRejectTheSecondOperation()
     {
@@ -149,8 +139,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-before-recovery", reset.ExpectedRuntimeSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_ConcurrentPreparationReusesThePersistedOperation()
     {
@@ -166,8 +154,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(1, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_ReservationSurvivesReactivationAndCompletesOnlyOnce()
     {
@@ -185,8 +171,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompletedCompact_DoesNotBlockTheNextReset()
     {
@@ -201,8 +185,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-completed-compact", reset.ExpectedRuntimeSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_PostCommitFailure_ReactivationReturnsPersistedCompletionWithoutAnotherCompaction()
     {
@@ -229,8 +211,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompletedCompact_ReplaysOnlyItsIdempotencyKeyAndStartsANewOperationForAnotherKey()
     {
@@ -247,8 +227,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(2, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PendingReset_AcceptsAnotherIdempotencyKeyAndReplaysCompletionForBothKeys()
     {
@@ -267,8 +245,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, "reset-2"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task DelayedAttachAfterReset_CannotRestoreThePreviousRuntimeBinding()
     {
@@ -284,8 +260,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactAndReset_ActiveSession_ReturnIdenticalConflictWithoutMutation()
     {
@@ -311,8 +285,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-active", Assert.Single(_fixture.StateStore.State.Status.RuntimeSessionLineage!).AgentRuntimeSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent()
     {
@@ -353,8 +325,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.True(result.WasCompacted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_AfterAcceptedFollowupIsLost_ExpiresTheLeaseWithoutSynthesizingATerminalEvent()
     {
@@ -369,8 +339,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Empty(_fixture.StateStore.State!.Status.PendingFollowups!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_AfterSessionClosed_IsImmediatelyAvailable()
     {
@@ -384,8 +352,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.True(result.WasCompacted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task PendingIdleFollowup_RejectsDuplicateDeliveryUntilItsMatchingFailureArrives()
     {

@@ -13,8 +13,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 {
     public RunnerFailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerUnregistersWithInFlightWork_FailsActiveWorkflowWork()
     {
@@ -36,8 +34,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerUnregistersWithoutOutstandingWork_DoesNotFailAlreadyCompletedWork()
     {
@@ -57,8 +53,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Completed, run.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerUnregisters_IsIdempotentForRunnerLoss()
     {
@@ -77,8 +71,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Heartbeat_WithOnlineRunner_PreservesRunningTask()
     {
@@ -98,8 +90,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Reactivation_WithPersistedRunningTask_RecoversAssignmentButLeavesWorkDrainToRunnerSide()
     {
@@ -129,8 +119,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Running, run.Stages.Single().Tasks.Single().Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HeartbeatRepair_OfflineGrain_RefreshesInfoButPollPresenceRestoresOnline()
     {
@@ -154,8 +142,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_KeepsAssignment_AndRunnerDropsPendingWork()
     {

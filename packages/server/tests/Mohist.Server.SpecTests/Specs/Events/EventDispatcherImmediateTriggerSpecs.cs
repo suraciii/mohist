@@ -33,8 +33,6 @@ public class EventDispatcherImmediateTriggerSpecs
         _fixture.ResetInvocationRecords();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task WorkflowRunStore_Commit_PokesDispatcherAndLowersLatencyBelowReminderCadence()
     {
@@ -81,8 +79,6 @@ public class EventDispatcherImmediateTriggerSpecs
             .ListRunnerIdsAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task IssueStore_Commit_PokesDispatcherAndLowersLatencyBelowReminderCadence()
     {
@@ -118,8 +114,6 @@ public class EventDispatcherImmediateTriggerSpecs
             advance: AdvanceClusterTurnAsync);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentSessionStore_Commit_PokesDispatcherAndLowersLatencyBelowReminderCadence()
     {
@@ -161,8 +155,6 @@ public class EventDispatcherImmediateTriggerSpecs
             advance: AdvanceClusterTurnAsync);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LostImmediateTrigger_LeavesRowUndispatched_AndReminderTickRecovers()
     {

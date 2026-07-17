@@ -1,7 +1,5 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -11,43 +9,31 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class EventStoreScopedAppendSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 8, 0, 0, 0, TimeSpan.Zero);
 
-    private readonly DbContextOptions<MohistDbContext> _options;
-    private readonly SqliteConnection _keeper;
+    private readonly TestSqliteDatabase _database;
     private EventStore _store = null!;
 
     public EventStoreScopedAppendSpecs()
     {
-        var connectionString = $"Data Source=event-store-scoped-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
-
-        _store = new EventStore(new Factory(_options), NullLogger<EventStore>.Instance);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _store = new EventStore(new TestDbContextFactory(_database.Options), NullLogger<EventStore>.Instance);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
     [Fact]
     public async Task AppendAsync_DoesNotCallSaveChangesAsync_OnScopedOverload()
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
 
         await _store.AppendAsync(db, BuildEvent("/mohist/workflow-runs/wr_scoped_save", "com.mohist.workflow.task.completed"));
 
@@ -61,7 +47,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task AppendAsync_ScopedOverload_StagesRowVisibleInsideCallerTransaction()
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         await using var transaction = await db.Database.BeginTransactionAsync();
 
         await _store.AppendAsync(db, BuildEvent("/mohist/workflow-runs/wr_scoped_visible", "com.mohist.workflow.task.completed"));
@@ -80,7 +66,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task AppendAsync_ScopedOverload_RowIsDurableAfterCommit_OnFreshDbContext()
     {
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             await using var transaction = await db.Database.BeginTransactionAsync();
             await _store.AppendAsync(db, BuildEvent("/mohist/workflow-runs/wr_scoped_durable", "com.mohist.workflow.task.completed"));
@@ -88,7 +74,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             await transaction.CommitAsync();
         }
 
-        await using var fresh = new MohistDbContext(_options);
+        await using var fresh = new MohistDbContext(_database.Options);
         var row = Assert.Single(await fresh.WorkflowRunEvents.AsNoTracking()
             .Where(r => r.Source == "/mohist/workflow-runs/wr_scoped_durable")
             .ToListAsync());
@@ -99,7 +85,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task AppendAsync_PerSourceId_AccountsForPendingRowsInSameTransaction()
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         await using var transaction = await db.Database.BeginTransactionAsync();
 
         var source = "/mohist/workflow-runs/wr_seq_in_tx";
@@ -110,7 +96,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         var ids = (await verify.WorkflowRunEvents.AsNoTracking()
             .Where(r => r.Source == source)
             .OrderBy(r => r.Id)
@@ -123,7 +109,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     {
         var source = "/mohist/workflow-runs/wr_seq_separate_tx";
 
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             await using var tx = await db.Database.BeginTransactionAsync();
             await _store.AppendAsync(db, BuildEvent(source, "com.mohist.workflow.task.completed"));
@@ -131,7 +117,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             await tx.CommitAsync();
         }
 
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             await using var tx = await db.Database.BeginTransactionAsync();
             await _store.AppendAsync(db, BuildEvent(source, "com.mohist.workflow.task.completed"));
@@ -139,7 +125,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             await tx.CommitAsync();
         }
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         var ids = (await verify.WorkflowRunEvents.AsNoTracking()
             .Where(r => r.Source == source)
             .OrderBy(r => r.Id)
@@ -153,7 +139,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var source = "/mohist/workflow-runs/wr_nonscoped";
         await _store.AppendAsync(BuildEvent(source, "com.mohist.workflow.task.completed"));
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         var row = Assert.Single(await verify.WorkflowRunEvents.AsNoTracking()
             .Where(r => r.Source == source)
             .ToListAsync());
@@ -169,7 +155,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
 
         await _store.AppendAsync(envelope);
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         var stored = Assert.Single(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
         Assert.Equal(envelope.Type, stored.Type);
     }
@@ -177,7 +163,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task AppendAsync_AgentSessionSource_LandsInAgentSessionEventsTable()
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var sessionId = "sess_scoped_1";
 
         await _store.AppendAsync(db, BuildEvent(AgentSessionEventPersistence.AgentSessionSource(sessionId), "test.agent-session.bound"));
@@ -192,7 +178,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         var stored = Assert.Single(await verify.AgentSessionEvents.AsNoTracking()
             .Where(r => r.Source == AgentSessionEventPersistence.AgentSessionSource(sessionId))
             .ToListAsync());
@@ -308,7 +294,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
             "test.agent-session.bound"));
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         Assert.Empty(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
         var stored = Assert.Single(await verify.AgentSessionEvents.AsNoTracking()
             .Where(r => r.Source == AgentSessionEventPersistence.AgentSessionSource(sessionId))
@@ -331,12 +317,4 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
                 [EventCatalog.Lineage.Stage] = "test",
             });
 
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 }

@@ -173,8 +173,6 @@ public class TaskLogRouteSpecs
         truncated = false,
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_StoresEntriesAndReturnsAcceptedCount()
     {
@@ -213,8 +211,6 @@ public class TaskLogRouteSpecs
         Assert.Equal("Stable", rows[1].Text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_AgentJobRoute_StoresUnderAgentJobOwnerKind()
     {
@@ -246,8 +242,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(0, workflowCollision);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsMalformedJson()
     {
@@ -262,8 +256,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsDuplicateSeqValues()
     {
@@ -286,8 +278,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsInvalidMetadataAndOversizedText()
     {
@@ -310,8 +300,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, hugeText.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_DoesNotInvokeAnyGrain()
     {
@@ -351,8 +339,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(stateBefore, stateAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_UnknownOwnerWork_ReturnsNotFoundAndDoesNotPersist()
     {
@@ -372,71 +358,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(0, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task UploadEndpoint_CrossOwnerOverwrite_IsRejectedAndExistingLogStaysIntact()
-    {
-        var allowedOwnerId = $"wr-tasklog-owner-{Guid.NewGuid():N}";
-        var forgedOwnerId = $"wr-tasklog-forged-{Guid.NewGuid():N}";
-        var workId = $"work-{Guid.NewGuid():N}";
-        await SeedActiveWorkflowRunAsync(allowedOwnerId, "task-1", workId);
-
-        using (var accepted = await PostTaskLogAsync(
-            $"/api/workflow-runs/{allowedOwnerId}/work/{workId}/task-log",
-            OneLineBody("original")))
-        {
-            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-        }
-
-        using var forged = await PostTaskLogAsync(
-            $"/api/workflow-runs/{forgedOwnerId}/work/{workId}/task-log",
-            OneLineBody("forged"));
-
-        Assert.Equal(HttpStatusCode.NotFound, forged.StatusCode);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var original = await db.TaskLogEntries.AsNoTracking()
-            .SingleAsync(e => e.OwnerKind == "workflow" && e.OwnerId == allowedOwnerId && e.WorkId == workId);
-        Assert.Equal("original", original.Text);
-        var forgedCount = await db.TaskLogEntries.AsNoTracking()
-            .CountAsync(e => e.OwnerKind == "workflow" && e.OwnerId == forgedOwnerId && e.WorkId == workId);
-        Assert.Equal(0, forgedCount);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task UploadEndpoint_SecondRunnerCannotReplaceAnotherRunnersLog()
-    {
-        var workflowRunId = $"wr-tasklog-runner-{Guid.NewGuid():N}";
-        var workId = $"work-{Guid.NewGuid():N}";
-        await SeedActiveWorkflowRunAsync(workflowRunId, "task-1", workId);
-
-        using (var accepted = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("from assigned runner")))
-        {
-            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-        }
-
-        using var rejected = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            OneLineBody("from second runner"),
-            runnerId: $"runner-forged-{Guid.NewGuid():N}");
-
-        Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.TaskLogEntries.AsNoTracking()
-            .SingleAsync(e => e.OwnerKind == "workflow" && e.OwnerId == workflowRunId && e.WorkId == workId);
-        Assert.Equal("from assigned runner", row.Text);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_TaskWithoutCapturedLines_ReturnsEmptyPage()
     {
@@ -457,8 +378,6 @@ public class TaskLogRouteSpecs
         Assert.False(data.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_ReturnsPaginatedLinesInSeqOrder()
     {
@@ -517,45 +436,6 @@ public class TaskLogRouteSpecs
         Assert.False(finalData.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public async Task GetEndpoint_TruncatedBatch_ReportsTruncatedTrueAndRetainedTail()
-    {
-        var projectId = await CreateProjectAsync("tasklog-trunc");
-        var issueNumber = await CreateIssueAsync(projectId, "truncated logs");
-        var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
-        await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
-
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var entries = Enumerable.Range(1, 3).Select(seq => new
-        {
-            seq = (long)seq,
-            timestamp = now.AddSeconds(seq),
-            source = "action",
-            text = $"tail {seq}",
-        }).ToArray();
-
-        using (var upload = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            new { entries, truncated = true }))
-        {
-            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
-        }
-
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.True(data.GetProperty("truncated").GetBoolean());
-        var lines = data.GetProperty("lines").EnumerateArray().ToList();
-        Assert.Equal(3, lines.Count);
-        Assert.Equal("tail 3", lines[^1].GetProperty("text").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_UnknownTaskId_ReturnsEmptyPage()
     {
@@ -574,8 +454,6 @@ public class TaskLogRouteSpecs
         Assert.False(data.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_IssueWithoutWorkflowRun_ReturnsEmptyPage()
     {

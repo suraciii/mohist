@@ -10,8 +10,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
 public class OtelDbSpecs : IDisposable
 {
     private readonly OtelDb _db;

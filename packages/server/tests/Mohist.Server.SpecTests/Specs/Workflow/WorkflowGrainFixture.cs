@@ -17,13 +17,9 @@ public class WorkflowGrainFixture : IAsyncLifetime
 {
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
-    public IEventPublisher EventBus => _sharedEventBus;
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
-    public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-    public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
-    public ControllableReminderTable ControllableReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<ControllableReminderTable>();
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
 
     private readonly RecordingEventStore _sharedEventStore = new();

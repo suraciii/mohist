@@ -23,8 +23,6 @@ public class AgentSessionLifecycleDedupSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AttachPhysicalSessionAsync_PersistsRuntimeBoundExactlyOnce()
     {
@@ -52,8 +50,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal("/mohist/agent-session/" + session.Id, bound.Envelope.Source.ToString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AttachThenFirstRuntimeAppend_PersistsRuntimeBoundOnceAcrossRuntimeEvents()
     {
@@ -78,8 +74,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal(1, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_WithoutAttach_DoesNotPersistRuntimeBound()
     {
@@ -122,8 +116,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_SessionClosedDoesNotPersistTerminalDomainEvents()
     {
@@ -149,8 +141,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_FailedClosedObservationDoesNotPersistFailedDomainEvent()
     {
@@ -167,8 +157,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_CancelledClosedObservationDoesNotPersistCancelledDomainEvent()
     {
@@ -185,8 +173,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_LivenessDoesNotPersistDomainStatusEvents()
     {
@@ -205,8 +191,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.All(stored, s => Assert.NotEqual("session.liveness", s.Envelope.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_TranscriptRows_DoNotPersistAsDomainEvents()
     {
@@ -247,8 +231,6 @@ public class AgentSessionLifecycleDedupSpecs
             s.Envelope.Type == "model.resolved"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_RunnerTranscriptRows_PublishToTranscriptChannel()
     {
@@ -274,8 +256,6 @@ public class AgentSessionLifecycleDedupSpecs
             third => Assert.Equal("tool_call.updated", third.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_SessionClosedPublishesOnlyTranscriptChannel()
     {
@@ -294,8 +274,6 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.closed"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_UsageAndModelEventsPersistReverseDnsType()
     {

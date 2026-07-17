@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -15,31 +14,8 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// <summary>
 /// Issue-130 T-001: focused unit specs for <see cref="AgentSessionQuery"/> that
 /// exercise the newly queryable agent-launch label keys (and the workflow
-/// regression), using the FakeDbContextFactory on <c>SqliteConnection(":memory:")</c>
-/// pattern already established by <c>MohistLocalWorkflowProfileSpecs</c>.
+/// regression), over a migrated <see cref="TestSqliteDatabase"/>.
 /// </summary>
-public sealed class FakeAgentSessionQueryDbContextFactory : IDbContextFactory<MohistDbContext>, IDisposable
-{
-    private readonly SqliteConnection _connection;
-
-    public FakeAgentSessionQueryDbContextFactory()
-    {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        MigratedSqliteTemplate.CopyTo(_connection);
-    }
-
-    public MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-        return new MohistDbContext(options);
-    }
-
-    public void Dispose() => _connection.Dispose();
-}
-
 public class AgentSessionQuerySpecs
 {
     private const string ProjectA = "proj-A";
@@ -64,12 +40,11 @@ public class AgentSessionQuerySpecs
     private const string WorkflowIssueNumberW1 = "100";
     private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByAgentId_ReturnsOnlyThatAgentsGenericSessions()
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);
@@ -101,12 +76,11 @@ public class AgentSessionQuerySpecs
         Assert.DoesNotContain(unfiltered, m => m.Row.Id == "s_w1_workflow");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByAgentName_ResolvesToSameSetAsAgentId()
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);
@@ -127,8 +101,6 @@ public class AgentSessionQuerySpecs
             byName.Select(r => r.Row.Id).OrderBy(id => id, StringComparer.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("s_a1_2_with_issue", GenericAgentSessionMetadata.IssueNumber, AgentA1IssueNumber)]
     [InlineData("s_a1_3_with_epic", GenericAgentSessionMetadata.EpicNumber, AgentA1EpicNumber)]
@@ -137,7 +109,8 @@ public class AgentSessionQuerySpecs
     public async Task QueryByAgentLaunchContextRef_ResolvesViaIndexedColumn(
         string matchedSessionId, string labelKey, string labelValue)
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);
@@ -163,8 +136,6 @@ public class AgentSessionQuerySpecs
         Assert.DoesNotContain(matches, m => m.Row.Id == "s_w1_workflow");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData(AgentSessionQueryMetadataKeys.ProjectId, ProjectA, new[] { "s_a1_1", "s_a1_2_with_issue", "s_a1_3_with_epic", "s_a1_with_repo", "s_a1_with_workspace", "s_a2_1", "s_w1_workflow" })]
     [InlineData(AgentSessionQueryMetadataKeys.WorkflowRunId, WorkflowRunW1, new[] { "s_w1_workflow" })]
@@ -175,7 +146,8 @@ public class AgentSessionQuerySpecs
     [InlineData(AgentSessionQueryMetadataKeys.Stage, "plan", new[] { "s_w1_workflow" })]
     public async Task WorkflowShapedLookupKeys_StillResolveExactlyAsBefore(        string labelKey, string labelValue, string[] expectedIds)
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);
@@ -189,12 +161,11 @@ public class AgentSessionQuerySpecs
         Assert.Equal(expectedIds.OrderBy(id => id, StringComparer.Ordinal), ids);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByTriggerLabels_ResolvesSubscriptionTriggeredSessions()
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         const string eventId = "evt_subscription_42";
@@ -242,12 +213,11 @@ public class AgentSessionQuerySpecs
         Assert.Empty(byMissingEvent);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByTriggerLabels_ManualSessionsDoNotMatch()
     {
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);
@@ -260,8 +230,6 @@ public class AgentSessionQuerySpecs
         Assert.Empty(matches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ComputedColumns_PopulateFromStateJson_WithoutBackfill()
     {
@@ -269,7 +237,8 @@ public class AgentSessionQuerySpecs
         // derive their values from the State JSON (no data backfill step),
         // and QueryRowsByLabels must therefore find it via the indexed label
         // path rather than a no-match fallback.
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var storedLabels = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -350,15 +319,14 @@ public class AgentSessionQuerySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentScopedQuery_FiltersByProjectAndAgent_ExcludesOtherProjects()
     {
         // Sanity check: a project-id + agent-id combination that matches
         // nothing must return zero rows (proves neither filter collapses
         // to "all rows" nor bleeds across projects).
-        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
         var query = new AgentSessionQuery(fixture, TimeProvider);

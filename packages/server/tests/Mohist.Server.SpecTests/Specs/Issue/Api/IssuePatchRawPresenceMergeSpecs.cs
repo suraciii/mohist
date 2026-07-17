@@ -17,8 +17,6 @@ public class IssuePatchRawPresenceMergeSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_AbsentLabels_PreservesExistingLabels()
     {
@@ -44,8 +42,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal("auth", labels["module"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_NullLabels_ClearsLabelMapToEmpty()
     {
@@ -68,8 +64,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Empty(detail.GetProperty("labels").EnumerateObject());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_PresentLabels_ReplacesLabelMapInFull()
     {
@@ -97,8 +91,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal("v", labels["k"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_AbsentIsDraft_PreservesExistingDraftState()
     {
@@ -118,8 +110,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.True(detail.IsDraft);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_PresentIsDraft_UpdatesDraftState()
     {
@@ -138,8 +128,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.False(detail.IsDraft);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_AbsentAttachmentIds_PreservesExistingAttachments()
     {
@@ -171,8 +159,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal(new[] { attachment.Id }, attachmentIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_PresentAttachmentIds_ReplacesAttachmentList()
     {
@@ -207,8 +193,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal(new[] { third.Id }, attachmentIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_OnlyLabels_LeavesOtherFieldsUnchanged()
     {
@@ -262,8 +246,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal("auth", labels["module"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_NullAttachmentIds_ClearsAllAttachments()
     {
@@ -290,8 +272,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Empty(detail.GetProperty("attachments").EnumerateArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_StageModels_PersistsViaWorkflowProfilePath()
     {
@@ -315,8 +295,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal("openai/gpt-5.5", detail.StageModels["build"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_StageModelVariants_PersistsViaWorkflowProfilePath()
     {
@@ -342,8 +320,6 @@ public class IssuePatchRawPresenceMergeSpecs
         Assert.Equal("openai/gpt-5.5", detail.StageModels!["plan"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithStageModels_PersistsViaWorkflowProfilePath()
     {

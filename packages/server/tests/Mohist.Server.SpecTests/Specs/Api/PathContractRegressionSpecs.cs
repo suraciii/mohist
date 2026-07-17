@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using static Mohist.Server.SpecTests.Support.PathContractAssertions;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
@@ -27,8 +28,6 @@ public class PathContractRegressionSpecs
         { "resolvedPath", "/runner/resolved-worktree" },
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task LegacyWorktreeStatusRoute_ReturnsNotFound()
     {
@@ -55,8 +54,6 @@ public class PathContractRegressionSpecs
     // slug() helper in packages/runner/src/runtime/workspace.ts. The
     // runner-equivalent test in workspace.spec.ts asserts the JS side; this
     // test pins the C# side with representative Unicode inputs.
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("my-project", "my-project")]
     [InlineData("My Project!", "my-project")]
@@ -71,8 +68,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(expected, MohistWorkspaceLayout.Slug(input ?? string.Empty));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectsList_OmitsPathAndEffectivePath()
     {
@@ -95,8 +90,6 @@ public class PathContractRegressionSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectDetail_OmitsPathAndEffectivePath()
     {
@@ -117,8 +110,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectCreate_WithoutPath_ReturnsProjectWithoutLocalPathFields()
     {
@@ -137,8 +128,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task ProjectCreate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotCreateProject(
@@ -166,8 +155,6 @@ public class PathContractRegressionSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithoutGitUrl_Returns400AndDoesNotMutateState()
     {
@@ -196,8 +183,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(beforeRepos, afterRepos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task RepositoryAdd_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
@@ -231,8 +216,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithGitUrl_ReturnsRepositoryWithoutLocalPathFields()
     {
@@ -259,8 +242,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task RepositoryUpdate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
@@ -291,8 +272,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task IssueStart_DispatchVariables_ContainGitUrlButNoLocalPathFields()
     {
@@ -332,8 +311,6 @@ public class PathContractRegressionSpecs
         AssertDispatchVariablesHaveWorkspaceContract(variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowRunProfileVariables_AreReadWrittenAsVariableBundle()
     {
@@ -367,8 +344,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("put", profileData.GetProperty("variables").GetProperty("vars").GetProperty("source").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
     {
@@ -438,72 +413,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(System.Net.HttpStatusCode.OK, missingResponse.StatusCode);
         var missingJson = JsonDocument.Parse(await missingResponse.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(JsonValueKind.Null, missingJson.GetProperty("data").ValueKind);
-    }
-
-    private static void AssertProjectHasNoLocalPathFields(JsonElement project)
-    {
-        Assert.Equal(JsonValueKind.Object, project.ValueKind);
-        Assert.False(project.TryGetProperty("path", out _), "project response unexpectedly contained 'path'");
-        Assert.False(project.TryGetProperty("effectivePath", out _), "project response unexpectedly contained 'effectivePath'");
-        Assert.False(project.TryGetProperty("checkoutPath", out _), "project response unexpectedly contained 'checkoutPath'");
-        Assert.False(project.TryGetProperty("baseBranch", out _), "project response unexpectedly contained 'baseBranch'");
-
-        if (project.TryGetProperty("repositories", out var repositories)
-            && repositories.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var repo in repositories.EnumerateArray())
-            {
-                AssertRepositoryHasNoLocalPathFields(repo);
-            }
-        }
-    }
-
-    private static void AssertRepositoryHasNoLocalPathFields(JsonElement repo)
-    {
-        Assert.Equal(JsonValueKind.Object, repo.ValueKind);
-        Assert.False(repo.TryGetProperty("path", out _), "repository response unexpectedly contained 'path'");
-        Assert.False(repo.TryGetProperty("remote", out _), "repository response unexpectedly contained 'remote'");
-        Assert.False(repo.TryGetProperty("resolvedPath", out _), "repository response unexpectedly contained 'resolvedPath'");
-        Assert.True(repo.TryGetProperty("gitUrl", out _), "repository response missing 'gitUrl'");
-        Assert.True(repo.TryGetProperty("baseBranch", out _), "repository response missing 'baseBranch'");
-    }
-
-    private static void AssertDispatchVariablesHaveWorkspaceContract(JsonElement variables)
-    {
-        if (variables.ValueKind != JsonValueKind.Object)
-        {
-            Assert.Fail($"expected dispatch variables to be a JSON object, got {variables.ValueKind}");
-            return;
-        }
-
-        if (variables.TryGetProperty("project", out var projectVar)
-            && projectVar.ValueKind == JsonValueKind.Object)
-        {
-            Assert.False(projectVar.TryGetProperty("path", out _), "project dispatch variable unexpectedly contained 'path'");
-            Assert.False(projectVar.TryGetProperty("effectivePath", out _), "project dispatch variable unexpectedly contained 'effectivePath'");
-            // baseBranch is a repository property, not a project property.
-            Assert.False(projectVar.TryGetProperty("baseBranch", out _), "project dispatch variable unexpectedly contained 'baseBranch'");
-            Assert.False(projectVar.TryGetProperty("defaultBranch", out _), "project dispatch variable unexpectedly contained 'defaultBranch'");
-        }
-
-        if (variables.TryGetProperty("repository", out var repoVar)
-            && repoVar.ValueKind == JsonValueKind.Object)
-        {
-            Assert.False(repoVar.TryGetProperty("path", out _), "repository dispatch variable unexpectedly contained 'path'");
-            Assert.False(repoVar.TryGetProperty("remote", out _), "repository dispatch variable unexpectedly contained 'remote'");
-            Assert.False(repoVar.TryGetProperty("resolvedPath", out _), "repository dispatch variable unexpectedly contained 'resolvedPath'");
-            Assert.True(repoVar.TryGetProperty("gitUrl", out _), "repository dispatch variable missing 'gitUrl'");
-            Assert.True(repoVar.TryGetProperty("baseBranch", out _), "repository dispatch variable missing 'baseBranch'");
-        }
-
-        Assert.True(variables.TryGetProperty("workspace", out var workspace),
-            "dispatch variables missing 'workspace'");
-        if (workspace.ValueKind == JsonValueKind.Object)
-        {
-            Assert.True(workspace.TryGetProperty("path", out _), "workspace dispatch variable missing 'path'");
-            // Per-run head ref (mohist/run-${workflowRunId}); not a worktree branch.
-            Assert.True(workspace.TryGetProperty("branch", out _), "workspace dispatch variable missing 'branch'");
-        }
     }
 
     private Task DispatchEventsAsync() =>

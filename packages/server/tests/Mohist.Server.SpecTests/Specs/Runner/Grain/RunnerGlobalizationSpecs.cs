@@ -21,8 +21,6 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
 {
     public RunnerGlobalizationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Register_RunnerIsRecordedInGlobalRegistry_NotInProjectRegistry()
     {
@@ -40,8 +38,6 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
         Assert.Contains(runnerId, globalIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_ReturnsAllRegisteredRunnersRegardlessOfProjectIdField()
     {
@@ -61,8 +57,6 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
         Assert.Contains(eligible, r => r.RunnerId == projectRunnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Poll_GlobalRunnerAssignsAcrossProjects()
     {

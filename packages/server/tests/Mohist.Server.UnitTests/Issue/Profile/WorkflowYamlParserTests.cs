@@ -1,0 +1,427 @@
+using System.Text.Json;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Prompts;
+using Xunit;
+
+namespace Mohist.Server.UnitTests.Issue.Profile;
+
+public class WorkflowYamlParserTests
+{
+    [Fact]
+    public void WorkflowYamlParser_CheckLevelRepairFieldsThrowSchemaDiagnostic()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+                  timeout: 300000
+                repairLimit: 1
+                repairTask:
+                  id: fix-health
+                  title: Fix health
+                  uses: mohist/acp-agent
+                  with:
+                    prompt: Fix it
+        """));
+
+        Assert.Contains("obsolete check-level repair", ex.Message);
+        Assert.Contains("task-level recovery", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_CheckRepairWithVerifyTaskStillThrows()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+                repairLimit: 2
+                repairTask:
+                  id: fix-health
+                  title: Fix health
+                  uses: mohist/acp-agent
+                  with:
+                    prompt: Fix it
+                verifyTask:
+                  id: verify-health
+                  title: Verify health
+                  uses: core/script
+                  with:
+                    run: git diff --check
+        """));
+
+        Assert.Contains("obsolete check-level repair", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_TaskWithNeutralArtifactMarker_ParsesSuccessfully()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks:
+              - id: doc-task
+                title: Document task
+                uses: mohist/acp-agent
+                with:
+                  prompt: Write docs
+                  expect:
+                    files:
+                      - path: docs/readme.md
+                    markers:
+                      - path: docs/readme.md
+                        contains: "## Getting Started"
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.Equal("doc-task", task.Id);
+    }
+
+    [Theory]
+    [InlineData("PASS")]
+    [InlineData("FAIL")]
+    [InlineData("<promise>PASS</promise>")]
+    [InlineData("<promise>FAIL</promise>")]
+    public void WorkflowYamlParser_TaskWithVerdictMarkerInExpect_ThrowsSchemaDiagnostic(string marker)
+    {
+        var yaml = $"""
+        stages:
+          - stage: build
+            tasks:
+              - id: bad-task
+                title: Bad task
+                uses: mohist/acp-agent
+                with:
+                  prompt: Do work
+                  expect:
+                    files:
+                      - path: result.md
+                    markers:
+                      - path: result.md
+                        contains: {marker}
+            checks: []
+        """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
+        Assert.Contains("verdict marker", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("check definition", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bad-task", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_PreservesTaskArtifactCapturePaths()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: proposal
+                title: Generate proposal
+                uses: mohist/acp-agent
+                with:
+                  prompt: ${{ prompts.proposal }}
+                  expect:
+                    files:
+                      - path: ${{ openspecChangeDir }}/proposal.md
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/proposal.md
+                    - path: ${{ openspecChangeDir }}/specs
+              - id: design
+                title: Design
+                uses: mohist/acp-agent
+                with:
+                  prompt: ${{ prompts.design }}
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/design.md
+            checks: []
+        """);
+
+        var proposal = definition.Stages.Single().Tasks.Single(t => t.Id == "proposal");
+        Assert.NotNull(proposal.Artifacts);
+        Assert.Equal(
+            new[]
+            {
+                "${{ openspecChangeDir }}/proposal.md",
+                "${{ openspecChangeDir }}/specs",
+            },
+            proposal.Artifacts!.Files.Select(f => f.Path).ToArray());
+
+        var design = definition.Stages.Single().Tasks.Single(t => t.Id == "design");
+        Assert.NotNull(design.Artifacts);
+        Assert.Equal(
+            new[] { "${{ openspecChangeDir }}/design.md" },
+            design.Artifacts!.Files.Select(f => f.Path).ToArray());
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_TaskArtifactsAreNotMergedIntoWith()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: declare-task
+                title: Declare artifacts
+                uses: mohist/acp-agent
+                with:
+                  prompt: hello
+                artifacts:
+                  files:
+                    - path: docs/out.md
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.NotNull(task.With);
+        var withJson = JsonSerializer.Serialize(task.With);
+        Assert.DoesNotContain("artifacts", withJson);
+        Assert.DoesNotContain("docs/out.md", withJson);
+
+        Assert.NotNull(task.Artifacts);
+        Assert.Equal(new[] { "docs/out.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_WithExpectFilesAloneDoesNotCreateArtifactCapture()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: expect-only
+                title: Expect files only
+                uses: mohist/acp-agent
+                with:
+                  prompt: hello
+                  expect:
+                    files:
+                      - path: docs/expected.md
+                    markers:
+                      - path: docs/expected.md
+                        contains: "# Done"
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.Null(task.Artifacts);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_AcceptsSamePathInExpectMarkersAndArtifacts()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: review
+                title: Review
+                uses: mohist/acp-agent
+                with:
+                  prompt: Review
+                  expect:
+                    markers:
+                      - path: ${{ openspecChangeDir }}/review.md
+                        oneOf:
+                          - <promise>PASS</promise>
+                          - <promise>FAIL</promise>
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/review.md
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.NotNull(task.Artifacts);
+        Assert.Equal(new[] { "${{ openspecChangeDir }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+        var withJson = JsonSerializer.Serialize(task.With);
+        Assert.Contains("expect", withJson);
+        Assert.Contains("markers", withJson);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_TaskArtifactFileEntryWithoutPathThrows()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: bad
+                title: Bad
+                uses: mohist/acp-agent
+                with:
+                  prompt: hi
+                artifacts:
+                  files:
+                    - other: docs/out.md
+            checks: []
+        """));
+
+        Assert.Contains("artifacts.files", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_RecoveryTaskArtifactsAreIsolated()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: check
+            tasks:
+              - id: ai-review
+                title: AI review
+                uses: mohist/acp-agent
+                with:
+                  prompt: review
+                artifacts:
+                  files:
+                    - path: review.md
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: promise=FAIL
+                      tasks:
+                        - id: recover:fix-review
+                          title: Fix review
+                          uses: mohist/acp-agent
+                          with:
+                            prompt: fix
+                      retrySelf: true
+            checks: []
+        """);
+
+        var stage = definition.Stages.Single();
+        var review = stage.Tasks.Single();
+        Assert.NotNull(review.Artifacts);
+
+        var recoveryTask = Assert.Single(Assert.Single(review.Recovery!.Handlers).Tasks);
+        Assert.Null(recoveryTask.Artifacts);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ProfileWithoutDescriptionYieldsNullDescription()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        Assert.Null(definition.Description);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ProfileWithSingleLineDescription_ParsesItVerbatim()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        description: Simple description
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        Assert.Equal("Simple description", definition.Description);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ParsesApprovalFeedbackTaskConfig()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        approval:
+          feedback:
+            task:
+              id: apply-feedback
+              title: Apply approval feedback
+              uses: mohist/acp-agent
+              with:
+                session: ${{ stage.name }}
+                prompt: ${{ prompts.apply-feedback }}
+        stages:
+          - stage: plan
+            tasks: []
+            checks: []
+        """);
+
+        Assert.NotNull(definition.Approval);
+        Assert.NotNull(definition.Approval!.Feedback);
+        var task = definition.Approval!.Feedback!.Task;
+        Assert.NotNull(task);
+        Assert.Equal("apply-feedback", task!.Id);
+        Assert.Equal("Apply approval feedback", task.Title);
+        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.NotNull(task.With);
+        Assert.True(task.With!.ContainsKey("session"));
+        Assert.True(task.With!.ContainsKey("prompt"));
+        Assert.Equal("${{ stage.name }}", task.With["session"]?.GetString());
+        Assert.Equal("${{ prompts.apply-feedback }}", task.With["prompt"]?.GetString());
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ApprovalSectionAbsent_ReturnsNullApproval()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """);
+
+        Assert.Null(definition.Approval);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ApprovalFeedbackTaskMissingId_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        approval:
+          feedback:
+            task:
+              title: Apply approval feedback
+              uses: mohist/acp-agent
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """));
+
+        Assert.Contains("approval.feedback.task", ex.Message);
+        Assert.Contains("id", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_ApprovalFeedbackTaskMissingTitle_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        approval:
+          feedback:
+            task:
+              id: apply-feedback
+              uses: mohist/acp-agent
+        stages:
+          - stage: build
+            tasks: []
+            checks: []
+        """));
+
+        Assert.Contains("approval.feedback.task", ex.Message);
+        Assert.Contains("title", ex.Message);
+    }
+
+}

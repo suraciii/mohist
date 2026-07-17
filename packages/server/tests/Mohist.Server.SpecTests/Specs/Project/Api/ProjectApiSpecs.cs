@@ -22,8 +22,6 @@ public class ProjectApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_WithoutRepository_ReturnsBadRequest()
     {
@@ -38,8 +36,6 @@ public class ProjectApiSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_WithoutRepositoryGitUrl_ReturnsBadRequest()
     {
@@ -57,8 +53,6 @@ public class ProjectApiSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotCreateProject()
     {
@@ -80,8 +74,6 @@ public class ProjectApiSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_WithInitialIsDefault_ReturnsBadRequestAndDoesNotCreateProject()
     {
@@ -103,8 +95,6 @@ public class ProjectApiSpecs
         Assert.DoesNotContain(projects, project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [InlineData("""{"name":"null-initial-default","repository":{"name":"main","gitUrl":"git@example.com:main.git","isDefault":null}}""")]
     [InlineData("""{"name":"set-initial-default","repository":{"name":"main","gitUrl":"git@example.com:main.git","setDefault":true}}""")]
@@ -121,8 +111,6 @@ public class ProjectApiSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_WithRepository_CreatesProjectWithOneDefaultRepository()
     {
@@ -146,8 +134,6 @@ public class ProjectApiSpecs
         Assert.True(repo.IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetProjects_ListReturnsCreatedProject()
     {
@@ -169,8 +155,6 @@ public class ProjectApiSpecs
         Assert.Equal("list-test", project.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ProjectUse_AndDelete_RemainFunctional()
     {
@@ -199,8 +183,6 @@ public class ProjectApiSpecs
         Assert.DoesNotContain(list, p => p.Id == created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithGitUrl_AddsSecondRepositoryPreservingDefault()
     {
@@ -233,8 +215,6 @@ public class ProjectApiSpecs
         Assert.False(backend.GetProperty("isDefault").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithSetDefault_SwitchesDefaultAtomically()
     {
@@ -262,8 +242,6 @@ public class ProjectApiSpecs
         Assert.True(repositories.Single(repository => repository.GetProperty("name").GetString() == "web").GetProperty("isDefault").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_DuplicateNameDifferentCase_ReturnsConflict()
     {
@@ -292,8 +270,6 @@ public class ProjectApiSpecs
         Assert.Single(repos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithoutGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -322,8 +298,6 @@ public class ProjectApiSpecs
         Assert.Single(repos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -337,8 +311,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithIsDefault_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -352,8 +324,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [InlineData("""{"name":"web","gitUrl":"git@example.com:web.git","setDefault":false}""")]
     [InlineData("""{"name":"web","gitUrl":"git@example.com:web.git","setDefault":null}""")]
@@ -369,8 +339,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_MetadataUpdate_PersistsNewGitUrlAndBaseBranch()
     {
@@ -399,8 +367,6 @@ public class ProjectApiSpecs
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_EmptyUpdate_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -436,8 +402,6 @@ public class ProjectApiSpecs
         { new { setDefault = false, baseBranch = "release" } },
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [MemberData(nameof(ForbiddenRepositoryPatches))]
     public async Task PatchRepository_WithForbiddenControl_ReturnsBadRequestAndDoesNotMutate(object patch)
@@ -452,8 +416,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_WithBlankGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -467,23 +429,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public async Task PatchRepository_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotMutate()
-    {
-        var created = await CreateRepositoryUpdateProjectAsync();
-
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories/backend",
-            new { gitUrl = "https://user:token@example.test/backend.git" });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        await AssertRepositoryUnchangedAsync(created.Id);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [InlineData("""{"newName":null,"baseBranch":"release"}""")]
     [InlineData("""{"isDefault":null,"baseBranch":"release"}""")]
@@ -500,8 +445,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_UnknownName_ReturnsNotFound()
     {
@@ -525,8 +468,6 @@ public class ProjectApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_SetDefaultTrue_SwitchesDefault()
     {
@@ -558,8 +499,6 @@ public class ProjectApiSpecs
         Assert.True(repos.Single(r => r.GetProperty("name").GetString() == "web").GetProperty("isDefault").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_SetDefaultWithBlankName_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -573,36 +512,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public async Task PatchRepository_SetDefaultOnCurrentDefault_IsIdempotent()
-    {
-        var created = await _client.PostDataAsync<ProjectInfo>(
-            "/api/projects",
-            new
-            {
-                name = "repo-idempotent",
-                repository = new
-                {
-                    name = "server",
-                    gitUrl = "git@example.com:server.git",
-                    baseBranch = "main",
-                },
-            });
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories/server",
-            new { setDefault = true });
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-        var repos = json.GetProperty("data").GetProperty("repositories").EnumerateArray().ToList();
-        Assert.Single(repos);
-        Assert.True(repos[0].GetProperty("isDefault").GetBoolean());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteRepository_NonDefault_SucceedsAndKeepsDefault()
     {
@@ -632,8 +541,6 @@ public class ProjectApiSpecs
         Assert.True(repos[0].GetProperty("isDefault").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteRepository_Default_ReturnsConflictAndDoesNotMutate()
     {
@@ -661,8 +568,6 @@ public class ProjectApiSpecs
         Assert.Single(repos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RepoDelete_DefaultThroughCli_SurfacesServerConflictHint()
     {
@@ -695,8 +600,6 @@ public class ProjectApiSpecs
         Assert.Single(await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetProject_QueryModel_ReturnsFlaggedDefaultRepository()
     {

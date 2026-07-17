@@ -11,8 +11,6 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
 {
     public FailIfMarkerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_PreservesFailIfInTaskWith()
     {
@@ -45,8 +43,6 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         Assert.Contains("oneOf:", emitted);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithExpectMarkersFailIf_ReturnsFailIfAndOneOf()
     {
@@ -78,8 +74,6 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         Assert.Equal("<promise>FAIL</promise>", entry.FailIf);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithExpectFilesAndMarkers_DedupesByPath()
     {

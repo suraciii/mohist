@@ -9,8 +9,6 @@ namespace Mohist.Server.SpecTests.Specs.CliInfo;
 
 public class InfoCollectorVerboseSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Collect_VerboseTrue_PopulatesVerboseSection()
     {
@@ -106,8 +104,6 @@ public class InfoCollectorVerboseSpecs
         Assert.Equal(3, result.Verbose.DiskUsage.Categories.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Collect_VerboseFalse_LeavesVerboseNull()
     {

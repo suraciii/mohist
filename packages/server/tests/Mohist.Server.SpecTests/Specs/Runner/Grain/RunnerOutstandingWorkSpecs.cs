@@ -11,8 +11,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 {
     public RunnerOutstandingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerLoss_FailsActiveWorkflowTask()
     {
@@ -30,8 +28,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerLoss_WithoutOutstandingWorkflowWork_IsNoOp()
     {
@@ -53,8 +49,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Offline, runtimeAfter.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerLoss_FailedTaskKeepsRunnerLostMessage()
     {
@@ -72,8 +66,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerLoss_WithRunningChecks_FailsEachRunningCheck()
     {

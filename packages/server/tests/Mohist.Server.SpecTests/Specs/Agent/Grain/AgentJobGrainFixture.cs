@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,7 +18,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public IGrainFactory Grains => Cluster.Client;
     public IEventPublisher EventBus => _sharedEventBus;
     public RecordingEventStore EventStore => _sharedEventStore;
-    public string ConnectionString => _keeper.ConnectionString;
+    public string ConnectionString => _database.ConnectionString;
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
@@ -28,7 +27,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 
     private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();
-    private SqliteConnection _keeper = null!;
+    private TestSqliteDatabase _database = null!;
 
     public AgentJobGrainFixture()
     {
@@ -40,12 +39,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        var dbName = $"mohist-agent-job-test-{Guid.NewGuid():N}";
-        var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        var connectionString = _database.ConnectionString;
 
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 1;
@@ -63,7 +58,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public Task DisposeAsync()
     {
         Cluster?.Dispose();
-        _keeper?.DisposeAsync();
+        _database?.Dispose();
         return Task.CompletedTask;
     }
 }

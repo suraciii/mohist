@@ -11,8 +11,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.SignalR;
 
 public class RunnerHubSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Ping_ReturnsCallerConnectionId()
     {
@@ -24,8 +22,6 @@ public class RunnerHubSpecs
         Assert.Equal("conn-ping-1", result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Ping_DistinctConnections_DistinctResults()
     {

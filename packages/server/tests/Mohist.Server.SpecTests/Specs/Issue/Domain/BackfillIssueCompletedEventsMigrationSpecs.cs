@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
@@ -17,13 +16,11 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     private const string MigrationId = "20260705132535_BackfillIssueCompletedEvents";
     private const string CompletedType = "com.mohist.issue.completed";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoneIssueWithCompletedAt_InsertsCompletedEventUsingCompletedAt()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_done_ca", """
                 {"id":"issue_done_ca","projectId":"proj_a","number":7,"title":"Done with completedAt","status":"done","completedAt":"2026-06-28T12:00:00Z","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T12:00:00Z","workflowRunId":"wr_done_ca"}
@@ -32,7 +29,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_done_ca");
         Assert.NotNull(row);
         Assert.Equal(CompletedType, row!.Type);
@@ -44,13 +41,11 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Contains("\"issueno\":\"7\"", row.ExtensionsJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoneIssueWithoutCompletedAt_FallsBackToUpdatedAt()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_done_noca", """
                 {"id":"issue_done_noca","projectId":"proj_a","number":8,"title":"Legacy done no completedAt","status":"done","createdAt":"2026-05-31T10:00:00Z","updatedAt":"2026-05-31T13:30:13.257Z"}
@@ -59,7 +54,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_done_noca");
         Assert.NotNull(row);
         Assert.Equal(CompletedType, row!.Type);
@@ -69,15 +64,13 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Contains("\"workflowRunId\":null", row.Data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_LegacyDoneCapitalized_AlsoBackfilled()
     {
         // Legacy snapshots serialize status as PascalCase ('Done') from the
         // pre-camelCase serializer era; the match must be case-insensitive.
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_done_caps", """
                 {"id":"issue_done_caps","projectId":"proj_a","number":9,"title":"Capital Done","status":"Done","createdAt":"2026-05-31T10:00:00Z","updatedAt":"2026-05-31T13:30:13Z"}
@@ -86,21 +79,19 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_done_caps");
         Assert.NotNull(row);
         Assert.Equal(CompletedType, row!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_CancelledIssue_NotBackfilled()
     {
         // Throughput measures delivery, not failure cadence — cancelled is
         // intentionally out of scope.
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_cancelled", """
                 {"id":"issue_cancelled","projectId":"proj_a","number":10,"title":"Cancelled","status":"cancelled","completedAt":"2026-06-27T14:00:00Z","createdAt":"2026-06-27T10:00:00Z","updatedAt":"2026-06-27T14:00:00Z"}
@@ -109,18 +100,16 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_cancelled");
         Assert.Null(row);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_NonTerminalIssue_NotBackfilled()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_backlog", """
                 {"id":"issue_backlog","projectId":"proj_a","number":11,"title":"Backlog","status":"backlog","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T10:00:00Z"}
@@ -129,20 +118,18 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_backlog");
         Assert.Null(row);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_IssueWithExistingCompletedEvent_NotReinserted()
     {
         // Idempotency: an issue that already has a completed event (e.g. live-
         // written after the SaveIssueAsync fix) must not get a duplicate.
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_existing", """
                 {"id":"issue_existing","projectId":"proj_a","number":12,"title":"Existing","status":"done","completedAt":"2026-06-29T08:00:00Z","createdAt":"2026-06-29T06:00:00Z","updatedAt":"2026-06-29T08:00:00Z"}
@@ -153,13 +140,11 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var count = await CountIssueEventsAsync(verify, "issue_existing");
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_BackfilledEvent_CountsAsCompletedInMetricsScan()
     {
@@ -168,7 +153,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         // the catalog constant the querier filters on, so throughput picks
         // the backfilled population up.
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_metric", """
                 {"id":"issue_metric","projectId":"proj_a","number":13,"title":"Metric","status":"done","completedAt":"2026-06-30T04:15:26Z","createdAt":"2026-06-29T06:00:00Z","updatedAt":"2026-06-30T04:15:26Z"}
@@ -177,7 +162,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var row = await ReadSingleIssueEventAsync(verify, "issue_metric");
         Assert.NotNull(row);
         // Must equal EventCatalog.ReverseDns.IssueCompleted — the literal the
@@ -185,22 +170,20 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Equal("com.mohist.issue.completed", row!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_IncludesBackfillIssueCompletedEventsMigration()
     {
         await using var database = CreateDatabase();
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = CreateContext(database);
         await ctx.Database.MigrateAsync();
 
         var applied = await ctx.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == MigrationId);
     }
 
-    private static async Task RunMigrationUpAsync(TestDatabase database)
+    private static async Task RunMigrationUpAsync(TestSqliteDatabase database)
     {
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = CreateContext(database);
         // Re-statement of the migration's Up SQL (mirrors
         // BackfillIssueCompletedEvents.Up exactly). The separate
         // DatabaseMigrate_IncludesBackfillIssueCompletedEventsMigration spec
@@ -317,58 +300,13 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         command.Parameters.Add(param);
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateEmpty();
 
-    private static TestDatabase CreateModelSchemaDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
+    private static MohistDbContext CreateContext(TestSqliteDatabase database) =>
+        new(new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(database.Keeper).Options);
+
+    private static TestSqliteDatabase CreateModelSchemaDatabase() => TestSqliteDatabase.CreateModelSchema();
 
     private sealed record EventRow(
         string Type, string Source, string? Subject, string Time, string Data, string ExtensionsJson);
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options)
-        {
-            Options = options;
-        }
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
 }

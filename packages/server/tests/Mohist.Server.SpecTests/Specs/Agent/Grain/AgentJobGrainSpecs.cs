@@ -16,96 +16,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
-public class AgentJobGrainSpecs
+public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 {
-    private readonly AgentJobGrainFixture _fixture;
-
-    public AgentJobGrainSpecs(AgentJobGrainFixture fixture)
+    public AgentJobGrainSpecs(AgentJobGrainFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
-        _fixture.DispatchObserver.Reset();
     }
 
-    private IGrainFactory Grains => _fixture.Grains;
-
-    private IAgentJobGrain JobGrain(string key) => Grains.GetGrain<IAgentJobGrain>(key);
-
-    private static async Task<T> WaitForAsync<T>(
-        Func<Task<T>> probe,
-        Func<T, bool> done,
-        TimeSpan timeout,
-        TimeSpan step,
-        string description)
-        => await TestWait.ForAsync(probe, done, timeout, step, description);
-
-    private static async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
-    {
-        await WaitForAsync(
-            () => job.GetStatusAsync(),
-            s => s == expected,
-            timeout,
-            TimeSpan.FromMilliseconds(25),
-            $"status == {expected}",
-            () => job.CheckTimeoutsAsync());
-    }
-
-    private static async Task<T> WaitForAsync<T>(
-        Func<Task<T>> probe,
-        Func<T, bool> done,
-        TimeSpan timeout,
-        TimeSpan step,
-        string description,
-        Func<Task> advance)
-        => await TestWait.ForAsync(probe, done, timeout, step, description, advance);
-
-    private async Task<(string RunnerId, string ProjectId)> RegisterAgentJobRunnerAsync(
-        string runnerId,
-        string? projectId = null,
-        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
-    {
-        // Every agent-job spec shares the in-memory backlog directory and
-        // global runner registry with the rest of the [Collection("RunnerGrain")]
-        // cluster. Without a reset here, a stale runner from a prior spec
-        // assigns this job before the new runner can, which makes the
-        // assertions on snapshot.RunnerId non-deterministic. Clear both
-        // before each registration.
-        await ClearBacklogAsync();
-
-        var pid = projectId ?? $"agent-job-project-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "agent-job-host",
-            pid));
-        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
-        {
-            await runner.UpdateAsync(maxWorkflowSlots);
-        }
-        return (runnerId, pid);
-    }
-
-    private async Task ClearBacklogAsync()
-    {
-        await ClearGlobalRunnerRegistryAsync();
-
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
-    }
-
-    private async Task ClearGlobalRunnerRegistryAsync()
-    {
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        var ids = await registry.ListRunnerIdsAsync();
-        foreach (var id in ids)
-            await registry.UnregisterAsync(id);
-    }
-
-    private static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
-        new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId);
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch()
     {
@@ -133,8 +49,6 @@ public class AgentJobGrainSpecs
         Assert.Contains(jobKey, state.ActiveWorks.Select(w => w.OwnerId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_TransitionsRunningToCompleted_OnSuccess()
     {
@@ -171,8 +85,6 @@ public class AgentJobGrainSpecs
         Assert.Null(terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_TransitionsRunningToFailed_OnFailure()
     {
@@ -208,8 +120,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("boom", terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_AfterTerminalCompletion_IsRejected_AndPriorResultPreserved()
     {
@@ -245,8 +155,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("first result", stillTerminal.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_StaysPendingAndRetriesWithBackoff()
     {
@@ -266,8 +174,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobStatus.Pending, stillPending);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending()
     {
@@ -301,8 +207,6 @@ public class AgentJobGrainSpecs
         Assert.DoesNotContain(activeWorks, w => w.OwnerId == secondJobKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_BoundExceeded_TransitionsToFailedWithRunnerUnavailable()
     {
@@ -321,8 +225,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed()
     {
@@ -383,8 +285,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_DoesNotUseWorkflowAssignment()
     {
@@ -402,8 +302,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(jobKey, polled.AgentJobId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task RunningJob_WithoutReport_JobTimeout_TransitionsToFailed()
     {
@@ -423,8 +321,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
     {
@@ -469,8 +365,6 @@ public class AgentJobGrainSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task AttachedGenericJobFailure_RecordsOneTerminalFactWithRuntimeFailureCategory()
     {
@@ -517,8 +411,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("prompt_timeout", payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task GetGrain_IAgentJobGrain_ResolvesActiveActivation()
     {
@@ -538,8 +430,6 @@ public class AgentJobGrainSpecs
         Assert.Null(terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_SecondCallAfterRunning_ThrowsInvalidOperationException()
     {
@@ -554,8 +444,6 @@ public class AgentJobGrainSpecs
             async () => await job.SubmitAsync(MakeInput("second", projectId, "/tmp/agent-job-resubmit")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent()
     {
@@ -571,8 +459,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
     {
@@ -591,188 +477,4 @@ public class AgentJobGrainSpecs
         Assert.True(snapshot.DispatchAttempts >= 2);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task SubmitAsync_WithAgentDefinition_ComposesInstructionsConfigAndPrompt_OnDispatchEnvelope()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-agent-source-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-agent-source-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-        var sessionId = $"agent-session-{Guid.NewGuid():N}";
-
-        var instructions = "Always respond in formal English; refuse non-code tasks.";
-        var configElement = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\"}").RootElement.Clone();
-
-        var input = new AgentJobInput(
-            Prompt: "summarize the diff",
-            Model: "openai/gpt-5.5",
-            WorkspacePath: "/tmp/agent-job-agent-source",
-            ProjectId: projectId,
-            AgentId: "agent-7",
-            AgentInstructions: instructions,
-            AgentConfig: configElement,
-            AgentSessionId: sessionId);
-
-        await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
-
-        Assert.NotNull(polled);
-        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled!.OwnerKind);
-        Assert.Equal(jobKey, polled.AgentJobId);
-        Assert.Equal(projectId, polled.ProjectId);
-        Assert.Equal(sessionId, polled.AgentSessionId);
-
-        Assert.False(string.IsNullOrWhiteSpace(polled.With));
-        var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
-        var promptValue = with.GetProperty("prompt");
-        Assert.Equal(JsonValueKind.Object, promptValue.ValueKind);
-
-        var agentLaunch = promptValue.GetProperty("agent-launch");
-        Assert.Equal(instructions, agentLaunch.GetProperty("instructions").GetString());
-        Assert.Equal("openai/gpt-5.5", agentLaunch.GetProperty("config").GetProperty("model").GetString());
-        Assert.Equal("summarize the diff", agentLaunch.GetProperty("prompt").GetString());
-
-        Assert.Equal("openai/gpt-5.5", with.GetProperty("model").GetString());
-        Assert.Equal("openai/gpt-5.5", with.GetProperty("agent").GetProperty("model").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task SubmitAsync_RawPromptOnly_PassesBarePromptToDispatchEnvelope_AndLeavesNewFieldsUnset()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-raw-only-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-raw-only-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
-        await job.SubmitAsync(MakeInput("raw prompt only", projectId, "/tmp/agent-job-raw-only"));
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
-
-        Assert.NotNull(polled);
-        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled!.OwnerKind);
-        Assert.Equal(jobKey, polled.AgentJobId);
-        Assert.Equal(projectId, polled.ProjectId);
-        Assert.Null(polled.AgentSessionId);
-
-        var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
-        Assert.Equal(JsonValueKind.String, with.GetProperty("prompt").ValueKind);
-        Assert.Equal("raw prompt only", with.GetProperty("prompt").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task SubmitAsync_AgentJobWithAgentSessionId_PopulatesSessionIdOnDispatchEnvelope()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-session-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-session-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-        var sessionId = $"generic-session-{Guid.NewGuid():N}";
-
-        var input = new AgentJobInput(
-            Prompt: "ask the agent",
-            WorkspacePath: "/tmp/agent-job-session",
-            ProjectId: projectId,
-            AgentId: "agent-42",
-            AgentInstructions: "be brief",
-            AgentSessionId: sessionId);
-
-        await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
-
-        Assert.NotNull(polled);
-        Assert.Equal(projectId, polled!.ProjectId);
-        Assert.Equal(sessionId, polled.AgentSessionId);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task SubmitAsync_AgentJobWithoutSessionId_LeavesAgentSessionIdUnset()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-no-session-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-no-session-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-
-        var input = new AgentJobInput(
-            Prompt: "no session",
-            WorkspacePath: "/tmp/agent-job-no-session",
-            ProjectId: projectId);
-
-        await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
-
-        Assert.NotNull(polled);
-        Assert.Equal(projectId, polled!.ProjectId);
-        Assert.Null(polled.AgentSessionId);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task SubmitAsync_PolledDispatch_ExposesProjectIdAndAgentSessionIdThroughHttpPoll()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-http-project-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-http-project-{Guid.NewGuid():N}";
-        var job = JobGrain(jobKey);
-        var sessionId = $"http-session-{Guid.NewGuid():N}";
-
-        var input = new AgentJobInput(
-            Prompt: "expose via http",
-            WorkspacePath: "/tmp/agent-job-http-project",
-            ProjectId: projectId,
-            AgentId: "agent-http",
-            AgentInstructions: "concise",
-            AgentSessionId: sessionId);
-
-        await job.SubmitAsync(input);
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
-
-        Assert.NotNull(polled);
-        Assert.Equal(projectId, polled!.ProjectId);
-        Assert.Equal(sessionId, polled.AgentSessionId);
-    }
-}
-
-[Collection("RunnerGrain")]
-public class AgentJobOptionsBindingSpecs
-{
-    private readonly WorkflowGrainFixture _fixture;
-
-    public AgentJobOptionsBindingSpecs(WorkflowGrainFixture fixture)
-    {
-        _fixture = fixture;
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public async Task AgentJobOptions_ResolveBackoffSchedule_UsesDefaultsFromConfigurationKnob()
-    {
-        var provider = _fixture.Cluster.GetSiloServiceProvider(null);
-        var optionsAccessor = provider.GetRequiredService<IOptions<AgentJobOptions>>();
-        var schedule = optionsAccessor.Value.ResolveBackoffSchedule();
-
-        Assert.Equal(TimeSpan.FromMilliseconds(50), schedule.Initial);
-        Assert.Equal(TimeSpan.FromMilliseconds(200), schedule.Cap);
-        Assert.Equal(TimeSpan.FromSeconds(5), schedule.TotalBound);
-        Assert.Equal(TimeSpan.FromSeconds(10), optionsAccessor.Value.JobTimeout);
-
-        var next = schedule.NextDelay(TimeSpan.Zero);
-        Assert.Equal(TimeSpan.FromMilliseconds(50), next);
-
-        var capped = schedule.NextDelay(TimeSpan.FromSeconds(1));
-        Assert.Equal(TimeSpan.FromMilliseconds(200), capped);
-    }
 }

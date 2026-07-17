@@ -9,8 +9,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-[Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
 [Collection("IntegrationTelemetry")]
 public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 {

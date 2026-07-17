@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Api;
 /// <item>honours the <c>?limit=</c> query parameter.</item>
 /// </list>
 /// </summary>
-[Collection("MohistIntegration2")]
+[Collection("PlatformIntegration")]
 public class EpicEventsApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -30,8 +30,6 @@ public class EpicEventsApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_ForEpicWithOnlyTheCreationEvent_Returns200WithSingletonList()
     {
@@ -50,8 +48,6 @@ public class EpicEventsApiSpecs
         Assert.Equal("p2", created.Data.GetProperty("priority").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_ForEpicWithOnlyCreationEvent_IsHttp200()
     {
@@ -64,8 +60,6 @@ public class EpicEventsApiSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_AfterMutations_ReturnsEventsChronologically()
     {
@@ -108,8 +102,6 @@ public class EpicEventsApiSpecs
         Assert.Contains(statusChanges, s => s.Old == "idle" && s.New == "running");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_AcceptsEpicNumber()
     {
@@ -121,8 +113,6 @@ public class EpicEventsApiSpecs
         Assert.NotEmpty(events);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_OnUnknownEpicNumber_Returns404()
     {
@@ -134,8 +124,6 @@ public class EpicEventsApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_OnUnassignedNumber_Returns404()
     {
@@ -149,8 +137,6 @@ public class EpicEventsApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_WithLimit_ReturnsTailOnly()
     {
@@ -187,8 +173,6 @@ public class EpicEventsApiSpecs
         Assert.Equal(unlimited[^1].Type, single.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task GetEvents_DtoShapeExposesTypeTimeAndPayload()
     {

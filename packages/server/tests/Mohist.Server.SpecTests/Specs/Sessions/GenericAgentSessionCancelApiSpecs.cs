@@ -17,38 +17,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 [Collection("IntegrationSessions")]
-public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
+public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTestSupport
 {
-    private readonly MohistIntegrationFixture _fixture;
-    private readonly HttpClient _client;
-    private readonly string _runnerId = $"generic-cancel-{Guid.NewGuid():N}";
-
-    public GenericAgentSessionCancelApiSpecs(MohistIntegrationFixture fixture)
+    public GenericAgentSessionCancelApiSpecs(MohistIntegrationFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
-        _client = fixture.Client;
     }
 
-    // Issue-129 T-005: each test instance registers its own runner via
-    // LaunchAndOpenGenericSessionAsync so the runner id is unique across
-    // tests and we don't pick up a stale work item from a previous test.
-    public Task InitializeAsync() => Task.CompletedTask;
-
-    public async Task DisposeAsync()
-    {
-        try
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/unregister", content: null);
-            _ = response;
-        }
-        catch
-        {
-            // Best-effort cleanup; do not mask test failures.
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsCancelled_ReturnsCancelledState()
     {
@@ -86,8 +60,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("workflow")]
     [InlineData("agent-launch")]
@@ -146,8 +118,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsNotCancellable_ReturnsNotCancellableState()
     {
@@ -174,8 +144,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_RunnerInvocationFails_ReturnsNotCancellableState()
     {
@@ -202,8 +170,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner()
     {
@@ -244,8 +210,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
     {
@@ -279,8 +243,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("completed")]
     [InlineData("failed")]
@@ -306,8 +268,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(terminalStatus, doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_UnknownSession_ReturnsNotFound()
     {
@@ -320,8 +280,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_SessionInOtherProject_ReturnsNotFound()
     {
@@ -333,8 +291,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionButRunnerOffline_ReturnsNotCancellableState()
     {
@@ -354,8 +310,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Empty(runnerHub.Invocations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_UnopenedAgentLaunchSession_ReturnsNotCancellableWithoutRequiringRuntimeBinding()
     {
@@ -377,8 +331,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal("not-cancellable", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_BoundSessionWithMissingRuntime_ReturnsResetHint()
     {
@@ -401,8 +353,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState()
     {
@@ -431,8 +381,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericCancelTargetAsync_UnknownSessionId_ReturnsNull()
     {
@@ -446,8 +394,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Null(target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericCancelTargetAsync_ActiveSession_ReturnsNullTerminalState()
     {
@@ -464,8 +410,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Null(target.TerminalState);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("failed")]
     [InlineData("cancelled")]
@@ -491,179 +435,4 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(terminalStatus, target!.TerminalState);
     }
 
-    private Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId) =>
-        _client.PostAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel", content: null);
-
-    private async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind, string runtime = "opencode")
-    {
-        var project = await CreateProjectAsync($"preserves-{sourceKind}");
-        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
-            .RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
-
-        var sessionId = $"cancel-{Guid.NewGuid():N}";
-        var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
-        var metadata = sourceKind switch
-        {
-            "workflow" => WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
-                project.Id,
-                $"workflow-{Guid.NewGuid():N}",
-                "build")),
-            "agent-launch" => GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
-                project.Id,
-                $"agent-{Guid.NewGuid():N}",
-                "cancel-agent")),
-            _ => throw new ArgumentOutOfRangeException(nameof(sourceKind), sourceKind, "Unknown AgentSession source"),
-        };
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(
-            RunnerId: _runnerId,
-            AgentRuntime: runtime,
-            WorkDir: $"/workspaces/{project.Id}",
-            Metadata: metadata));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-            runtimeSessionId,
-            WorkDir: $"/workspaces/{project.Id}"));
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionInput,
-                $"{{\"role\":\"user\",\"text\":\"before cancel\",\"kind\":\"task\",\"runtimeSessionId\":\"{runtimeSessionId}\"}}"),
-            new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.MessageDelta,
-                "{\"text\":\"preserved assistant text\"}"),
-        }, runtimeSessionId));
-        await grain.FlushForTestAsync();
-
-        return (project, sessionId);
-    }
-
-    private async Task<SessionEvidence> ReadSessionEvidenceAsync(string sessionId)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var query = scope.ServiceProvider.GetRequiredService<AgentSessionQuery>();
-        var record = Assert.Single(await query.ListByIdsAsync([sessionId]));
-        var lineage = (record.Session.Status.RuntimeSessionLineage ?? [])
-            .Select(entry => $"{entry.Runtime}|{entry.AgentRuntimeSessionId}|{entry.BoundAt:o}")
-            .ToArray();
-
-        await using var db = await scope.ServiceProvider
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var turns = await db.AgentSessionTranscriptTurns
-            .AsNoTracking()
-            .Where(turn => turn.SessionId == sessionId)
-            .OrderBy(turn => turn.Sequence)
-            .ThenBy(turn => turn.Id)
-            .ToListAsync();
-        var turnIds = turns.Select(turn => turn.Id).ToArray();
-        var parts = await db.AgentSessionTranscriptParts
-            .AsNoTracking()
-            .Where(part => turnIds.Contains(part.TurnId))
-            .OrderBy(part => part.Sequence)
-            .ThenBy(part => part.Id)
-            .ToListAsync();
-
-        return new SessionEvidence(
-            record.Session.Id,
-            record.Label(AgentSessionQueryMetadataKeys.SourceKind),
-            record.Session.Status.AgentRuntimeSessionId,
-            lineage,
-            turns.Select(turn => $"{turn.Id}|{turn.Sequence}|{turn.PromptKind}|{turn.PromptText}").ToArray(),
-            parts.Select(part => $"{part.Id}|{part.Sequence}|{part.Type}|{part.Text}|{part.PayloadJson}").ToArray());
-    }
-
-    private async Task<(ProjectRef Project, AgentRef Agent, string SessionId, AgentSessionInfo Info)> LaunchAndOpenGenericSessionAsync(string name)
-    {
-        var project = await CreateProjectAsync(name);
-        var runnerId = _runnerId;
-        var agent = await CreateAgentAsync(project.Id, $"gen-cancel-agent-{name}");
-
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
-            projectId = project.Id,
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/sessions",
-            new { prompt = $"hello from {name}" });
-
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-
-        // Open + attach the generic session so the runner's Runtime.RunnerId
-        // is bound and IsActive resolves true (matches the followup
-        // helper used in T-004).
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
-            new
-            {
-                workId = $"work-{Guid.NewGuid():N}",
-                workType = "task",
-                stage = "Build",
-                title = $"session for {name}",
-                issueNumber = 1,
-            });
-
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
-            new
-            {
-                runtimeSessionId = sessionId,
-                workDir = $"/workspaces/{project.Id}",
-                processPid = 1234,
-            });
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
-        return (project, agent, sessionId, info);
-    }
-
-    private async Task<ProjectRef> CreateProjectAsync(string name)
-    {
-        var projectName = $"gen-cancel-{Guid.NewGuid():N}";
-        if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return new ProjectRef(project.Id);
-    }
-
-    private async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
-                name = agentName,
-                description = $"description for {agentName}",
-                instructions = $"instructions for {agentName}",
-                agentConfig = new { type = "opencode" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
-    }
-
-    private sealed record ProjectRef(string Id);
-    private sealed record AgentRef(string Id, string Name);
-    private sealed record SessionEvidence(
-        string SessionId,
-        string? SourceKind,
-        string? RuntimeSessionId,
-        string[] Lineage,
-        string[] TranscriptTurns,
-        string[] TranscriptParts);
-    private sealed record ProjectDto(string Id, string Name);
 }

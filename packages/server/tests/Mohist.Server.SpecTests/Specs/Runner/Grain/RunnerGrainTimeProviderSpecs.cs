@@ -13,8 +13,6 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
 {
     public RunnerGrainTimeProviderSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task AssignAgentJobAsync_RecordsTakeTimeFromFakeTimeProvider()
     {
@@ -53,8 +51,6 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
         Assert.Equal(after, second.TakenAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Heartbeat_DoesNotRefreshPresence_ButPollPresenceDoes()
     {

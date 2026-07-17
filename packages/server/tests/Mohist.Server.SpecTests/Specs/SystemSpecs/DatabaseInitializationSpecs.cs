@@ -8,8 +8,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class DatabaseInitializationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_CreatesAllTables()
     {
@@ -38,8 +36,6 @@ public class DatabaseInitializationSpecs
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_CreatesProjectPromptTemplatesTableAndIndex()
     {
@@ -60,8 +56,6 @@ public class DatabaseInitializationSpecs
         Assert.Contains("20260605025642_InitialSchema", migrations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_AppliesDisabledWorkflowProfileIdsMigration()
     {
@@ -80,8 +74,6 @@ public class DatabaseInitializationSpecs
         Assert.Contains("20260629000000_AddDisabledWorkflowProfileIds", applied);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenCalledTwiceOnProjectPromptTemplates_IsIdempotent()
     {
@@ -106,8 +98,6 @@ public class DatabaseInitializationSpecs
         Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenCalledTwice_IsIdempotent()
     {

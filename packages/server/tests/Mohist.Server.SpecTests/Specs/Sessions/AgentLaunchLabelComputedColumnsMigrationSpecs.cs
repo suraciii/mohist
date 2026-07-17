@@ -21,8 +21,6 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
 {
     private const string MigrationName = "20260629112745_AddAgentLaunchLabelComputedColumns";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Up_CreatesSixStoredComputedColumnsDerivedFromStateJson()
     {
@@ -53,8 +51,6 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Up_IndexesMatchExpectedShape()
     {
@@ -84,8 +80,6 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
             indexes["IX_AgentSessions_LabelAgentLaunchEpicNumber"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task DatabaseMigrate_AppliesAgentLaunchComputedColumnsMigration()
     {
@@ -114,8 +108,6 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task DatabaseMigrate_PopulatesComputedColumnsWithoutBackfill()
     {

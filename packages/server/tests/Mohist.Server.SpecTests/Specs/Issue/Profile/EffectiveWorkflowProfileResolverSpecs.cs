@@ -20,8 +20,6 @@ public class EffectiveWorkflowProfileResolverSpecs
 
     // ===================== Pure core (existence-only) =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_NullIssueSelection_NoProjectDefault_FallsToSystemDefault()
     {
@@ -33,8 +31,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_EmptyWhitespaceIssueSelection_FallsToSystemDefault()
     {
@@ -46,8 +42,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_ExplicitIssueSelection_TakesPrecedenceOverProjectDefault()
     {
@@ -59,8 +53,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_NoIssueSelection_UsesProjectDefaultWhenKnown()
     {
@@ -72,8 +64,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_UnknownIssueSelection_FallsThroughToProjectDefault()
     {
@@ -85,8 +75,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_UnknownIssueSelection_AndUnknownProjectDefault_FallsToSystemDefault()
     {
@@ -98,8 +86,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_UnknownProjectDefaultAlone_FallsToSystemDefault()
     {
@@ -113,8 +99,6 @@ public class EffectiveWorkflowProfileResolverSpecs
 
     // ===================== Service (registry-backed) =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_NullSelection_AndNoProjectDefault_ReturnsMohistLocal()
     {
@@ -125,8 +109,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_ExplicitPrSelection_ReturnsMohistPr()
     {
@@ -137,8 +119,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_NullSelection_WithPrProjectDefault_ReturnsMohistPr()
     {
@@ -149,8 +129,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_ExplicitDefaultSelection_ReturnsMohistLocal()
     {
@@ -161,8 +139,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/local", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_UnknownId_DoesNotThrowAndFallsBackToSystemDefault()
     {
@@ -175,8 +151,6 @@ public class EffectiveWorkflowProfileResolverSpecs
 
     // ===================== Disabled-profile skipping (core) =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_DisabledIssueSelection_FallsThroughToProjectDefault()
     {
@@ -191,8 +165,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/local", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_DisabledIssueSelectionAndProjectDefault_FallsThroughToFirstEnabledSystem()
     {
@@ -207,8 +179,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Null(resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_DisabledProjectDefault_WithOtherEnabledSystem_SkipsToOther()
     {
@@ -222,8 +192,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal("mohist/github-pr", resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_NoDisabledIds_BehavesAsBefore()
     {
@@ -235,8 +203,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ResolveCore_BlacklistAwareWithoutSystemProfileIds_ReturnsNull()
     {
@@ -251,8 +217,6 @@ public class EffectiveWorkflowProfileResolverSpecs
 
     // ===================== Instance Resolve with disabled set =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_WithDisabledSet_SkipsDisabledProfiles()
     {
@@ -266,8 +230,6 @@ public class EffectiveWorkflowProfileResolverSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Resolve_AllSystemProfilesDisabled_ReturnsNull()
     {

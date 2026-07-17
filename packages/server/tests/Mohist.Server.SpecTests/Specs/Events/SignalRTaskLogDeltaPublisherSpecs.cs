@@ -12,8 +12,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
 {
     private const string TaskLogType = "task-log.delta";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_SubscribedConnection_DeliversDeltaOnTaskLogChannel()
     {
@@ -35,8 +33,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.Equal("task-1", message.Envelope.TaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_UnsubscribeByTask_DoesNotReceive()
     {
@@ -56,8 +52,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.Empty(hub.TaskLogDeltaMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_OnlyInterestedClientsReceive_NotOthersOnSameRun()
     {
@@ -88,8 +82,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.DoesNotContain(hub.TaskLogDeltaMessages, m => m.ConnectionId == "conn-C");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_NoSubscribers_DoesNotThrowAndDoesNotProduceFanOut()
     {
@@ -107,8 +99,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.Empty(hub.TaskLogDeltaMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_SubscribedTypeMissing_DoesNotReceive()
     {
@@ -131,8 +121,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.Empty(hub.TaskLogDeltaMessages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_PerSendThrows_OtherClientsStillReceive()
     {
@@ -163,8 +151,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         Assert.NotEmpty(log);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_NullEnvelope_Throws()
     {
@@ -175,8 +161,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
         await Assert.ThrowsAsync<ArgumentNullException>(() => publisher.PublishAsync(null!));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_NullTaskId_DoesNotFanOut()
     {
@@ -222,8 +206,6 @@ public class SignalRTaskLogDeltaPublisherSpecs
             Truncated: false);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PublishAsync_ProjectScopedDelta_DeliversOnlyToMatchingProjectConnection()
     {

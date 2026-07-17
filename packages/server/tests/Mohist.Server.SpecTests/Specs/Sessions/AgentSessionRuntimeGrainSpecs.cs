@@ -15,8 +15,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         _fixture.Reset();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task OpenAndAttach_StampRuntimeOnBindingAndLineage()
     {
@@ -29,8 +27,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         Assert.Equal("opencode", Assert.Single(_fixture.StateStore.State.Status.RuntimeSessionLineage!).Runtime);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Open_ExistingLegacySessionDoesNotBackfillRuntime()
     {
@@ -54,8 +50,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         Assert.Null(_fixture.StateStore.State!.Runtime.Runtime);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Compact_MissingBindingThrowsRuntimeSessionMissing()
     {
@@ -70,8 +64,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         Assert.Contains("Reset", exception.Message, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reset_UnregisteredRuntimeEstablishesReplacementBinding()
     {
@@ -90,8 +82,6 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         Assert.Equal("opencode", rebound?.Runtime);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RuntimeBinding_RemainsAvailableAfterReactivation()
     {

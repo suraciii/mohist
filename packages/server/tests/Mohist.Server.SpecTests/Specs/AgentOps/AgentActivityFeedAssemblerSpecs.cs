@@ -48,8 +48,6 @@ public class AgentActivityFeedAssemblerSpecs
         return scope.ServiceProvider.GetRequiredService<AgentActivityFeedAssembler>();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_NoSessions_EmitsEmptySummaryAndEmptyCardList()
     {
@@ -66,8 +64,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Empty(result.Waiting);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_GenericAgentLaunchSession_ProjectsAgentIdAndIssueTitleFallback()
     {
@@ -91,8 +87,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Empty(result.Waiting);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_WaitingCardsForwardedAndCountedSeparately()
     {
@@ -116,8 +110,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Equal(1, result.Summary.Active);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_LimitClampedToOneAndTwoHundred()
     {
@@ -133,8 +125,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Empty(high.Sessions);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_NullWaitingDefaultsToEmpty()
     {
@@ -147,8 +137,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Empty(result.Waiting);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetActivityAsync_WorkflowSessionCard_OmitsAgentFields()
     {
@@ -167,8 +155,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Null(card.AgentName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reconcile_DropsActiveSessionWhenWorkflowStateIsInvalid()
     {
@@ -188,8 +174,6 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.DoesNotContain(result.Sessions, c => c.SessionId == sessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Reconcile_RetainsActiveSessionWhenWorkflowRunIsNotYetRecorded()
     {

@@ -15,8 +15,6 @@ public class IssueOwnedEpicMembershipSpecs
 {
     private const string ProjectId = "project_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_NewIssue_CommandsIssueToOwnAffiliation()
     {
@@ -36,8 +34,6 @@ public class IssueOwnedEpicMembershipSpecs
         Assert.Null((await verify.Issues.SingleAsync()).EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MembershipCommands_RejectProjectOutsideEpicGrainKey()
     {
@@ -53,8 +49,6 @@ public class IssueOwnedEpicMembershipSpecs
         Assert.Empty(grains.AffiliationCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_AlreadyAssignedToClosedEpic_IsIdempotent()
     {
@@ -69,8 +63,6 @@ public class IssueOwnedEpicMembershipSpecs
         Assert.Empty(grains.AffiliationCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_NewIssueToClosedEpic_IsRejected()
     {
@@ -85,8 +77,6 @@ public class IssueOwnedEpicMembershipSpecs
         Assert.Empty(grains.AffiliationCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssueAsync_UsesExpectedEpicNumber()
     {
@@ -102,8 +92,6 @@ public class IssueOwnedEpicMembershipSpecs
         Assert.False(call.IsLink);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_ReportsCurrentIssueStateAndCommandsOnlyNewAssignments()
     {

@@ -25,7 +25,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue2")]
+[Collection("IssueLifecycle")]
 public class IssueWorkflowLifecycleSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -43,8 +43,6 @@ public class IssueWorkflowLifecycleSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompleteWorkAsync_IssueTransitionsFromInProgressToDone()
     {
@@ -65,8 +63,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.NotNull(archived.ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CancelAsync_WhenWorkflowRunning_RejectsWithError()
     {
@@ -76,8 +72,6 @@ public class IssueWorkflowLifecycleSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CancelAsync_WhenWorkflowStopped_IssueTransitionsToCancelled()
     {
@@ -95,8 +89,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(wrId, final.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CancelAsync_WhenIssueIsDoneWithPreservedReference_RejectsViaCloseOnly()
     {
@@ -115,8 +107,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.DoesNotContain("workflow is", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateFullAsync_WhenWorkflowHasStarted_RejectsWorkflowProfileChange()
     {
@@ -140,8 +130,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(wrId, final.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompleteWorkAsync_ForIssueNotInProgress_StaysInCurrentState()
     {
@@ -157,8 +145,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal("backlog", final!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RerunAsync_WhenFailureReasonIsUnknownLegacyValue_RerunsExistingWorkflow()
     {
@@ -184,8 +170,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_WhenExistingWorkflowIsStopped_StartsNewWorkflow()
     {
@@ -202,8 +186,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(newWrId, restarted.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_PersistsWorkspaceIdentityOnWorkflowRun()
     {
@@ -219,8 +201,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal($"openspec/changes/issue-{issueNumber}", run.Workspace.ChangeDir);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_WhenActiveRunExists_ReusesRunAndWorkspace()
     {
@@ -236,8 +216,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.NotNull(run!.Workspace);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task EventDispatcher_RedeliversIssueWorkStartedAndCreatesMissingWorkflowRun()
     {
@@ -255,8 +233,6 @@ public class IssueWorkflowLifecycleSpecs
         await AssertIssueWorkStartedDispatchedAsync(projectId, issueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_WhenPrerequisiteIncomplete_DoesNotCreateWorkflowRunOrWorkspace()
     {
@@ -285,8 +261,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.DoesNotContain("Path", projectRow.RepositoriesJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectAndRepository_AfterStart_HaveNoLocalPathFields()
     {
@@ -307,8 +281,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Contains("\"path\"", runRow.State);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWork_DispatchVariables_ExposeWorkspacePathAndRepositoryMetadataOnly()
     {

@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -13,39 +12,29 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogServiceSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogService _service;
-    private readonly SqliteConnection _keeper;
 
     public TaskLogServiceSpecs()
     {
-        var connectionString = $"Data Source=task-log-service-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        var factory = new Factory(_options);
+        _database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(_database.Options);
         _service = new TaskLogService(
             new TaskLogStore(factory, _timeProvider),
             new RunnerWorkStore(factory),
             new WorkflowRunQuerier(factory),
             new NoopTaskLogDeltaPublisher(),
             NullLogger<TaskLogService>.Instance);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -80,15 +69,6 @@ public class TaskLogServiceSpecs : IAsyncLifetime
             "work",
             entries,
             truncated: false));
-    }
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 
     private sealed class NoopTaskLogDeltaPublisher : ITaskLogDeltaPublisher
