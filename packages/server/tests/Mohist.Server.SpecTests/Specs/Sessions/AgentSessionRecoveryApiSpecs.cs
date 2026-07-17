@@ -619,7 +619,7 @@ public class AgentSessionRecoveryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task CompactEndpoint_PersistsCompactionEventAndUpdatesCoderSessionRecord()
+    public async Task CompactEndpoint_PersistsCompactionEventAndPreservesRuntimeBinding()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-persist", sessionName: "plan", attachIdle: true);
 
@@ -642,7 +642,7 @@ public class AgentSessionRecoveryApiSpecs
 
         var row = await db.AgentSessions.AsNoTracking()
             .SingleAsync(r => r.Id == currentSession.Id);
-        Assert.Null(row.AgentSessionId);
+        Assert.Equal(currentSession.Id, row.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
