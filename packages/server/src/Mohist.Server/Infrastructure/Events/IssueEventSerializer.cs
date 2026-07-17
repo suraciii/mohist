@@ -40,7 +40,7 @@ internal static class IssueEventSerializer
     /// <summary>
     /// CloudEvents 1.0.2 reverse-DNS <c>type</c> string for the bus.
     /// </summary>
-    public static string BusType(IssueEvent payload)
+    public static string BusType(IssueEvent payload) => Unwrap(payload) switch
     {
         IssueCreated => "com.mohist.issue.created",
         IssueLabelsChanged => "com.mohist.issue.labels-changed",
