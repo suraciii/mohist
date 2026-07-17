@@ -220,6 +220,26 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("task-1.1", dispatch.WorkId);
     }
 
+    [Fact]
+    public async Task TranslateToDispatch_LegacyInlineAgentInput_ThrowsDispatchRejection()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-translate-legacy-agent";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var item = WorkItem.Task(
+            "check",
+            "recover:fix-review-findings.4",
+            "Fix review findings",
+            "mohist/acp-agent",
+            With("""{"session":"check","prompt":"fix","agent":"${{ vars.agent }}"}"""));
+
+        var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(
+            () => _translator.TranslateToDispatchAsync(item, runId, run, "runner-1"));
+
+        Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
+        Assert.Contains("options", error.Message, StringComparison.Ordinal);
+    }
+
     // =========================================================================
     // In-direction: WorkResult → TaskReport | CheckReport
     // =========================================================================

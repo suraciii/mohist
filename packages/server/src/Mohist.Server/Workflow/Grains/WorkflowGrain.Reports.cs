@@ -32,6 +32,21 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, string message)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+        var activeWork = _run.FindActiveWork(workId, workerId);
+        if (activeWork is null || !activeWork.IsTask) return ReportAck.Stale;
+
+        var events = _run.FailTask(new TaskResult("failed", message), Now());
+        if (events.Count == 0) return ReportAck.Stale;
+
+        _log.LogWarning("Workflow {Id} rejected dispatch for {WorkId}: {Message}", GrainKey, workId, message);
+        await CommitAsync(events);
+        return ReportAck.Accepted;
+    }
+
     public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
         RejectIfRunReloadRequired();

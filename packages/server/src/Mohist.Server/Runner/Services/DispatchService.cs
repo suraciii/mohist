@@ -180,6 +180,11 @@ public sealed class DispatchService : IScopedService
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
             return (workKey, WithIssueFromRunAnnotations(dispatch, run));
         }
+        catch (WorkflowDispatchRejectedException ex)
+        {
+            await RejectDispatchAsync(workflowRunId, workerId, workId, ex);
+            return (null, null);
+        }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
@@ -211,6 +216,11 @@ public sealed class DispatchService : IScopedService
             var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, runnerId);
             return WithIssueFromRunAnnotations(dispatch, run);
         }
+        catch (WorkflowDispatchRejectedException ex)
+        {
+            await RejectDispatchAsync(workflowRunId, workerId, item.Id!, ex);
+            return null;
+        }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
@@ -220,6 +230,19 @@ public sealed class DispatchService : IScopedService
             // the next poll redelivers it via poll reconciliation.
             return null;
         }
+    }
+
+    private async Task RejectDispatchAsync(
+        string workflowRunId,
+        string workerId,
+        string workId,
+        WorkflowDispatchRejectedException exception)
+    {
+        _log.LogWarning(exception,
+            "DispatchService rejected dispatch for workflow {WorkflowId} work {WorkId}",
+            workflowRunId, workId);
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+            .RejectActiveWorkDispatchAsync(workerId, workId, exception.Message);
     }
 
     private static WorkDispatch WithIssueFromRunAnnotations(WorkDispatch dispatch, WorkflowRun run)

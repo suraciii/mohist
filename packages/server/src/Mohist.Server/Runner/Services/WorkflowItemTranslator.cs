@@ -252,7 +252,7 @@ EpicNumber: ReadEpicNumber(run),
 
         if (with is not null && with.TryGetValue("agent", out var legacyAgent) && legacyAgent.HasValue)
         {
-            throw new InvalidOperationException(
+            throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
                 "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{ vars.agent }}'.");
         }
@@ -260,7 +260,7 @@ EpicNumber: ReadEpicNumber(run),
         if (with is not null && with.TryGetValue("expect", out var legacyExpect) && legacyExpect.HasValue
             && HasWorkflowCompletionPolicy(legacyExpect.Value))
         {
-            throw new InvalidOperationException(
+            throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
                 "Move 'files', 'markers', and 'failIf' to task-level 'expect'. " +
                 "'with.expect' is reserved for Action-owned input on the selected Action contract.");
@@ -273,7 +273,7 @@ EpicNumber: ReadEpicNumber(run),
         // discriminators the inline-agent contract does not read.
         if (with is not null && with.ContainsKey("kind"))
         {
-            throw new InvalidOperationException(
+            throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy execution discriminator 'with.kind'. " +
                 "The 'mohist/opencode' Action is selected by 'uses' and does not read 'kind'. " +
                 "Remove 'with.kind'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
@@ -281,7 +281,7 @@ EpicNumber: ReadEpicNumber(run),
 
         if (with is not null && with.ContainsKey("type"))
         {
-            throw new InvalidOperationException(
+            throw new WorkflowDispatchRejectedException(
                 $"Workflow task '{workId}' declares legacy execution discriminator 'with.type'. " +
                 "The 'mohist/opencode' Action is selected by 'uses' and does not read 'type'. " +
                 "Remove 'with.type'; if model configuration is intended, bind 'options: ${{ vars.agent }}'.");
