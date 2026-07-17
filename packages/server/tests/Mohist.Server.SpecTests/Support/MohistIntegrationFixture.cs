@@ -181,6 +181,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<ILogTailSource>();
             services.AddSingleton<InMemoryLogTailSource>();
             services.AddSingleton<ILogTailSource>(provider => provider.GetRequiredService<InMemoryLogTailSource>());
+            services.RemoveAll<IEventTailSource>();
+            services.AddSingleton<InMemoryEventTailSource>();
+            services.AddSingleton<IEventTailSource>(provider => provider.GetRequiredService<InMemoryEventTailSource>());
             services.RemoveAll<Mohist.Server.SystemInfo.IFileSystem>();
             services.AddSingleton<Mohist.Server.SystemInfo.IFileSystem, InMemoryServerFileSystem>();
             services.RemoveAll<ISystemUpdateStore>();
