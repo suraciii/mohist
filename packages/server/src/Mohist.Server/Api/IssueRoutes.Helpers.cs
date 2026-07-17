@@ -124,7 +124,7 @@ public static partial class IssueRoutes
         return ApiResults.Ok(response!);
     }
 
-    internal static JsonElement? BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository)
+    internal static JsonElement? BuildRebaseTaskWith(string baseBranch, Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext repository)
     {
         var with = new Dictionary<string, object?>
         {
@@ -135,6 +135,8 @@ public static partial class IssueRoutes
                 ["name"] = repository.Name,
                 ["gitUrl"] = repository.GitUrl,
                 ["baseBranch"] = repository.BaseBranch,
+                ["remoteFingerprint"] = repository.RemoteFingerprint,
+                ["remoteIdentityVersion"] = repository.RemoteIdentityVersion,
             },
         };
 

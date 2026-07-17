@@ -19,6 +19,16 @@ public interface IIssueGrain : IGrainWithStringKey
     Task ChangeRepositoryAsync(string canonicalName, string commandId, long? expectedRevision);
     Task RecordRepositoryCommandReceiptAsync(string commandId, string kind, long? expectedRevision);
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
+
+    /// <summary>
+    /// issue-417 T-006 (D4): returns the Issue's currently-bound
+    /// workflow run id, or <c>null</c> when the issue has no
+    /// <c>workflowRunId</c>. Used by the durable
+    /// <c>IssueWorkStartedHandler</c> to detect and discard stale
+    /// events whose run id no longer matches the Issue's active
+    /// run.
+    /// </summary>
+    Task<string?> GetActiveWorkflowRunIdAsync();
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartReadiness> GetStartReadinessAsync();

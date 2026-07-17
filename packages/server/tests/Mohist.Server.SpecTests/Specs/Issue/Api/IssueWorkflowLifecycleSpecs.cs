@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -189,7 +190,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWorkAsync_PersistsWorkspaceIdentityOnWorkflowRun()
     {
-        var (projectId, projectName, issueNumber, _, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, projectName, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
 
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
@@ -199,6 +200,17 @@ public class IssueWorkflowLifecycleSpecs
             run.Workspace.Path);
         Assert.Equal($"mohist/run-{wrId}", run.Workspace.Branch);
         Assert.Equal($"openspec/changes/issue-{issueNumber}", run.Workspace.ChangeDir);
+
+        using var scope = _services.CreateScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var started = (await events.ListIssueEventsAsync(issueId, 100))
+            .LastOrDefault(e => string.Equals(e.Envelope.Type, EventCatalog.ReverseDns.IssueWorkStarted, StringComparison.Ordinal));
+        Assert.NotNull(started);
+        var payload = started!.Envelope.Data!.Value.Deserialize<IssueWorkStarted>(JSON.Options);
+        Assert.NotNull(payload);
+        Assert.Equal(run.Repository!.Name, payload!.Repository!.Name);
+        Assert.Equal(run.Workspace.Path, payload.Workspace!.Path);
+        Assert.Equal(issueNumber, payload.Context!.IssueNumber);
     }
 
     [Fact]

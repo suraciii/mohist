@@ -25,8 +25,6 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
-
             var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
             if (prepared.Unavailable is not null) return ApiResults.Ok(prepared.Unavailable);
 
@@ -82,8 +80,6 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
-
             var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
             if (prepared.Unavailable is not null) return ApiResults.Ok(prepared.Unavailable);
 
@@ -137,8 +133,6 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
-
             var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(ToCommitDiffUnavailable(prepared.Unavailable, hash));
@@ -181,8 +175,6 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
-
             var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = prepared.Unavailable.Reason });
@@ -222,8 +214,6 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
-
             var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = prepared.Unavailable.Reason });
@@ -303,17 +293,6 @@ public static class WorkspaceRoutes
         return app;
     }
 
-    private static IResult? CheckRepositoryConfig(IssueReadModel? issue) =>
-        IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue);
-
-    private static string ResolveBaseBranch(IssueReadModel issue)
-    {
-        var repo = issue.Repository
-            ?? throw new InvalidOperationException(
-                "Issue repository context is not resolved; check IssueRepositoryResolutionHelpers.CheckRepositoryConfigured first.");
-        return string.IsNullOrWhiteSpace(repo.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : repo.BaseBranch;
-    }
-
     private static async Task<PreparedWorkspaceQuery> PrepareWorkspaceQueryAsync(WorkflowQuerier querier, IssueReadModel issue)
     {
         if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
@@ -326,7 +305,12 @@ public static class WorkspaceRoutes
         if (WorkspaceHeadOrNull(workspace, issue.WorkflowRunId) is null)
             return PreparedWorkspaceQuery.UnavailableResult(Unavailable("branch_missing", "Workspace head branch is not recorded for this run"));
 
-        return PreparedWorkspaceQuery.Ready(workspace, ResolveBaseBranch(issue));
+        var repository = await querier.GetRepositoryContextAsync(issue.WorkflowRunId);
+        if (repository is null)
+            return PreparedWorkspaceQuery.UnavailableResult(Unavailable("missing_repository_context", "The workflow repository context is not available"));
+
+        var baseBranch = repository.BaseBranch;
+        return PreparedWorkspaceQuery.Ready(workspace, baseBranch);
     }
 
     private static async Task<WorkspaceUnavailable?> EnsureRunnerWorkspaceAvailableAsync(
@@ -381,6 +365,7 @@ public static class WorkspaceRoutes
         "runner_unavailable" => "Runner is not connected",
         "branch_missing" => "Workspace branch not found in workspace",
         "workspace_removed" => "The workflow workspace is not available",
+        "missing_repository_context" => "The workflow repository context is not available",
         _ => "Workspace unavailable",
     };
 

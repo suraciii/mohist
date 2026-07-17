@@ -126,7 +126,15 @@ public sealed partial class Issue
         RecordEvent(new IssueDraftChanged(oldIsDraft, isDraft));
     }
 
-    public void StartWorkflow(string wrId, DateTime? now = null)
+    public void StartWorkflow(string wrId, DateTime? now = null) =>
+        StartWorkflow(wrId, repository: null, workspace: null, context: null, now);
+
+    public void StartWorkflow(
+        string wrId,
+        IssueWorkStartedRepository? repository,
+        IssueWorkStartedWorkspace? workspace,
+        IssueWorkStartedContext? context,
+        DateTime? now = null)
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
@@ -136,7 +144,11 @@ public sealed partial class Issue
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
         Touch(now);
-        RecordEvent(new IssueWorkStarted(wrId));
+        RecordEvent(new IssueWorkStarted(
+            wrId,
+            repository,
+            workspace,
+            context));
     }
 
     public IssueStartBlocker? StartBlocker(IReadOnlySet<int>? undeliveredPrerequisites)
@@ -156,7 +168,16 @@ public sealed partial class Issue
     public bool CanStart(IReadOnlySet<int>? undeliveredPrerequisites) =>
         StartBlocker(undeliveredPrerequisites) is null;
 
-    public void Start(string wrId, IReadOnlySet<int>? undeliveredPrerequisites, DateTime? now = null)
+    public void Start(string wrId, IReadOnlySet<int>? undeliveredPrerequisites, DateTime? now = null) =>
+        Start(wrId, undeliveredPrerequisites, repository: null, workspace: null, context: null, now);
+
+    public void Start(
+        string wrId,
+        IReadOnlySet<int>? undeliveredPrerequisites,
+        IssueWorkStartedRepository? repository,
+        IssueWorkStartedWorkspace? workspace,
+        IssueWorkStartedContext? context,
+        DateTime? now = null)
     {
         var blocker = StartBlocker(undeliveredPrerequisites);
         if (blocker is IssueStartBlocker.Draft)
@@ -173,7 +194,11 @@ public sealed partial class Issue
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
         Touch(now);
-        RecordEvent(new IssueWorkStarted(wrId));
+        RecordEvent(new IssueWorkStarted(
+            wrId,
+            repository,
+            workspace,
+            context));
     }
 
     public void ClearStoppedWorkflow(string workflowRunId, DateTime? now = null)

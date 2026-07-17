@@ -32,7 +32,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
-    public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenPathAndBaseBranchComeFromCurrentProjectConfig()
+    public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenBaseBranchComesFromRunSnapshot()
     {
         // Given an issue bound to a project repository whose path and base branch are
         // subsequently changed in project configuration.
@@ -78,10 +78,9 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var diff = JsonDocument.Parse(await diffResponse.Content.ReadAsStringAsync()).RootElement;
         var data = diff.GetProperty("data");
         Assert.True(data.GetProperty("available").GetBoolean());
-        // The diff endpoint exposes the current repository's base branch as "base".
-        // After the project repository config change it must reflect the new value
-        // ("release") rather than the originally resolved "develop" value.
-        Assert.Equal("release", data.GetProperty("base").GetString());
+        // The diff endpoint passes the run-owned repository context even
+        // after the Project declaration is replaced.
+        Assert.Equal("develop", _fixture.RunnerWorkspace.LastBaseBranch);
 
         // Then the diff git call used the latest path resolved from the current project
         // configuration, not the repository fields resolved at issue creation.
@@ -96,10 +95,9 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         _fixture.Git.BranchExists = true;
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
-        // Drive the backlog issue to terminal so the deletion guard
-        // (issue-417 T-004) lets the repository be removed.
-        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/close");
+        await DriveIssueToTerminalAsync(projectId, issue);
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -110,28 +108,15 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         using var workspaceStatus = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/workspace-status");
         using var cleanup = await _client.PostAsync($"/api/projects/{projectId}/issues/{issue.Number}/cleanup", null);
 
-        // Then each endpoint returns a clear repository configuration problem instead of
-        // silently using stale issue repository data or falling back to "main".
-        Assert.Equal(HttpStatusCode.Conflict, diff.StatusCode);
-        var diffPayload = await diff.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", diffPayload.GetProperty("code").GetString());
-        Assert.Contains("secondary", diffPayload.GetProperty("error").GetString() ?? string.Empty);
-
-        Assert.Equal(HttpStatusCode.Conflict, fileContent.StatusCode);
-        var fileContentPayload = await fileContent.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", fileContentPayload.GetProperty("code").GetString());
-
-        Assert.Equal(HttpStatusCode.Conflict, workspaceStatus.StatusCode);
-        var workspaceStatusPayload = await workspaceStatus.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", workspaceStatusPayload.GetProperty("code").GetString());
-
-        Assert.Equal(HttpStatusCode.Conflict, cleanup.StatusCode);
-        var cleanupPayload = await cleanup.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", cleanupPayload.GetProperty("code").GetString());
+        // The run snapshot remains authoritative after the live declaration is removed.
+        Assert.Equal(HttpStatusCode.OK, diff.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, fileContent.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, workspaceStatus.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, cleanup.StatusCode);
     }
 
     [Fact]
-    public async Task GivenProjectRepositoryBaseBranchChanges_AfterIssueCreation_WhenUserRebasesWithoutBaseBranch_ThenRebaseUsesCurrentBaseBranch()
+    public async Task GivenProjectRepositoryBaseBranchChanges_AfterIssueCreation_WhenUserRebasesWithoutBaseBranch_ThenRebaseUsesRunSnapshot()
     {
         // Given an issue bound to a project repository whose base branch is later changed.
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
@@ -149,15 +134,17 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
-        // Then the queued rebase task uses the current project repository base branch
-        // resolved from the live project configuration.
+        // Then the rebase uses the run-owned snapshot's base branch
+        // ("develop" at start time), not the project's current base
+        // branch ("release"). The D4 design rule is that the run owns
+        // its repository context for its entire lifetime.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("release", payload.GetProperty("data").GetProperty("baseBranch").GetString());
+        Assert.Equal("develop", payload.GetProperty("data").GetProperty("baseBranch").GetString());
     }
 
     [Fact]
-    public async Task GivenReferencedRepositoryRemoved_WhenUserRebases_ThenApiReturnsRepositoryConfigurationProblem()
+    public async Task GivenReferencedRepositoryRemoved_WhenUserRebases_ThenApiUsesRunSnapshot()
     {
         // Given an issue bound to a project repository whose configuration is later removed.
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
@@ -174,12 +161,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
-        // Then the endpoint returns a clear repository configuration problem instead of
-        // silently falling back to stale issue repository data or to "main".
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        // Then the endpoint uses the immutable run snapshot instead of
+        // requiring the live repository declaration.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());
-        Assert.Contains("secondary", payload.GetProperty("error").GetString() ?? string.Empty);
+        Assert.Equal("develop", payload.GetProperty("data").GetProperty("baseBranch").GetString());
     }
 
     [Fact]

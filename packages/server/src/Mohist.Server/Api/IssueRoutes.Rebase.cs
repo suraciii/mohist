@@ -3,9 +3,10 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -19,7 +20,8 @@ public static partial class IssueRoutes
             int number,
             RebaseRequest? req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            WorkflowQuerier workflowQuerier) =>
         {
             var project = GetRequiredProject(ctx);
             var wrId = await ResolveWorkflowRunIdAsync(grains, issuesQuery, project.Id, number);
@@ -27,21 +29,31 @@ public static partial class IssueRoutes
 
             var issue = await issuesQuery.GetAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
+
+            // T-006: read the run-owned repository context instead of
+            // composing live Project metadata. The run's authoritative
+            // snapshot survives even if the Project's repository
+            // declaration has since been removed (Cleanup after terminal).
+            var runSnapshot = await workflowQuerier.GetRepositoryContextAsync(wrId);
+            if (runSnapshot is null)
+                return ApiResults.Conflict("Workflow run has no repository context; rebase not supported", "missing_repository_context");
 
             var workflow = grains.GetGrain<IWorkflowGrain>(wrId);
             if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase"))
                 return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
 
+            // Omitted base uses the run snapshot; explicit base is
+            // an operation-local override that must remain inside the
+            // same verified repository.
             var baseBranch = !string.IsNullOrWhiteSpace(req?.BaseBranch)
                 ? req!.BaseBranch!
-                : (string.IsNullOrWhiteSpace(issue.Repository!.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : issue.Repository.BaseBranch);
+                : runSnapshot.BaseBranch;
             var taskId = $"rebase-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             var task = new RuntimeTaskInput(
                 taskId,
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
-                BuildRebaseTaskWith(baseBranch, issue.Repository!),
+                BuildRebaseTaskWith(baseBranch, runSnapshot),
                 InvalidateChecks: true,
                 Recovery: BuildRebaseRecovery());
 

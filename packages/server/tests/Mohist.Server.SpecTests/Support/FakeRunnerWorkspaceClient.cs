@@ -17,6 +17,7 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
     public RunnerWorkspaceFileContentResult FileContent { get; set; } = new(null, null, "workspace_removed");
     public WorkspaceRemovalResult WorkspaceRemoval { get; set; } = new(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed");
     public Exception? Throw { get; set; }
+    public string? LastBaseBranch { get; private set; }
     public IReadOnlyList<RemoveWorkspaceCall> RemoveWorkspaceCalls
     {
         get { lock (_gate) return _removeWorkspaceCalls.ToList(); }
@@ -31,6 +32,7 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         FileContent = new RunnerWorkspaceFileContentResult(null, null, "workspace_removed");
         WorkspaceRemoval = new WorkspaceRemovalResult(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed");
         Throw = null;
+        LastBaseBranch = null;
         lock (_gate)
         {
             _removeWorkspaceCalls.Clear();
@@ -40,6 +42,7 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
     public Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
     {
         MaybeThrow();
+        LastBaseBranch = baseBranch;
         return Task.FromResult(Diff);
     }
 
@@ -58,6 +61,7 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
     public Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
     {
         MaybeThrow();
+        LastBaseBranch = baseBranch;
         return Task.FromResult(WorkspaceStatus);
     }
 

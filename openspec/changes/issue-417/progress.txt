@@ -286,3 +286,42 @@
   911 CLI + 1431 unit + 28 arch（+1 BindingParticipantInterfaces_OnlyConsumedByCoordinator）
   + 2829 spec（+6 IssueRepositoryCoordinatorSpecs）+ 1016 runner，
   0 warning 0 error。
+
+## T-006 notes (WorkflowRun repository context)
+
+- `IssueWorkStarted` now carries typed `IssueWorkStartedRepository`,
+  `IssueWorkStartedWorkspace`, and `IssueWorkStartedContext` records. The
+  durable `IssueWorkStartedHandler` rereads the Issue grain's active run id,
+  drops stale events, and converts the committed snapshot into an
+  input-idempotent `EnsureStartedAsync` command. Events with incomplete
+  snapshots are ignored so old synthetic test events cannot create a run.
+- Startup computes the repository fingerprint, workspace, and typed event
+  input before calling `Issue.Start`; the Issue save therefore owns the first
+  committed start fact. The same `EnsureStartedAsync` command is also issued
+  immediately after that commit as a latency optimization, while the durable
+  event remains the recovery path. A pre-commit save failure creates no run or
+  lock; a post-commit run-start failure leaves the Issue locked for event retry.
+- `WorkflowRun.Repository` has a private setter with JSON inclusion and is
+  assigned only by `EnsureStarted`. Replay compares repository, workspace, and
+  Issue identity annotations; identical input is a no-op and conflicting input
+  throws corruption. The repository snapshot round-trips through the existing
+  JSON run store without a relational migration.
+- `AuthoritativeRoutingOverlay.Apply` is applied after stage variables and
+  replaces complete `repository` and `workspace` roots, then resets run,
+  Project, and Issue identity fields. `WorkflowItemTranslator` now uses the
+  same effective bundle as API variable reads for task `with` expansion and
+  artifact binding, so configurable variables cannot redirect execution.
+- Workspace/review/cleanup and rebase routes resolve base/repository facts from
+  the run snapshot. They no longer reject a terminal Issue solely because its
+  live Project repository declaration was removed; omitted rebase base is the
+  snapshot, while an explicit base remains task-local.
+- The repository test changed from asserting live metadata after a Project
+  replacement to asserting the run snapshot, and terminal cleanup coverage now
+  starts a run before removing its declaration. `npm test -w packages/server`
+  cannot run in this repository because `packages/server` is not listed in the
+  root npm workspaces; equivalent server verification uses the three dotnet
+  server test projects with `-p:SkipWebBuild=true`.
+- Full `npm test` initially exposed the corrupted-run API theory's
+  nondeterministic `DeactivateOnIdle` assumption. Its test helper now forces
+  activation collection on each convergence probe; the final run passed 911
+  CLI + 1444 unit + 28 arch + 2829 spec + 4681 web + 1016 runner tests.

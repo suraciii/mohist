@@ -57,7 +57,29 @@ public sealed record IssueEpicChanged(
     int? EpicNumber);
 
 public sealed record IssueWorkStarted(
-    string WorkflowRunId);
+    string WorkflowRunId,
+    IssueWorkStartedRepository? Repository = null,
+    IssueWorkStartedWorkspace? Workspace = null,
+    IssueWorkStartedContext? Context = null);
+
+public sealed record IssueWorkStartedRepository(
+    string Name,
+    string GitUrl,
+    string BaseBranch,
+    string RemoteFingerprint,
+    string RemoteIdentityVersion);
+
+public sealed record IssueWorkStartedWorkspace(
+    string Path,
+    string? Branch,
+    string? ChangeDir);
+
+public sealed record IssueWorkStartedContext(
+    string ProjectId,
+    string IssueId,
+    int IssueNumber,
+    string? Title,
+    string? Priority);
 
 public sealed record IssueCompleted(
     string WorkflowRunId);
