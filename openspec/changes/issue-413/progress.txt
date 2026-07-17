@@ -1,0 +1,6 @@
+## Codebase Patterns
+
+- T-001: The transport-independent matcher lives under `Infrastructure/Events/Matching` and accepts only the `EventMatchInput` interface. CloudEvent adaptation remains for T-002.
+- T-001: Compilation tokenizes and parses once into immutable record AST nodes. Regex instances are created eagerly with the caller-provided timeout; runtime regex failures return false locally.
+- T-001: General evaluation failures flow through `IEventMatchFailureSink`, which is the structured log + counter integration seam; failures in either evaluation or the sink never propagate.
+- T-001 verification: focused matcher suite passes 21 tests in 25ms; `dotnet build Mohist.sln --no-restore -p:SkipWebBuild=true` passes with zero warnings; full `npm test` passed Unit/Arch/CLI but had one unrelated pre-existing flaky `SessionFollowupApiSpecs` failure, and that exact test passed immediately when rerun alone.
