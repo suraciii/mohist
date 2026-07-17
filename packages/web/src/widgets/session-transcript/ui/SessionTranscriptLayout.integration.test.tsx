@@ -4,19 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { SessionTranscriptLayout } from './SessionTranscriptLayout'
 import type { DisplayTurn } from '../model/session-transcript-display'
-import { setScopedValue } from '../../../../tests/support/scoped-property'
+import { setScopedValue, restoreScopedProperties } from '../../../../tests/support/scoped-property'
 
 function makeTurn(overrides: {
   id?: string
   prompt?: Partial<DisplayTurn['prompt']>
   startedAt?: string
+  completedAt?: string | null
   assistantParts?: DisplayTurn['assistantParts']
 }): DisplayTurn {
   const startedAt = overrides.startedAt ?? '2024-05-15T10:00:00.000Z'
   return {
     id: overrides.id ?? 'turn-1',
     startedAt,
-    completedAt: null,
+    completedAt: overrides.completedAt ?? null,
     prompt: {
       role: 'mohist',
       text: 'prompt body',
@@ -30,46 +31,108 @@ function makeTurn(overrides: {
   }
 }
 
-describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () => {
+describe('SessionTranscriptLayout — flat single-column timeline', () => {
   let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
-  const scrollContainerCleanups = new Set<() => void>()
 
   beforeEach(() => {
     scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
   })
 
   afterEach(() => {
-    for (const dispose of [...scrollContainerCleanups]) dispose()
     scrollIntoViewSpy.mockRestore()
   })
 
-  describe('TOC entry count matches rendered turn count and is keyed 1-based in document order', () => {
-    it('lists N entries for N turns with the 1-based index', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 't1', prompt: { kind: 'initial', title: 'First' } }),
-        makeTurn({ id: 't2', prompt: { kind: 'followup', title: 'Second' } }),
-        makeTurn({ id: 't3', prompt: { kind: 'task', title: 'Third' } }),
-      ]
+  describe('flat single-column container', () => {
+    it('renders a single full-width column with no two-column grid or max-width cap', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+      )
 
-      render(<SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />)
+      expect(container.querySelector('[data-turn-toc-rail]')).toBeNull()
+      expect(container.querySelector('[data-turn-toc-list]')).toBeNull()
+      expect(container.querySelector('[data-transcript-toolbar]')).toBeNull()
+      expect(container.querySelector('[data-transcript-toolbar-toc-trigger]')).toBeNull()
 
-      const list = document.querySelector('[data-turn-toc-list]')
-      const items = list?.querySelectorAll('[data-turn-toc-entry]') ?? []
+      const gridCandidates = Array.from(container.querySelectorAll('[class*="grid-cols"]'))
+      expect(gridCandidates).toHaveLength(0)
 
-      expect(items).toHaveLength(turns.length)
-      expect(items[0].getAttribute('data-turn-toc-entry-index')).toBe('1')
-      expect(items[1].getAttribute('data-turn-toc-entry-index')).toBe('2')
-      expect(items[2].getAttribute('data-turn-toc-entry-index')).toBe('3')
+      const maxWidthCandidates = Array.from(container.querySelectorAll('[class*="max-w-4xl"]'))
+      expect(maxWidthCandidates).toHaveLength(0)
     })
 
-    it('renders zero entries for an empty turn list', () => {
-      render(<SessionTranscriptLayout turns={[]} turnCount={0} title="t" statusKind="completed" isRunning={false} />)
-      expect(document.querySelector('[data-turn-toc-list]')).toBeNull()
+    it('keeps the CopyFullTextButton in the column header for non-empty transcripts', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+
+      const copyButtons = document.querySelectorAll('[data-copy-full-text]')
+      expect(copyButtons).toHaveLength(1)
+      expect((copyButtons[0] as HTMLButtonElement).disabled).toBe(false)
+    })
+  })
+
+  describe('turn divider bar — ordinal, kind label, start time, duration', () => {
+    it('renders a divider bar for every turn with ordinal, kind label, and start time', () => {
+      const turns: DisplayTurn[] = [
+        makeTurn({ id: 't1', prompt: { kind: 'initial' } }),
+        makeTurn({ id: 't2', prompt: { kind: 'followup' } }),
+        makeTurn({ id: 't3', prompt: { kind: 'task' } }),
+      ]
+
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />,
+      )
+
+      const dividers = container.querySelectorAll('[data-turn-divider]')
+      expect(dividers).toHaveLength(3)
+      expect(dividers[0].getAttribute('data-turn-index')).toBe('1')
+      expect(dividers[1].getAttribute('data-turn-index')).toBe('2')
+      expect(dividers[2].getAttribute('data-turn-index')).toBe('3')
+
+      const ordinals = container.querySelectorAll('[data-turn-index-label]')
+      expect(ordinals[0].textContent).toBe('Turn 1')
+      expect(ordinals[1].textContent).toBe('Turn 2')
+      expect(ordinals[2].textContent).toBe('Turn 3')
+
+      const kindLabels = container.querySelectorAll('[data-turn-kind-label]')
+      expect(kindLabels[0].textContent).toBe('Initial Task')
+      expect(kindLabels[1].textContent).toBe('Follow-up')
+      expect(kindLabels[2].textContent).toBe('Task')
+
+      const timestamps = container.querySelectorAll('[data-turn-timestamp]')
+      expect(timestamps[0].getAttribute('datetime')).toBe(turns[0].startedAt)
+      expect(timestamps[1].getAttribute('datetime')).toBe(turns[1].startedAt)
+      expect(timestamps[2].getAttribute('datetime')).toBe(turns[2].startedAt)
+    })
+
+    it('shows duration on completed turns and omits it on running turns', () => {
+      const turns: DisplayTurn[] = [
+        makeTurn({
+          id: 'completed',
+          startedAt: '2024-05-15T10:00:00.000Z',
+          completedAt: '2024-05-15T10:01:00.000Z',
+          prompt: { kind: 'initial' },
+        }),
+        makeTurn({
+          id: 'running',
+          startedAt: '2024-05-15T10:02:00.000Z',
+          completedAt: null,
+          prompt: { kind: 'followup' },
+        }),
+      ]
+
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="live" isRunning />,
+      )
+
+      const durations = container.querySelectorAll('[data-turn-duration]')
+      expect(durations).toHaveLength(1)
+      expect(durations[0].textContent).toBe('1m 00s')
     })
   })
 
   describe('turn refs map is owned by the layout and registered by TurnList', () => {
-    it('registers each turn element with its 1-based index', () => {
+    it('registers each turn element with its 1-based index via data-turn-ref', () => {
       const turns: DisplayTurn[] = [
         makeTurn({ id: 't1' }),
         makeTurn({ id: 't2' }),
@@ -80,72 +143,12 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
 
       const turnRefs = document.querySelectorAll('[data-turn-ref]')
       expect(turnRefs).toHaveLength(3)
-
-      const list = document.querySelector('[data-turn-toc-list]')
-      const items = list?.querySelectorAll('[data-turn-toc-entry]') ?? []
-
-      const firstButton = items[0] as HTMLButtonElement
-      fireEvent.click(firstButton)
-
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[0])
+      expect(turnRefs[0].getAttribute('data-turn-id')).toBe('t1')
+      expect(turnRefs[1].getAttribute('data-turn-id')).toBe('t2')
+      expect(turnRefs[2].getAttribute('data-turn-id')).toBe('t3')
     })
 
-    it('clicking the TOC entry for turn K calls scrollIntoView on the K-th turn element', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 'a', prompt: { kind: 'task', title: 'A' } }),
-        makeTurn({ id: 'b', prompt: { kind: 'task', title: 'B' } }),
-        makeTurn({ id: 'c', prompt: { kind: 'task', title: 'C' } }),
-      ]
-
-      render(<SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />)
-
-      const turnRefs = document.querySelectorAll('[data-turn-ref]')
-      const list = document.querySelector('[data-turn-toc-list]')
-      const secondButton = list?.querySelector('[data-turn-toc-entry-index="2"]') as HTMLButtonElement
-
-      fireEvent.click(secondButton)
-
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
-    })
-
-    it('boundary indices (first/last) are honored by scrollIntoView', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 'a' }),
-        makeTurn({ id: 'b' }),
-        makeTurn({ id: 'c' }),
-      ]
-
-      render(<SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />)
-
-      const turnRefs = document.querySelectorAll('[data-turn-ref]')
-      const list = document.querySelector('[data-turn-toc-list]')
-
-      const firstButton = list?.querySelector('[data-turn-toc-entry-index="1"]') as HTMLButtonElement
-      fireEvent.click(firstButton)
-      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[0])
-
-      const lastButton = list?.querySelector('[data-turn-toc-entry-index="3"]') as HTMLButtonElement
-      fireEvent.click(lastButton)
-      expect(scrollIntoViewSpy.mock.instances[scrollIntoViewSpy.mock.calls.length - 1]).toBe(turnRefs[2])
-    })
-
-    it('uses smooth scroll behavior and block:start on the target', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const list = document.querySelector('[data-turn-toc-list]')
-      const button = list?.querySelector('[data-turn-toc-entry]') as HTMLButtonElement
-      fireEvent.click(button)
-
-      const arg = scrollIntoViewSpy.mock.calls[0]?.[0]
-      expect(arg).toMatchObject({ behavior: 'smooth', block: 'start' })
-    })
-  })
-
-  describe('streaming-appended turns appear in the TOC without remounting existing entries', () => {
-    it('appends a new TOC entry when the turns array grows without a page reload', () => {
+    it('streaming-appended turns grow the turn refs map without dropping existing ids', () => {
       const initialTurns: DisplayTurn[] = [
         makeTurn({ id: 'a' }),
         makeTurn({ id: 'b' }),
@@ -163,158 +166,35 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
 
       const { getByTestId } = render(<AppendableTranscript />)
 
-      const listBefore = document.querySelector('[data-turn-toc-list]')
-      const beforeItems = listBefore?.querySelectorAll('[data-turn-toc-entry]') ?? []
-      expect(beforeItems).toHaveLength(2)
-
-      const firstButtonBefore = beforeItems[0] as HTMLElement
-      const firstIndexBefore = firstButtonBefore.getAttribute('data-turn-toc-entry-index')
+      const beforeRefs = document.querySelectorAll('[data-turn-ref]')
+      expect(beforeRefs).toHaveLength(2)
+      const firstRefBefore = beforeRefs[0]
 
       fireEvent.click(getByTestId('append'))
 
-      const listAfter = document.querySelector('[data-turn-toc-list]')
-      const afterItems = listAfter?.querySelectorAll('[data-turn-toc-entry]') ?? []
-      expect(afterItems).toHaveLength(3)
-      expect(afterItems[0]).toBe(firstButtonBefore)
-      expect(afterItems[0].getAttribute('data-turn-toc-entry-index')).toBe(firstIndexBefore)
-      expect(afterItems[2].getAttribute('data-turn-toc-entry-index')).toBe('3')
-    })
-
-    it('does not introduce any new TOC rail above the existing one on re-render', () => {
-      function AppendableTranscript() {
-        const [turns, setTurns] = useState<DisplayTurn[]>([makeTurn({ id: 'a' })])
-        return (
-          <div>
-            <button data-testid="append" onClick={() => setTurns((prev) => [...prev, makeTurn({ id: `b-${prev.length}` })])}>append</button>
-            <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="live" isRunning />
-          </div>
-        )
-      }
-
-      const { getByTestId } = render(<AppendableTranscript />)
-      const railsBefore = document.querySelectorAll('[data-turn-toc-rail]').length
-
-      fireEvent.click(getByTestId('append'))
-
-      const railsAfter = document.querySelectorAll('[data-turn-toc-rail]').length
-      expect(railsAfter).toBe(railsBefore)
-    })
-  })
-
-  describe('lg+ two-column layout and below-lg toolbar trigger', () => {
-    it('renders the rail with the lg-block class and hides it below lg', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const rail = document.querySelector('[data-turn-toc-rail]')
-      expect(rail?.className).toContain('hidden')
-      expect(rail?.className).toContain('lg:block')
-    })
-
-    it('renders the toolbar trigger below lg (with the lg:hidden class)', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const toolbar = document.querySelector('[data-transcript-toolbar]')
-      expect(toolbar?.className).toContain('lg:hidden')
-    })
-
-    it('places the toolbar above the turn list (toolbar precedes turn list in document order)', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const toolbar = document.querySelector('[data-transcript-toolbar]')
-      const firstTurn = document.querySelector('[data-turn-ref]')
-
-      expect(toolbar).not.toBeNull()
-      expect(firstTurn).not.toBeNull()
-
-      const mask = (toolbar as Node).compareDocumentPosition(firstTurn as Node)
-      expect(mask & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    })
-
-    it('mounts the CopyFullTextButton inside the toolbar alongside the mobile TOC trigger', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const toolbar = document.querySelector('[data-transcript-toolbar]')
-      expect(toolbar).not.toBeNull()
-      const copyButton = toolbar!.querySelector('[data-copy-full-text]')
-      const tocTrigger = toolbar!.querySelector('[data-transcript-toolbar-toc-trigger]')
-      expect(copyButton).not.toBeNull()
-      expect(tocTrigger).not.toBeNull()
-    })
-
-    it('also mounts a desktop-visible CopyFullTextButton in the lg+ TOC rail', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const rail = document.querySelector('[data-turn-toc-rail]')
-      expect(rail).not.toBeNull()
-      expect(rail?.className).toContain('lg:block')
-
-      const copyButton = rail!.querySelector('[data-copy-full-text]') as HTMLButtonElement | null
-      expect(copyButton).not.toBeNull()
-      expect(copyButton?.disabled).toBe(false)
-      expect(copyButton?.textContent).toBe('Copy')
-    })
-
-    it('keeps copy available in both viewport layouts for non-empty transcripts', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const copyButtons = document.querySelectorAll('[data-copy-full-text]')
-      expect(copyButtons).toHaveLength(2)
-      for (const button of Array.from(copyButtons) as HTMLButtonElement[]) {
-        expect(button.disabled).toBe(false)
-      }
-    })
-
-    it('renders the grid with the lg-only two-column measure on lg+', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
-
-      const grid = container.querySelector('[data-turn-toc-rail]')?.parentElement
-      expect(grid?.className).toContain('lg:grid')
-      expect(grid?.className).toContain('lg:grid-cols-[1fr_180px]')
-    })
-
-    it('mobile disclosure toggles the overlay that reuses the TurnTocList', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' }), makeTurn({ id: 'b' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={2} title="t" statusKind="completed" isRunning={false} />)
-
-      const trigger = document.querySelector('[data-transcript-toolbar-toc-trigger]') as HTMLButtonElement
-      expect(document.querySelector('[data-transcript-toolbar-toc-overlay]')).toBeNull()
-
-      fireEvent.click(trigger)
-
-      const overlay = document.querySelector('[data-transcript-toolbar-toc-overlay]')
-      expect(overlay).not.toBeNull()
-      expect(overlay?.querySelector('[data-turn-toc-list]')).not.toBeNull()
-      expect(overlay?.querySelectorAll('[data-turn-toc-entry]')).toHaveLength(2)
-
-      fireEvent.click(trigger)
-      expect(document.querySelector('[data-transcript-toolbar-toc-overlay]')).toBeNull()
+      const afterRefs = document.querySelectorAll('[data-turn-ref]')
+      expect(afterRefs).toHaveLength(3)
+      expect(afterRefs[0]).toBe(firstRefBefore)
+      expect(afterRefs[0].getAttribute('data-turn-id')).toBe('a')
     })
   })
 
   describe('responsive card classes', () => {
-    it('prompt cards use max-w-[90%] sm:max-w-[80%] with min-w-0 on the card parent', () => {
+    it('does not render the legacy rounded-2xl bubble on the prompt block', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a', prompt: { kind: 'task', title: 'Hello' } })]
-      const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+      )
 
-      const promptBubble = container.querySelector('.rounded-2xl')
-      expect(promptBubble).not.toBeNull()
-      const promptClass = promptBubble!.className
-      expect(promptClass).toContain('max-w-[90%]')
-      expect(promptClass).toContain('sm:max-w-[80%]')
-      expect(promptClass).toContain('min-w-0')
-
-      const promptOuter = promptBubble!.parentElement
-      expect(promptOuter?.className).toContain('min-w-0')
+      const promptBlock = container.querySelector('[data-prompt-block]')
+      expect(promptBlock).not.toBeNull()
+      expect(promptBlock!.className).not.toContain('rounded-2xl')
+      expect(promptBlock!.className).not.toContain('justify-end')
+      expect(promptBlock!.className).not.toContain('max-w-[80%]')
+      expect(promptBlock!.className).not.toContain('max-w-[90%]')
     })
 
-    it('assistant text parts use max-w-[90%] sm:max-w-[80%] with min-w-0', () => {
+    it('assistant text parts render without a max-width cap', () => {
       const turns: DisplayTurn[] = [
         makeTurn({
           id: 'a',
@@ -330,18 +210,16 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         }),
       ]
 
-      const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+      )
 
       const found = Array.from(container.querySelectorAll('div')).find((el) =>
-        el.classList?.contains('max-w-[90%]') &&
-        el.classList?.contains('sm:max-w-[80%]') &&
-        el.classList?.contains('min-w-0') &&
-        !!el.querySelector('.transcript-md')
+        !!el.querySelector('.transcript-md'),
       )
       expect(found).toBeTruthy()
-      expect(found!.className).toContain('max-w-[90%]')
-      expect(found!.className).toContain('sm:max-w-[80%]')
-      expect(found!.className).toContain('min-w-0')
+      expect(found!.className).not.toContain('max-w-[80%]')
+      expect(found!.className).not.toContain('max-w-[90%]')
     })
 
     it('the turn list role=log element has min-w-0', () => {
@@ -409,9 +287,7 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         mounted = false
         view.unmount()
         scrollContainer.remove()
-        scrollContainerCleanups.delete(unmount)
       }
-      scrollContainerCleanups.add(unmount)
 
       return {
         scrollContainer,
@@ -499,72 +375,59 @@ describe('SessionTranscriptLayout narrow viewport no-overflow integration', () =
 
   afterEach(() => {
     scrollIntoViewSpy.mockRestore()
+    restoreScopedProperties()
   })
 
-  function renderLongLineTranscript(width: number) {
-    setScopedValue(window, 'innerWidth', width)
-    const turns: DisplayTurn[] = Array.from({ length: 3 }, (_, i) => makeTurn({
-      id: `t${i + 1}`,
-      prompt: {
-        kind: 'task',
-        title: 'A long prompt title without spaces'.repeat(8),
-        text: 'Long line content '.repeat(40),
-      },
-      assistantParts: [
-        {
-          id: `p${i + 1}`,
-          partType: 'text',
-          text: 'A'.repeat(200),
-          startedAt: '2024-05-15T10:00:01.000Z',
-          completedAt: '2024-05-15T10:00:02.000Z',
-        },
-      ],
-    }))
-
-    const view = render(
-      <SessionTranscriptLayout
-        turns={turns}
-        turnCount={turns.length}
-        title="long-line fixture"
-        statusKind="completed"
-        isRunning={false}
-      />,
-    )
-
-    const scrollable = view.container.querySelector('[data-scrollable]') as HTMLElement | null
-    expect(scrollable).not.toBeNull()
-    return { view, scrollable: scrollable as HTMLElement }
-  }
-
   it.each([320, 375, 430])(
-    'className contract protects long prompt/card/code content at %ipx',
+    'flat-column timeline protects long prompt/code content at %ipx width',
     (width) => {
-      const { view } = renderLongLineTranscript(width)
+      setScopedValue(window, 'innerWidth', width)
+
+      const turns: DisplayTurn[] = Array.from({ length: 3 }, (_, i) => makeTurn({
+        id: `t${i + 1}`,
+        prompt: {
+          kind: 'task',
+          title: 'A long prompt title without spaces'.repeat(8),
+          text: 'Long line content '.repeat(40),
+        },
+        assistantParts: [
+          {
+            id: `p${i + 1}`,
+            partType: 'text',
+            text: 'A'.repeat(200),
+            startedAt: '2024-05-15T10:00:01.000Z',
+            completedAt: '2024-05-15T10:00:02.000Z',
+          },
+        ],
+      }))
+
+      const view = render(
+        <SessionTranscriptLayout
+          turns={turns}
+          turnCount={turns.length}
+          title="long-line fixture"
+          statusKind="completed"
+          isRunning={false}
+        />,
+      )
+
       const scrollable = view.container.querySelector('[data-scrollable]')
       expect(scrollable?.className).toContain('min-w-0')
 
-      const promptBubble = view.container.querySelector('.rounded-2xl')
-      expect(promptBubble).not.toBeNull()
-      expect(promptBubble!.className).toContain('max-w-[90%]')
-      expect(promptBubble!.className).toContain('sm:max-w-[80%]')
-      expect(promptBubble!.className).toContain('min-w-0')
-
-      const promptParent = promptBubble!.parentElement
-      expect(promptParent?.className).toContain('min-w-0')
+      const promptBlock = view.container.querySelector('[data-prompt-block]')
+      expect(promptBlock).not.toBeNull()
+      expect(promptBlock!.className).not.toContain('rounded-2xl')
+      expect(promptBlock!.className).not.toContain('max-w-[80%]')
 
       const turnList = view.container.querySelector('[role="log"]')
       expect(turnList?.className).toContain('min-w-0')
-
-      const railParent = view.container.querySelector('[data-turn-toc-rail]')?.parentElement
-      expect(railParent?.className).toContain('lg:grid-cols-[1fr_180px]')
-      expect(railParent?.className).toContain('lg:max-w-4xl')
+      expect(turnList?.className).not.toContain('max-w-2xl')
 
       const markdown = view.container.querySelector('.transcript-md')
       expect(markdown?.className).toContain('leading-relaxed')
       const assistantCard = markdown?.parentElement
-      expect(assistantCard?.className).toContain('max-w-[90%]')
-      expect(assistantCard?.className).toContain('sm:max-w-[80%]')
-      expect(assistantCard?.className).toContain('min-w-0')
+      expect(assistantCard?.className).not.toContain('max-w-[80%]')
+      expect(assistantCard?.className).not.toContain('max-w-[90%]')
     },
   )
 

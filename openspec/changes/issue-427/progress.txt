@@ -18,3 +18,29 @@
 - ToolCallCard.tsx still has a local `formatDuration(ms)` (T-003 removes the file).
 - SessionTranscriptView legacy rendering ("Context gathered", "Gathering context") is still on disk and tested (T-003 deletes it).
 - T-002 needs the new `formatElapsed(start, completedAt)` for turn-divider duration (turn.startedAt, turn.completedAt); T-003 needs it for the per-row duration in ToolRowView.
+
+## Decisions & Gotchas (T-002)
+
+- Consolidated the duplicate `KIND_LABELS` map from `PromptBlock.tsx` + `TurnToc.tsx` into a new shared `model/prompt-kind-labels.ts` (`PROMPT_KIND_LABELS` + `promptKindLabel(kind)`). Both `PromptBlock` and `TurnDivider` (formerly `TurnHeader`) consume this single source of truth; deleting `TurnToc.tsx` left no duplicate behind.
+- `TurnList` root container: dropped `max-w-2xl mx-auto` so the list fills the available content-column width. The role=log + min-w-0 + contentVisibility auto behavior is preserved so `useTurnKeyboardNav` and live-region announcements keep working.
+- `TurnHeader` was replaced by an inline `TurnDivider` inside `TurnItem` (no separate export). Divider exposes three stable anchors: `data-turn-divider`, `data-turn-index`, `data-turn-index-label`, `data-turn-kind-label`, `data-turn-timestamp`, plus `data-turn-duration` only when `turn.completedAt` is set. The `formatElapsed(startedAt, completedAt)` from T-001 returns null for running turns, so the divider omits the duration token cleanly (no `0s`/`NaN`).
+- `PromptBlock`: replaced the right-aligned `flex justify-end` + `rounded-2xl rounded-br-sm bg-gray-200/300 … max-w-[80%]` bubble with a blockquote-style full-width block (`border-l-2 border-muted pl-3`). Collapse affordance and copy button semantics are unchanged. Added `data-prompt-block` + `data-prompt-kind` for the divider-bar/preview pair.
+- `AssistantTextPartView` and `ReasoningPartView` dropped their `max-w-[90%] sm:max-w-[80%]` caps; assistant markdown and reasoning now fill the column. The horizontal-scroll guards for fenced code blocks (max-w-full overflow-x-auto on `<pre>`) remain — those are inside `TranscriptMarkdown` and are independent of the column width.
+- `SessionTranscriptLayout`: rewritten to a single full-width column (no `lg:grid lg:grid-cols-[1fr_180px] lg:max-w-4xl lg:mx-auto`). `TurnTocRail` and `TranscriptToolbar` were removed entirely. `CopyFullTextButton` is mounted once in the column header (`justify-end`) above the `TurnList`. `useTurnKeyboardNav` + the `turnRefs` map + `data-turn-id`/`data-turn-ref` on each turn are preserved unchanged — these are the anchors #429 mounts on (design Decision 2).
+- Deleted files (no remaining importers):
+  - `ui/TurnToc.tsx` and `ui/TurnToc.test.tsx`
+  - `ui/TranscriptToolbar.tsx` and `ui/TranscriptToolbar.test.tsx`
+  - `ui/index.ts` no longer exports `TurnTocList` / `TurnTocRail` / `buildTurnTocEntries` / `TurnTocEntry` / `TranscriptToolbar`. `SessionTranscriptLayout.tsx` no longer imports them.
+- Tests migrated:
+  - `TurnList.render.test.tsx` was rewritten to assert the divider-bar DOM (`data-turn-divider`, `data-turn-kind-label`, `data-turn-duration`) and full-width invariants (no `rounded-2xl`, no `justify-end`, no `max-w-2xl`). Old assertions that required the right-aligned bubble DOM (e.g. `compareDocumentPosition` against `.rounded-2xl`) were replaced with `[data-prompt-block]` ordering checks.
+  - `SessionTranscriptLayout.integration.test.tsx` was rewritten: removed every TOC entry/rail/grid assertion and every toolbar trigger/overlay assertion; added negative assertions (`[data-turn-toc-rail]` / `[data-turn-toc-list]` / `[data-transcript-toolbar]` / `[data-transcript-toolbar-toc-trigger]` / `lg:grid-cols-[1fr_180px]` / `lg:max-w-4xl` all expected to be `null`/absent); added positive assertions for divider-bar content (ordinal, kind label, start time, conditional duration), turn-refs ownership (data-turn-id + data-turn-ref on each turn, growth on append), and the narrow-viewport no-overflow contract (no `rounded-2xl`/`max-w-[80%]` on the prompt block, no `max-w-[80%]`/`max-w-[90%]` on the assistant card, no `max-w-2xl` on the turn list at 320/375/430px).
+  - The `setScopedValue`/`restoreScopedProperties` helper from `tests/support/scoped-property` is reused for `window.innerWidth` in the narrow-viewport suite (matches the pattern from the original test).
+- `AssistantParts.render.test.tsx` did NOT assert against the bubble/max-w DOM (it asserted tool-row content, not wrapper styling), so no changes were required there.
+- All 4778 web tests pass; typecheck (`npm run typecheck -w packages/web`) is clean.
+
+## Open for later tasks (T-002 state)
+
+- `ToolCallCard.tsx` still has a local `formatDuration(ms)` — T-003 removes the file.
+- `SessionTranscriptView.tsx` legacy rendering ("Context gathered", "Gathering context") is still on disk and tested — T-003 deletes it.
+- T-003 needs `formatElapsed(startedAt, completedAt)` for per-row duration (part.startedAt, part.completedAt) inside `ToolRowView`. The util already supports this shape.
+- The new `data-prompt-block` / `data-turn-divider` anchors are stable enough for #429 navigation to mount on; if #429 prefers a different anchor scheme it can swap the data-attrs without affecting this task's invariants.

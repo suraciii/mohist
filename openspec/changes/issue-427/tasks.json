@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "Rewritten SessionTranscriptLayout/TurnList/TurnHeader(→divider)/PromptBlock/AssistantParts; consolidated KIND_LABELS; removed TOC rail+dropdown; migrated + new web tests green.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Use the shared `formatElapsed` from T-001 for the divider duration. Preserve keyboard nav + turn refs even though the visible TOC is removed — these are the turn-level anchors #429 mounts on (design Decision 2)."
     },
     {
