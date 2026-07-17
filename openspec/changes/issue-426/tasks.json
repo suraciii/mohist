@@ -33,7 +33,7 @@
         "A paragraph boundary (\\n\\n) spanning two deltas is preserved so the rendered output shows separate paragraphs, not a run-on like 'usage:Let me' (unit + TranscriptMarkdown render test).",
         "Reasoning-interrupt-then-resume renders the earlier and later text segments as distinct blocks (unit test).",
         "Localization outcome is documented in the task result: either a web-path fix was applied, or evidence was recorded pointing to an upstream collection/reflow gap for a follow-up issue.",
-        "npm run typecheck -w packages web passes.",
+        "npm run typecheck -w packages/web passes.",
         "npm run test:run -w packages/web passes."
       ],
       "priority": 2,
@@ -76,6 +76,7 @@
         "ToolRowView exposes aria-expanded only when showExpandableDetails is true; non-disclosing rows do not (render test).",
         "Decorative icons (ToolIcon, ToolStatusDot/RunningIndicator, chevrons) are marked aria-hidden='true' (render test).",
         "StreamingIndicator and ThinkingPlaceholder have role='status' (render test).",
+        "TurnList retains role='log' so streamed content is announced as a live region (render test).",
         "No transcript control's accessible name is 'unknown' or empty (render test, verified after T-001 lands).",
         "npm run typecheck -w packages/web passes.",
         "npm run test:run -w packages/web passes."
