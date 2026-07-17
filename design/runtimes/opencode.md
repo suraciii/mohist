@@ -178,7 +178,7 @@ SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的
 是否结束。现有调用方 abort signal 是唯一执行期限：Workflow task executor 与 AgentJob
 executor 拥有工作回合的执行期限；未显式指定时，单个 Prompt 的默认期限为 60 分钟，
 显式期限可以覆盖该默认值。期限到达时 abort 回合并让工作失败。移除 ACP liveness probe
-后，这个 executor 期限是悬挂回合的唯一兜底；`OpenCodeRuntime` 不自带静默检测。收到 abort 时调用
+后，`OpenCodeRuntime` 不做静默/空闲检测；悬挂回合由 executor 期限兜底，而 provider 错误可在到达期限前按 `session.status` retry 事实提前失败（见「Provider 错误失败策略」）。收到 abort 时调用
 `client.session.abort()`，向调用者返回 interrupted result。
 
 Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
@@ -202,6 +202,31 @@ transcript、tool、usage、model、status 与 compaction 事实；未知 OpenCo
 Mohist 不保存 V2 history cursor、aggregate sequence 或 event replay state。Workflow
 task executor 根据 Action result，再应用 Mohist expectation、artifact、`failIf` 与
 recovery 语义判断 Workflow 成功；AgentJob 是否完成由其 executor 独立判断。
+
+## Provider 错误失败策略
+
+provider 错误仅当判为不可恢复时让回合失败；可恢复错误（瞬时 429、5xx、网络抖动）交
+OpenCode 重试，Mohist 不主动失败。失败信号来自 `session.status` 事件（`type:"retry"`，
+携带 `attempt`、`message`、`next`）与回合最终的 prompt reject，不扫描日志。两类不可
+恢复判定都归一到 abort 回合并失败：
+
+- 按性质不可恢复：retry 事件 `message` 命中额度/credit/billing 等模式（OpenCode 会把
+  这类错误误判为可恢复限流而持续重试），命中即 abort+失败。默认模式集覆盖常见 provider
+  的额度措辞（含中文），runner 级可配置追加。
+- 按证据不可恢复：可恢复错误连续重试，`attempt` 达到阈值 N（默认 5，runner 级可配置）
+  而回合仍未完成，重新判为不可恢复，abort+失败。
+
+可恢复错误在 N 次内恢复（回合完成）则继续，不失败。OpenCode 自身已判不可恢复的错误
+（auth、invalid-request、context-overflow、content-policy）由 OpenCode 直接 reject
+prompt，Mohist 不额外处理。连 retry 事件都不产生的静默卡死仍由 executor 期限兜底。
+
+计数直接用 retry 事件的 `attempt` 字段（OpenCode 维护、每回合重置）；runner 重启后用
+`session.status()` snapshot 恢复，不另建状态。命中或超阈值时调用
+`client.session.abort()`，向调用者返回带原始 provider message 的失败事实。
+
+上游差距（不阻塞）：OpenCode 流式重试路径不使用 `QuotaExceeded` 分类（分类正则为英文
+only），且在「有响应头但无 retry-after」时退避无上限；修复后 Mohist 可逐步去掉按
+`message` 匹配的兜底，改用结构化分类。
 
 ## Session 命令
 
