@@ -195,6 +195,11 @@ public static class AgentSessionRecoveryRoutes
                 request.SessionId,
                 request.RuntimeSessionId,
                 request.Runtime)),
+            SessionCommandError.NotStarted => ApiResults.Fail(
+                "Runner did not start the session command",
+                503,
+                "runner_command_not_started",
+                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
             SessionCommandError.Unavailable => ApiResults.Fail(
                 "Runner is unavailable",
                 503,
@@ -207,7 +212,7 @@ public static class AgentSessionRecoveryRoutes
     private static bool IsDefinitiveNoEffect(SessionCommandResult result) =>
         !result.Ok
         && result.RuntimeSessionId is null
-        && result.Error is SessionCommandError.Conflict or SessionCommandError.Missing;
+        && result.Error is SessionCommandError.Conflict or SessionCommandError.Missing or SessionCommandError.NotStarted;
 
     private static IResult RuntimeSessionMissingResult(RuntimeSessionMissingException ex) =>
         ApiResults.Conflict(

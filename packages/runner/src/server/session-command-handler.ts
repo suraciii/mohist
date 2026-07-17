@@ -2,7 +2,7 @@ import type * as signalR from "@microsoft/signalr"
 import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
 
 export type SessionCommand = "compact" | "reset"
-export type SessionCommandError = "conflict" | "missing" | "unavailable"
+export type SessionCommandError = "conflict" | "missing" | "notStarted" | "unavailable"
 
 export interface SessionCommandRequest {
   sessionId: string
@@ -117,7 +117,7 @@ export function isValidSessionCommandResult(request: SessionCommandRequest, resu
 
   return candidate.ok === false
     && candidate.runtimeSessionId === undefined
-    && (candidate.error === "conflict" || candidate.error === "missing" || candidate.error === "unavailable")
+    && (candidate.error === "conflict" || candidate.error === "missing" || candidate.error === "notStarted" || candidate.error === "unavailable")
 }
 
 export function isValidSessionCommandRequest(value: unknown): value is SessionCommandRequest {

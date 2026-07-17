@@ -61,6 +61,7 @@ public class SessionCommandContractTests
     [Theory]
     [InlineData(SessionCommandError.Conflict, "conflict")]
     [InlineData(SessionCommandError.Missing, "missing")]
+    [InlineData(SessionCommandError.NotStarted, "notStarted")]
     [InlineData(SessionCommandError.Unavailable, "unavailable")]
     public void ErrorResult_UsesClosedErrorVocabulary(
         SessionCommandError error,

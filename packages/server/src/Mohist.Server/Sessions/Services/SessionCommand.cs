@@ -12,6 +12,7 @@ public enum SessionCommandError
 {
     Conflict,
     Missing,
+    NotStarted,
     Unavailable,
 }
 
