@@ -6,12 +6,12 @@
       "id": "T-001",
       "title": "Shared duration derivation + context-group projection guard",
       "spec": "specs/transcript-context-grouping/spec.md#Consecutive exploratory tool calls collapse into one grouped row",
-      "description": "Add a shared `format-duration.ts` util (`formatElapsed(startedAt, completedAt)` returning null while completedAt is unset, plus `formatDuration(ms)`) that both tool rows and turn dividers will derive from. Fix `projectTurn` (`model/session-transcript-display.ts`) so its context-group flush only wraps runs of >=2 consecutive exploratory calls — a lone exploratory call is pushed as a plain `tool` part — and rename the group summary prefix from \"Gathering context\" to \"Explored\". Delete the duplicate `formatDuration` copies in `ToolCallCard.tsx` and `SessionDetailShell.tsx`, pointing them at the shared util. This is the narrow projection/utility foundation the rendering tasks build on; the data model and event protocol stay unchanged.",
+      "description": "Add a shared `format-duration.ts` util (`formatElapsed(startedAt, completedAt)` returning null while completedAt is unset, plus `formatDuration(ms)`) that both tool rows and turn dividers will derive from. Fix `projectTurn` (`model/session-transcript-display.ts`) so its context-group flush only wraps runs of >=2 consecutive exploratory calls — a lone exploratory call is pushed as a plain `tool` part — and rename the group summary prefix from \"Gathering context\" to \"Explored\". Delete the duplicate `formatDuration` copy in `SessionDetailShell.tsx`, pointing it at the shared util (the `ToolCallCard.tsx` copy disappears when that legacy file is deleted in T-003). This is the narrow projection/utility foundation the rendering tasks build on; the data model and event protocol stay unchanged.",
       "acceptanceCriteria": [
         "`formatElapsed(startedAt, completedAt)` returns null when completedAt is unset/missing and a formatted duration string otherwise — never NaN or `0s` for missing data (unit test covers both cases).",
         "Projecting a turn with a single exploratory tool call yields a `tool` part, NOT a `context-group`; >=2 consecutive exploratory calls still yield one `context-group` part (projection unit test covers lone-call, multi-call, and interruption-by-non-exploratory cases).",
         "The context-group summary prefix is \"Explored\" (e.g. \"Explored · 5 reads · 3 searches · 2 globs\").",
-        "`ToolCallCard.tsx` and `SessionDetailShell.tsx` no longer define their own `formatDuration`; both import the shared util.",
+        "`SessionDetailShell.tsx` no longer defines its own `formatDuration` and imports the shared util.",
         "No fields added to `ToolPart`, `SessionTurn`, or any event/protocol type (data model unchanged).",
         "`npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes with the projection/util unit tests updated (context-grouping + new format-duration tests green)."
       ],
@@ -34,7 +34,7 @@
         "The user prompt renders aligned to the shared left margin as a full-width block, not right-aligned and not wrapped in a rounded bubble; a long prompt is collapsed by default and expandable to full text.",
         "`useTurnKeyboardNav`, the `turnRefs` map, and `data-turn-id`/`data-turn-ref` are preserved on each turn; the copy-full-text affordance is retained.",
         "`SessionDetailShell`'s hosting contract is unchanged — page header, usage summary, recovery bar, follow-up composer, and scroll behavior render unchanged.",
-        "Existing `ui/*.test.tsx` that assert the bubble/centered DOM (e.g. states-and-turns, sticky) are migrated to the timeline DOM; new specs assert the full-width invariant and divider-bar content; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+        "Existing live-path transcript specs that assert the bubble/centered DOM (`TurnList.render`, `AssistantParts.render`) are migrated to the timeline DOM; new specs assert the full-width invariant and divider-bar content; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
       ],
       "priority": 2,
       "mode": "AFK",
@@ -48,7 +48,7 @@
       "id": "T-003",
       "title": "Default-collapsed tool-call rows with verb-led titles, inline edit stats, whole-row failure, and stable anchors",
       "spec": "specs/transcript-tool-rows/spec.md#Each tool call renders as a single default-collapsed row",
-      "description": "Rework `ToolRowView` (`ui/tool-views/index.tsx`) into a default-collapsed single row composed of: the existing `ToolStatusDot`, a verb-led title built from status + normalizedName per the design's verb table (Editing/Edited/Failed-to-edit {file}; $ {cmd}; Reading/Read {path}; Searching/Searched {query}; fallback to toolName), key param badges (existing `getToolDisplayArgs`), inline edit file + +N/−M stats, and the derived duration at the right. Typed detail (`BashContentView`/`DiffContentView`/`ReadContentView`/`SearchContentView`/`TodoContentView`/`DelegationContentView`) stays hidden behind the expand chevron. A failed call renders the WHOLE row in a danger style; a running/pending call renders a one-line in-progress state with no live timer. Add `data-tool-call-id` and `data-tool-state` to each row root. Align the older `ToolCallCard.tsx` and the typed content views to the expand-on-demand model and reuse the shared duration util.",
+      "description": "Rework `ToolRowView` (`ui/tool-views/index.tsx`) into a default-collapsed single row composed of: the existing `ToolStatusDot`, a verb-led title built from status + normalizedName per the design's verb table (Editing/Edited/Failed-to-edit {file}; $ {cmd}; Reading/Read {path}; Searching/Searched {query}; fallback to toolName), key param badges (existing `getToolDisplayArgs`), inline edit file + +N/−M stats, and the derived duration at the right. Typed detail (`BashContentView`/`DiffContentView`/`ReadContentView`/`SearchContentView`/`TodoContentView`/`DelegationContentView`) stays hidden behind the expand chevron. A failed call renders the WHOLE row in a danger style; a running/pending call renders a one-line in-progress state with no live timer. Add `data-tool-call-id` and `data-tool-state` to each row root. Delete the legacy `SessionTranscriptView.tsx` + `ToolCallCard.tsx` parallel render path and its test suite (not on the live session page — design Decision 9); align the live typed content views (`tool-views/*.tsx`) to the expand-on-demand model and reuse the shared duration util.",
       "acceptanceCriteria": [
         "A completed tool call renders on one collapsed line showing a status symbol, a verb-led title, key parameters, and the derived duration; its full input/output detail is hidden until the row is expanded.",
         "Expanding a row reveals typed detail appropriate to the kind (terminal/command output for bash, inline diff for edit, result summary otherwise).",
@@ -57,12 +57,12 @@
         "A running/pending tool call renders a single-line in-progress state and does NOT show a continuously updating timer.",
         "Each tool row carries stable `data-tool-call-id` (tied to its tool call id) and `data-tool-state` attributes that remain unchanged when a call transitions running→completed.",
         "Tool rows fill the column width with no centered-card `max-width` cap.",
-        "Existing tool specs (tool-labels, file-tools, raw-tool-payload, todo-tools, accessibility, shared-tool-semantics) are migrated to the row DOM; new specs cover the verb-led title, inline +N/−M, whole-row red, and stable identity; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+        "The legacy `SessionTranscriptView.*.test.tsx` suite is deleted with the path; live-path tool specs (`AssistantParts.*`, `tool-views/*`, `tool-registry`, `shared-tool-semantics`, `TurnList.render`) are migrated to the row DOM; new specs cover the verb-led title, inline +N/−M, whole-row red, and stable identity; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Reworked ToolRowView + typed content views + aligned ToolCallCard; verb-title table; data-tool-call-id/data-tool-state anchors; migrated + new web tests green.",
+      "output": "Reworked ToolRowView + typed content views; deleted legacy SessionTranscriptView/ToolCallCard path; verb-title table; data-tool-call-id/data-tool-state anchors; migrated + new web tests green.",
       "dependsOn": ["T-001", "T-002"],
       "passes": false,
       "notes": "Verb-led title is a new small mapping table in the row layer only — leave the noun-based `DISPLAY_TITLES` used by detail views untouched (design Decision 5). Reuse existing extractors (`getToolLabel`, `getFilePathFromInput`, `parseEditWriteChanges`, `parsePatchOperations`) for the recognizable target and inline stats."

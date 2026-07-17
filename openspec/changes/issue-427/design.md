@@ -7,7 +7,7 @@ The current shape is a chat UI, not a timeline:
 - `TurnList` caps everything at `max-w-2xl mx-auto`; `SessionTranscriptLayout` wraps it in `lg:max-w-4xl` with the TOC grid.
 - `PromptBlock` is a right-aligned `rounded-2xl` bubble at `max-w-[80%]`.
 - `AssistantTextPartView` caps assistant markdown at `max-w-[80%]`.
-- Each tool call renders as a bordered card (`ToolRowView` / `ContextGroupView` in `ui/tool-views/index.tsx`, plus the older `ToolCallCard`), expanded by default with input/output `<pre>` blocks — the "card wall".
+- Each tool call renders as a bordered card (`ToolRowView` / `ContextGroupView` in `ui/tool-views/index.tsx`), expanded by default with input/output `<pre>` blocks — the "card wall". (A second, older parallel implementation — `SessionTranscriptView.tsx` → `ToolCallCard.tsx` — exists but is **not on the live render path**: see Decision 9.)
 
 The **data model is already sufficient** and is explicitly out of scope to change (issue Non-Goals). `projectTurn` (`model/session-transcript-display.ts`) already projects `DisplayTurn` → `assistantParts` of kinds `text` / `reasoning` / `tool` / `context-group` / `error` / `divider`, each `DisplayToolPart` carrying `status`, `startedAt`/`completedAt`, `changedFiles` (with `additions`/`deletions`), `rawInput`/`rawOutput`, `normalizedName`, and failure flags. Consecutive exploratory calls are already merged into `context-group` parts. So this is a **pure presentation rewrite**: same projection in, different rendering out.
 
@@ -83,7 +83,7 @@ Each tool row root SHALL carry `data-tool-call-id={toolCallId}` and `data-tool-s
 
 ### Decision 6: Derive duration from timestamps via one shared helper; do not add a model field
 
-`ToolPart.tool` and `DisplayToolPart` carry `startedAt`/`completedAt` (ISO strings) but no `duration`. Add a single shared `format-duration.ts` util: `formatElapsed(startedAt, completedAt): string | null` (returns `null` while `completedAt` is unset) plus the existing `formatDuration(ms)` semantics. Use it for both tool-row duration and turn-divider duration. Delete the two duplicate `formatDuration` copies in `ToolCallCard.tsx` and `SessionDetailShell.tsx`, pointing them at the shared util.
+`ToolPart.tool` and `DisplayToolPart` carry `startedAt`/`completedAt` (ISO strings) but no `duration`. Add a single shared `format-duration.ts` util: `formatElapsed(startedAt, completedAt): string | null` (returns `null` while `completedAt` is unset) plus the existing `formatDuration(ms)` semantics. Use it for both tool-row duration and turn-divider duration. Delete the duplicate `formatDuration` copy in `SessionDetailShell.tsx`, pointing it at the shared util (the `ToolCallCard.tsx` copy is removed when that legacy path is deleted — Decision 9).
 
 **Alternatives considered:**
 - *Add `durationMs` to `DisplayToolPart` computed in `projectTurn`.* Rejected — it duplicates data already present as two timestamps, and the display-only derivation is trivially pure. Keeping it out of the model honors the "no data-model change" invariant most strictly.
@@ -101,9 +101,17 @@ Today `projectTurn`'s `flushContextGroup` wraps even a single exploratory call i
 **Alternatives considered:**
 - *Keep grouping single calls and hide the affordance in the view.* Rejected — leaks a "group of one" into the DOM and into #429's anchoring model, and contradicts the spec.
 
+### Decision 9: Delete the legacy `SessionTranscriptView` / `ToolCallCard` parallel render path
+
+`SessionTranscriptView.tsx` (+ its `ToolCallCard.tsx`) is a second, older transcript implementation that is **not in the live render path**. The widget's public API (`index.ts`) exports only `SessionTranscriptLayout`; `SessionDetailShell` renders `SessionTranscriptLayout` → `TurnList` → `AssistantParts` → `ToolRowView`/`ContextGroupView`; and `SessionTranscriptView` is imported only by its own test suite (`SessionTranscriptView.*.test.tsx` + `SessionTranscriptView.fixture.ts`) — zero non-test importers. Delete `SessionTranscriptView.tsx`, `ToolCallCard.tsx`, and their tests as rewrite cleanup rather than "aligning" them. This also removes the duplicated `formatDuration` in `ToolCallCard` and most of the mis-attributed regression surface, leaving the **live** regression surface = the `TurnList` / `AssistantParts` / `tool-views/*` / `tool-registry` specs.
+
+**Alternatives considered:**
+- *Keep `SessionTranscriptView` as an alternate view.* Rejected — it is unreachable from any page and diverges from the live projection; keeping it doubles the rendering surface to maintain without a consumer.
+- *Migrate its tests onto the live path.* Rejected — its test suite asserts `ToolCallCard` DOM that is being removed; the live path already has its own `TurnList`/`AssistantParts`/`tool-views` specs.
+
 ## Risks / Trade-offs
 
-- `[Large regression surface across every tool-type render path]` -> The widget has extensive render specs (`ui/*.test.tsx`: tool-labels, file-tools, context-tools, todo-tools, raw-tool-payload, turn-file-changes, states-and-turns, accessibility, shared-tool-semantics) that assert today's bubble/card DOM. Mitigation: migrate these specs in lockstep with the components (see Migration Plan); add focused new specs for full-width invariant, divider content, inline `+N`/`−M`, whole-row red, and group summary. The risk is rated medium precisely because the data model is unchanged — only DOM assertions regress.
+- `[Large regression surface across every tool-type render path]` -> The **live** path has render specs (`TurnList.render`, `AssistantParts.*`, `tool-views/*`, `tool-registry`, `TranscriptMarkdown.render`, `shared-tool-semantics`) that assert today's bubble/card DOM. Mitigation: migrate these live specs in lockstep with the components (see Migration Plan) and add focused new specs for full-width invariant, divider content, inline `+N`/`−M`, whole-row red, and group summary. The legacy `SessionTranscriptView.*.test.tsx` suite is **deleted with the legacy path** (Decision 9), not migrated. The risk is rated medium because the data model is unchanged — only DOM assertions regress.
 - `[Removing the TOC rail reduces navigation until #429 lands]` -> Accepted trade-off. Keyboard turn nav (`useTurnKeyboardNav`) and turn refs are preserved, and `Cmd/Ctrl+arrows`-style jumping still works; the visible TOC list is intentionally deferred to #429.
 - `[Verb-led titles may mismatch the recognizable target for unknown/exotic tools]` -> The "other" row in the verb table falls back to `toolName`; the existing `inferToolName`/`normalizeToolName` heuristics still feed the family lookup, so exotic tools degrade to a recognizable name rather than an empty row.
 - [`≥2` grouping guard changes part-shape observed by other consumers]` -> `DisplayContextGroupPart` is consumed only within this widget; confirmed no other import of `projectTurn`'s grouping outside `widgets/session-transcript`. Still, re-run the context-tools and turn-file-changes specs.
@@ -115,7 +123,7 @@ Today `projectTurn`'s `flushContextGroup` wraps even a single exploratory call i
 2. **Layout/container:** rewrite `SessionTranscriptLayout` to a single full-width column; drop `TurnTocRail` + the toolbar TOC dropdown; keep `CopyFullTextButton`, `useTurnKeyboardNav`, `turnRefs`.
 3. **Turn-level:** rewrite `TurnHeader` → full-width divider bar; rewrite `PromptBlock` → full-width collapsed block; remove the `max-w-[80%]` cap in `AssistantTextPartView`.
 4. **Tool rows:** rewrite `ToolRowView` (verb title, duration, inline edit stats, whole-row red, `data-tool-call-id`/`data-tool-state`) and `ContextGroupView` (one-line group row); align the typed content views (`tool-views/*.tsx`) to expand-on-demand.
-5. **Cleanup:** delete the now-unused `TurnToc.tsx`/`TranscriptToolbar.tsx` (if not referenced elsewhere) and the duplicate `formatDuration` copies.
+5. **Cleanup:** delete the now-unused `TurnToc.tsx`/`TranscriptToolbar.tsx` and the legacy `SessionTranscriptView.tsx`/`ToolCallCard.tsx` parallel path + its tests (Decision 9), plus the duplicate `formatDuration` copy in `SessionDetailShell.tsx`.
 6. **Tests:** migrate existing `ui/*.test.tsx` to the timeline/row DOM; add new specs for the four new behaviors. Run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`.
 7. **Deploy/rollback:** frontend-only; normal web build. Rollback is reverting the commits — no data or config migration, no API change.
 
