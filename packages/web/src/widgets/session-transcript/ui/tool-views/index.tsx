@@ -286,7 +286,6 @@ export function ToolRowView({ part }: ToolRowViewProps) {
         {editStats && !editStats.singleFile && editStats.fileCount > 1 && (
           <span
             data-testid="tool-row-edit-file-count"
-            data-tone="success"
             className={`text-xs ${isFailed ? 'text-danger/80' : 'text-muted-foreground'}`}
           >
             {editStats.fileCount} files
