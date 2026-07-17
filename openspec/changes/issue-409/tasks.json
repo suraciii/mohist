@@ -25,7 +25,7 @@
     {
       "id": "T-002",
       "title": "Build the OpenCodeRuntime deep module (lifecycle, readiness, catalog, error normalization, factory seam)",
-      "spec": "specs/opencode-runtime/spec.md",
+      "spec": "specs/opencode-runtime/spec.md, specs/opencode-model-catalog/spec.md",
       "description": "Create the OpenCodeRuntime deep module under packages/runner/src/runtime/opencode/. It owns the shared Server/Client lifecycle via createOpencodeServer()/createOpencodeClient() (no direct spawn, no --pure, no .opencode lockfile cleanup), the single client.global.event() subscription routed by Session ID + directory, the readiness check (health plus model catalog loaded via client.v2.provider.list() and client.v2.model.list()), error normalization to the small Mohist result set (invalid input, unavailable runtime, missing Session, incompatible runtime, permission required, interrupted, turn failed) with provider detail carried only as diagnostics, and the permissions-not-approved behavior. Define the Mohist-owned request/result types at the boundary so no generated SDK DTO leaks past it, and expose an injectable factory (e.g. setOpenCodeRuntimeFactoryForTest) so tests drive a fake runtime or fake generated Client/Server with no real process/network/fs/clock.",
       "acceptanceCriteria": [
         "OpenCodeRuntime exposes only Mohist-owned request/result types; no generated SDK type is exported across the module boundary",
@@ -71,7 +71,7 @@
     {
       "id": "T-004",
       "title": "Run Workflow Inline Agent turns on the OpenCode SDK and retire the Workflow-path ACP bridge",
-      "spec": "specs/opencode-turn-execution/spec.md",
+      "spec": "specs/opencode-turn-execution/spec.md, specs/opencode-model-catalog/spec.md",
       "description": "Switch opencodeAction from the ACP bridge to OpenCodeRuntime: resolve/create the physical Session via client.session.create(); construct the SDK model DTO from the first-slash-parsed provider/model with variant as a sibling; apply model/variant per turn (on session creation + first prompt for new sessions, per-prompt for reused sessions) without rotating the physical Session; call and await client.session.prompt() for completion; project the assistant message + events and reconcile via session.messages() when needed; return ActionResult with turnFact.finalAssistantText and do not evaluate expect or synthesize { promise }. Enforce the reuse invariants (binding + runtime + directory; model/variant never rotate, never enter the cache key, never trigger lineage; directory change creates a new physical Session; same WorkflowRun + sessionName reuses the current binding; unrestorable persisted binding fails with a Reset hint), the single in-flight work prompt per logical Session, and restart/reconnect reconciliation from the persisted binding plus a session.status()/get()/messages() snapshot with no V2 replay state. Use the executor-owned deadline (default 60 min) and call client.session.abort() on deadline; remove ACP liveness for the Workflow path. Retire Workflow-path ACP artifacts: restoreAgentToolNoise/.opencode lockfile restore, withOpencodeAgentBinding, the Workflow branch of runAcpWorkflowAgentSession, and the Workflow-path usage of liveness/compaction/model-resolution/session-events. Leave the AgentJob generic path on ACP.",
       "acceptanceCriteria": [
         "opencodeAction runs the turn via OpenCodeRuntime (create/resume + awaited client.session.prompt()), not runAcpWorkflowAgentSession",
