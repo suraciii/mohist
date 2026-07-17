@@ -37,10 +37,7 @@ export function TranscriptEmptyState({ isRunning }: TranscriptEmptyStateProps) {
 export type { TurnRefsMap } from '../model/turn-refs'
 
 interface SessionTranscriptLayoutProps {
-  title: string
-  turnCount: number
   turns: DisplayTurn[]
-  statusKind: 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
   isRunning: boolean
   isThinking?: boolean
   isStreaming?: boolean

@@ -8,7 +8,7 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
-import { formatDuration } from '../../../widgets/session-transcript/model/format-duration'
+import { formatDuration } from '../../../widgets/session-transcript'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -140,7 +140,6 @@ export function SessionDetailShell({
     isLoading,
     isError,
     notFound,
-    sessionKey,
     sendFollowup,
     followupIsPending,
     contextWindowUsed,
@@ -384,10 +383,7 @@ export function SessionDetailShell({
           )}
           {hasTurns ? (
             <SessionTranscriptLayout
-              title={meta.sessionName ?? sessionKey ?? 'Session'}
-              turnCount={displayTurnCount}
               turns={displayTurns}
-              statusKind={displayStatusKind}
               isRunning={isRunning}
               isThinking={isThinking}
               isStreaming={isStreaming}

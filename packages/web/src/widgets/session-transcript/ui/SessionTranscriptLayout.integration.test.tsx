@@ -46,7 +46,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
     it('renders a single full-width column with no two-column grid or max-width cap', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
       const { container } = render(
-        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
       )
 
       expect(container.querySelector('[data-turn-toc-rail]')).toBeNull()
@@ -63,7 +63,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
 
     it('keeps the CopyFullTextButton in the column header for non-empty transcripts', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
 
       const copyButtons = document.querySelectorAll('[data-copy-full-text]')
       expect(copyButtons).toHaveLength(1)
@@ -80,7 +80,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
       ]
 
       const { container } = render(
-        <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />,
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
       )
 
       const dividers = container.querySelectorAll('[data-turn-divider]')
@@ -122,7 +122,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
       ]
 
       const { container } = render(
-        <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="live" isRunning />,
+        <SessionTranscriptLayout turns={turns} isRunning />,
       )
 
       const durations = container.querySelectorAll('[data-turn-duration]')
@@ -139,7 +139,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
         makeTurn({ id: 't3' }),
       ]
 
-      render(<SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="completed" isRunning={false} />)
+      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
 
       const turnRefs = document.querySelectorAll('[data-turn-ref]')
       expect(turnRefs).toHaveLength(3)
@@ -159,7 +159,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
         return (
           <div>
             <button data-testid="append" onClick={() => setTurns((prev) => [...prev, makeTurn({ id: `c-${prev.length + 1}` })])}>append</button>
-            <SessionTranscriptLayout turns={turns} turnCount={turns.length} title="t" statusKind="live" isRunning />
+            <SessionTranscriptLayout turns={turns} isRunning />
           </div>
         )
       }
@@ -183,7 +183,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
     it('does not render the legacy rounded-2xl bubble on the prompt block', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a', prompt: { kind: 'task', title: 'Hello' } })]
       const { container } = render(
-        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
       )
 
       const promptBlock = container.querySelector('[data-prompt-block]')
@@ -211,7 +211,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
       ]
 
       const { container } = render(
-        <SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />,
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
       )
 
       const found = Array.from(container.querySelectorAll('div')).find((el) =>
@@ -224,7 +224,7 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
 
     it('the turn list role=log element has min-w-0', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
       const log = document.querySelector('[role="log"]')
       expect(log?.className).toContain('min-w-0')
     })
@@ -268,9 +268,6 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
       const view = render(
         <SessionTranscriptLayout
           turns={turns}
-          turnCount={turns.length}
-          title="t"
-          statusKind="completed"
           isRunning={false}
           scrollContainerRef={scrollContainerRef}
         />,
@@ -404,9 +401,6 @@ describe('SessionTranscriptLayout narrow viewport no-overflow integration', () =
       const view = render(
         <SessionTranscriptLayout
           turns={turns}
-          turnCount={turns.length}
-          title="long-line fixture"
-          statusKind="completed"
           isRunning={false}
         />,
       )
@@ -445,7 +439,7 @@ describe('SessionTranscriptLayout narrow viewport no-overflow integration', () =
       ],
     })]
 
-    const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+    const { container } = render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
     const pre = container.querySelector('.transcript-md pre')
     expect(pre).not.toBeNull()
     expect(pre?.className).toContain('max-w-full')

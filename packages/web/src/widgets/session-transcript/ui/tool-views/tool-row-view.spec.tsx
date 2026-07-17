@@ -135,7 +135,7 @@ describe('ToolRowView — verb-led title builder', () => {
     expect(verb?.textContent?.trim()).toBe('todowrite')
   })
 
-  it('uses the trailing ellipsis for running rows without a recognizable target', () => {
+  it('uses a single trailing ellipsis for running rows without a recognizable target', () => {
     const part = makeToolPart({
       id: 'verb-running-other',
       normalizedName: 'task',
@@ -145,7 +145,7 @@ describe('ToolRowView — verb-led title builder', () => {
     const { container } = render(<ToolRowView part={part} />)
 
     const verb = container.querySelector('[data-testid="tool-row-verb-title"]')
-    expect(verb?.textContent?.trim()).toMatch(/…$/)
+    expect(verb?.textContent?.trim()).toBe('task…')
   })
 })
 

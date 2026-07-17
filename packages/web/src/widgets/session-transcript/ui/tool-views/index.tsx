@@ -273,7 +273,6 @@ export function ToolRowView({ part }: ToolRowViewProps) {
         {editStats && editStats.singleFile && (
           <span
             data-testid="tool-row-edit-stats"
-            data-tone="success"
             className="flex gap-1.5 shrink-0 text-xs font-mono"
           >
             {typeof editStats.additions === 'number' && (

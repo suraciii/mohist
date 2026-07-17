@@ -157,7 +157,7 @@ export function deriveVerbLedTitle(status: string, normalizedName: string, rawIn
   const fallback = normalizedName && normalizedName !== 'unknown' ? normalizedName : (toolName ?? normalizedName)
   const display = fallback && fallback !== 'unknown' ? fallback : GENERIC_TOOL_LABEL
   return {
-    verb: inFlight ? `${display}…` : failed ? `${display} (failed)` : display,
+    verb: failed ? `${display} (failed)` : display,
     family,
     trailingEllipsis: inFlight,
   }

@@ -38,10 +38,7 @@ function renderTranscript(rawTurns: Parameters<typeof projectSessionToDisplayTur
   })
   return renderWithQueryClient(
     <SessionTranscriptLayout
-      title="t"
-      turnCount={displayTurns.length}
       turns={displayTurns}
-      statusKind="live"
       isRunning={isRunning}
     />,
   )
