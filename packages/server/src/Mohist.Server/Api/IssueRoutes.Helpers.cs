@@ -147,7 +147,7 @@ public static partial class IssueRoutes
         {
             ["session"] = JsonSerializer.SerializeToElement("check"),
             ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.resolve-rebase-conflicts }}"),
-            ["agent"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
+            ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
         };
         return new RecoveryDefinition(
             Budget: 2,
