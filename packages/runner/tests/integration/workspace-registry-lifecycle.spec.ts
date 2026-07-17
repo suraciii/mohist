@@ -7,6 +7,7 @@ import {
   setRunnerSignalRExistsCheckerForTest,
 } from "../../src/server/runner-signalr.js"
 import { WorkspaceManager } from "../../src/runtime/workspace.js"
+import { fingerprintGitRemote } from "../../src/runtime/git-remote-identity.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../../src/runtime/workspace-registry.js"
 import { exists, runCommand } from "../../src/system/process.js"
 import { createTestTempDir } from "../support/temp-dir.js"
@@ -107,8 +108,12 @@ function installGitFake() {
       return commandResult()
     }
 
+    if (gitArgs[0] === "remote" && gitArgs[1] === "get-url" && gitArgs[2] === "origin") {
+      return commandResult(`${testGitUrl}\n`)
+    }
+
     if (gitArgs[0] === "rev-parse" && gitArgs.includes("--abbrev-ref") && workDir) {
-      return commandResult(`${workspaceBranches.get(workDir) ?? "main"}\n`)
+      return commandResult(`${workspaceBranches.get(workDir) ?? workspaceBranches.get(`${workDir}.preparing`) ?? "main"}\n`)
     }
 
     return commandResult()
@@ -116,6 +121,7 @@ function installGitFake() {
 }
 
 function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
+  const remote = fingerprintGitRemote(gitUrl)!
   return {
     workflowRunId,
     workId: "proposal.1",
@@ -125,9 +131,30 @@ function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
       mohist: { runId: workflowRunId },
       issue: { number: issueNumber },
       project: { id: "project-1", name: "Mohist Local" },
-      repository: { name: "main", gitUrl, baseBranch: "main" },
+      repository: {
+        name: "main",
+        gitUrl,
+        baseBranch: "main",
+        remoteFingerprint: remote.remoteFingerprint,
+        remoteIdentityVersion: remote.remoteIdentityVersion,
+      },
       openspecChangeDir: "openspec/changes/sample-change",
     },
+  }
+}
+
+function removalQuery(workflowRunId: string, issueNumber: number, workspacePath: string) {
+  const remote = fingerprintGitRemote(testGitUrl)!
+  return {
+    workflowRunId,
+    projectId: "project-1",
+    issueNumber,
+    repositoryName: "main",
+    remoteFingerprint: remote.remoteFingerprint,
+    remoteIdentityVersion: remote.remoteIdentityVersion,
+    workspacePath,
+    branch: `mohist/run-${workflowRunId}`,
+    baseBranch: "main",
   }
 }
 
@@ -166,8 +193,14 @@ describe("workspace registry lifecycle", () => {
     const info = await manager.prepare(work("wr-marker", 99, repo), new AbortController().signal)
 
     const marker = JSON.parse(await readFile(join(info.path, ".mohist/workspace.json"), "utf8"))
-    expect(Object.keys(marker).sort()).toEqual(["issueNumber", "workflowRunId"])
-    expect(marker).toEqual({ issueNumber: 99, workflowRunId: "wr-marker" })
+    expect(marker).toMatchObject({
+      issueNumber: 99,
+      workflowRunId: "wr-marker",
+      projectId: "project-1",
+      repositoryName: "main",
+      baseBranch: "main",
+      runBranch: "mohist/run-wr-marker",
+    })
   })
 
   it("verification refreshes an existing entry", async () => {
@@ -250,7 +283,7 @@ describe("workspace registry lifecycle", () => {
     const removeHandler = builder.handlers.get("RemoveWorkspace")
     expect(removeHandler).toBeTypeOf("function")
 
-    const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: info.path })
+    const result = await (removeHandler as (query: unknown) => Promise<unknown>)(removalQuery("wr-remove", 1, info.path))
 
     expect(result).toMatchObject({ removed: true, status: "removed" })
     expect(registry.get("wr-remove")).toBeNull()
@@ -273,7 +306,7 @@ describe("workspace registry lifecycle", () => {
 
     void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
     const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
-    const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: info.path })
+    const result = await (removeHandler as (query: unknown) => Promise<unknown>)(removalQuery("wr-gone", 2, info.path))
 
     expect(result).toMatchObject({ removed: false, status: "missing" })
     expect(registry.get("wr-gone")).toBeNull()
@@ -298,7 +331,7 @@ describe("workspace registry lifecycle", () => {
     const outsidePath = join(root, "outside", "decoy")
     await writeFile(outsidePath, "not a workspace")
 
-    const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: outsidePath })
+    const result = await (removeHandler as (query: unknown) => Promise<unknown>)(removalQuery("wr-out", 3, outsidePath))
     expect(result).toMatchObject({ removed: false, reason: "workspace_cleanup_refused" })
     expect(registry.get("wr-out")).not.toBeNull()
 
@@ -324,7 +357,7 @@ describe("workspace registry lifecycle", () => {
 
     const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: outsidePath })
 
-    expect(result).toMatchObject({ removed: false, status: "failed", reason: "workspace_cleanup_refused" })
+    expect(result).toMatchObject({ removed: false, status: "failed", reason: "workspace_identity_mismatch" })
     expect(registry.get("wr-outside-entry")).toMatchObject({ workspacePath: outsidePath })
     expect(exists(outsidePath)).toBe(true)
   })

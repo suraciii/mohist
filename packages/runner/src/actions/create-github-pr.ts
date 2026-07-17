@@ -8,7 +8,7 @@ import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, getGitHubPrGit, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type CreateGitHubPrOutput, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata } from "./github-pr-types.js"
-import { resolveDeliveryBaseBranch } from "./delivery-context.js"
+import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource, resolveGitHubRepository } from "./delivery-context.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -47,10 +47,10 @@ function networkGhOptions(context: ActionContext): CommandLineOptions | undefine
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
-  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
+  const source = resolveDeliverySource(context)
   const target = resolveDeliveryBaseBranch(context)
-  if (!target) return { status: "failure", message: "create-github-pr requires the authoritative repository base branch" }
-  const remote = stringInput(context.with, "remote") ?? "origin"
+  const remote = resolveDeliveryRemote(context)
+  if (!source || !target || !remote) return { status: "failure", message: "create-github-pr requires the authoritative repository branch, source, and origin" }
   const draft = context.with?.["draft"] !== false
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
@@ -81,6 +81,8 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     output: payload.output ?? message,
     steps,
   })
+  const githubRepository = resolveGitHubRepository(context)
+  if (githubRepository === null) return fail("config-error", "create-github-pr requires an authoritative GitHub repository URL")
 
   const ghOpts = networkGhOptions(context)
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
@@ -123,7 +125,7 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     )
   }
 
-  const opened = await openOrReusePr(gh, workDir, branchProbe.name, target, text.title, text.body, draft, context.signal, record, ghOpts)
+  const opened = await openOrReusePr(gh, workDir, branchProbe.name, target, text.title, text.body, draft, context.signal, record, ghOpts, githubRepository)
   if (opened.kind === "failure") {
     return fail(opened.errorCode, opened.message, {
       output: opened.output,
@@ -169,11 +171,12 @@ export async function openOrReusePr(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
+  githubRepository?: string,
 ): Promise<
   | { kind: "ok"; prNumber: number; prUrl: string; operation: "created" | "updated" | "reused"; output: string }
   | { kind: "failure"; errorCode: GitHubPrErrorCode; message: string; output: string }
 > {
-  const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], workDir, signal, undefined, options)
+  const listResult = await gh("gh", withGitHubRepository(["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], githubRepository), workDir, signal, undefined, options)
   const listOutput = combinedGhOutput(listResult)
   record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url,isDraft`, listResult.exitCode, listOutput, timeoutStepMetadata(listResult))
   if (listResult.exitCode !== 0) {
@@ -189,7 +192,7 @@ export async function openOrReusePr(
   if (existing.length > 0) {
     const pr = existing[0]!
     const editArgs = ["pr", "edit", String(pr.number), "--title", title, "--body", body]
-    const editResult = await gh("gh", editArgs, workDir, signal, undefined, options)
+    const editResult = await gh("gh", withGitHubRepository(editArgs, githubRepository), workDir, signal, undefined, options)
     const editOutput = combinedGhOutput(editResult)
     record("gh-pr-edit", `pr edit ${pr.number} --title "${title}" --body "${body}"`, editResult.exitCode, editOutput, timeoutStepMetadata(editResult))
     if (editResult.exitCode !== 0) {
@@ -205,7 +208,7 @@ export async function openOrReusePr(
 
   const createArgs = ["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body]
   if (draft) createArgs.push("--draft")
-  const createResult = await gh("gh", createArgs, workDir, signal, undefined, options)
+  const createResult = await gh("gh", withGitHubRepository(createArgs, githubRepository), workDir, signal, undefined, options)
   const createOutput = combinedGhOutput(createResult)
   record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}"${draft ? " --draft" : ""}`, createResult.exitCode, createOutput, timeoutStepMetadata(createResult))
   if (createResult.exitCode !== 0) {
@@ -293,4 +296,8 @@ export function buildCreateGitHubPrOutput(output: CreateGitHubPrOutput): ActionR
     output: json,
     exitCode: 1,
   }
+}
+
+function withGitHubRepository(args: string[], githubRepository?: string): string[] {
+  return githubRepository ? [...args, "--repo", githubRepository] : args
 }

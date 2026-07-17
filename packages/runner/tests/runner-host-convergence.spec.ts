@@ -235,12 +235,18 @@ describe("RunnerHost converges active workflow runs", () => {
   async function seedActiveEntry(workflowRunId: string, workspacePath: string) {
     const filePath = defaultWorkspaceRegistryFilePath(root)
     const file = {
-      version: 1,
+        version: 2,
       entries: {
         [workflowRunId]: {
           issueNumber: 1,
           workflowRunId,
           workspacePath,
+          projectId: "project-1",
+          repositoryName: "main",
+          baseBranch: "main",
+          runBranch: `mohist/run-${workflowRunId}`,
+          remoteFingerprint: "fingerprint",
+          remoteIdentityVersion: "git-remote-url/v1",
           phase: "active",
           materializedAt: FIXED_TIME,
           terminalAt: null,
@@ -297,12 +303,13 @@ describe("RunnerHost converges active workflow runs", () => {
     const { mkdir } = await import("node:fs/promises")
     await mkdir(join(root, ".mohist/runner-state"), { recursive: true })
     await writeFile(filePath, JSON.stringify({
-      version: 1,
+      version: 2,
       entries: {
         "wr-active": {
           issueNumber: 1,
           workflowRunId: "wr-active",
           workspacePath: wsPathA,
+          projectId: "project-1", repositoryName: "main", baseBranch: "main", runBranch: "mohist/run-wr-active", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1",
           phase: "active",
           materializedAt: FIXED_TIME,
           terminalAt: null,
@@ -311,6 +318,7 @@ describe("RunnerHost converges active workflow runs", () => {
           issueNumber: 2,
           workflowRunId: "wr-eligible",
           workspacePath: wsPathB,
+          projectId: "project-1", repositoryName: "main", baseBranch: "main", runBranch: "mohist/run-wr-eligible", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1",
           phase: "eligible",
           materializedAt: FIXED_TIME,
           terminalAt: FIXED_TIME,
@@ -343,16 +351,18 @@ describe("RunnerHost converges active workflow runs", () => {
     const { mkdir } = await import("node:fs/promises")
     await mkdir(join(root, ".mohist/runner-state"), { recursive: true })
     await writeFile(filePath, JSON.stringify({
-      version: 1,
+      version: 2,
       entries: {
         "wr-1": {
           issueNumber: 1, workflowRunId: "wr-1",
           workspacePath: wsPath1, phase: "active",
+          projectId: "project-1", repositoryName: "main", baseBranch: "main", runBranch: "mohist/run-wr-1", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1",
           materializedAt: FIXED_TIME, terminalAt: null,
         },
         "wr-2": {
           issueNumber: 2, workflowRunId: "wr-2",
           workspacePath: wsPath2, phase: "active",
+          projectId: "project-1", repositoryName: "main", baseBranch: "main", runBranch: "mohist/run-wr-2", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1",
           materializedAt: FIXED_TIME, terminalAt: null,
         },
       },

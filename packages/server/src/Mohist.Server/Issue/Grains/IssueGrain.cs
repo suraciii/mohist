@@ -190,6 +190,33 @@ public class IssueGrain : Grain, IIssueGrain
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
         var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
 
+        // Compute the authoritative repository context BEFORE saving the
+        // Issue transaction (T-006 / D4). Fingerprint normalization lives
+        // in GitRemoteUrlNormalizer; the same fingerprint is shared with
+        // RepositoryPolicy alias-rejection so two Project-local names
+        // that resolve to the same physical remote are forbidden from
+        // the start.
+        var fingerprint = Mohist.Server.Project.Domain.GitRemoteUrlNormalizer.Fingerprint(repo.GitUrl);
+        var repositoryContext = fingerprint is null
+            ? (Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext?)null
+            : new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
+                Name: repo.Name,
+                GitUrl: repo.GitUrl,
+                BaseBranch: repo.BaseBranch,
+                RemoteFingerprint: fingerprint.Fingerprint,
+                RemoteIdentityVersion: fingerprint.Version);
+        if (repositoryContext is null)
+        {
+            // Fail closed: an unparseable Git URL means we cannot prove
+            // identity later. The Issue stays in backlog (no lock, no
+            // IssueWorkStarted event) — no workspace has been created.
+            throw new InvalidOperationException(
+                $"Cannot start workflow: target repository '{repo.Name}' has an unparseable Git URL (no fingerprint)");
+        }
+        if (string.IsNullOrWhiteSpace(repositoryContext.BaseBranch))
+            throw new InvalidOperationException(
+                $"Cannot start workflow: target repository '{repo.Name}' has no configured base branch");
+
         // The startup template resolution honors the issue's effective
         // workflow profile (issue selection → project default → system
         // default) and only the explicit advanced overrides (issue custom
@@ -591,14 +618,6 @@ public class IssueGrain : Grain, IIssueGrain
             throw new IssueRepositoryUnknownException(command.RepositoryName);
         var canonicalName = match.Name;
 
-        // Apply the repository reassignment first so a lock / unknown /
-        // stale-revision failure leaves every other field untouched.
-        // ChangeRepository throws IssueRepositoryLockedException when
-        // HasWorkflowStarted is true, IssueRepositoryStaleRevisionException
-        // when expectedRevision mismatches the stored revision, and
-        // ArgumentException when the canonical name is empty.
-        _issue.ChangeRepository(canonicalName, commandId, expectedRevision);
-
         var present = command.PresentFields ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal);
         var hasTitle = present.Contains(nameof(command.Title));
         var hasBody = present.Contains(nameof(command.Body));
@@ -617,6 +636,24 @@ public class IssueGrain : Grain, IIssueGrain
         {
             await _attachmentService.ValidateIssueBindAsync(_issue.ProjectId, _issue.Id, command.AttachmentIds);
         }
+
+        if (hasTitle && string.IsNullOrWhiteSpace(command.Title))
+            throw new ArgumentException("Issue title is required", nameof(command.Title));
+        if (hasPriority && command.Priority is not null)
+            _ = IssuePriority.From(command.Priority);
+        if (hasLabels && command.Labels is not null)
+        {
+            foreach (var (key, value) in command.Labels)
+            {
+                Domain.Issue.ValidateLabelKey(key);
+                Domain.Issue.ValidateLabelValue(value);
+            }
+        }
+
+        // Every potentially failing PATCH input has been validated before
+        // this point, so the repository transition and sibling aggregate
+        // fields are committed together or not at all.
+        _issue.ChangeRepository(canonicalName, commandId, expectedRevision);
 
         IReadOnlyDictionary<string, string>? labelsForUpdate = null;
         if (hasLabels)
@@ -672,8 +709,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         var targetExists = await ResolveReopenTargetExistsAsync();
-        _issue.Reopen(targetExists);
-        _issue.RecordRepositoryCommandReceipt(commandId, "reopen", expectedRevision);
+        _issue.ReopenWithReceipt(targetExists, commandId, expectedRevision);
         await SaveIssueAsync();
         return Coordinator.IssueBindingParticipantOutcome.Applied;
     }

@@ -109,12 +109,18 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     await writeFile(
       registry.getFilePath(),
       JSON.stringify({
-        version: 1,
+          version: 2,
         entries: {
           [workflowRunId]: {
             issueNumber,
             workflowRunId,
             workspacePath: path,
+            projectId: "project-1",
+            repositoryName: "main",
+            baseBranch: "main",
+            runBranch: `mohist/run-${workflowRunId}`,
+            remoteFingerprint: "fingerprint",
+            remoteIdentityVersion: "git-remote-url/v1",
             phase: "eligible",
             materializedAt: now.toISOString(),
           },

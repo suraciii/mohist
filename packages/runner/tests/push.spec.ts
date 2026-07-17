@@ -302,6 +302,25 @@ describe("mohist/push", () => {
     })
   })
 
+  it("IssueRun_RejectsConflictingDeliveryOverridesBeforeGit", async () => {
+    const calls = installGit(async () => { throw new Error("git must not run") })
+    const result = await pushAction(context(
+      { remote: "upstream", source: "other", target: "release" },
+      {
+        repository: {
+          gitUrl: "https://github.com/acme/web.git",
+          baseBranch: "master",
+          remoteFingerprint: "a".repeat(64),
+          remoteIdentityVersion: "git-remote-url/v1",
+        },
+        workspace: { path: WORKSPACE_PATH, branch: "mohist/run-issue" },
+      },
+    ))
+
+    expect(result.status).toBe("failure")
+    expect(calls).toEqual([])
+  })
+
   it("ExplicitSourceOption_PushesThatRefAsSource", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")

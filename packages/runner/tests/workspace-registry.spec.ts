@@ -58,7 +58,7 @@ describe("WorkspaceRegistry", () => {
     })
   })
 
-  it("Load_FromExistingFile_RestoresEntriesAndPreservesActivePhase", async () => {
+  it("Load_LegacyFile_RejectsEntries", async () => {
     const persistedAt = "2026-06-20T08:00:00.000Z"
     const filePath = defaultWorkspaceRegistryFilePath(root)
     await mkdir(join(root, ".mohist", "runner-state"), { recursive: true })
@@ -88,11 +88,9 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     const list = registry.list()
-    expect(list).toHaveLength(2)
-    const active = registry.get("wr-existing")
-    expect(active).toMatchObject({ phase: "active", materializedAt: persistedAt, terminalAt: null })
-    const eligible = registry.get("wr-done")
-    expect(eligible).toMatchObject({ phase: "eligible", terminalAt: "2026-06-24T00:00:00.000Z" })
+    expect(list).toEqual([])
+    expect(registry.get("wr-existing")).toBeNull()
+    expect(registry.get("wr-done")).toBeNull()
   })
 
   it("Load_MissingFile_TreatsAsEmpty", async () => {

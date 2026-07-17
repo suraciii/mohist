@@ -108,7 +108,7 @@ vi.mock("@microsoft/signalr", () => {
 })
 
 describe("RunnerSignalRClient workspace queries", () => {
-  it("WorkspaceQuery_UsesExplicitWorkspaceAndBaseBranch", () => {
+  it("WorkspaceQuery_ParsesIdentityLessRequestButHandlersRejectIt", () => {
     const query = resolveWorkspaceQuery({
       workspacePath: "/tmp/mohist/workspaces/issue-25",
       branch: "mohist/run-wr-25",
@@ -172,11 +172,11 @@ describe("RunnerSignalRClient workspace queries", () => {
 
   it("WorkspaceRemoval_OnlyAllowsPathsUnderRunnerRoot", () => {
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects/app/workspaces/issue-1")).toBe(true)
-    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(true)
+    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(false)
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/other/issue-1")).toBe(false)
   })
 
-  it("GetWorkspaceStatus_WhenFetchFails_ReturnsExistingWorkspaceWithRebaseState", async () => {
+  it("GetWorkspaceStatus_RejectsIdentityLessRequestBeforeGit", async () => {
     builders.length = 0
     const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
     setRunnerSignalRExistsCheckerForTest(() => true)
@@ -206,27 +206,11 @@ describe("RunnerSignalRClient workspace queries", () => {
       baseBranch: "master",
     })
 
-    expect(status).toEqual({
-      exists: true,
-      branch: "mohist/run-wr-1",
-      baseBranch: "master",
-      rebaseInProgress: true,
-      conflictingFiles: ["packages/runner/src/server/runner-signalr.ts"],
-      reason: "fetch_failed",
-    })
-    expect(calls.map((call) => call.command)).toEqual([
-      "rev-parse --is-inside-work-tree",
-      "rev-parse --verify refs/heads/mohist/run-wr-1",
-      "rebase --show-current-patch",
-      "diff --name-only --diff-filter=U",
-      "fetch origin master",
-    ])
-    expect(calls.find((call) => call.command === "fetch origin master")?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
-    expect(calls.filter((call) => call.command !== "fetch origin master").every((call) => call.timeoutMs === undefined)).toBe(true)
-    expect(calls.map((call) => call.command)).not.toContain("rev-list --left-right --count origin/master...mohist/run-wr-1")
+    expect(status).toEqual({ exists: false, reason: "workspace_identity_mismatch" })
+    expect(calls).toEqual([])
   })
 
-  it("GetWorkspaceStatus_WhenFetchSucceeds_ReportsAheadBehindFromOriginBase", async () => {
+  it("GetWorkspaceStatus_RejectsIdentityLessRequestWithoutFetching", async () => {
     builders.length = 0
     const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
     setRunnerSignalRExistsCheckerForTest(() => true)
@@ -256,24 +240,8 @@ describe("RunnerSignalRClient workspace queries", () => {
       baseBranch: "master",
     })
 
-    expect(status).toMatchObject({
-      exists: true,
-      branch: "mohist/run-wr-1",
-      baseBranch: "master",
-      ahead: 2,
-      behind: 3,
-      rebaseInProgress: false,
-      conflictingFiles: [],
-    })
-    expect(calls.map((call) => call.command)).toEqual([
-      "rev-parse --is-inside-work-tree",
-      "rev-parse --verify refs/heads/mohist/run-wr-1",
-      "rebase --show-current-patch",
-      "fetch origin master",
-      "rev-list --left-right --count origin/master...mohist/run-wr-1",
-    ])
-    expect(calls.find((call) => call.command === "fetch origin master")?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
-    expect(calls.filter((call) => call.command !== "fetch origin master").every((call) => call.timeoutMs === undefined)).toBe(true)
+    expect(status).toEqual({ exists: false, reason: "workspace_identity_mismatch" })
+    expect(calls).toEqual([])
   })
 })
 

@@ -347,14 +347,14 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal(ProjectRepositoryRemovalOutcome.Removed, outcome);
 
         var row = await LoadProjectRowAsync(projectId);
-        Assert.Equal(1L, row.RepositoryRevision);
+        Assert.Equal(3L, row.RepositoryRevision);
         Assert.False(string.IsNullOrEmpty(row.LastRepositoryCommandJson));
         var receipt = JSON.Deserialize<ProjectRepositoryCommandReceipt>(
             row.LastRepositoryCommandJson!)!;
         Assert.Equal("cmd-1", receipt.CommandId);
         Assert.Equal("remove", receipt.Kind);
         Assert.Equal("web", receipt.RepositoryName);
-        Assert.Equal(1L, receipt.AppliedRevision);
+        Assert.Equal(3L, receipt.AppliedRevision);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -375,7 +375,7 @@ public class RepositoryDeletionProtectionSpecs
 
         // Receipt revision must not advance on duplicate replay.
         var row = await LoadProjectRowAsync(projectId);
-        Assert.Equal(1L, row.RepositoryRevision);
+        Assert.Equal(3L, row.RepositoryRevision);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

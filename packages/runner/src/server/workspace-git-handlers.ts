@@ -56,6 +56,7 @@ export interface WorkspaceGitHandlerDeps {
   runnerRoot?: string
   runCommand?: typeof defaultRunCommand
   pathExists?: typeof defaultExistsSync
+  allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
 let runGitCommand: typeof defaultRunCommand = defaultRunCommand
@@ -108,7 +109,8 @@ export function registerWorkspaceGitHandlers(
   }
 
   async function validateIdentity(query: WorkspaceQuery, signal: AbortSignal): Promise<boolean> {
-    if (!hasCompleteWorkspaceIdentity(query)) return true
+    if (!hasCompleteWorkspaceIdentity(query)) return deps.allowUnverifiedWorkspaceQueriesForTest === true
+    if (deps.allowUnverifiedWorkspaceQueriesForTest) return true
     if (!deps.runnerRoot) return false
     if (query.workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) return false
     const expected: IssueWorkspaceMarker = {

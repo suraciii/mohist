@@ -44,41 +44,44 @@ export function registerWorkspaceRemovalHandler(
 
   conn.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
     if (!query?.workspacePath) {
-      await dropRegistryEntryForPath(deps.registry ?? null, null)
       return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
     }
     const workspacePath = resolve(query.workspacePath)
+    if (!hasCompleteWorkspaceIdentity(query)) {
+      return removal(false, "failed", workspacePath, "workspace_identity_mismatch", "Workspace query requires complete identity")
+    }
     if (!isUnderRunnerRoot(deps.runnerRoot, workspacePath)) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
     }
-    if (hasCompleteWorkspaceIdentity(query)) {
-      if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
-        return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path does not belong to the workflow run")
-      }
-      const expected: IssueWorkspaceMarker = {
-        version: 2,
-        issueId: null,
-        issueNumber: query.issueNumber,
-        workflowRunId: query.workflowRunId,
-        projectId: query.projectId,
-        repositoryName: query.repositoryName,
-        baseBranch: query.baseBranch ?? "",
-        runBranch: query.branch,
-        remoteFingerprint: query.remoteFingerprint,
-        remoteIdentityVersion: query.remoteIdentityVersion,
-      }
-      try {
-        await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal, null, deps.runnerRoot)
-      } catch (error) {
-        return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
-      }
+    if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
+      return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path does not belong to the workflow run")
+    }
+    if (!pathExists(workspacePath)) {
+      await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+      return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+    }
+    const expected: IssueWorkspaceMarker = {
+      version: 2,
+      issueId: null,
+      issueNumber: query.issueNumber,
+      workflowRunId: query.workflowRunId,
+      projectId: query.projectId,
+      repositoryName: query.repositoryName,
+      baseBranch: query.baseBranch,
+      runBranch: query.branch,
+      remoteFingerprint: query.remoteFingerprint,
+      remoteIdentityVersion: query.remoteIdentityVersion,
+    }
+    try {
+      await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal, null, deps.runnerRoot)
+    } catch (error) {
+      return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
     }
     // Pre-resolve any matching registry entry after the containment
     // check. In-root missing directories still drop their registry entry
     // so the registry stays consistent with disk reality, while refused
     // outside-root paths leave registry state untouched.
     await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-    if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
     try {
       await deleteDirectory(workspacePath)
       return removal(true, "removed", workspacePath, null, "Workspace removed")

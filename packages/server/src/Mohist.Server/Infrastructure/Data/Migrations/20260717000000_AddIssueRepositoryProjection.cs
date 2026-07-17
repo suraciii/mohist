@@ -1,25 +1,11 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Mohist.Server.Infrastructure.Data.Db;
 
 #nullable disable
 
 namespace Mohist.Server.Infrastructure.Data.Migrations;
 
-/// <summary>
-/// issue-417 T-002 / Design D2/D3: persistence projection for the issue
-/// target-repository lifecycle. See the comment on
-/// <see cref="AddIssueRepositoryProjection"/> for the rationale and
-/// SQLite-specific steps.
-/// </summary>
-[DbContext(typeof(MohistDbContext))]
-[Migration("20260717000000_AddIssueRepositoryProjection")]
 public partial class AddIssueRepositoryProjection : Migration
 {
-    protected override void BuildTargetModel(ModelBuilder modelBuilder) =>
-        MohistDbContextModelSnapshot.BuildModelCore(modelBuilder);
-
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {

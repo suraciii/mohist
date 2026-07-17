@@ -241,12 +241,30 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
 
         var canonicalRepository = payload.RepositoryName ?? string.Empty;
 
-        // The blocker check runs before fencing so a deletion rejected
-        // for non-terminal bindings returns RepositoryInUse without
-        // persisting a fence and without invoking the Project
-        // participant. Project's existing existence / default checks
-        // happen inside the participant, preserving
-        // not-found/default precedence.
+        var project = await _grains.GetGrain<IProjectGrain>(payload.ProjectId).GetAsync();
+        var repository = project?.GetRepository(canonicalRepository);
+        if (repository is null)
+        {
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryNotFound,
+                canonicalRepository,
+                expectedRevision ?? 0L,
+                $"Repository '{canonicalRepository}' not found in project '{payload.ProjectId}'");
+        }
+
+        if (repository.IsDefault)
+        {
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryDefault,
+                repository.Name,
+                expectedRevision ?? 0L,
+                $"Repository '{repository.Name}' is the default. Run 'mo repo set-default <other-name>' first.");
+        }
+
+        // Check committed Issue blockers before fencing so a rejection
+        // does not leave technical coordinator state behind. Existence and
+        // default precedence are established above and revalidated by the
+        // Project participant before it mutates Project state.
         if (await _blockerQuery.HasBlockerAsync(payload.ProjectId, canonicalRepository))
         {
             return new IssueRepositoryBindingResult(

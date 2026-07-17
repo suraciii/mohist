@@ -439,7 +439,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public Task<bool> IsStoppedOrTerminalAsync()
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return Task.FromResult(true);
+        if (_run is null) return Task.FromResult(false);
         return Task.FromResult(_run.IsTerminal());
     }
 

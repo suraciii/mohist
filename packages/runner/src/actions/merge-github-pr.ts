@@ -9,7 +9,7 @@ import { classifyGhFailure } from "./github-pr-classify.js"
 import { waitChecksAndMergePr } from "./github-pr-merge.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MergeGitHubPrOutput } from "./github-pr-types.js"
-import { resolveDeliveryBaseBranch } from "./delivery-context.js"
+import { resolveDeliveryBaseBranch, resolveDeliverySource, resolveGitHubRepository } from "./delivery-context.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:merge-github-pr"
@@ -40,6 +40,8 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
     output: payload.output ?? message,
     steps,
   })
+  const githubRepository = resolveGitHubRepository(context)
+  if (githubRepository === null) return fail("config-error", "merge-github-pr requires an authoritative GitHub repository URL")
 
   if (method !== "squash") {
     return fail("config-error", `Unsupported merge method '${method}'. Supported method: squash.`)
@@ -56,12 +58,12 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
     return fail("config-error", subject.message, { output: subject.message })
   }
 
-  const resolvedPr = await resolvePrNumberForMerge(gh, context, workDir, context.signal, record, ghOpts)
+  const resolvedPr = await resolvePrNumberForMerge(gh, context, workDir, context.signal, record, ghOpts, githubRepository)
   if (resolvedPr.kind === "failure") {
     return fail(resolvedPr.errorCode, resolvedPr.message, { output: resolvedPr.output })
   }
 
-  const merged = await waitChecksAndMergePr(gh, workDir, resolvedPr.prNumber, subject.subject, context.signal, record, ghOpts)
+  const merged = await waitChecksAndMergePr(gh, workDir, resolvedPr.prNumber, subject.subject, context.signal, record, ghOpts, githubRepository)
   if (merged.kind === "failure") {
     return fail(merged.errorCode, merged.message, {
       output: merged.output,
@@ -102,6 +104,7 @@ async function resolvePrNumberForMerge(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
+  githubRepository?: string,
 ): Promise<
   | { kind: "ok"; prNumber: number; prUrl: string | null }
   | { kind: "failure"; errorCode: GitHubPrErrorCode; message: string; output: string }
@@ -109,7 +112,7 @@ async function resolvePrNumberForMerge(
   const explicit = numberInput(context.with, "prNumber")
   if (explicit !== undefined) return { kind: "ok", prNumber: explicit, prUrl: null }
 
-  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"])
+  const source = resolveDeliverySource(context)
   const target = resolveDeliveryBaseBranch(context)
   if (!target) {
     return {
@@ -128,7 +131,7 @@ async function resolvePrNumberForMerge(
     }
   }
 
-  const listResult = await gh("gh", ["pr", "list", "--head", source, "--base", target, "--state", "open", "--json", "number,url"], workDir, signal, undefined, options)
+  const listResult = await gh("gh", withGitHubRepository(["pr", "list", "--head", source, "--base", target, "--state", "open", "--json", "number,url"], githubRepository), workDir, signal, undefined, options)
   const listOutput = combinedGhOutput(listResult)
   record("gh-pr-list", `pr list --head ${source} --base ${target} --state open --json number,url`, listResult.exitCode, listOutput, timeoutStepMetadata(listResult))
   if (listResult.exitCode !== 0) {
@@ -163,4 +166,8 @@ export function buildMergeGitHubPrOutput(output: MergeGitHubPrOutput): ActionRes
     output: json,
     exitCode: 1,
   }
+}
+
+function withGitHubRepository(args: string[], githubRepository?: string): string[] {
+  return githubRepository ? [...args, "--repo", githubRepository] : args
 }

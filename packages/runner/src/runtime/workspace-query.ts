@@ -58,13 +58,13 @@ export function hasCompleteWorkspaceIdentity(query: WorkspaceQuery | null | unde
   return resolved !== null && "identity" in resolved
 }
 
-// Containment check: is `candidate` the runner root itself, OR a path
-// nested strictly under it (no `..` traversal, no absolute leak)? Used
+// Containment check: is `candidate` nested strictly under the runner root
+// (no `..` traversal, no absolute leak)? Used
 // by the cleanup loop to refuse deleting workspaces outside the runner
 // root, and by the manual `RemoveWorkspace` handler for the same guard.
 export function isUnderRunnerRoot(root: string, candidate: string): boolean {
   const rootPath = resolve(root)
   const target = resolve(candidate)
   const rel = relative(rootPath, target)
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)
 }

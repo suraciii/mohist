@@ -42,7 +42,7 @@ export interface WorkspaceRegistryEntry {
 // Wire shape. Persistence is intentionally versioned so a future schema
 // change can be detected and handled without silently corrupting state.
 interface WorkspaceRegistryFile {
-  version: 1 | 2
+  version: 2
   entries: Record<string, WorkspaceRegistryEntry>
 }
 
@@ -258,7 +258,7 @@ export class WorkspaceRegistry {
       return
     }
     const file = parsed as Partial<WorkspaceRegistryFile> | null
-    if (!file || typeof file !== "object" || (file.version !== 1 && file.version !== 2) || !file.entries || typeof file.entries !== "object") {
+    if (!file || typeof file !== "object" || file.version !== 2 || !file.entries || typeof file.entries !== "object") {
       this.loaded = true
       return
     }

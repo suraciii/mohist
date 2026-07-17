@@ -143,6 +143,7 @@ public sealed partial class Issue
         _workflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
+        _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
         Touch(now);
         RecordEvent(new IssueWorkStarted(
             wrId,
@@ -193,6 +194,7 @@ public sealed partial class Issue
         _workflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
+        _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
         Touch(now);
         RecordEvent(new IssueWorkStarted(
             wrId,
@@ -241,6 +243,7 @@ public sealed partial class Issue
         var completedAt = now ?? DateTime.UtcNow;
         _completedAt = completedAt;
         _status = IssueStatus.Done;
+        _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
         Touch(completedAt);
         RecordEvent(new IssueCompleted(workflowRunId));
         return true;
@@ -271,6 +274,7 @@ public sealed partial class Issue
         var completedAt = now ?? DateTime.UtcNow;
         _completedAt = completedAt;
         _status = IssueStatus.Cancelled;
+        _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
         Touch(completedAt);
         RecordEvent(new IssueCancelled(reason));
     }
@@ -285,13 +289,40 @@ public sealed partial class Issue
     /// back without operator intervention that first re-declares the
     /// repository.
     /// </summary>
-    public void Reopen(bool targetExists, DateTime? now = null)
+    public void Reopen(bool targetExists, DateTime? now = null) =>
+        ReopenCore(targetExists, commandId: null, expectedRevision: null, now);
+
+    public void ReopenWithReceipt(
+        bool targetExists,
+        string commandId,
+        long? expectedRevision,
+        DateTime? now = null) =>
+        ReopenCore(targetExists, commandId, expectedRevision, now);
+
+    private void ReopenCore(
+        bool targetExists,
+        string? commandId,
+        long? expectedRevision,
+        DateTime? now)
     {
         if (_status != IssueStatus.Cancelled)
             throw new InvalidOperationException($"Issue #{Number} is not cancelled");
         if (!targetExists)
             throw new IssueRepositoryMissingOnReopenException(_repositoryRef?.Value ?? "<unset>");
+        if (expectedRevision.HasValue && expectedRevision.Value != _repositoryBindingRevision)
+            throw new IssueRepositoryStaleRevisionException(commandId ?? "reopen", expectedRevision.Value, _repositoryBindingRevision);
         _status = IssueStatus.Backlog;
+        var nextRevision = NextRevision(_repositoryBindingRevision, expectedRevision);
+        _repositoryBindingRevision = nextRevision;
+        if (commandId is not null)
+        {
+            _lastRepositoryCommand = new IssueRepositoryBindingReceipt(
+                commandId,
+                "reopen",
+                _repositoryRef?.Value ?? throw new InvalidOperationException($"Issue #{Number} has no stored target repository"),
+                nextRevision,
+                now ?? DateTime.UtcNow);
+        }
         Touch(now);
         RecordEvent(new IssueReopened());
     }

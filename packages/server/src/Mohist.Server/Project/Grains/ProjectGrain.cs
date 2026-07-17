@@ -87,6 +87,7 @@ public class ProjectGrain : Grain, IProjectGrain
             Id = GrainKey,
             Name = name,
             RepositoriesJson = serialized,
+            RepositoryRevision = 1,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -418,6 +419,7 @@ public class ProjectGrain : Grain, IProjectGrain
 
         entry.RepositoriesJson = JSON.Serialize(repositories);
         entry.UpdatedAt = updatedAt;
+        entry.RepositoryRevision += 1;
         await db.SaveChangesAsync();
         return true;
     }
