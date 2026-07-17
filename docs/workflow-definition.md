@@ -109,7 +109,7 @@ recovery:
 ## Check
 
 ```yaml
-- name: merge-verified      # 必填。检查名
+- id: merge-verified        # 必填。阶段内的检查标识
   title: Merge verified     # 可选。面向使用者的名称
   uses: mohist/github-pr-status
   with:
@@ -120,7 +120,8 @@ recovery:
 
 ## 模板表达式
 
-`with` 和 `expect` 中可以使用 `${{ }}` 表达式：
+`with` 和 `expect` 中可以使用 `${{ }}` 表达式。下表列出全部可用的命名空间，表外的
+根引用不合法：
 
 | 表达式 | 含义 |
 |---|---|
@@ -138,6 +139,9 @@ recovery:
 - 模板在任务开始执行前展开；已开始任务的输入固定，不随之后的 Variables 修改变化。
 - `${{ prompts.<key> }}` 例外：执行时才读取 Prompt 正文。
 - `${{ vars.x }}` 单独占据整个值时，替换结果保留原始类型（对象、数组、数字）。
+- 表达式可以嵌在字符串里拼接，如 `openspec/changes/issue-${{ issue.number }}`：值转为
+  文本拼入。嵌入的表达式解析不出值、或值是对象/数组时，任务失败。
+- 需要字面 `${{` 时写 `\${{`。
 
 ## 完整示例
 
@@ -189,7 +193,7 @@ stages:
           github.pr.number: output.prNumber
           github.pr.url: output.prUrl
     checks:
-      - name: health
+      - id: health
         uses: core/script
         with:
           run: git diff --check
@@ -237,7 +241,7 @@ stages:
             - when: errorCode=protection-conflict
               retrySelf: true
     checks:
-      - name: merge-verified
+      - id: merge-verified
         uses: mohist/github-pr-status
         with:
           prNumber: ${{ vars.github.pr.number }}
@@ -249,5 +253,8 @@ stages:
 - 部分内置 profile 仍把 `expect` 写在 `with` 内；目标位置是任务顶层。
 - 部分内置任务仍使用旧的 Agent Action 输入；目标接口以 [Action 契约](actions/README.md)
   为准。
-- 内置 profile 直接使用 `${{ openspecChangeDir }}`，尚未纳入上表的命名空间。
+- 内置 profile 仍直接使用 `${{ openspecChangeDir }}`；目标写法是字面模板
+  `openspec/changes/issue-${{ issue.number }}`。
+- 字符串内嵌入的表达式解析不出值时，当前保留原文而非让任务失败。
+- check 当前用 `name` 声明标识；目标是 `id`。
 - 本地校验（写完 definition 不经服务器即可验证并得到领域语言的错误提示）尚未提供。

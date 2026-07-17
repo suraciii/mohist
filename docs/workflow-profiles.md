@@ -58,7 +58,7 @@ stages:
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: ${{ openspecChangeDir }}/proposal.md
+            - path: openspec/changes/issue-${{ issue.number }}/proposal.md
       - id: specs
         # ...
       - id: design
@@ -68,9 +68,9 @@ stages:
       - id: self-review
         # ...
     checks:
-      - name: plan-artifacts
+      - id: plan-artifacts
         with:
-          changeDir: ${{ openspecChangeDir }}
+          changeDir: openspec/changes/issue-${{ issue.number }}
 
   - stage: build
     requiresApproval: false
