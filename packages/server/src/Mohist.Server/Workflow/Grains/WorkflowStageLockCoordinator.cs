@@ -60,7 +60,7 @@ internal sealed class WorkflowStageLockCoordinator
     {
         var repository = _owner.RunOrNull?.Repository;
         if (repository is not null
-            && !string.IsNullOrWhiteSpace(_owner.GetIssueNumber())
+            && _owner.GetIssueNumber() is not null
             && string.Equals(resource, "project-integration", StringComparison.Ordinal))
             return WorkflowStageLockKeys.ForProjectRepositoryResource(projectId, repository.Name, resource);
 

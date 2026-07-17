@@ -76,7 +76,6 @@ public sealed record IssueWorkStartedWorkspace(
 
 public sealed record IssueWorkStartedContext(
     string ProjectId,
-    string IssueId,
     int IssueNumber,
     string? Title,
     string? Priority);

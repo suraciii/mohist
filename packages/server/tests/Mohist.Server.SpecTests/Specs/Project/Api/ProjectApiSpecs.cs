@@ -299,8 +299,6 @@ public class ProjectApiSpecs
         Assert.Single(repos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_AliasRemote_ReturnsAliasConflict()
     {
@@ -334,8 +332,6 @@ public class ProjectApiSpecs
         Assert.Equal("git@example.com:owner/web.git", web.GitUrl);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteRepository_BlockedByNonTerminalIssue_ReturnsInUseConflict()
     {
@@ -371,8 +367,6 @@ public class ProjectApiSpecs
         Assert.Contains(repos, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithoutGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {

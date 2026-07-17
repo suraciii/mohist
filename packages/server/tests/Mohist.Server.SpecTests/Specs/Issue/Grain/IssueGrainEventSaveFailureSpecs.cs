@@ -146,7 +146,13 @@ public class IssueGrainEventSaveFailureSpecs
             await grain.OnActivateAsync(CancellationToken.None);
         }
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ReopenAsync());
+        // issue-417: reopen now runs under the coordinator fence via
+        // ReopenWithReceiptAsync (which resolves the target through the
+        // project grain and so cannot be exercised from this isolated
+        // IssueGrain instance). The quarantine-under-test is the save path
+        // itself, so trigger the event-aware save via UpdateAsync instead —
+        // the same path the sibling 902 spec uses.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.UpdateAsync("Changed", null));
         var eventAwareSaves = failingStore.EventAwareSaveAttempts;
         var stateOnlySaves = failingStore.StateOnlySaveAttempts;
 

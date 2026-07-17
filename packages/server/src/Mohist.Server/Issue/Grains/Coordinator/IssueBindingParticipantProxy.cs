@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Grains;
 
@@ -23,20 +24,22 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
         _grains = grains;
     }
 
-    private IIssueBindingTarget IssueTarget(string issueId) => _grains.GetGrain<IIssueBindingTarget>(issueId);
+    private static string IssueGrainKey(string projectId, int issueNumber) =>
+        GrainKey.Issue(new IssueKey(projectId, issueNumber));
 
     public async Task<IssueBindingParticipantOutcome> CreateAsync(
         RepositoryCommandPayload.Create payload,
         string commandId,
         long? expectedRevision)
     {
+        var grainKey = IssueGrainKey(payload.ProjectId, payload.IssueNumber);
         try
         {
             await BindingParticipantProbe.BeforeParticipantAsync(
                 BindingParticipantProbeKind.Create,
-                payload.IssueId,
+                grainKey,
                 commandId);
-            return await IssueTarget(payload.IssueId).CreateWithReceiptAsync(
+            return await _grains.GetGrain<IIssueBindingTarget>(grainKey).CreateWithReceiptAsync(
                 payload.ProjectId,
                 payload.IssueNumber,
                 payload.Title,
@@ -44,7 +47,6 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                 payload.Labels,
                 payload.Priority,
                 payload.RepositoryName,
-                payload.IssueId,
                 payload.Risk,
                 payload.IsDraft,
                 payload.AttachmentIds,
@@ -68,13 +70,14 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
         string commandId,
         long? expectedRevision)
     {
+        var grainKey = IssueGrainKey(payload.ProjectId, payload.IssueNumber);
         try
         {
             await BindingParticipantProbe.BeforeParticipantAsync(
                 BindingParticipantProbeKind.Change,
-                payload.IssueId,
+                grainKey,
                 commandId);
-            return await IssueTarget(payload.IssueId).ChangeRepositoryWithReceiptAsync(
+            return await _grains.GetGrain<IIssueBindingTarget>(grainKey).ChangeRepositoryWithReceiptAsync(
                 new IssueChangeRepositoryCommand(
                     payload.RepositoryName,
                     payload.Title,
@@ -107,13 +110,14 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
         string commandId,
         long? expectedRevision)
     {
+        var grainKey = IssueGrainKey(payload.ProjectId, payload.IssueNumber);
         try
         {
             await BindingParticipantProbe.BeforeParticipantAsync(
                 BindingParticipantProbeKind.Reopen,
-                payload.IssueId,
+                grainKey,
                 commandId);
-            return await IssueTarget(payload.IssueId).ReopenWithReceiptAsync(commandId, expectedRevision);
+            return await _grains.GetGrain<IIssueBindingTarget>(grainKey).ReopenWithReceiptAsync(commandId, expectedRevision);
         }
         catch (IssueRepositoryStaleRevisionException)
         {

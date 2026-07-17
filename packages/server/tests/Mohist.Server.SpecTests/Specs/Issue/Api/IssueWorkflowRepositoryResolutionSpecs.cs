@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
@@ -81,7 +82,16 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "secondary",
             "git@secondary.example:repo-new.git",
             "release");
-        await issueGrain.ReopenWithTargetCheckAsync();
+        // issue-417: reopen now runs under the coordinator fence
+        // (IIssueGrain.ReopenWithTargetCheckAsync was removed) so a
+        // repository removal cannot race into an orphan reopen.
+        var reopenResult = await _grains
+            .GetGrain<IIssueRepositoryCoordinatorGrain>(projectId)
+            .ReopenAsync(
+                new RepositoryCommandPayload.Reopen(projectId, number, "secondary"),
+                $"reopen:{projectId}:{number}",
+                expectedRevision: null);
+        Assert.True(reopenResult.IsApplied, reopenResult.Message ?? "reopen rejected");
 
         var wrId = await issueGrain.StartWorkAsync();
 

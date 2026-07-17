@@ -28,8 +28,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
     private const string PreviousMigrationId = "20260714120000_AddProjectEventReadKeys";
     private const string MigrationId = "20260717000000_AddIssueRepositoryProjection";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_AddsRepositoryNameColumnToIssues()
     {
@@ -45,8 +43,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         Assert.Contains("RepositoryName", columns);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RepositoryNameIsStoredGeneratedFromStateJson()
     {
@@ -73,15 +69,13 @@ public class AddIssueRepositoryProjectionMigrationSpecs
             priority = "p2",
             repositoryRef = "web",
         });
-        await InsertIssueAsync(database, "iss_with_repo", stateJson);
+        await InsertIssueAsync(database, "proj_t002_a", 1001, stateJson);
 
         await using var read = database.CreateDbContext();
-        var row = await read.Set<IssueRow>().AsNoTracking().SingleAsync(r => r.IssueId == "iss_with_repo");
+        var row = await read.Set<IssueRow>().AsNoTracking().SingleAsync(r => r.ProjectId == "proj_t002_a" && r.Number == 1001);
         Assert.Equal("web", row.RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RepositoryName_NullWhenStateJsonHasNoRepositoryRef()
     {
@@ -102,15 +96,13 @@ public class AddIssueRepositoryProjectionMigrationSpecs
             status = "done",
             priority = "p3",
         });
-        await InsertIssueAsync(database, "iss_legacy", stateJson);
+        await InsertIssueAsync(database, "proj_t002_legacy", 1, stateJson);
 
         await using var read = database.CreateDbContext();
-        var row = await read.Set<IssueRow>().AsNoTracking().SingleAsync(r => r.IssueId == "iss_legacy");
+        var row = await read.Set<IssueRow>().AsNoTracking().SingleAsync(r => r.ProjectId == "proj_t002_legacy" && r.Number == 1);
         Assert.Null(row.RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_CreatesIssuesRepositoryNameStatusIndex()
     {
@@ -127,8 +119,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
             indexes["IX_Issues_ProjectId_RepositoryName_Status"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Up_AddsRepositoryRevisionColumnToProjects()
     {
@@ -143,8 +133,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         Assert.Contains("LastRepositoryCommandJson", columns);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Up_ProjectsColumnsAreWiredAndQueryableThroughEf()
     {
@@ -175,8 +163,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         Assert.Equal("""{"commandId":"abc","kind":"remove"}""", row.LastRepositoryCommandJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_AppliesAddIssueRepositoryProjectionMigration()
     {
@@ -189,8 +175,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         Assert.Contains(MigrationId, applied);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Migration_AppliesOnTopOfPreviousMigration()
     {
@@ -208,8 +192,6 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         Assert.Contains("RepositoryName", columns);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task MigratedSqliteTemplate_AlreadyContainsRepositoryProjection()
     {
@@ -292,19 +274,23 @@ public class AddIssueRepositoryProjectionMigrationSpecs
         return new TestDatabase(connection, options);
     }
 
-    private static async Task InsertIssueAsync(TestDatabase database, string issueId, string stateJson)
+    private static async Task InsertIssueAsync(TestDatabase database, string projectId, int number, string stateJson)
     {
         await using var ctx = database.CreateDbContext();
         var connection = ctx.Database.GetDbConnection();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO Issues (IssueId, State)
-            VALUES ($id, $state);
+            INSERT INTO Issues (ProjectId, Number, State)
+            VALUES ($projectId, $number, $state);
             """;
-        var idParam = command.CreateParameter();
-        idParam.ParameterName = "$id";
-        idParam.Value = issueId;
-        command.Parameters.Add(idParam);
+        var projectIdParam = command.CreateParameter();
+        projectIdParam.ParameterName = "$projectId";
+        projectIdParam.Value = projectId;
+        command.Parameters.Add(projectIdParam);
+        var numberParam = command.CreateParameter();
+        numberParam.ParameterName = "$number";
+        numberParam.Value = number;
+        command.Parameters.Add(numberParam);
         var stateParam = command.CreateParameter();
         stateParam.ParameterName = "$state";
         stateParam.Value = stateJson;

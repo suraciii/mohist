@@ -102,21 +102,16 @@ public class RepositoryDeletionProtectionSpecs
         return (number, issueId, wrId);
     }
 
-    private async Task<string> ResolveIssueIdAsync(string projectId, int number)
+    private Task<string> ResolveIssueIdAsync(string projectId, int number)
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-        await using var db = new MohistDbContext(options);
-        var row = await db.Issues.AsNoTracking()
-            .Where(r => r.ProjectId == projectId && r.Number == number)
-            .Select(r => r.IssueId)
-            .SingleAsync();
-        return row;
+        // issue-417: the IIssueGrain key is now derived from the
+        // (projectId, number) scoped key via GrainKey.Issue rather than a
+        // stored IssueId column (which master removed from IssueRow).
+        return Task.FromResult(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+                new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, number)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_UnusedNonDefault_Succeeds()
     {
@@ -130,8 +125,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.True(updated.Repositories[0].IsDefault);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_DraftBacklogIssue_ThrowsInUseWithoutMutation()
     {
@@ -148,8 +141,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Contains(after.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_BacklogNonDraftIssue_ThrowsInUse()
     {
@@ -161,8 +152,6 @@ public class RepositoryDeletionProtectionSpecs
             grain.RemoveRepositoryAsync("web"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_InProgressIssue_ThrowsInUseRegardlessOfWorkflowHealth()
     {
@@ -184,8 +173,6 @@ public class RepositoryDeletionProtectionSpecs
             grain.RemoveRepositoryAsync("web"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_OnlyTerminalIssuesBound_SucceedsAndKeepsHistoricalName()
     {
@@ -213,8 +200,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal("done", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_CancelledIssueDoesNotBlock_Succeeds()
     {
@@ -241,8 +226,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal("cancelled", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_CrossProjectIssueDoesNotBlock()
     {
@@ -262,8 +245,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Single(updated!.Repositories);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_UnknownRepository_ReturnsNullWithoutBlockerQuery()
     {
@@ -278,8 +259,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_DefaultRepository_DefaultConflictWinsOverBlocker()
     {
@@ -297,8 +276,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Contains("default", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_AliasRemoteRejectedAsAliasConflict()
     {
@@ -313,8 +290,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Single(after!.Repositories);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateRepository_AliasRemoteRejectedAsAliasConflict()
     {
@@ -330,8 +305,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal("git@example.com:web.git", web.GitUrl);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_FirstCall_RemovesAndRecordsReceipt()
     {
@@ -353,8 +326,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal(3L, receipt.AppliedRevision);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_DuplicateReplay_ReturnsAlreadyAppliedWithoutMutation()
     {
@@ -374,8 +345,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Equal(3L, row.RepositoryRevision);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_StaleRevision_ThrowsAndDoesNotMutate()
     {
@@ -406,8 +375,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Contains(after.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_UnknownRepository_ThrowsNotFound()
     {
@@ -418,8 +385,6 @@ public class RepositoryDeletionProtectionSpecs
             grain.RemoveRepositoryWithReceiptAsync("ghost", "cmd-1", null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_DefaultRepository_DefaultConflictWinsOverBlocker()
     {
@@ -434,8 +399,6 @@ public class RepositoryDeletionProtectionSpecs
             grain.RemoveRepositoryWithReceiptAsync("server", "cmd-1", null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_NonTerminalIssue_ThrowsInUseWithoutMutation()
     {
@@ -451,8 +414,6 @@ public class RepositoryDeletionProtectionSpecs
         Assert.Contains(after.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepositoryWithReceipt_BlockerCheck_RunsAfterDefaultCheck()
     {

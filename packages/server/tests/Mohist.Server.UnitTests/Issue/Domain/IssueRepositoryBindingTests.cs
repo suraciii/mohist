@@ -23,7 +23,7 @@ public class IssueRepositoryBindingTests
     {
         Assert.Throws<ArgumentException>(() =>
             Mohist.Server.Issue.Domain.Issue.Create(
-                "issue_1", ProjectId, Number, "Title",
+                ProjectId, Number, "Title",
                 repositoryRef: null));
     }
 
@@ -32,7 +32,7 @@ public class IssueRepositoryBindingTests
     {
         Assert.Throws<ArgumentException>(() =>
             Mohist.Server.Issue.Domain.Issue.Create(
-                "issue_1", ProjectId, Number, "Title",
+                ProjectId, Number, "Title",
                 repositoryRef: "   "));
     }
 
@@ -40,7 +40,7 @@ public class IssueRepositoryBindingTests
     public void Create_StoresRepository_AndInitialRevision()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         Assert.Equal("main", issue.RepositoryRef);
         Assert.Equal(1L, issue.RepositoryBindingRevision);
@@ -52,7 +52,7 @@ public class IssueRepositoryBindingTests
     public void Create_WithCommand_RecordsReceipt()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title",
+            ProjectId, Number, "Title",
             repositoryRef: "main",
             commandId: "cmd-1");
 
@@ -66,7 +66,7 @@ public class IssueRepositoryBindingTests
     public void State_RoundTripsRepositoryBindingState()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title",
+            ProjectId, Number, "Title",
             repositoryRef: "main", commandId: "cmd-1");
 
         var json = IssueStore.Serialize(issue);
@@ -83,7 +83,7 @@ public class IssueRepositoryBindingTests
     public void StartWorkflow_SetsHasWorkflowStarted_Atomically()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         Assert.False(issue.HasWorkflowStarted);
 
@@ -98,7 +98,7 @@ public class IssueRepositoryBindingTests
     public void Start_SetsHasWorkflowStarted_Atomically()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
 
         issue.Start("wr_1", undeliveredPrerequisites: null);
@@ -114,7 +114,7 @@ public class IssueRepositoryBindingTests
     public void HasWorkflowStarted_SurvivesTerminalState(IssueStatus terminalStatus)
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         Assert.True(issue.HasWorkflowStarted);
@@ -132,7 +132,7 @@ public class IssueRepositoryBindingTests
     public void HasWorkflowStarted_SurvivesReopenFromCancelled()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         issue.Close();
@@ -148,7 +148,7 @@ public class IssueRepositoryBindingTests
     public void HasWorkflowStarted_SurvivesClearStoppedWorkflow()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         Assert.True(issue.HasWorkflowStarted);
@@ -163,7 +163,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_OnUnstartedIssue_StoresCanonicalName()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         issue.ChangeRepository("web", "cmd-2", expectedRevision: 1L);
 
@@ -177,7 +177,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_StaleRevision_Throws()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         Assert.Throws<IssueRepositoryStaleRevisionException>(() =>
             issue.ChangeRepository("web", "cmd-2", expectedRevision: 99L));
@@ -187,7 +187,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_EmptyName_Throws()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         Assert.Throws<ArgumentException>(() =>
             issue.ChangeRepository("  ", "cmd-2", expectedRevision: 1L));
@@ -197,7 +197,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_AfterStart_Rejects()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
 
@@ -210,7 +210,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_AfterCompletion_StillRejects()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         issue.Complete("wr_1");
@@ -229,7 +229,7 @@ public class IssueRepositoryBindingTests
         // makes the cancelled-to-backlog move; this test only covers the
         // lock-vs-no-lock check.
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
         issue.Close();
 
         Assert.False(issue.HasWorkflowStarted);
@@ -245,7 +245,7 @@ public class IssueRepositoryBindingTests
     public void Reopen_WhenTargetMissing_Throws()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         issue.Close();
@@ -260,7 +260,7 @@ public class IssueRepositoryBindingTests
     public void Reopen_WhenTargetExists_Succeeds()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         issue.Close();
@@ -275,7 +275,7 @@ public class IssueRepositoryBindingTests
     public void RecordRepositoryCommandReceipt_OnNoOp_AdvancesRevisionWithoutChangingRepo()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
         issue.ChangeRepository("web", "cmd-2", expectedRevision: 1L);
 
         issue.RecordRepositoryCommandReceipt("cmd-2b", "change", expectedRevision: 2L);
@@ -289,7 +289,7 @@ public class IssueRepositoryBindingTests
     public void ChangeRepository_EmitsIssueRepositoryChangedEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         issue.ChangeRepository("web", "cmd-2", expectedRevision: 1L);
 
@@ -314,7 +314,7 @@ public class IssueRepositoryBindingTests
     public void Create_WithoutCommand_DoesNotEmitIssueRepositoryChanged()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
 
         var hasRepoEvent = false;
         var hasCreated = false;
@@ -331,7 +331,7 @@ public class IssueRepositoryBindingTests
     public void State_RoundTripsChangeRepositoryEventPayload()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main");
+            ProjectId, Number, "Title", repositoryRef: "main");
         issue.ChangeRepository("web", "cmd-2", expectedRevision: 1L);
 
         var json = IssueStore.Serialize(issue);
@@ -348,7 +348,7 @@ public class IssueRepositoryBindingTests
     public void Reopen_DoesNotClearHasWorkflowStarted()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", ProjectId, Number, "Title", repositoryRef: "main",
+            ProjectId, Number, "Title", repositoryRef: "main",
             isDraft: false);
         issue.Start("wr_1", undeliveredPrerequisites: null);
         issue.Close();

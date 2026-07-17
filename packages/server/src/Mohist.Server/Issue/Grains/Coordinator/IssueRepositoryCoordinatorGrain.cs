@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
@@ -82,8 +83,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             payload.RepositoryName,
             commandId,
             expectedRevision,
-            payload,
-            issueId: payload.IssueId);
+            payload);
 
         if (pending.Replay is not null)
             return pending.Replay;
@@ -93,7 +93,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
 
         try
         {
-            var participant = _grains.GetGrain<IIssueBindingParticipant>(payload.IssueId);
+            var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(payload.ProjectId, payload.IssueNumber));
             var outcome = await participant.CreateAsync(payload, commandId, pending.CapturedRevision);
             await ClearFenceAsync(commandId);
             return new IssueRepositoryBindingResult(
@@ -138,8 +138,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             payload.RepositoryName,
             commandId,
             expectedRevision,
-            payload,
-            issueId: payload.IssueId);
+            payload);
 
         if (pending.Replay is not null)
             return pending.Replay;
@@ -149,7 +148,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
 
         try
         {
-            var participant = _grains.GetGrain<IIssueBindingParticipant>(payload.IssueId);
+            var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(payload.ProjectId, payload.IssueNumber));
             var outcome = await participant.ChangeRepositoryAsync(payload, commandId, pending.CapturedRevision);
             await ClearFenceAsync(commandId);
             return new IssueRepositoryBindingResult(
@@ -203,8 +202,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             payload.RepositoryName ?? string.Empty,
             commandId,
             expectedRevision,
-            payload,
-            issueId: payload.IssueId);
+            payload);
 
         if (pending.Replay is not null)
             return pending.Replay;
@@ -214,7 +212,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
 
         try
         {
-            var participant = _grains.GetGrain<IIssueBindingParticipant>(payload.IssueId);
+            var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(payload.ProjectId, payload.IssueNumber));
             var outcome = await participant.ReopenAsync(payload, commandId, pending.CapturedRevision);
             await ClearFenceAsync(commandId);
             return new IssueRepositoryBindingResult(
@@ -296,8 +294,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             canonicalRepository,
             commandId,
             expectedRevision,
-            canonicalPayload,
-            issueId: null);
+            canonicalPayload);
 
         if (pending.Replay is not null)
             return pending.Replay;
@@ -377,8 +374,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         string repositoryName,
         string commandId,
         long? expectedRevision,
-        RepositoryCommandPayload payload,
-        string? issueId)
+        RepositoryCommandPayload payload)
     {
         var existing = _state.State.Pending;
         if (existing is not null)
@@ -420,21 +416,27 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         return kind switch
         {
             RepositoryCommandPayloadKinds.Create => await CaptureIssueRevisionAsync(
-                ((RepositoryCommandPayload.Create)payload).IssueId),
+                ((RepositoryCommandPayload.Create)payload).ProjectId,
+                ((RepositoryCommandPayload.Create)payload).IssueNumber),
             RepositoryCommandPayloadKinds.Change => await CaptureIssueRevisionAsync(
-                ((RepositoryCommandPayload.Change)payload).IssueId),
+                ((RepositoryCommandPayload.Change)payload).ProjectId,
+                ((RepositoryCommandPayload.Change)payload).IssueNumber),
             RepositoryCommandPayloadKinds.Reopen => await CaptureIssueRevisionAsync(
-                ((RepositoryCommandPayload.Reopen)payload).IssueId),
+                ((RepositoryCommandPayload.Reopen)payload).ProjectId,
+                ((RepositoryCommandPayload.Reopen)payload).IssueNumber),
             RepositoryCommandPayloadKinds.Remove => await CaptureProjectRevisionAsync(
                 ((RepositoryCommandPayload.Remove)payload).ProjectId),
             _ => throw new InvalidOperationException($"Unknown coordinator kind '{kind}'"),
         };
     }
 
-    private Task<long> CaptureIssueRevisionAsync(string issueId)
+    private Task<long> CaptureIssueRevisionAsync(string projectId, int issueNumber)
     {
-        return _grains.GetGrain<IIssueBindingTarget>(issueId).GetRepositoryBindingRevisionAsync();
+        return _grains.GetGrain<IIssueBindingTarget>(IssueGrainKey(projectId, issueNumber)).GetRepositoryBindingRevisionAsync();
     }
+
+    private static string IssueGrainKey(string projectId, int issueNumber) =>
+        GrainKey.Issue(new IssueKey(projectId, issueNumber));
 
     private Task<long> CaptureProjectRevisionAsync(string projectId)
     {
@@ -451,21 +453,21 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 case RepositoryCommandPayloadKinds.Create:
                 {
                     var p = (RepositoryCommandPayload.Create)payload;
-                    var participant = _grains.GetGrain<IIssueBindingParticipant>(p.IssueId);
+                    var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(p.ProjectId, p.IssueNumber));
                     await participant.CreateAsync(p, pending.CommandId, pending.ExpectedRevision);
                     break;
                 }
                 case RepositoryCommandPayloadKinds.Change:
                 {
                     var p = (RepositoryCommandPayload.Change)payload;
-                    var participant = _grains.GetGrain<IIssueBindingParticipant>(p.IssueId);
+                    var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(p.ProjectId, p.IssueNumber));
                     await participant.ChangeRepositoryAsync(p, pending.CommandId, pending.ExpectedRevision);
                     break;
                 }
                 case RepositoryCommandPayloadKinds.Reopen:
                 {
                     var p = (RepositoryCommandPayload.Reopen)payload;
-                    var participant = _grains.GetGrain<IIssueBindingParticipant>(p.IssueId);
+                    var participant = _grains.GetGrain<IIssueBindingParticipant>(IssueGrainKey(p.ProjectId, p.IssueNumber));
                     await participant.ReopenAsync(p, pending.CommandId, pending.ExpectedRevision);
                     break;
                 }

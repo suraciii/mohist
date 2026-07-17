@@ -36,8 +36,6 @@ public class IssueRepositoryBindingApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithoutRepository_BindsToProjectDefault_AndReturnsCanonicalName()
     {
@@ -50,8 +48,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Null(created.Data.RepositoryProblem);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithRepository_ReturnsCanonicalCasing()
     {
@@ -67,8 +63,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("secondary", created.Data.Repository!.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithUnknownRepository_ReturnsBadRequest()
     {
@@ -86,8 +80,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("repository_not_found", envelope.Code);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterRepoRemoval_ReturnsStoredNameAsUnresolved()
     {
@@ -97,7 +89,9 @@ public class IssueRepositoryBindingApiSpecs
 
         // Drive the issue to a terminal status so the deletion guard
         // (issue-417 T-004) lets the repository be removed.
-        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id);
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+                new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, created.Data!.Number)));
         await grain.CancelAsync();
 
         await _fixture.Grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
@@ -111,8 +105,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("secondary", fetched.RepositoryProblem!.RepositoryRef);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithRepositoryName_ReassignsBeforeStart_ReturnsCanonicalCasing()
     {
@@ -131,14 +123,14 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("secondary", envelope.Data!.RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_RepositoryAndInvalidDraftTransition_DoesNotLeakRepositoryIntoLaterSave()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var created = await CreateIssueAsync(projectId, new { title = "Cancelled", repositoryName = "main" });
-        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id);
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+                new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, created.Data!.Number)));
         await grain.CancelAsync();
 
         using (var rejected = await _client.PatchAsJsonAsync(
@@ -162,8 +154,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("Saved after rejection", persisted.Title);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_SameRepository_RecordsReceiptWithoutRepositoryChangedEvent()
     {
@@ -178,12 +168,10 @@ public class IssueRepositoryBindingApiSpecs
 
         using var scope = _fixture.Services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var stored = await events.ListIssueEventsAsync(created.Data.Id);
+        var stored = await events.ListIssueEventsAsync(projectId, created.Data!.Number);
         Assert.DoesNotContain(stored, e => e.Envelope.Type == "com.mohist.issue.repository-changed");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_WithUnknownRepository_ReturnsBadRequest_LeavesIssueUnchanged()
     {
@@ -205,14 +193,14 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("main", unchanged!.RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchIssue_AfterWorkflowStart_RejectsRepositoryReassignment()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var created = await CreateIssueAsync(projectId, new { title = "Started", repositoryName = "main", isDraft = false });
-        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id);
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+                new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, created.Data!.Number)));
         await grain.StartWorkAsync(new Mohist.Server.Issue.Grains.WorkflowProjectContext(
             projectId, "P", RepositoryBaseBranch: "main"));
 
@@ -231,8 +219,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal("main", unchanged!.RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterByRepository_CaseInsensitive_ReturnsOnlyMatching()
     {
@@ -249,8 +235,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Empty(filtered);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterByRepositorySecondary_ReturnsOnlySecondaryIssues()
     {
@@ -267,8 +251,6 @@ public class IssueRepositoryBindingApiSpecs
         Assert.All(filtered, i => Assert.Equal("secondary", i.RepositoryName));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterRepositoryAndStatus_ComposesFilters()
     {
@@ -285,14 +267,14 @@ public class IssueRepositoryBindingApiSpecs
         Assert.Equal(secondary1.Data!.Number, filtered[0].Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterByHistoricalTarget_AfterRepoRemoved_StillReturnsTerminalIssues()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var orphaned = await CreateIssueAsync(projectId, new { title = "Terminal orphan", repositoryName = "secondary", isDraft = false });
-        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(orphaned.Data!.Id);
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+                new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, orphaned.Data!.Number)));
         var wrId = await grain.StartWorkAsync(new Mohist.Server.Issue.Grains.WorkflowProjectContext(
             projectId, "P", RepositoryBaseBranch: "develop"));
         await grain.CompleteWorkAsync(wrId);
@@ -301,12 +283,10 @@ public class IssueRepositoryBindingApiSpecs
         var filtered = await GetIssuesAsync($"/api/projects/{projectId}/issues?repository=secondary&stage=done");
 
         Assert.Single(filtered);
-        Assert.Equal(orphaned.Data.Number, filtered[0].Number);
+        Assert.Equal(orphaned.Data!.Number, filtered[0].Number);
         Assert.Equal("secondary", filtered[0].RepositoryName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DetailIssue_AfterRepositoryReassignment_PATCH_ReturnsCanonicalCasing()
     {
@@ -381,7 +361,6 @@ public class IssueRepositoryBindingApiSpecs
 
     private sealed record IssueDto(
         int Number,
-        string Id,
         string Title,
         string Status,
         string? RepositoryName,

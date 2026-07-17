@@ -127,7 +127,6 @@ public static partial class IssueRoutes
                 coordinatorResult = await coordinator.ReopenAsync(
                     new RepositoryCommandPayload.Reopen(
                         ProjectId: project.Id,
-                        IssueId: string.Empty,
                         IssueNumber: number,
                         RepositoryName: string.Empty),
                     commandId: $"reopen:{project.Id}:{number}:{Guid.NewGuid():N}",

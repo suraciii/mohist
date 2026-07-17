@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,11 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260717153324_FixProjectIdSnapshotMismatch")]
+    partial class FixProjectIdSnapshotMismatch
     {
-        protected override void BuildModel(ModelBuilder modelBuilder) => BuildModelCore(modelBuilder);
-
-        internal static void BuildModelCore(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -396,15 +397,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("Time")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimelineSource")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TimelineSource")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasDefaultValue("")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Source", "Id");
@@ -413,10 +415,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
+                    b.HasIndex("Type", "Source", "Id");
+
                     b.HasIndex("TimelineSource", "Time", "Source", "Id")
                         .HasDatabaseName("IX_EpicEvents_TimelineSource_Time_Source_Id");
-
-                    b.HasIndex("Type", "Source", "Id");
 
                     b.ToTable("EpicEvents", (string)null);
                 });
@@ -470,9 +472,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("TimelineSource")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(256)
-                        .HasDefaultValue("")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
 
                     b.Property<string>("Type")
                         .IsRequired()
@@ -488,10 +491,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("TimeSortKey", "Source", "Id")
                         .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
 
+                    b.HasIndex("Type", "Source", "Id");
+
                     b.HasIndex("TimelineSource", "Time", "Source", "Id")
                         .HasDatabaseName("IX_IssueEvents_TimelineSource_Time_Source_Id");
-
-                    b.HasIndex("Type", "Source", "Id");
 
                     b.ToTable("IssueEvents", (string)null);
                 });
@@ -774,7 +777,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueRow", b =>
                 {
                     b.Property<string>("ProjectId")
-                        .IsRequired()
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Number")
@@ -802,10 +805,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
-
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("RepositoryName")
                         .ValueGeneratedOnAddOrUpdate()

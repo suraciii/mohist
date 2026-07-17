@@ -171,14 +171,56 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         RepositoryInfo repo,
         IReadOnlySet<int>? undeliveredPrerequisites)
     {
-        await PrepareWorkflowStartContextAsync(project, wrId, repo);
-        _issue!.Start(wrId, undeliveredPrerequisites);
-        await SaveIssueAsync();
+        var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
+
+        // Synchronously start the workflow run carrying the immutable
+        // repository/workspace snapshot captured at this transaction. The
+        // IssueWorkStarted durable event (emitted by SaveIssueAsync below)
+        // drives the same snapshot-aware EnsureStartedAsync on replay/restart,
+        // so the run reads run-owned repository facts rather than live
+        // Project metadata regardless of which path created it first.
+        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
+        var snapshot = new WorkflowStartSnapshot(repositoryContext, workspace);
+        var startContext = new WorkflowIssueContext(issueContext.ProjectId, issueContext.IssueNumber, null);
+        await wfGrain.EnsureStartedAsync(startContext, snapshot);
+
+        _issue!.Start(
+            wrId,
+            undeliveredPrerequisites,
+            repository: new IssueWorkStartedRepository(
+                repositoryContext.Name,
+                repositoryContext.GitUrl,
+                repositoryContext.BaseBranch,
+                repositoryContext.RemoteFingerprint,
+                repositoryContext.RemoteIdentityVersion),
+            workspace: new IssueWorkStartedWorkspace(
+                workspace.Path,
+                workspace.Branch,
+                workspace.ChangeDir),
+            context: issueContext);
+        try
+        {
+            await SaveIssueAsync();
+        }
+        catch
+        {
+            // The workflow run was already committed, but the issue state/event
+            // transaction rolled back. A retry would mint a new wrId and leave
+            // this run orphaned. Compensate by stopping the run so it does not
+            // linger as active work the issue no longer references.
+            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
+            catch (Exception compEx)
+            {
+                _log.LogWarning(compEx,
+                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
+            }
+            throw;
+        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    private async Task PrepareWorkflowStartContextAsync(
+    private async Task<(Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext Repository, WorkspaceIdentity Workspace, IssueWorkStartedContext Context)> PrepareWorkflowStartContextAsync(
         WorkflowProjectContext? project,
         string wrId,
         RepositoryInfo repo)
@@ -274,6 +316,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.ProjectId, issue.Number, key, body);
 
+        return (repositoryContext, workspace, new IssueWorkStartedContext(
+            issue.ProjectId,
+            issue.Number,
+            issue.Title,
+            issue.Priority));
     }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
@@ -455,7 +502,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IReadOnlyDictionary<string, string>? labels,
         string? priority,
         string repositoryRef,
-        string issueId,
         string? risk,
         bool isDraft,
         string[]? attachmentIds,
@@ -501,7 +547,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
 
         var issue = Domain.Issue.Create(
-            issueId,
             projectId,
             number,
             title,
@@ -539,9 +584,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             throw;
         }
 
-        await _attachmentService.ValidateIssueBindAsync(projectId, issue.Id, attachmentIds);
+        await _attachmentService.ValidateIssueBindAsync(projectId, issue.Number, attachmentIds);
         await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+        await _attachmentService.BindIssueAsync(projectId, issue.Number, attachmentIds);
         return Coordinator.IssueBindingParticipantOutcome.Applied;
     }
 
@@ -589,7 +634,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         if (hasAttachments && command.AttachmentIds is not null)
         {
-            await _attachmentService.ValidateIssueBindAsync(_issue.ProjectId, _issue.Id, command.AttachmentIds);
+            await _attachmentService.ValidateIssueBindAsync(_issue.ProjectId, _issue.Number, command.AttachmentIds);
         }
 
         if (hasTitle && string.IsNullOrWhiteSpace(command.Title))
@@ -642,11 +687,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         {
             if (command.AttachmentIds is null)
             {
-                await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Id);
+                await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Number);
             }
             else
             {
-                await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, command.AttachmentIds);
+                await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Number, command.AttachmentIds);
             }
         }
 
@@ -779,7 +824,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             wfStatus);
     }
 
-    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, string? commandId = null, long? expectedRevision = null)
+    public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
     {
         var key = ParseIssueKey();
         EnsureIdentityMatches(key, projectId, number);
@@ -789,8 +834,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
         if (string.IsNullOrWhiteSpace(resolvedRef))
             throw new InvalidOperationException($"Cannot create issue without a resolved target repository for project '{projectId}'");
-        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
-        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
+        await _attachmentService.ValidateIssueBindAsync(projectId, key.IssueNumber, attachmentIds);
 
         if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
@@ -807,9 +851,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             resolvedRef,
             risk,
             isDraft,
-            workflowProfileId,
-            commandId,
-            expectedRevision);
+            workflowProfileId);
 
         // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
         // the project id from _issue.ProjectId during prerequisite existence

@@ -9,7 +9,7 @@ public static class IssueRepositoryCoordinatorTestSupport
         this IGrainFactory grains,
         string projectId,
         int number,
-        string issueId,
+        string commandId,
         string title,
         string? body = null,
         IReadOnlyDictionary<string, string>? labels = null,
@@ -28,7 +28,6 @@ public static class IssueRepositoryCoordinatorTestSupport
                 new RepositoryCommandPayload.Create(
                     projectId,
                     number,
-                    issueId,
                     repository?.Name ?? repositoryName ?? string.Empty,
                     title,
                     body,
@@ -39,7 +38,7 @@ public static class IssueRepositoryCoordinatorTestSupport
                     attachmentIds,
                     workflowProfileId,
                     prerequisiteNumbers),
-                $"create:{projectId}:{issueId}",
+                commandId,
                 expectedRevision: null);
 
         if (!result.IsApplied)

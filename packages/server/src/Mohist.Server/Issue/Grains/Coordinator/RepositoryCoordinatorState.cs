@@ -51,7 +51,6 @@ public abstract record RepositoryCommandPayload
     public sealed record Create(
         string ProjectId,
         int IssueNumber,
-        string IssueId,
         string RepositoryName,
         string Title,
         string? Body,
@@ -70,7 +69,6 @@ public abstract record RepositoryCommandPayload
     [GenerateSerializer]
     public sealed record Change(
         string ProjectId,
-        string IssueId,
         int IssueNumber,
         string RepositoryName,
         string? Body,
@@ -89,7 +87,6 @@ public abstract record RepositoryCommandPayload
     [GenerateSerializer]
     public sealed record Reopen(
         string ProjectId,
-        string IssueId,
         int IssueNumber,
         string RepositoryName) : RepositoryCommandPayload
     {

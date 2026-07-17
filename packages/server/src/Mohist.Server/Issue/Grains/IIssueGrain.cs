@@ -6,6 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
+    Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -49,7 +50,6 @@ public interface IIssueGrain : IGrainWithStringKey
         IReadOnlyDictionary<string, string>? labels,
         string? priority,
         string repositoryRef,
-        string issueId,
         string? risk,
         bool isDraft,
         string[]? attachmentIds,

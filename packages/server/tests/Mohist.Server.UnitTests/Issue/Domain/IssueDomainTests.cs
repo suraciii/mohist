@@ -175,7 +175,7 @@ public class IssueDomainTests
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         issue.Close(now: terminalMoment);
 
-        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        issue.Reopen(targetExists: true, now: new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal(terminalMoment, issue.CompletedAt);
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Backlog, issue.Status);
@@ -192,7 +192,7 @@ public class IssueDomainTests
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         issue.Close(now: firstComplete);
 
-        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        issue.Reopen(targetExists: true, now: new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
         issue.ClearStoppedWorkflow("wr_1", new DateTime(2026, 6, 5, 3, 5, 0, DateTimeKind.Utc));
         issue.StartWorkflow("wr_2", new DateTime(2026, 6, 5, 3, 10, 0, DateTimeKind.Utc));
         issue.Complete("wr_2", secondComplete);

@@ -49,6 +49,7 @@ internal static class IssueEventSerializer
         IssuePrerequisiteAdded => "com.mohist.issue.prerequisite-added",
         IssuePrerequisiteRemoved => "com.mohist.issue.prerequisite-removed",
         IssueWorkflowProfileChanged => "com.mohist.issue.workflow-profile-changed",
+        IssueEpicChanged => EventCatalog.ReverseDns.IssueEpicChanged,
         IssueWorkStarted => "com.mohist.issue.work-started",
         IssueCompleted => EventCatalog.ReverseDns.IssueCompleted,
         IssueCancelled => EventCatalog.ReverseDns.IssueCancelled,

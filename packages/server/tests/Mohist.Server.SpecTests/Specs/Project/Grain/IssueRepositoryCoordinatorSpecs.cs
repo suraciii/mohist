@@ -62,11 +62,10 @@ public class IssueRepositoryCoordinatorSpecs
         _grains.GetGrain<IIssueRepositoryCoordinatorGrain>(projectId);
 
     private static RepositoryCommandPayload.Create BuildCreatePayload(
-        string projectId, string issueId, int number, string repositoryName) =>
+        string projectId, int number, string repositoryName) =>
         new RepositoryCommandPayload.Create(
             ProjectId: projectId,
             IssueNumber: number,
-            IssueId: issueId,
             RepositoryName: repositoryName,
             Title: $"Issue #{number}",
             Body: null,
@@ -79,10 +78,9 @@ public class IssueRepositoryCoordinatorSpecs
             PrerequisiteNumbers: null);
 
     private static RepositoryCommandPayload.Change BuildChangePayload(
-        string projectId, string issueId, int number, string repositoryName) =>
+        string projectId, int number, string repositoryName) =>
         new RepositoryCommandPayload.Change(
             ProjectId: projectId,
-            IssueId: issueId,
             IssueNumber: number,
             RepositoryName: repositoryName,
             Body: null,
@@ -95,10 +93,9 @@ public class IssueRepositoryCoordinatorSpecs
             Title: null);
 
     private static RepositoryCommandPayload.Reopen BuildReopenPayload(
-        string projectId, string issueId, int number, string repositoryName) =>
+        string projectId, int number, string repositoryName) =>
         new RepositoryCommandPayload.Reopen(
             ProjectId: projectId,
-            IssueId: issueId,
             IssueNumber: number,
             RepositoryName: repositoryName);
 
@@ -123,19 +120,22 @@ public class IssueRepositoryCoordinatorSpecs
         return (grain.GetPrimaryKeyString(), project);
     }
 
-    private async Task<string> SeedIssueAsync(string projectId, string repositoryName, bool isDraft = false)
+    private async Task<(string Key, int Number)> SeedIssueAsync(string projectId, string repositoryName, bool isDraft = false)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
         await _grains.CreateIssueThroughCoordinatorAsync(
             projectId,
             number,
-            issueId,
+            commandId: $"create:{projectId}:{number}",
             $"Issue #{number}",
             repositoryName: repositoryName,
             isDraft: isDraft);
-        return issueId;
+        return (IssueGrainKey(projectId, number), number);
     }
+
+    private static string IssueGrainKey(string projectId, int number) =>
+        Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(
+            new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, number));
 
     private static (TaskCompletionSource FencePersisted, TaskCompletionSource ReleaseParticipant) InstallParticipantProbe()
     {
@@ -144,18 +144,15 @@ public class IssueRepositoryCoordinatorSpecs
         return (fencePersisted, releaseParticipant);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Create_RaceDelete_FirstWins_DeleteWaits_AndBlocksBecauseBindingExists()
     {
         var (projectId, _) = await SeedProjectAsync();
 
         var coordinator = NewCoordinator(projectId);
-        var issueId = $"issue_{Guid.NewGuid():N}";
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var createCommandId = $"create:{issueId}";
-        var createPayload = BuildCreatePayload(projectId, issueId, number, "web");
+        var createCommandId = $"create:{projectId}:{number}";
+        var createPayload = BuildCreatePayload(projectId, number, "web");
 
         var fenceGate = InstallParticipantProbe();
         using var _ = CoordinatorProbe.Install((kind, pid, cmd) =>
@@ -189,13 +186,11 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Contains(projectAfter!.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Reassign_RaceDelete_ReassignBlockedByPostStart_LeavesBindingUnchanged()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var issueId = await SeedIssueAsync(projectId, "web");
+        var (issueId, issueNumber) = await SeedIssueAsync(projectId, "web");
 
         // Start the workflow so the binding becomes locked. The
         // start path resolves the target declaration atomically with
@@ -209,7 +204,7 @@ public class IssueRepositoryCoordinatorSpecs
         // SeedProjectAsync), so the change target resolves to a
         // declared repository and the participant's unknown-rejection
         // path stays closed.
-        var changePayload = BuildChangePayload(projectId, issueId, 0, "server");
+        var changePayload = BuildChangePayload(projectId, issueNumber, "server");
         var changeResult = await coordinator.ChangeRepositoryAsync(
             changePayload,
             commandId: $"change:{issueId}:{Guid.NewGuid():N}",
@@ -230,13 +225,11 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Contains(projectAfter!.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Reopen_RaceDelete_DeleteBlocks_BecauseReopenRestoresBinding()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var issueId = await SeedIssueAsync(projectId, "web");
+        var (issueId, issueNumber) = await SeedIssueAsync(projectId, "web");
 
         // Drive the issue to terminal cancelled so a reopen can
         // restore the binding.
@@ -245,7 +238,7 @@ public class IssueRepositoryCoordinatorSpecs
 
         var coordinator = NewCoordinator(projectId);
         var reopenCommandId = $"reopen:{issueId}:{Guid.NewGuid():N}";
-        var reopenPayload = BuildReopenPayload(projectId, issueId, 0, "web");
+        var reopenPayload = BuildReopenPayload(projectId, issueNumber, "web");
 
         var fenceGate = InstallParticipantProbe();
         using var _ = CoordinatorProbe.Install((kind, pid, cmd) =>
@@ -278,20 +271,17 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Contains(projectAfter!.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task LostResponse_SameCommandReplay_ReturnsAlreadyAppliedWithoutReMutation()
     {
         var (projectId, _) = await SeedProjectAsync();
 
         var coordinator = NewCoordinator(projectId);
-        var issueId = $"issue_{Guid.NewGuid():N}";
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var commandId = $"create:{issueId}";
+        var commandId = $"create:{projectId}:{number}";
 
         var first = await coordinator.CreateIssueAsync(
-            BuildCreatePayload(projectId, issueId, number, "web"),
+            BuildCreatePayload(projectId, number, "web"),
             commandId,
             null);
         Assert.Equal(IssueRepositoryBindingResultCode.Applied, first.Code);
@@ -300,7 +290,7 @@ public class IssueRepositoryCoordinatorSpecs
         // AlreadyApplied so the coordinator reports it without
         // touching Issue or Project state.
         var second = await coordinator.CreateIssueAsync(
-            BuildCreatePayload(projectId, issueId, number, "web"),
+            BuildCreatePayload(projectId, number, "web"),
             commandId,
             null);
         Assert.Equal(IssueRepositoryBindingResultCode.AlreadyApplied, second.Code);
@@ -309,20 +299,17 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Equal(2, projectAfter!.Repositories.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeactivationAfterParticipantCommit_ReplayReturnsAlreadyApplied()
     {
         var (projectId, _) = await SeedProjectAsync();
 
         var coordinator = NewCoordinator(projectId);
-        var issueId = $"issue_{Guid.NewGuid():N}";
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var commandId = $"create:{issueId}";
+        var commandId = $"create:{projectId}:{number}";
 
         var first = await coordinator.CreateIssueAsync(
-            BuildCreatePayload(projectId, issueId, number, "web"),
+            BuildCreatePayload(projectId, number, "web"),
             commandId,
             null);
         Assert.Equal(IssueRepositoryBindingResultCode.Applied, first.Code);
@@ -335,7 +322,7 @@ public class IssueRepositoryCoordinatorSpecs
         await coordinator.DeactivateForTestAsync();
 
         var replayed = await coordinator.CreateIssueAsync(
-            BuildCreatePayload(projectId, issueId, number, "web"),
+            BuildCreatePayload(projectId, number, "web"),
             commandId,
             null);
         Assert.Equal(IssueRepositoryBindingResultCode.AlreadyApplied, replayed.Code);
@@ -344,13 +331,11 @@ public class IssueRepositoryCoordinatorSpecs
         // issue via the IssueGrain's IIssueStore-backed state. A
         // missing issue would surface as KeyNotFoundException on
         // EnsureIssue().
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, number));
         var readiness = await issueGrain.GetStartReadinessAsync();
         Assert.NotNull(readiness);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RepositoryRemoval_WithNonTerminalIssue_ReturnsRepositoryInUseWithoutFence()
     {
@@ -369,8 +354,6 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Contains(projectAfter!.Repositories, r => r.Name == "web");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RepositoryRemoval_UsesDeclaredNonAsciiNameForBlockerLookup()
     {
@@ -388,55 +371,46 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Contains(project!.Repositories, repository => repository.Name == "Å");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CoordinatorCreate_WithUnknownRepository_IsRejectedWithoutCreatingAnIssue()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
         var result = await NewCoordinator(projectId).CreateIssueAsync(
-            BuildCreatePayload(projectId, issueId, 1, "ghost"),
-            commandId: $"create:{issueId}",
+            BuildCreatePayload(projectId, 1, "ghost"),
+            commandId: $"create:{projectId}:1",
             expectedRevision: null);
 
         Assert.Equal(IssueRepositoryBindingResultCode.RepositoryUnknown, result.Code);
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var issue = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, 1));
         await Assert.ThrowsAsync<KeyNotFoundException>(() => issue.GetStartReadinessAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CoordinatorReopen_AfterTargetDeletion_IsRejectedWithoutReopening()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var issueId = await SeedIssueAsync(projectId, "web");
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var (issueKey, issueNumber) = await SeedIssueAsync(projectId, "web");
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
         await issue.CancelAsync();
         await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("web");
 
         var coordinator = NewCoordinator(projectId);
-        var first = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueId, 0, "web"), $"reopen:{issueId}", null);
-        var second = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueId, 0, "web"), $"reopen:{issueId}:retry", null);
+        var first = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueNumber, "web"), $"reopen:{issueKey}", null);
+        var second = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueNumber, "web"), $"reopen:{issueKey}:retry", null);
 
         Assert.Equal(IssueRepositoryBindingResultCode.RepositoryMissingOnReopen, first.Code);
         Assert.Equal(IssueRepositoryBindingResultCode.RepositoryMissingOnReopen, second.Code);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CoordinatorCreate_WithInvalidAttachments_ClearsFenceAndAllowsSubsequentOperation()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
 
         var createPayload = new RepositoryCommandPayload.Create(
             ProjectId: projectId,
             IssueNumber: number,
-            IssueId: issueId,
             RepositoryName: "web",
             Title: $"Issue #{number}",
             Body: null,
@@ -450,14 +424,13 @@ public class IssueRepositoryCoordinatorSpecs
 
         await Assert.ThrowsAnyAsync<Exception>(() => NewCoordinator(projectId).CreateIssueAsync(
             createPayload,
-            commandId: $"create:{issueId}",
+            commandId: $"create:{projectId}:{number}",
             expectedRevision: null));
 
-        var secondIssueId = $"issue_{Guid.NewGuid():N}";
         var secondNumber = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var secondResult = await NewCoordinator(projectId).CreateIssueAsync(
-            BuildCreatePayload(projectId, secondIssueId, secondNumber, "web"),
-            commandId: $"create:{secondIssueId}",
+            BuildCreatePayload(projectId, secondNumber, "web"),
+            commandId: $"create:{projectId}:{secondNumber}",
             expectedRevision: null);
 
         Assert.Equal(IssueRepositoryBindingResultCode.Applied, secondResult.Code);

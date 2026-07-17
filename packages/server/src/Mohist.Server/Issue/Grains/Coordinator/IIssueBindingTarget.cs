@@ -17,7 +17,6 @@ public interface IIssueBindingTarget : IGrainWithStringKey
         IReadOnlyDictionary<string, string>? labels,
         string? priority,
         string repositoryRef,
-        string issueId,
         string? risk,
         bool isDraft,
         string[]? attachmentIds,

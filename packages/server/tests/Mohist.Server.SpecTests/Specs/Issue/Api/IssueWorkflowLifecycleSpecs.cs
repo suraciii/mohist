@@ -191,7 +191,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWorkAsync_PersistsWorkspaceIdentityOnWorkflowRun()
     {
-        var (projectId, projectName, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, projectName, issueNumber, issueKey, wrId) = await SeedIssueInProgressAsync();
 
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
@@ -204,7 +204,7 @@ public class IssueWorkflowLifecycleSpecs
 
         using var scope = _services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var started = (await events.ListIssueEventsAsync(issueId, 100))
+        var started = (await events.ListIssueEventsAsync(projectId, issueNumber, 100))
             .LastOrDefault(e => string.Equals(e.Envelope.Type, EventCatalog.ReverseDns.IssueWorkStarted, StringComparison.Ordinal));
         Assert.NotNull(started);
         var payload = started!.Envelope.Data!.Value.Deserialize<IssueWorkStarted>(JSON.Options);

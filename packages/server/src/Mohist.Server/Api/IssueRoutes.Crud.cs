@@ -81,8 +81,7 @@ public static partial class IssueRoutes
 
             var counter = grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id));
             var number = await counter.NextAsync();
-            var issueId = $"issue_{Guid.NewGuid():N}";
-            var commandId = $"create:{project.Id}:{issueId}";
+            var commandId = $"create:{project.Id}:{number}";
 
             // issue-417 T-005: route the create through the
             // Project-scoped coordinator so it serializes against the
@@ -98,7 +97,6 @@ public static partial class IssueRoutes
                     new RepositoryCommandPayload.Create(
                         ProjectId: project.Id,
                         IssueNumber: number,
-                        IssueId: issueId,
                         RepositoryName: resolution.Repository!.Name,
                         Title: req.Title,
                         Body: req.Body,
@@ -215,9 +213,6 @@ public static partial class IssueRoutes
             var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            var issueId = await ResolveIssueIdAsync(issueIdentityResolver, project.Id, number);
-            if (issueId is null) return ApiResults.NotFound($"Issue #{number} not found");
-
             // issue-417 T-005: a repository-bearing PATCH must be routed
             // through the Project-scoped coordinator so the complete
             // aggregate PATCH is fenced as a single command — an ambiguous
@@ -249,7 +244,6 @@ public static partial class IssueRoutes
                     coordinatorResult = await coordinator.ChangeRepositoryAsync(
                         new RepositoryCommandPayload.Change(
                             ProjectId: project.Id,
-                            IssueId: issueId,
                             IssueNumber: number,
                             RepositoryName: canonicalRepositoryName,
                             Body: req.Body,
@@ -260,7 +254,7 @@ public static partial class IssueRoutes
                             WorkflowProfileId: workflowProfileIdForUpdate,
                             PresentFields: req.Fields,
                             Title: req.Title),
-                        commandId: $"change:{project.Id}:{issueId}:{Guid.NewGuid():N}",
+                        commandId: $"change:{project.Id}:{number}:{Guid.NewGuid():N}",
                         expectedRevision: null);
                 }
                 catch (IssueDomain.WorkflowProfileLockedException ex)
@@ -302,7 +296,7 @@ public static partial class IssueRoutes
                             coordinatorResult.Message ?? "Repository change rejected");
                 }
 
-                await ApplyUpdateModelMetadataAsync(issueProfileManager, issueId, req, req.Raw);
+                await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
 
                 var info = await issuesQuery.GetAsync(project.Id, number);
                 return ApiResults.Ok(info);
