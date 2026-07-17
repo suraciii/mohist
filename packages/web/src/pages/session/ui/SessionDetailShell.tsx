@@ -8,6 +8,7 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
+import { formatDuration } from '../../../widgets/session-transcript/model/format-duration'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -414,18 +415,6 @@ export function SessionDetailShell({
 }
 
 // ── Sub-components ──
-
-function formatDuration(ms: number): string {
-  if (ms < 0) return '0s'
-  const totalSec = Math.floor(ms / 1000)
-  if (totalSec < 60) return `${totalSec}s`
-  const min = Math.floor(totalSec / 60)
-  const sec = totalSec % 60
-  if (min < 60) return `${min}m ${String(sec).padStart(2, '0')}s`
-  const hr = Math.floor(min / 60)
-  const remMin = min % 60
-  return `${hr}h ${String(remMin).padStart(2, '0')}m`
-}
 
 function formatRelativeTime(dateStr: string | null | undefined): string {
   if (!dateStr) return 'never'

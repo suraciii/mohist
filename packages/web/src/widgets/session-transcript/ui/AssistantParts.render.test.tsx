@@ -181,7 +181,7 @@ describe('AssistantParts tool views — baseline render', () => {
     const group = {
       id: 'ctx-1',
       partType: 'context-group',
-      title: 'Gathering context · 1 read',
+      title: 'Explored · 1 read',
       tools: [
         makeToolPart({
           id: 'tool-r1',
@@ -198,7 +198,7 @@ describe('AssistantParts tool views — baseline render', () => {
 
     renderAssistantParts([group])
 
-    expect(screen.getByText('Gathering context')).toBeInTheDocument()
+    expect(screen.getByText('Explored')).toBeInTheDocument()
     expect(screen.getByText('1 read')).toBeInTheDocument()
   })
 

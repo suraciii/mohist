@@ -1,0 +1,20 @@
+## Codebase Patterns
+
+- `formatDuration(ms)` lives at `packages/web/src/widgets/session-transcript/model/format-duration.ts` (this task). `formatDuration(seconds)` in `src/shared/lib/format-duration.ts` is a different util (sub-minute -> "<1m") used by `AttentionHero` etc. and is not the same one. Don't conflate the two.
+- Projection rules: `flushContextGroup` is now ≥2-only; single exploratory call is pushed as a plain `tool` part. Title prefix is "Explored" (was "Gathering context").
+- In T-003 the legacy `SessionTranscriptView`/`ToolCallCard` path and its tests get deleted. Its tests still assert "Gathering context" against its own local title generator (line 359 in `SessionTranscriptView.tsx`), so they don't break right now — they will be deleted wholesale in T-003.
+- New util is imported by SessionDetailShell for its header duration. The old local `formatDuration(ms)` in that file is gone (acceptance criterion). ToolCallCard's local copy goes away when that file is deleted in T-003.
+- Text part between two context runs does NOT split the stack — the existing text-path logic peeks "next is context tool" and defers flushing so a subsequent context tool can extend the current stack. Test was updated to assert non-exploratory tool interruption (bash/edit) instead.
+
+## Decisions & Gotchas (T-001)
+
+- Added `formatElapsed(startedAt, completedAt): string | null` returning null while completedAt is missing/unparseable/out-of-order. Uses the new `formatDuration(diff)`. Sub-second precision in `formatDuration(ms)`: `<1s` returns `${N}ms`, `<60s` returns `${N.N}s`, minutes formatted as `${m}m ${ss}s`, hours as `${h}h ${mm}m`.
+- Removed dead helpers `getToolPath`, `readableSummary`, `getContextToolSummary` from `session-transcript-display.ts` after the ≥2-guard change made the single-call `Gathering context · <summary>` branch unreachable.
+- Existing tests asserting `title contains 'Gathering context'` were updated to `'Explored'` (projection context-title test, serializer fixture, AssistantParts render, tool-views index, accessibility). SessionTranscriptView's own internal "Gathering context · …" string is unchanged (it's that file's local rendering, not the projector).
+- Single-call follow-up tests (≥2 guard acceptance) added: lone read -> tool; lone read + apply_patch -> tool+tool; run interrupted by non-exploratory -> group + tool + group; lone read + error -> tool + error.
+
+## Open for later tasks
+
+- ToolCallCard.tsx still has a local `formatDuration(ms)` (T-003 removes the file).
+- SessionTranscriptView legacy rendering ("Context gathered", "Gathering context") is still on disk and tested (T-003 deletes it).
+- T-002 needs the new `formatElapsed(start, completedAt)` for turn-divider duration (turn.startedAt, turn.completedAt); T-003 needs it for the per-row duration in ToolRowView.

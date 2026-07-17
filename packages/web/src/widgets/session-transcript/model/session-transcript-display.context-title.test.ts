@@ -38,8 +38,8 @@ function makeTurn(assistant: ToolPart[]): SessionTurn {
   }
 }
 
-describe('context-group title never surfaces "unknown"', () => {
-  it('skips a literal "unknown" displayTitle and surfaces a readable fallback from input', () => {
+describe('context-group title', () => {
+  it('a single exploratory call becomes a plain tool part, not a context-group', () => {
     const turn = makeTurn([
       makeContextTool('r1', {
         displayTitle: 'unknown',
@@ -49,25 +49,36 @@ describe('context-group title never surfaces "unknown"', () => {
 
     const display = projectTurn(turn)
 
-    expect(display.assistantParts[0].partType).toBe('context-group')
-    const group = display.assistantParts[0] as { title: string }
-    expect(group.title).not.toContain('unknown')
-    expect(group.title).toContain('foo.ts')
+    expect(display.assistantParts).toHaveLength(1)
+    expect(display.assistantParts[0].partType).toBe('tool')
   })
 
-  it('renders a bare "Gathering context" title when no readable summary exists', () => {
+  it('a run of ≥2 exploratory calls forms a context-group with per-type counts', () => {
     const turn = makeTurn([
-      makeContextTool('r1', {
-        displayTitle: 'unknown',
-        displaySubtitle: 'unknown',
-        target: 'unknown',
-      }),
+      makeContextTool('r1'),
+      makeContextTool('r2'),
+      makeContextTool('g1', { toolName: 'grep', normalizedName: 'grep' }),
+    ])
+
+    const display = projectTurn(turn)
+
+    expect(display.assistantParts).toHaveLength(1)
+    expect(display.assistantParts[0].partType).toBe('context-group')
+    const group = display.assistantParts[0] as { title: string }
+    expect(group.title).toBe('Explored · 2 reads · 1 search')
+  })
+
+  it('summary never surfaces a literal "unknown" title on the grouped row', () => {
+    const turn = makeTurn([
+      makeContextTool('r1', { displayTitle: 'unknown', displaySubtitle: 'unknown', target: 'unknown' }),
+      makeContextTool('r2', { displayTitle: 'unknown', displaySubtitle: 'unknown', target: 'unknown' }),
     ])
 
     const display = projectTurn(turn)
 
     const group = display.assistantParts[0] as { title: string }
-    expect(group.title).toBe('Gathering context')
+    expect(group.title).toContain('Explored')
+    expect(group.title).toContain('2 reads')
     expect(group.title).not.toContain('unknown')
   })
 })
