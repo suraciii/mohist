@@ -184,6 +184,8 @@ function makeGenericRunningSession() {
     sessionId: genericSessionId,
     agentId: 'agent-cancel',
     agentName: 'Cancellation Agent',
+    runtimeSessionId: 'runtime-cancel-session',
+    runtime: 'opencode',
     status: 'active',
     createdAt: '2026-06-12T10:00:00.000Z',
     lastActivityAt: '2026-06-12T10:05:00.000Z',
