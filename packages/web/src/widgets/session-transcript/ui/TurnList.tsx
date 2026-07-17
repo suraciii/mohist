@@ -15,9 +15,10 @@ interface TurnListProps {
   turns: DisplayTurn[]
   turnRefs?: TurnRefsMap
   isRunning?: boolean
+  now?: number
 }
 
-export function TurnList({ turns, turnRefs, isRunning }: TurnListProps) {
+export function TurnList({ turns, turnRefs, isRunning, now }: TurnListProps) {
   return (
     <div
       role="log"
@@ -37,6 +38,7 @@ export function TurnList({ turns, turnRefs, isRunning }: TurnListProps) {
             }
           } : undefined}
           isRunning={isRunning}
+          now={now}
         />
       ))}
     </div>
@@ -48,9 +50,10 @@ interface TurnItemProps {
   index: number
   registerRef?: (el: HTMLDivElement | null) => void
   isRunning?: boolean
+  now?: number
 }
 
-export function TurnItem({ turn, index, registerRef, isRunning }: TurnItemProps) {
+export function TurnItem({ turn, index, registerRef, isRunning, now }: TurnItemProps) {
   return (
     <div
       ref={registerRef}
@@ -70,7 +73,7 @@ export function TurnItem({ turn, index, registerRef, isRunning }: TurnItemProps)
 
       {turn.assistantParts.length > 0 && (
         <div className="min-w-0">
-          <AssistantParts parts={turn.assistantParts} isRunning={isRunning} />
+          <AssistantParts parts={turn.assistantParts} isRunning={isRunning} now={now} />
         </div>
       )}
 

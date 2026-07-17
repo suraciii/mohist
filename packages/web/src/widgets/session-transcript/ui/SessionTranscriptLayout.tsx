@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
+import { useNow } from '../model/use-now'
 import type { TurnRefsMap } from '../model/turn-refs'
 import { TurnList } from './TurnList'
 import { CopyFullTextButton } from './CopyFullTextButton'
@@ -42,6 +43,7 @@ interface SessionTranscriptLayoutProps {
   isThinking?: boolean
   isStreaming?: boolean
   scrollContainerRef?: RefObject<HTMLElement | null>
+  now?: number
 }
 
 export function SessionTranscriptLayout({
@@ -50,6 +52,7 @@ export function SessionTranscriptLayout({
   isThinking,
   isStreaming,
   scrollContainerRef,
+  now: providedNow,
 }: SessionTranscriptLayoutProps) {
   const turnRefs = useRef<TurnRefsMap>(new Map()).current
   const [, setRefsVersion] = useState(0)
@@ -64,6 +67,9 @@ export function SessionTranscriptLayout({
     turnCount: turns.length,
   })
 
+  const liveNow = useNow({ intervalMs: 1000, enabled: isRunning, now: providedNow })
+  const now = liveNow
+
   return (
     <div className="px-4 py-6 min-w-0" data-scrollable="">
       {turns.length === 0 ? (
@@ -73,7 +79,7 @@ export function SessionTranscriptLayout({
           <div className="mb-3 flex items-center justify-end gap-2">
             <CopyFullTextButton turns={turns} />
           </div>
-          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} />
+          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} />
           {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
           {isRunning && isStreaming && <StreamingIndicator />}
         </div>

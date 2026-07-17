@@ -1,0 +1,39 @@
+T-001 (Live-ticking duration on running tool rows) — completed 2026-07-18
+
+## Codebase Patterns
+
+- Tool row duration rendering lives at `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx:129` (`formatElapsed(part.startedAt, part.completedAt ?? undefined)`), and the JSX block was historically gated on `!isRunning` (line 294 originally).
+- ActivityPage (`packages/web/src/pages/activity/ui/ActivityPage.tsx:133-161`) is the existing precedent for injectable clock: `now?: number` prop, `setInterval(1000)` otherwise.
+- `DisplayToolPart.status` ∈ `pending | running | completed | failed | cancelled`; `isRunning` is derived as `status === 'running' || status === 'pending'` — used in many places, do not redefine.
+- `TurnList`/`TurnItem`/`AssistantParts` chain forms the rendering pipeline; new props must thread through the chain (TurnList→TurnItem→AssistantParts→ToolRowView, plus ContextGroupView for grouped tools).
+- Vitest config uses `isolate: false`, project `jsdom` for `*.spec.tsx`; setup file restores `vi.useRealTimers()` in `afterEach`. So each test file/suite must call `vi.useFakeTimers()` itself and `vi.useRealTimers()` in afterEach.
+- Test pattern for fake timers + React renderHook: `act(() => { vi.advanceTimersByTime(N) })`. Existing examples: `CopyFullTextButton.test.tsx:248`, `useSessionTimeline.dom.test.ts:330`.
+- The existing `tool-row-view.spec.tsx` has a hard assertion that running rows render no duration when `now` is omitted — that contract is preserved because `liveDuration` only renders when `now !== undefined`.
+
+## Implementation notes
+
+- Added `widgets/session-transcript/model/use-now.ts` with `{ intervalMs, now?, enabled? }` API. `enabled` (default true) controls whether the interval runs; passing `enabled: false` returns `undefined` and skips the interval — this lets the layout gate ticking on `isRunning`. When `now` is provided, no interval is started (matches ActivityPage convention).
+- Added `formatElapsedNow(startedAt, nowMs)` next to `formatElapsed` in `model/format-duration.ts`. Returns null for missing/unparseable/negative/non-finite inputs (same defensive shape as `formatElapsed`). Unit-tested with fixed timestamps.
+- `ToolRowView` now takes optional `now?: number`. Computes `liveDuration = isRunning && now !== undefined ? formatElapsedNow(...) : null`; `duration = liveDuration ?? finalizedDuration`. JSX now renders duration when `(!isRunning || liveDuration)`, tagged `data-duration-mode="live"` vs `"frozen"` so tests can distinguish without polluting the testid.
+- `SessionTranscriptLayout` calls `useNow({ intervalMs: 1000, enabled: isRunning, now: providedNow })` and threads the resulting `now` to `TurnList`. Only in-progress tool rows (status pending/running) receive the `now` prop in `AssistantParts` and `ContextGroupView`; terminal rows are passed `undefined` so `React.memo(ToolRowView)` stays effective (D2).
+- When `isRunning` flips false, `useNow`'s effect dependency cleanup tears the interval down and the layout starts passing `now = undefined` to all rows; in-progress rows drop the live duration (matches spec scenario "Ticking stops when the session ends mid-tool" → row reverts to no duration).
+- Layout exposes `now?: number` prop so tests can inject a fixed timestamp; the ActivityPage precedent (`pages/activity/ui/ActivityPage.tsx:139`) calls this `now`.
+
+## Gotchas
+
+- `vi.advanceTimersByTime(N)` only fires intervals if the fake timers are configured. Setup file's afterEach runs `vi.useRealTimers()`, so each test must opt back into fake timers (typically via `beforeEach`).
+- Initial render of a running tool row at `now === startedAt` produces `"0ms"` (sub-second), not `"0.0s"` — `formatDuration` switches at 1000ms. Tests for the layout use `vi.advanceTimersByTime(1000+)` to reach the seconds tier.
+- For the test `does not start any interval when there are no turns`: the layout's `useNow` call is unconditional (rules-of-hooks), so the interval still starts. Rewrote the test to assert the interval is torn down on unmount instead.
+- `enabled` was added to the hook signature even though the spec doesn't list it — needed to satisfy D1 ("the interval only runs while isRunning is true"). Layout passes `enabled: isRunning`.
+
+## Files changed
+
+- `packages/web/src/widgets/session-transcript/model/use-now.ts` (new)
+- `packages/web/src/widgets/session-transcript/model/use-now.test.tsx` (new)
+- `packages/web/src/widgets/session-transcript/model/format-duration.ts` (added formatElapsedNow)
+- `packages/web/src/widgets/session-transcript/model/format-duration.test.ts` (added formatElapsedNow tests)
+- `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.tsx` (useNow wiring)
+- `packages/web/src/widgets/session-transcript/ui/TurnList.tsx` (threaded `now`)
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (selective `now` for in-progress rows)
+- `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx` (ToolRowView + ContextGroupView accept `now`, ToolRowView renders live duration)
+- `packages/web/src/widgets/session-transcript/ui/tool-views/tool-row-view-live-duration.spec.tsx` (new, 15 spec tests)
