@@ -1,0 +1,85 @@
+{
+  "project": "mohist-local",
+  "description": "Reusable CEL-subset event envelope matcher and the first consumer, `mo events tail --match`, with a streaming NDJSON server tail, strict project isolation, and the `mo events` CLI noun consolidation.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Event envelope matcher module (CEL subset) with conformance suite",
+      "spec": "specs/event-envelope-matching/spec.md#boolean-expression-grammar-with-defined-precedence",
+      "description": "Add the reusable, transport-independent matcher in Infrastructure/Events/Matching: an EventMatchInput view (GetValue/Has), a tokenizer, a recursive-descent parser, an AST, and EventMatchExpression.Compile(source) returning a compiled immutable matcher or a MatchDiagnostic carrying a source location. Cover the full event-envelope-matching spec — operators (==, !=, &&, ||, !, in), functions (startsWith, endsWith, contains, matches), has(), string-only literals, core fields (type/source/subject) plus extensions, missing-⇒-empty semantics, event.data rejection, eager regex compile with an injected timeout, and runtime-failure-⇒-non-match. The module depends only on EventMatchInput, not on CloudEvent or any domain type.",
+      "acceptanceCriteria": [
+        "EventMatchExpression.Compile returns a compiled, immutable matcher reusable across many inputs without re-parsing; on any syntax error (e.g. unbalanced parentheses) it returns a failure whose MatchDiagnostic identifies a source location (offset/line)",
+        "Precedence is || < && < unary ! < comparisons/calls/presence, overridable by parentheses — unit assertions mirror the spec's AND-binds-tighter, parentheses-override, and NOT-negates-presence scenarios",
+        "== and != compare string operands ordinally and case-sensitively; in tests set membership including an empty list [] matching nothing; ! negates a boolean sub-expression",
+        "startsWith/endsWith/contains perform ordinal substring tests; matches evaluates the attribute against the argument as a regular expression",
+        "Every literal is a double-quoted string; numeric (event.issue == 42) and boolean (true/false) literals are compile errors",
+        "event.type, event.source, event.subject resolve to core fields; any other event.<ident> resolves to the extension of that name; a missing attribute resolves to the empty string",
+        "has(event.<attr>) reports presence (extension key presence; present-but-empty ⇒ true) and combines with == \"\" to distinguish empty from absent — unit assertions cover all three has() scenarios",
+        "event.data is a compile error (payload not addressable)",
+        "Each matches argument is compiled as a regex at compile time; an invalid pattern (e.g. matches(\"[\")) is a compile error with a location; at evaluation RegexMatchTimeoutException and any regex runtime failure ⇒ non-match and never thrown; the timeout is injected (no wall-clock access)",
+        "A runtime evaluation exception ⇒ non-match, recorded through an injectable structured-log + counter seam, and never propagated to the caller",
+        "Determinism: the same compiled expression evaluated against the same input one thousand times yields the same result",
+        "Unit conformance suite (server UnitTests, <50ms per test) covers every scenario in specs/event-envelope-matching/spec.md",
+        "The matcher module references only EventMatchInput (no CloudEvent and no domain coupling); dotnet build (TreatWarningsAsErrors) and npm test (server) pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Infrastructure/Events/Matching module (EventMatchInput, tokenizer, parser, AST, EventMatchExpression.Compile, MatchDiagnostic) plus the unit conformance suite",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Grammar authority is design/event-protocol.md (do not restate the BNF in code comments). Per design D2/D3: event.data is special-cased as a compile error, regex is compiled eagerly, and the regex timeout is injected so tests never touch a wall clock. The CloudEvent→EventMatchInput adapter is deliberately NOT in this task — it belongs to the server tail task (T-002) where the matcher meets the real envelope."
+    },
+    {
+      "id": "T-002",
+      "title": "Server event tail: NDJSON streaming endpoint + EventTailSource with strict project isolation",
+      "spec": "specs/project-event-tail/spec.md#strict-project-isolation",
+      "description": "Wire the matcher into live delivery on the server. Add a CloudEvent→EventMatchInput adapter, an injectable IEventTailSource seam, and an EventTailSource [Subscription(Type = \"com.mohist.*\")] handler that fans each envelope into per-tail bounded channels applying strict project isolation (event projectid must equal the tail's project; absent ⇒ skip) then the compiled matcher, writing non-blocking (drop-on-full). Add GET /api/projects/{projectRef}/events/tail[?match=] returning application/x-ndjson: compile match as the authority (400 with a structured location diagnostic before any stream on failure), one compact JSON envelope object (core fields + extensions, no payload) per line, streaming until disconnect/cancel with best-effort no-replay semantics. Server specs drive the endpoint via the IEventTailSource fake, not the durable dispatcher.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{projectRef}/events/tail streams application/x-ndjson; each line is one compact JSON object carrying type, source, id, time, subject, specversion, and context extensions; there is no payload/data field and the body is not a single JSON array",
+        "With ?match=: the server compiles the expression once as the single authority; on compile failure it returns 400 with a structured body containing the error location before any 200/stream and emits nothing",
+        "Without ?match=: every live event for the resolved project is delivered",
+        "Strict project isolation: an event stamped with a different projectid, or carrying no projectid, is never delivered to a tail scoped to project P, regardless of the expression",
+        "Match filter: only envelopes for which the compiled expression matches are delivered; non-matches are suppressed",
+        "Server-side, envelope-only matching: an event whose payload would satisfy the expression but whose envelope attributes do not is not delivered",
+        "EventTailSource is non-blocking: a bounded Channel<CloudEvent> per tail with TryWrite drop-on-full; the handler never blocks the dispatcher fan-out on a full channel",
+        "Client disconnect or cancellation terminates the stream and releases the channel/subscription with no leak; events that occurred before the subscription are not replayed (best-effort, transient)",
+        "A CloudEvent→EventMatchInput adapter is implemented and unit-tested (type/source/subject core fields; extensions; missing ⇒ empty; has() key presence)",
+        "An injectable IEventTailSource seam lets server specs push envelopes directly without driving the durable event dispatcher or touching a wall clock",
+        "Server specs (SpecTests) assert: matching vs non-matching delivery, other-project suppression, unprojected suppression, 400-with-location on invalid match, one-line-per-event NDJSON shape, and cancellation/release on disconnect — all via WebApplicationFactory + the IEventTailSource fake, with no real network and no wall-clock waits",
+        "The Web hub, UserNotificationDispatcher project gate, the finite Activity feed (GET /api/projects/{ref}/events), and durable [Subscription] dispatch semantics are unchanged; dotnet build (TreatWarningsAsErrors) and npm test (server) pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CloudEvent→EventMatchInput adapter, IEventTailSource + EventTailSource handler, the events/tail NDJSON endpoint with 400 diagnostics, DI registration, and server spec tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Per design D4: this is a new NDJSON endpoint fed by a new com.mohist.* subscription handler, deliberately NOT reusing SignalR/the shared dispatcher gate (which is permissive and would violate the tail's strict-isolation requirement). Strict isolation lives in EventTailSource as a one-line projectid filter. Project resolution reuses the existing ProjectResolutionEndpointFilter. Tails are process-local (single daemon today); multi-silo coverage is a tracked design limitation."
+    },
+    {
+      "id": "T-003",
+      "title": "`mo events` CLI surface: streaming tail + noun consolidation",
+      "spec": "specs/project-event-tail/spec.md#event-commands-consolidated-under-mo-events",
+      "description": "Add the CLI's first streaming reader and deliver the full `mo events` command surface. Add a small shared streaming helper (HttpClient.SendAsync with HttpCompletionOption.ResponseHeadersRead + a newline reader) and an `events tail [--match <expr>]` subcommand: resolve the project locally (TryReadActiveProjectIdAsync / --project / --project-id, failing fast with NoActiveProjectMessage without contacting the server when none), send ?match= when supplied, open the stream, print each NDJSON line to stdout; on a 400 parse the structured diagnostic, print the location to stderr, exit non-zero without emitting; link a CancellationTokenSource to Console.CancelKeyPress to cancel and exit cleanly. Rename the `event` noun to `events`, add `tail`, and relocate the `dead-letter` subtree (no compat shim). Extend the CLI fake HTTP factory to return streaming NDJSON and 400 diagnostic bodies, update the existing dead-letter specs, and update docs/cli-reference.md and skill-data.",
+      "acceptanceCriteria": [
+        "`mo events tail [--match <expr>]` resolves the project via the active project or --project/--project-id; when no project can be resolved it fails locally without contacting the server and reports that no project was selected",
+        "With --match: only lines for matching events are printed; when the server returns 400 for an invalid expression, the CLI prints a location-identifying diagnostic to stderr, exits non-zero, and emits nothing before streaming begins",
+        "Without --match: all live project events are printed, one compact JSON object per line on stdout",
+        "Ctrl-C / cancellation stops streaming, releases the live subscription, and exits cleanly with no wall-clock wait (tests cancel via the token, not a timeout)",
+        "`mo events dead-letter list` and `mo events dead-letter redeliver <id>` resolve and behave as the former `mo event dead-letter` commands did; the singular `mo event ...` no longer resolves",
+        "The CLI fake HTTP factory is extended to serve streaming NDJSON responses and 400 diagnostic bodies; CLI specs assert stdout NDJSON lines, stderr location + non-zero exit on invalid expression, cancellation/release, no-project local failure, dead-letter relocation, and singular-noun removal — with no real network and no wall-clock waits",
+        "Existing dead-letter CLI specs are updated to `mo events dead-letter` and pass",
+        "docs/cli-reference.md and skill-data document `mo events tail` and `mo events dead-letter` and contain no remaining `mo event` references",
+        "dotnet build (TreatWarningsAsErrors) and CLI tests pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI streaming helper, `events tail` subcommand, renamed `events` noun with relocated `dead-letter` subtree, extended fake HTTP factory, updated CLI specs, and updated docs/cli-reference.md + skill-data",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Per design D5/D6: the CLI forwards ?match verbatim and treats the server's 400 as validation — it does not compile locally (server is the single compile authority). The streaming helper is the first non-buffered HTTP path in the CLI; keep it shared and reusable. The `event`→`events` rename is intentionally BREAKING (project in active development, no compat shim), touching MohistCliCommands.Event.cs:10 and the root registration at MohistCliCommands.cs:26."
+    }
+  ]
+}
