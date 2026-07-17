@@ -7,6 +7,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -75,39 +76,50 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     }
 }
 
-public sealed class FakeAgentSessionStore : IAgentSessionStore
-{
-    public AgentSession? State { get; private set; }
-    public int SaveCount { get; private set; }
-    public Exception? NextException { get; set; }
-
-    public void Reset()
+    public sealed class FakeAgentSessionStore : IAgentSessionStore
     {
-        NextException = null;
-        SaveCount = 0;
-        State = null;
-    }
+        public AgentSession? State { get; private set; }
+        public List<AgentSessionEvent> Events { get; } = [];
+        public int SaveCount { get; private set; }
+        public Exception? NextException { get; set; }
+        public bool CommitThenThrowNext { get; set; }
 
-    public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State);
+        public void Reset()
+        {
+            NextException = null;
+            SaveCount = 0;
+            State = null;
+            Events.Clear();
+            CommitThenThrowNext = false;
+        }
 
-    public Task<IReadOnlyList<AgentSession>> ListAsync() =>
-        Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [State]);
+        public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State is null ? null : Clone(State));
 
-    public Task SaveAsync(string key, AgentSession state)
-    {
-        ThrowIfPending();
-        SaveCount++;
-        State = state;
-        return Task.CompletedTask;
-    }
+        public Task<IReadOnlyList<AgentSession>> ListAsync() =>
+            Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [Clone(State)]);
 
-    public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
-    {
-        ThrowIfPending();
-        SaveCount++;
-        State = state;
-        return Task.CompletedTask;
-    }
+        public Task SaveAsync(string key, AgentSession state)
+        {
+            ThrowIfPending();
+            SaveCount++;
+            State = Clone(state);
+            return Task.CompletedTask;
+        }
+
+        public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
+        {
+            if (!CommitThenThrowNext)
+                ThrowIfPending();
+            SaveCount++;
+            State = Clone(state);
+            Events.AddRange(events);
+            if (CommitThenThrowNext)
+            {
+                CommitThenThrowNext = false;
+                throw new InvalidOperationException("store committed before transport failure");
+            }
+            return Task.CompletedTask;
+        }
 
     public Task DeleteAsync(string key)
     {
@@ -122,6 +134,10 @@ public sealed class FakeAgentSessionStore : IAgentSessionStore
         NextException = null;
         throw ex;
     }
+
+    private static AgentSession Clone(AgentSession state) =>
+        JSON.Deserialize<AgentSession>(JSON.Serialize(state))
+        ?? throw new InvalidOperationException("Failed to clone AgentSession state.");
 }
 
 public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptStore

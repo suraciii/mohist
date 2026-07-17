@@ -93,7 +93,9 @@ public class AgentSessionRecoveryDomainTests
         var lineage = session.Status.RuntimeSessionLineage!;
         Assert.Equal(2, lineage.Count);
         Assert.Equal("acp-legacy", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal(legacyBoundAt, lineage[0].BoundAt);
         Assert.Equal("acp-after", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal(now, lineage[1].BoundAt);
 
         var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(bound.Value);
@@ -566,9 +568,10 @@ public class AgentSessionRecoveryDomainTests
     private static AgentSession CreateSession()
     {
         var metadata = new AgentSessionMetadata()
-            .WithLabel("owner", "proj")
-            .WithLabel("source", "wf")
-            .WithLabel("name", "session");
+            .WithLabel("mohist.io/project-id", "proj")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "wf")
+            .WithLabel("mohist.io/session-name", "session");
         return AgentSession.Create(
             "proj/wf/session",
             "runner-1",

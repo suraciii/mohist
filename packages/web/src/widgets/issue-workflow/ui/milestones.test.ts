@@ -13,7 +13,7 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
     id: 'session-id',
     workflowRunId: 'wr-1',
     sessionName: 'plan',
-    acpSessionId: null,
+    runtimeSessionId: null,
     projectId: null,
     issueNumber: null,
     runnerId: null,

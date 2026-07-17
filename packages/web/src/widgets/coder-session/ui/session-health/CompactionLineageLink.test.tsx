@@ -7,7 +7,7 @@ import type { RuntimeSessionLineageEntry } from '../../../../entities/coder-sess
 import type { CompactionLineageLinkProps } from './CompactionLineageLink'
 
 function makeEntry(id: string, boundAt: string): RuntimeSessionLineageEntry {
-  return { agentRuntimeSessionId: id, boundAt }
+  return { runtimeSessionId: id, boundAt }
 }
 
 const FIXED_PATH_BUILDER = (runtimeId: string) =>
@@ -212,7 +212,7 @@ describe('CompactionLineageLink', () => {
       .toBe('Navigate to next runtime session rt-C')
   })
 
-  it('renders the "Compaction chain" label so the link is identifiable as lineage (not a generic action)', () => {
+  it('renders the runtime session history label so the link describes replacement lineage', () => {
     const lineage = [
       makeEntry('rt-A', '2026-01-01T00:00:00Z'),
       makeEntry('rt-B', '2026-01-02T00:00:00Z'),
@@ -221,6 +221,6 @@ describe('CompactionLineageLink', () => {
       runtimeSessionLineage: lineage,
       viewedRuntimeSessionId: 'rt-B',
     })
-    expect(screen.getByTestId('compaction-lineage-link-label')).toHaveTextContent('Compaction chain')
+    expect(screen.getByTestId('compaction-lineage-link-label')).toHaveTextContent('Runtime session history')
   })
 })

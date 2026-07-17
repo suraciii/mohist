@@ -12,7 +12,7 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     id: overrides.id ?? 'session-id',
     workflowRunId: overrides.workflowRunId ?? 'wr-1',
     sessionName: overrides.sessionName ?? 'plan',
-    acpSessionId: overrides.acpSessionId ?? null,
+    runtimeSessionId: overrides.runtimeSessionId ?? null,
     projectId: overrides.projectId ?? 'project-1',
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',

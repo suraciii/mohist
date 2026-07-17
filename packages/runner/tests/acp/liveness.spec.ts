@@ -191,7 +191,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
 
   it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
     shared.agent.cancelHangs = true
 
     const result = await runWithDefaultModelWarning("shared-session", () => acpAgentAction(contextWithOverrides({
@@ -335,7 +335,7 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const failed = livenessEvents.find((payload) => payload.status === "failed")
     expect(failed).toBeTruthy()
     expect(failed?.failureReason).toBe("prompt_timeout")
-    expect(failed?.acpSessionId).toBe("fake-session-1")
+    expect(failed?.runtimeSessionId).toBe("fake-session-1")
   })
 })
 

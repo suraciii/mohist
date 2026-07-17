@@ -49,6 +49,7 @@ internal static partial class IssueCommands
         session.Subcommands.Add(BuildSessionCompact(api));
         session.Subcommands.Add(BuildSessionReset(api));
         session.Subcommands.Add(BuildSessionFollowup(api));
+        session.Subcommands.Add(BuildSessionCancel(api));
 
         return session;
     }
@@ -138,7 +139,7 @@ internal static partial class IssueCommands
 
     private static Command BuildSessionCompact(MohistCliApi api)
     {
-        var cmd = new Command("compact", "Compact the session and return a new session id");
+        var cmd = new Command("compact", "Compact the session in place");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -170,7 +171,8 @@ internal static partial class IssueCommands
                     path,
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.SessionRecovery));
+                    nameof(MohistCliApi.TableShape.SessionRecovery),
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = Guid.NewGuid().ToString("N") });
             }
         });
         return cmd;
@@ -178,7 +180,7 @@ internal static partial class IssueCommands
 
     private static Command BuildSessionReset(MohistCliApi api)
     {
-        var cmd = new Command("reset", "Reset the session so its next task creates a fresh runtime session");
+        var cmd = new Command("reset", "Reset the session in place");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -210,7 +212,8 @@ internal static partial class IssueCommands
                     path,
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.SessionRecovery));
+                    nameof(MohistCliApi.TableShape.SessionRecovery),
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = Guid.NewGuid().ToString("N") });
             }
         });
         return cmd;
@@ -220,7 +223,7 @@ internal static partial class IssueCommands
     {
         var cmd = new Command(
             "followup",
-            "Send followup text to a running issue workflow session. Sends POST /api/projects/:projectId/issues/:number/sessions/:name/followup.");
+            "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a TaskRun or AgentJob. Sends POST /api/projects/:projectId/issues/:number/sessions/:name/followup.");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };
@@ -273,6 +276,48 @@ internal static partial class IssueCommands
                     new { text = textValue },
                     mode,
                     nameof(MohistCliApi.TableShape.AgentSessionFollowup),
+                    rawJson: true);
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionCancel(MohistCliApi api)
+    {
+        var cmd = new Command("cancel", "Request cancellation of a running session and print its resulting state.");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return CancelAsync();
+
+            async Task<int> CancelAsync()
+            {
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/cancel");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionCancel),
                     rawJson: true);
             }
         });

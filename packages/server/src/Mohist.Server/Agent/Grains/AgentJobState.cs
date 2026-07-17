@@ -15,4 +15,5 @@ public sealed class AgentJobState
     [Id(9)] public int DispatchAttempts { get; set; }
     [Id(10)] public string? AgentConfigJson { get; set; }
     [Id(11)] public bool RunnerAccepted { get; set; }
+    [Id(12)] public string? RuntimeSessionId { get; set; }
 }

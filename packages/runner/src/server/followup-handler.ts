@@ -14,7 +14,7 @@
 //     generic  → `agentSessionRuntimeEvents`
 //   - emits a `session.input` runtime event tagged with
 //     `kind: "followup" / role: "user" / source: "followup"` on the
-//     resolved `acpSessionId` — non-awaited, rejection logged but does
+//     resolved `runtimeSessionId` — non-awaited, rejection logged but does
 //     NOT block the prompt
 //   - issues `connection.prompt(...)` exactly once, fire-and-forget:
 //     `target.connection.prompt(...)` is awaited only by `.catch(...)`,
@@ -29,32 +29,41 @@ import type { ServerConnection } from "./connection.js"
 import {
   resolveSessionTarget,
   type FollowupTarget,
+  type FollowupTargetResolution,
   type FollowupTargetResolver,
   type ReceiveFollowupPayload,
+  isFollowupTargetUnavailable,
 } from "./session-target.js"
+import type { SessionTarget } from "../runtime/acp-connection.js"
+import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 
 export interface FollowupHandlerDeps {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
+  followupFailureOutbox?: FollowupFailureOutboxStore | null
+}
+
+export interface FollowupDeliveryResult {
+  accepted: boolean
+  error?: "missing" | "unavailable"
 }
 
 export function registerFollowupHandler(
   conn: signalR.HubConnection,
   deps: FollowupHandlerDeps,
 ): void {
-  conn.on("ReceiveFollowup", (payload: ReceiveFollowupPayload | null | undefined) => {
-    void handleFollowup(payload, deps)
-  })
+  conn.on("ReceiveFollowup", async (payload: ReceiveFollowupPayload | null | undefined) =>
+    await handleFollowup(payload, deps))
 }
 
 async function handleFollowup(
   payload: ReceiveFollowupPayload | null | undefined,
   deps: FollowupHandlerDeps,
-): Promise<void> {
-  if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return
+): Promise<FollowupDeliveryResult> {
+  if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return unavailable()
   const serverConnection = deps.serverConnection ?? null
   const resolver = deps.followupTargetResolver ?? null
-  if (!resolver || !serverConnection) return
+  if (!resolver || !serverConnection) return unavailable()
 
   // Issue-129 T-004: branch on the discriminated `target.kind` so a
   // single handler can deliver followups to either a workflow-shaped
@@ -65,78 +74,126 @@ async function handleFollowup(
   // server builds (no `target` field) keep working against the
   // workflow followup route.
   const sessionTarget = resolveSessionTarget(payload)
-  if (!sessionTarget) return
+  if (!sessionTarget) return unavailable()
 
-  let target: FollowupTarget | null
+  let target: FollowupTargetResolution
   try {
-    target = resolver(sessionTarget)
+    const resolved = resolver(sessionTarget)
+    target = isPromise(resolved) ? await resolved : resolved
   } catch (error) {
     console.error("followup target resolver threw:", error)
+    return unavailable()
+  }
+  if (isFollowupTargetUnavailable(target)) return unavailable()
+  if (!target) return { accepted: false, error: "missing" }
+
+  emitFollowupEvent(serverConnection, sessionTarget, target, {
+    type: "session.input",
+    payload: {
+      role: "user",
+      text: payload.text,
+      kind: "followup",
+      sentAt: new Date().toISOString(),
+      ...(payload.operationId ? { operationId: payload.operationId } : {}),
+      runtimeSessionId: target.sessionId,
+      source: "followup",
+    },
+  })
+
+  try {
+    void target.connection.prompt({
+      sessionId: target.sessionId,
+      prompt: [{ type: "text", text: payload.text }],
+    }).then(
+      () => recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "completed", null),
+      (error) => {
+        console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+        recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
+      },
+    )
+  } catch (error) {
+    console.error("followup connection.prompt threw:", error instanceof Error ? error.message : String(error))
+    recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
+    return unavailable()
+  }
+  return { accepted: true }
+}
+
+function recordFollowupTerminal(
+  outbox: FollowupFailureOutboxStore | null,
+  serverConnection: ServerConnection,
+  sessionTarget: SessionTarget,
+  target: FollowupTarget,
+  operationId: string | undefined,
+  status: "completed" | "failed",
+  error: unknown,
+): void {
+  const message = error === null ? null : error instanceof Error ? error.message : String(error)
+  const completedAt = new Date().toISOString()
+  if (!operationId) return
+  if (outbox) {
+    void outbox.record({
+      operationId,
+      target: sessionTarget,
+      runtimeSessionId: target.sessionId,
+      status,
+      error: message,
+      completedAt,
+    }, serverConnection).catch((outboxError) => {
+      console.error("failed to persist followup failure:", outboxError)
+    })
     return
   }
-  if (!target) return
 
+  emitFollowupEvent(serverConnection, sessionTarget, target, {
+    type: status === "failed" ? "session.followup_failed" : "session.followup_completed",
+    payload: {
+      status,
+      ...(message ? { failureReason: message } : {}),
+      source: "followup",
+      operationId,
+      runtimeSessionId: target.sessionId,
+      completedAt,
+    },
+  })
+}
+
+// Emits a runtime event for a follow-up through the workflow or generic
+// runtime-events endpoint, depending on the session kind. Fire-and-forget:
+// a rejection is logged but does not change the handler result.
+function emitFollowupEvent(
+  serverConnection: ServerConnection,
+  sessionTarget: SessionTarget,
+  target: FollowupTarget,
+  event: { type: string; payload: Record<string, unknown> },
+): void {
+  const runtimeEvents = [event]
+  const signal = new AbortController().signal
+  const onError = (error: unknown) => {
+    console.error(`failed to emit followup ${event.type} event:`, error)
+  }
   if (sessionTarget.kind === "workflow") {
     void serverConnection.workflowAgentSessionRuntimeEvents(
       target.projectId,
-      sessionTarget.workflowRunId,
-      sessionTarget.sessionName,
-      {
-        workId: null,
-        workType: null,
-        stage: null,
-        runtimeEvents: [
-          {
-            type: "session.input",
-            payload: {
-              role: "user",
-              text: payload.text,
-              kind: "followup",
-              sentAt: new Date().toISOString(),
-              acpSessionId: target.sessionId,
-              source: "followup",
-            },
-          },
-        ],
-      },
-      new AbortController().signal,
-    ).catch((error) => {
-      console.error("failed to emit followup session.input event:", error)
-    })
+      sessionTarget.workflowRunId!,
+      sessionTarget.sessionName!,
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      signal,
+    ).catch(onError)
   } else {
     void serverConnection.agentSessionRuntimeEvents(
       target.projectId,
       sessionTarget.sessionId,
-      {
-        workId: null,
-        workType: null,
-        stage: null,
-        runtimeEvents: [
-          {
-            type: "session.input",
-            payload: {
-              role: "user",
-              text: payload.text,
-              kind: "followup",
-              sentAt: new Date().toISOString(),
-              acpSessionId: target.sessionId,
-              source: "followup",
-            },
-          },
-        ],
-      },
-      new AbortController().signal,
-    ).catch((error) => {
-      console.error("failed to emit followup session.input event:", error)
-    })
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      signal,
+    ).catch(onError)
   }
+}
 
-  void target.connection
-    .prompt({
-      sessionId: target.sessionId,
-      prompt: [{ type: "text", text: payload.text }],
-    })
-    .catch((error) => {
-      console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
-    })
+function isPromise<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === "function"
+}
+
+function unavailable(): FollowupDeliveryResult {
+  return { accepted: false, error: "unavailable" }
 }

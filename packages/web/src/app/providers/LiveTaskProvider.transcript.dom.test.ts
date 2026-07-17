@@ -23,6 +23,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const envelope = {
       type: 'message.delta',
       sessionId: 'session-1',
+      agentSessionId: 'runtime-1',
       sequence: 12,
       createdAt: '2026-06-12T00:00:00.000Z',
       payload: { text: 'persisted segment' },
@@ -37,22 +38,54 @@ describe('LiveTaskProvider transcript routing', () => {
       text: 'persisted segment',
       payload: { text: 'persisted segment' },
       sequence: 12,
+      runtimeSessionId: 'runtime-1',
     })
+  })
+
+  it('does not substitute a logical session id for a missing runtime binding', () => {
+    const unwrapped = __testing__.unwrapTranscriptEnvelope({
+      type: 'message.delta',
+      sessionId: 'session-1',
+      payload: { text: 'persisted segment' },
+    })
+
+    expect(unwrapped?.detail).not.toHaveProperty('runtimeSessionId')
   })
 
   it('normalizes server transcript metadata into session-scoped detail fields', () => {
     const unwrapped = __testing__.unwrapTranscriptEnvelope({
       type: 'reasoning.delta',
       sessionId: 'session-84',
-      agentSessionId: 'acp-84',
+      runtimeSessionId: 'runtime-84',
+      runtime: 'opencode',
       payload: { text: 'thinking' },
     })
 
     expect(unwrapped?.detail).toMatchObject({
-      acpSessionId: 'acp-84',
-      coderSessionId: 'session-84',
+      runtimeSessionId: 'runtime-84',
+      sessionId: 'session-84',
+      runtime: 'opencode',
       text: 'thinking',
     })
+  })
+
+  it('prefers the canonical runtime session field when the envelope provides it', () => {
+    const unwrapped = __testing__.unwrapTranscriptEnvelope({
+      type: 'message.delta',
+      sessionId: 'session-84',
+      runtimeSessionId: 'runtime-84',
+      runtime: 'opencode',
+      payload: { text: 'working' },
+    })
+
+    expect(unwrapped?.detail).toMatchObject({
+      runtimeSessionId: 'runtime-84',
+      sessionId: 'session-84',
+      runtime: 'opencode',
+      text: 'working',
+    })
+    expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')
+    expect(unwrapped?.detail).not.toHaveProperty('coderSessionId')
   })
 })
 

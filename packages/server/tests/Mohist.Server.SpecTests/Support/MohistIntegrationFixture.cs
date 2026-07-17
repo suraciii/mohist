@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Api;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -319,6 +320,7 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 {
     private readonly RecordingHubClients _clients;
     private readonly Dictionary<string, object?> _invocationResponses = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Func<IReadOnlyList<object?>, object?>> _invocationResponseFactories = new(StringComparer.Ordinal);
 
     public RecordingRunnerHubContext()
     {
@@ -334,6 +336,8 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
     {
         SentMessages.Clear();
         Invocations.Clear();
+        _invocationResponses.Clear();
+        _invocationResponseFactories.Clear();
     }
 
     /// <summary>
@@ -344,11 +348,27 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
     /// </summary>
     public void SetInvocationResponse(string method, object? response)
     {
+        _invocationResponseFactories.Remove(method);
         _invocationResponses[method] = response;
     }
 
-    private object? ResolveInvocationResponse(string method)
+    public void SetInvocationResponseFactory(
+        string method,
+        Func<IReadOnlyList<object?>, object?> responseFactory)
     {
+        _invocationResponses.Remove(method);
+        _invocationResponseFactories[method] = responseFactory;
+    }
+
+    private object? ResolveInvocationResponse(string method, IReadOnlyList<object?> arguments)
+    {
+        if (_invocationResponseFactories.TryGetValue(method, out var responseFactory))
+            return responseFactory(arguments);
+        if (string.Equals(method, "ReceiveFollowup", StringComparison.Ordinal)
+            && !_invocationResponses.ContainsKey(method))
+        {
+            return new RunnerFollowupDeliveryResult(true);
+        }
         return _invocationResponses.TryGetValue(method, out var value) ? value : null;
     }
 
@@ -403,8 +423,11 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 
         public Task<T> InvokeCoreAsync<T>(string method, object?[] args, CancellationToken cancellationToken = default)
         {
+            _context.SentMessages.Add(new RecordedRunnerHubMessage(_connectionId, method, args));
             _context.Invocations.Add(new RecordedRunnerHubInvocation(_connectionId, method, args));
-            var response = _context.ResolveInvocationResponse(method);
+            var response = _context.ResolveInvocationResponse(method, args);
+            if (response is Task<T> pending)
+                return pending;
             if (response is T typed)
             {
                 return Task.FromResult(typed);

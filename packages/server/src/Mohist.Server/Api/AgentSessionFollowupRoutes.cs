@@ -3,19 +3,21 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Generic (non-workflow) AgentSession followup endpoint for issue-129 T-004.
-/// Distinct from the issue-scoped
+/// Canonical follow-up endpoint for AgentSessions from either source.
+/// Follow-up joins the active turn or starts a user-initiated turn when the
+/// session is idle; neither case creates a TaskRun or AgentJob. The issue-scoped
 /// <c>POST /api/projects/{projectRef}/issues/{number}/sessions/{name}/followup</c>
-/// route (<see cref="IssueRoutes.MapIssueSessions"/>), which remains
-/// unchanged and reachable via the existing workflowRunId + sessionName axis.
-/// Generic sessions are reached by their minted <c>sessionId</c> alone
-/// (no workflowRunId lookup key); the launch endpoint stamps
-/// <c>source-kind = agent-launch</c> labels and the resolver in
+/// route (<see cref="IssueRoutes.MapIssueSessions"/>) is a Workflow lookup
+/// alias that resolves to the same stable AgentSession id and returns the same
+/// <see cref="AgentSessionFollowupResult"/> shape before using its
+/// Workflow-shaped runner target. The resolver in
 /// <see cref="AgentSessionQuerier.ResolveGenericFollowupTargetAsync"/> reads
 /// the runner id from the session's Runtime state.
 /// </summary>
@@ -46,11 +48,12 @@ public static class AgentSessionFollowupRoutes
             HttpContext context,
             string projectRef,
             string sessionId,
+            string? runtimeSessionId,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var transcript = await sessions.GetGenericSessionTranscriptAsync(project.Id, sessionId, ct);
+            var transcript = await sessions.GetGenericSessionTranscriptAsync(project.Id, sessionId, runtimeSessionId, ct);
             return transcript is null
                 ? ApiResults.NotFound($"Agent session {sessionId} not found")
                 : ApiResults.Ok(transcript);
@@ -62,6 +65,7 @@ public static class AgentSessionFollowupRoutes
             string sessionId,
             GenericFollowupRequest body,
             AgentSessionQuerier sessions,
+            IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
             CancellationToken ct) =>
@@ -71,52 +75,136 @@ public static class AgentSessionFollowupRoutes
                 return ApiResults.BadRequest("text is required", "followup_text_missing");
 
             var project = context.GetResolvedProject();
-            var target = await sessions.ResolveGenericFollowupTargetAsync(project.Id, sessionId, ct);
-            if (target is null)
-                return ApiResults.NotFound($"Agent session {sessionId} not found");
-
-            if (!target.IsActive)
-                return ApiResults.Conflict("Session is no longer active", "session_inactive");
-
-            // IsActive=true implies a runner has opened and reported
-            // runtime events, so RunnerId is guaranteed to be present.
-            // Defensive guard for the (impossible-by-construction) case
-            // where a session reads as active without a bound runner —
-            // surface it as 503 (the runner lookup will fail) rather than
-            // crash the handler.
-            if (string.IsNullOrWhiteSpace(target.RunnerId))
-                return ApiResults.Fail(
-                    "Runner is offline",
-                    503,
-                    "runner_offline",
-                    new { runnerId = target.RunnerId ?? string.Empty });
-
-            var connectionId = connections.GetConnectionId(target.RunnerId);
-            if (string.IsNullOrWhiteSpace(connectionId))
-                return ApiResults.Fail(
-                    "Runner is offline",
-                    503,
-                    "runner_offline",
-                    new { runnerId = target.RunnerId });
-
-            await runnerHub.Clients.Client(connectionId).SendAsync(
-                "ReceiveFollowup",
-                new
-                {
-                    target = new
-                    {
-                        kind = "generic",
-                        projectId = project.Id,
-                        sessionId = target.SessionId,
-                    },
-                    text,
-                });
-
-            return ApiResults.Ok(new { status = "sent" });
+            return await ExecuteFollowupAsync(project.Id, sessionId, text, sessions, grains, runnerHub, connections, ct);
         });
 
         return app;
     }
+
+    internal static async Task<IResult> ExecuteFollowupAsync(
+        string projectId,
+        string sessionId,
+        string text,
+        AgentSessionQuerier sessions,
+        IGrainFactory grains,
+        IHubContext<RunnerHub> runnerHub,
+        RunnerConnectionTracker connections,
+        CancellationToken ct)
+    {
+        var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
+        if (target is null)
+            return ApiResults.NotFound($"Agent session {sessionId} not found");
+        if (!string.IsNullOrWhiteSpace(target.TerminalState))
+            return ApiResults.Conflict("Session is no longer active", "session_inactive");
+
+        var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
+        AgentSessionFollowupReservation reservation;
+        try
+        {
+            reservation = await grain.BeginFollowupAsync();
+        }
+        catch (RuntimeSessionMissingException ex)
+        {
+            return ApiResults.Conflict(
+                ex.Message,
+                "runtime_session_missing",
+                new { sessionId = ex.SessionId, hint = "reset" });
+        }
+        catch (RecoveryOperationInProgressException ex)
+        {
+            return ApiResults.Conflict(
+                ex.Message,
+                "recovery_in_progress",
+                new { sessionId = ex.SessionId, operation = ex.Operation });
+        }
+        catch (FollowupOperationInProgressException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
+        }
+
+        if (string.IsNullOrWhiteSpace(target.RunnerId))
+        {
+            await AbandonReservationAsync(grain, reservation);
+            return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
+        }
+
+        var connectionId = connections.GetConnectionId(target.RunnerId);
+        if (string.IsNullOrWhiteSpace(connectionId))
+        {
+            await AbandonReservationAsync(grain, reservation);
+            return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
+        }
+
+        if (string.IsNullOrWhiteSpace(target.Runtime)
+            || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
+        {
+            await AbandonReservationAsync(grain, reservation);
+            var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
+            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId, hint = "reset" });
+        }
+
+        object binding = new
+        {
+            runtime = target.Runtime,
+            runtimeSessionId = target.RuntimeSessionId,
+            runnerId = target.RunnerId,
+            workDir = target.WorkDir,
+        };
+        object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+            ? new
+            {
+                kind = "workflow",
+                projectId,
+                workflowRunId = target.WorkflowRunId,
+                sessionName = target.SessionName,
+                binding,
+            }
+            : new
+            {
+                kind = "generic",
+                projectId,
+                sessionId = target.SessionId,
+                binding,
+            };
+        object payload = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+            ? new { workflowRunId = target.WorkflowRunId, sessionName = target.SessionName, target = wireTarget, text, operationId = reservation.OperationId }
+            : new { target = wireTarget, text, operationId = reservation.OperationId };
+
+        RunnerFollowupDeliveryResult? delivery;
+        try
+        {
+            delivery = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
+                "ReceiveFollowup",
+                payload,
+                ct);
+        }
+        catch
+        {
+            await AbandonReservationAsync(grain, reservation);
+            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+        }
+
+        if (delivery?.Accepted == true)
+        {
+            if (reservation.OperationId is not null)
+                await grain.ConfirmFollowupAsync(reservation.OperationId);
+            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
+        }
+
+        await AbandonReservationAsync(grain, reservation);
+        if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
+        {
+            return ApiResults.Conflict(
+                $"Runtime session missing for AgentSession {target.SessionId}. Reset the session to establish a new binding.",
+                "runtime_session_missing",
+                new { sessionId = target.SessionId, hint = "reset" });
+        }
+
+        return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+    }
+
+    private static Task AbandonReservationAsync(IAgentSessionGrain grain, AgentSessionFollowupReservation reservation) =>
+        reservation.OperationId is null ? Task.CompletedTask : grain.AbandonFollowupAsync(reservation.OperationId);
 }
 
 /// <summary>
@@ -126,3 +214,7 @@ public static class AgentSessionFollowupRoutes
 /// or runner lookup, mirroring the issue-scoped followup body shape.
 /// </summary>
 public sealed record GenericFollowupRequest(string? Text = null);
+
+public sealed record AgentSessionFollowupResult(string SessionId, string Status = "sent");
+
+public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

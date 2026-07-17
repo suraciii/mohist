@@ -11,13 +11,18 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { cn } from '@/shared/lib/utils'
-import { compactSession, resetSession } from '../../../entities/coder-session'
+import {
+  compactGenericSession,
+  compactSession,
+  resetGenericSession,
+  resetSession,
+} from '../../../entities/coder-session'
 import { useProject } from '../../../entities/project'
 
 const INACTIVE_TOOLTIP = 'Unavailable while session is active'
 const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
-  'This will clear all session context. The agent will lose all conversation history.'
+  'A new runtime session will start without prior context. Transcript and audit history remain available.'
 
 function isSessionActive(status: string | null | undefined): boolean {
   if (!status) return false
@@ -43,7 +48,9 @@ function resolveErrorMessage(err: unknown): string {
 export interface SessionRecoveryActionsProps {
   issueNumber: number
   sessionName: string
+  genericSessionId?: string
   status: string | null | undefined
+  recoveryAvailable?: boolean
   onSuccess?: () => void
   className?: string
   compactLabel?: string
@@ -55,6 +62,7 @@ export interface SessionRecoveryActionsProps {
    */
   bare?: boolean
   clients?: SessionRecoveryActionsClients
+  genericClients?: GenericSessionRecoveryActionsClients
 }
 
 export interface SessionRecoveryActionsClients {
@@ -62,39 +70,57 @@ export interface SessionRecoveryActionsClients {
   reset: typeof resetSession
 }
 
+export interface GenericSessionRecoveryActionsClients {
+  compact: typeof compactGenericSession
+  reset: typeof resetGenericSession
+}
+
 const defaultClients: SessionRecoveryActionsClients = {
   compact: compactSession,
   reset: resetSession,
 }
 
+const defaultGenericClients: GenericSessionRecoveryActionsClients = {
+  compact: compactGenericSession,
+  reset: resetGenericSession,
+}
+
 export function SessionRecoveryActions({
   issueNumber,
   sessionName,
+  genericSessionId,
   status,
+  recoveryAvailable,
   onSuccess,
   className,
   compactLabel = 'Compact',
   resetLabel = 'Reset',
   bare = false,
   clients = defaultClients,
+  genericClients = defaultGenericClients,
 }: SessionRecoveryActionsProps) {
   const { projectId } = useProject()
-  const active = isSessionActive(status)
+  const active = recoveryAvailable === undefined ? isSessionActive(status) : !recoveryAvailable
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
+  const [compactIdempotencyKey, setCompactIdempotencyKey] = useState<string | null>(null)
+  const [resetIdempotencyKey, setResetIdempotencyKey] = useState<string | null>(null)
 
   useEffect(() => {
     setInlineError(null)
   }, [status])
 
   const compactMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (idempotencyKey: string) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return clients.compact(issueNumber, sessionName, projectId)
+      return genericSessionId
+        ? genericClients.compact(genericSessionId, projectId, idempotencyKey)
+        : clients.compact(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
+      setCompactIdempotencyKey(null)
       setInlineError(null)
       onSuccess?.()
     },
@@ -104,13 +130,16 @@ export function SessionRecoveryActions({
   })
 
   const resetMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (idempotencyKey: string) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return clients.reset(issueNumber, sessionName, projectId)
+      return genericSessionId
+        ? genericClients.reset(genericSessionId, projectId, idempotencyKey)
+        : clients.reset(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
+      setResetIdempotencyKey(null)
       setResetDialogOpen(false)
       setInlineError(null)
       onSuccess?.()
@@ -124,7 +153,9 @@ export function SessionRecoveryActions({
 
   function handleCompact() {
     if (active || anyPending) return
-    compactMutation.mutate()
+    const idempotencyKey = compactIdempotencyKey ?? crypto.randomUUID()
+    setCompactIdempotencyKey(idempotencyKey)
+    compactMutation.mutate(idempotencyKey)
   }
 
   function openResetDialog() {
@@ -146,7 +177,9 @@ export function SessionRecoveryActions({
 
   function handleResetConfirm() {
     if (resetMutation.isPending) return
-    resetMutation.mutate()
+    const idempotencyKey = resetIdempotencyKey ?? crypto.randomUUID()
+    setResetIdempotencyKey(idempotencyKey)
+    resetMutation.mutate(idempotencyKey)
   }
 
   const compactButton = (

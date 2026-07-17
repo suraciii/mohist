@@ -96,7 +96,7 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
     if (!promptUsage || typeof promptUsage !== "object") return
     const payload = buildUsageUpdatePayload(context, sessionId, "prompt_response", promptUsage)
     if (!hasUsageUpdateContent(payload)) return
-    await emitSessionEvent(context, "usage.updated", payload)
+    await emitSessionEvent(context, "usage.updated", payload, sessionId)
   }
 
   try {
@@ -107,7 +107,7 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
       if (timeoutRemaining <= 0) {
         const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
         await emitLivenessStatusEvent(context, options.livenessState, "failed", {
-          acpSessionId: sessionId,
+          runtimeSessionId: sessionId,
           failureReason: "prompt_timeout",
           providerError: diagnostic,
           postProbeActivity: hasPostProbeActivity(options.livenessState),
@@ -135,13 +135,13 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
       if (result instanceof Error) {
         const failureReason: LivenessFailureReason = result.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
         const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
-        await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+        await emitLivenessStatusEvent(context, options.livenessState, "failed", { runtimeSessionId: sessionId, failureReason, providerError: diagnostic, postProbeActivity: hasPostProbeActivity(options.livenessState) })
         return { error: appendOpencodeDiagnostic(result.message, diagnostic), providerError: diagnostic, failureReason }
       }
       const failFastProviderError = await findFailFastOpencodeProviderErrorDiagnostic(sessionId, startedAt)
       if (failFastProviderError) {
         await emitLivenessStatusEvent(context, options.livenessState, "failed", {
-          acpSessionId: sessionId,
+          runtimeSessionId: sessionId,
           failureReason: "provider_error",
           providerError: failFastProviderError,
           postProbeActivity: hasPostProbeActivity(options.livenessState),
@@ -152,13 +152,13 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
       if (Date.now() - options.livenessState.lastDataAt < options.livenessQuietThresholdMs) continue
 
       const activeProbe = beginLivenessProbe(options.livenessState, options.probeTimeoutMs)
-      await emitLivenessStatusEvent(context, options.livenessState, "probing", { acpSessionId: sessionId, activeProbeVersion: activeProbe.probeVersion })
+      await emitLivenessStatusEvent(context, options.livenessState, "probing", { runtimeSessionId: sessionId, activeProbeVersion: activeProbe.probeVersion })
       try {
         await ensurePromptAcceptedOrPending(connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }))
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
-        await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_send_failed", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+        await emitLivenessStatusEvent(context, options.livenessState, "failed", { runtimeSessionId: sessionId, failureReason: "probe_send_failed", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
         return { error: appendOpencodeDiagnostic(`Failed to send liveness probe: ${message}`, diagnostic), providerError: diagnostic, failureReason: "probe_send_failed" }
       }
       const probeData = options.waitForData(activeProbe.probeVersion)
@@ -181,11 +181,11 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
         if (probeResult === "completed") {
           const probeState = buildProbeState(options.livenessState)
           const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
-          await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
+          await emitLivenessStatusEvent(context, options.livenessState, "failed", { runtimeSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
           return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
         }
         if (probeResult === "data" && probeWasSatisfied(options.livenessState)) {
-          await emitLivenessStatusEvent(context, options.livenessState, "running", { acpSessionId: sessionId, satisfiedProbeVersion: activeProbe.probeVersion })
+          await emitLivenessStatusEvent(context, options.livenessState, "running", { runtimeSessionId: sessionId, satisfiedProbeVersion: activeProbe.probeVersion })
           clearLivenessProbe(options.livenessState)
           continue monitorLoop
         }
@@ -194,13 +194,13 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
         if (probeResult instanceof Error) {
           const failureReason: LivenessFailureReason = probeResult.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
           const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
-          await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+          await emitLivenessStatusEvent(context, options.livenessState, "failed", { runtimeSessionId: sessionId, failureReason, providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
           return { error: appendOpencodeDiagnostic(probeResult.message, diagnostic), providerError: diagnostic, failureReason }
         }
         const failFastProviderError = await findFailFastOpencodeProviderErrorDiagnostic(sessionId, startedAt)
         if (failFastProviderError) {
           await emitLivenessStatusEvent(context, options.livenessState, "failed", {
-            acpSessionId: sessionId,
+            runtimeSessionId: sessionId,
             failureReason: "provider_error",
             providerError: failFastProviderError,
             activeProbeVersion: activeProbe.probeVersion,
@@ -212,7 +212,7 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
       }
       const probeState = buildProbeState(options.livenessState)
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
-      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { runtimeSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
       return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
     }
   } finally {

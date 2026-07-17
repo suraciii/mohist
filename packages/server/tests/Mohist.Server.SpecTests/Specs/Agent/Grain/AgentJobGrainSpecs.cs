@@ -340,6 +340,7 @@ public class AgentJobGrainSpecs
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
                     [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-test",
                 })));
 
         var jobKey = $"agent-job-bound-generic-{Guid.NewGuid():N}";
@@ -420,6 +421,100 @@ public class AgentJobGrainSpecs
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
         Assert.Equal(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-job-reset-project-{Guid.NewGuid():N}";
+        var sessionId = $"agent-job-reset-session-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-a",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-reset",
+            Metadata: new AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-test",
+                })));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
+
+        var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
+        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId));
+        await job.AssignRunnerAsync("runner-a", "work-a");
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+        Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-b"));
+
+        await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+        await job.CheckTimeoutsAsync();
+        await session.FlushForTestAsync();
+
+        Assert.Equal("runtime-b", (await session.GetAsync())?.AgentSessionId);
+        await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+        var turnIds = await db.AgentSessionTranscriptTurns
+            .Where(turn => turn.SessionId == sessionId)
+            .Select(turn => turn.Id)
+            .ToListAsync();
+        Assert.Empty(await db.AgentSessionTranscriptParts
+            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
+            .ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task AttachedGenericJobFailure_RecordsOneTerminalFactWithRuntimeFailureCategory()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-job-close-project-{Guid.NewGuid():N}";
+        var sessionId = $"agent-job-close-session-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-a",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-close",
+            Metadata: new AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-test",
+                })));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
+
+        var job = JobGrain($"agent-job-close-{Guid.NewGuid():N}");
+        await job.SubmitAsync(new AgentJobInput("record terminal failure", ProjectId: projectId, AgentSessionId: sessionId));
+        await job.AssignRunnerAsync("runner-a", "work-a");
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+
+        await job.ReportResultAsync("runner-a", "work-a", new WorkResult(
+            "failed",
+            "prompt timed out",
+            Output: """{"failureCategory":"prompt_timeout"}""",
+            ExitCode: 1));
+        await session.FlushForTestAsync();
+
+        await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+        var turnIds = await db.AgentSessionTranscriptTurns
+            .Where(turn => turn.SessionId == sessionId)
+            .Select(turn => turn.Id)
+            .ToListAsync();
+        var closed = Assert.Single(await db.AgentSessionTranscriptParts
+            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
+            .ToListAsync());
+
+        Assert.Equal(1, closed.RawEventCount);
+        using var payload = JsonDocument.Parse(closed.PayloadJson);
+        Assert.Equal("prompt_timeout", payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -15,11 +15,13 @@ public union AgentSessionEvent(
 /// it carries the predecessor runtime session id retained in
 /// <see cref="AgentSessionStatusSnapshot.RuntimeSessionLineage"/>.
 /// Realtime consumers use this to render a lineage link without
-/// re-querying the session.
+/// re-querying the session. <see cref="Runtime"/> names the backend
+/// that owns the new binding.
 /// </summary>
 public sealed record AgentSessionRuntimeBound(
     string AgentRuntimeSessionId,
-    string? PreviousAgentRuntimeSessionId = null);
+    string? PreviousAgentRuntimeSessionId = null,
+    string? Runtime = null);
 public sealed record AgentSessionUsageRecorded(AgentUsageSummary Usage);
 public sealed record AgentSessionModelChanged(string? Model);
 public sealed record AgentSessionContextCompacted(

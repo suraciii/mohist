@@ -163,7 +163,8 @@ public class TranscriptEventPublisherSpecs
         return new TranscriptEnvelope(
             Id: Guid.NewGuid().ToString(),
             SessionId: $"sess-{Guid.NewGuid():N}",
-            AgentSessionId: "acp-1",
+            RuntimeSessionId: "runtime-1",
+            Runtime: "opencode",
             Sequence: 1,
             Type: type,
             Payload: payload,

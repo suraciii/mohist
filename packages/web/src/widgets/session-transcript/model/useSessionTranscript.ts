@@ -29,7 +29,8 @@ import {
 interface UseSessionTranscriptOptions {
   issueNumber: number
   sessionId: string
-  acpSessionId: string
+  runtimeSessionId: string
+  runtime?: string | null
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
@@ -52,7 +53,8 @@ export interface UseSessionTranscriptResult {
 export function useSessionTranscript({
   issueNumber,
   sessionId,
-  acpSessionId,
+  runtimeSessionId,
+  runtime,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -86,7 +88,7 @@ export function useSessionTranscript({
 
   useEffect(() => {
     hasLiveTailRef.current = false
-  }, [issueId, sessionId, acpSessionId])
+  }, [issueId, sessionId, runtimeSessionId])
 
   const scrollToBottom = useCallback(() => {
     setIsNearBottom(true)
@@ -166,10 +168,14 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
-    const isCurrentSessionEvent = (detail: { acpSessionId?: string | null; coderSessionId?: string | null; sessionId?: string | null }) => {
+    const isCurrentSessionEvent = (detail: {
+      sessionId?: string | null
+      runtimeSessionId?: string | null
+      runtime?: string | null
+    }) => {
       if (!mountedRef.current) return false
-      if (acpSessionId && detail.acpSessionId === acpSessionId) return true
-      return detail.coderSessionId === sessionId || detail.sessionId === sessionId
+      if (detail.sessionId !== sessionId || detail.runtimeSessionId !== runtimeSessionId) return false
+      return runtime == null || detail.runtime === runtime
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -436,57 +442,6 @@ export function useSessionTranscript({
       }),
     )
 
-    const handleLegacyTerminalEvent = (
-      detail: { coderSessionId?: string | null; sessionId?: string | null; acpSessionId?: string | null; reason?: string | null },
-      status: 'completed' | 'failed' | 'cancelled',
-    ) => {
-      if (!isCurrentSessionEvent(detail)) return
-
-      hasLiveTailRef.current = true
-      const now = new Date().toISOString()
-      setTurns((prev) => closeLatestTurn(prev, now))
-
-      if (status === 'failed' || status === 'cancelled') {
-        const errorPart = createErrorPart(
-          detail.reason ?? `Session ${status}`,
-          status === 'cancelled' ? 'cancelled' : 'failed',
-          now,
-        )
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            assistant: [...lastTurn.assistant, errorPart],
-          }
-          return next
-        })
-      }
-
-      setIsThinking(false)
-      clearStreaming()
-      invalidateAndRefetch()
-      markNewContentRef.current()
-    }
-
-    unsubs.push(
-      onAgentEvent('coder_session_completed', (detail) => {
-        handleLegacyTerminalEvent(detail, 'completed')
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_failed', (detail) => {
-        handleLegacyTerminalEvent(detail, 'failed')
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_cancelled', (detail) => {
-        handleLegacyTerminalEvent(detail, 'cancelled')
-      }),
-    )
-
     unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
@@ -560,7 +515,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
+  }, [issueId, sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
   return {
     turns,

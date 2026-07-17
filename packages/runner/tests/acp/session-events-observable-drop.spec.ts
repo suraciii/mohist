@@ -41,7 +41,7 @@ function fakeServerConnection(): ServerConnection & { calls: Array<{ method: str
     },
     async ensureWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "ensureWorkflowAgentSession", args })
-      return { acpSessionId: "shared", workDir: "D:/work" }
+      return { runtimeSessionId: "shared", runtime: "opencode", workDir: "D:/work" }
     },
     async getWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "getWorkflowAgentSession", args })
@@ -49,7 +49,7 @@ function fakeServerConnection(): ServerConnection & { calls: Array<{ method: str
     },
     async openWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "openWorkflowAgentSession", args })
-      return { acpSessionId: "shared", workDir: "D:/work" }
+      return { runtimeSessionId: "shared", runtime: "opencode", workDir: "D:/work" }
     },
   } as unknown as ServerConnection & { calls: Array<{ method: string; args: unknown[] }> }
 }
@@ -181,13 +181,17 @@ describe("emitSessionEvent observable drop (D3)", () => {
       log: logger,
     })
 
-    await emitSessionEvent(context, "message.delta", { content: { text: "hello generic" } })
-    await emitSessionEvent(context, "usage.updated", { inputTokens: 12, outputTokens: 3 })
+    await emitSessionEvent(context, "message.delta", { content: { text: "hello generic" } }, "runtime-generic")
+    await emitSessionEvent(context, "usage.updated", { inputTokens: 12, outputTokens: 3 }, "runtime-generic")
 
     expect(server.calls.map((entry) => entry.method)).toEqual([
       "agentSessionRuntimeEvents",
       "agentSessionRuntimeEvents",
     ])
+    expect(server.calls[0]!.args[2]).toMatchObject({
+      runtimeSessionId: "runtime-generic",
+      runtimeEvents: [{ type: "message.delta", payload: { content: { text: "hello generic" } } }],
+    })
     const dropped = collector
       .flush()
       .entries.filter((entry) => entry.source === "action:session-events")

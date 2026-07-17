@@ -34,7 +34,10 @@ public class SessionFollowupApiSpecs
     [Fact]
     public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsSent()
     {
-        var (project, issue, workflowRunId, _) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
+        var (project, issue, workflowRunId, session) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
+        var sessionState = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
+        Assert.Equal("active", sessionState?.Status);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
@@ -47,7 +50,9 @@ public class SessionFollowupApiSpecs
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
-            Assert.Equal("sent", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal(session.Id, data.GetProperty("sessionId").GetString());
+            Assert.Equal("sent", data.GetProperty("status").GetString());
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-followup-1", sent.ConnectionId);
@@ -56,6 +61,38 @@ public class SessionFollowupApiSpecs
             Assert.Equal(workflowRunId, payload.GetProperty("workflowRunId").GetString());
             Assert.Equal("plan", payload.GetProperty("sessionName").GetString());
             Assert.Equal("加个登出", payload.GetProperty("text").GetString());
+
+            var tasksAfter = await GetWorkflowTaskSnapshotAsync(issue.Id);
+            Assert.Equal(tasksBefore, tasksAfter);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task FollowupEndpoint_IdleLiveSession_StartsUserTurnWithoutCreatingTask()
+    {
+        var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-idle", sessionName: "plan", attachAndStart: true);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync())?.Status);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(_runnerId, "conn-followup-idle");
+        try
+        {
+            using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "start an idle turn" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("ReceiveFollowup", Assert.Single(runnerHub.SentMessages).Method);
+            Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(issue.Id));
         }
         finally
         {
@@ -120,15 +157,23 @@ public class SessionFollowupApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task FollowupEndpoint_InactiveSession_ReturnsConflict()
+    public async Task FollowupEndpoint_MissingRuntimeBinding_ReturnsRuntimeSessionMissing()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-inactive", sessionName: "plan");
+        var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-missing-runtime", sessionName: "plan");
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Equal("reset", doc.RootElement.GetProperty("details").GetProperty("hint").GetString());
+        Assert.Contains(session.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Empty(runnerHub.SentMessages);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -167,6 +212,15 @@ public class SessionFollowupApiSpecs
     private Task<HttpResponseMessage> PostFollowupAsync(string projectId, int issueNumber, string sessionName, object body) =>
         _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/sessions/{sessionName}/followup", body);
 
+    private async Task<string[]> GetWorkflowTaskSnapshotAsync(string issueId)
+    {
+        var status = await _fixture.Grains.GetGrain<IIssueGrain>(issueId).GetWorkflowStatusAsync();
+        return status?.Workflow?.Stages
+            .SelectMany(stage => stage.Tasks)
+            .Select(task => $"{task.Id}:{task.Status}")
+            .ToArray() ?? [];
+    }
+
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId, CreatedSession Session)> CreateAndStartSessionAsync(
         string name,
         string sessionName = "plan",
@@ -191,7 +245,7 @@ public class SessionFollowupApiSpecs
 
         if (attachAndStart)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         }
 
         return (project, issue, currentWorkflowRunId, currentSession);

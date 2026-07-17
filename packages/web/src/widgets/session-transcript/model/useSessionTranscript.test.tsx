@@ -15,7 +15,8 @@ function Wrapper({
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
-    acpSessionId: 'acp-84',
+    runtimeSessionId: 'acp-84',
+    runtime: 'opencode',
     initialTurns: events,
     isRunning,
   })
@@ -77,7 +78,9 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        acpSessionId: 'acp-84',
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
         text: ' live',
       })
     })
@@ -89,13 +92,58 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
   })
 
+  it('ignores events from a replaced runtime even when they carry the same logical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-old',
+        runtime: 'opencode',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('ignores runtime events that provide only the logical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('ignores events from another runtime with the same physical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'other-runtime',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
   it('accepts persisted transcript once the session is no longer running', () => {
     const initial = [persistedEvent('persisted')]
     const { rerenderWith } = renderSessionTranscript(initial)
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        acpSessionId: 'acp-84',
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
         text: ' live',
       })
     })

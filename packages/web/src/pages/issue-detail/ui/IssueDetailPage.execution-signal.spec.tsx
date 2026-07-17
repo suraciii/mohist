@@ -82,7 +82,7 @@ function makeActiveSession(overrides: Record<string, unknown> = {}): Record<stri
     id: 'sess-1',
     workflowRunId: 'wr-1',
     sessionName: 'review-repair',
-    acpSessionId: 'acp-1',
+    runtimeSessionId: 'acp-1',
     projectId: 'proj-1',
     issueNumber: 401,
     runnerId: 'runner-1',

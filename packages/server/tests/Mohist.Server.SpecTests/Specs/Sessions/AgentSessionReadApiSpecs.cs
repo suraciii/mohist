@@ -273,7 +273,7 @@ public class AgentSessionReadApiSpecs
         var session = new AgentSession
         {
             Id = sessionId,
-            Runtime = new AgentSessionRuntime("test-runner", null),
+            Runtime = new AgentSessionRuntime("test-runner", null, "opencode"),
             Settings = new AgentSessionSettings("test-model"),
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: created,
@@ -382,6 +382,7 @@ public class AgentSessionReadApiSpecs
         var turn = new AgentSessionTranscriptTurnRow
         {
             SessionId = sessionId,
+            RuntimeSessionId = sessionId,
             Sequence = 1,
             StartedAt = startedAt,
             UpdatedAt = startedAt.AddMinutes(5),

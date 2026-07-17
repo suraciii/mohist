@@ -204,9 +204,11 @@ public class MohistDbContext : DbContext
             entity.ToTable("AgentSessionTranscriptTurns");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.RuntimeSessionId).HasMaxLength(256);
             entity.Property(e => e.PromptText).IsRequired();
             entity.Property(e => e.PromptKind).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.SessionId, e.RuntimeSessionId, e.Sequence });
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>

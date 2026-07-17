@@ -15,6 +15,24 @@ public class AgentSessionEventSerializerTests
     }
 
     [Fact]
+    public void ToData_RuntimeBound_ExposesRuntime()
+    {
+        var data = AgentSessionEventSerializer.ToData(
+            new AgentSessionRuntimeBound("runtime-session-1", Runtime: "opencode"));
+
+        Assert.Equal("opencode", data.GetProperty("runtime").GetString());
+    }
+
+    [Fact]
+    public void ToData_LegacyRuntimeBoundWithoutRuntime_OmitsRuntime()
+    {
+        var data = AgentSessionEventSerializer.ToData(
+            new AgentSessionRuntimeBound("legacy-runtime-session"));
+
+        Assert.False(data.TryGetProperty("runtime", out _));
+    }
+
+    [Fact]
     public void EventCatalog_IncludesTranscriptRuntimeEventTypes()
     {
         Assert.Contains("message.delta", EventCatalog.All);

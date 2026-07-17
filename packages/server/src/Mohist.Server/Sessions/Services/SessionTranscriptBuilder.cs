@@ -28,6 +28,7 @@ internal static class SessionTranscriptBuilder
                     Text = turn.PromptText,
                     Kind = AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind),
                     SentAt = at,
+                    RuntimeSessionId = turn.RuntimeSessionId,
                 },
             };
             toolPartIndex.Clear();

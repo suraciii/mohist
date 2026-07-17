@@ -280,7 +280,7 @@ function buildAgentSessionEventEntry(
   const info = agentSessionEventInfo(event)
   if (!info) return null
 
-  const sessionId = event.sourceAggregateId || readString(event.data, ['sessionId', 'coderSessionId']) || String(event.id)
+  const sessionId = event.sourceAggregateId || readString(event.data, ['sessionId']) || String(event.id)
   const session = sessionById.get(sessionId)
   const agentId = event.agentId ?? session?.agentId ?? readString(event.data, ['agentId'])
   const agentName = event.agentName ?? session?.agentName ?? readString(event.data, ['agentName'])

@@ -44,6 +44,7 @@ const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
+const SUPPORTED_RUNTIME = "opencode"
 
 export interface AcpSessionResult {
   text: string
@@ -89,14 +90,16 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
+      workDir: context.workDir,
     }, context.signal)
 
-    if (session.acpSessionId) {
+    if (session.runtimeSessionId) {
+      if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
       const cached = manager.get(key)
-      if (cached?.sessionId === session.acpSessionId) {
+      if (cached?.sessionId === session.runtimeSessionId) {
         return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
       }
-      const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
       if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
       return result
     }
@@ -137,17 +140,19 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     stage: context.stage,
     title: context.title,
     issueNumber: context.issueNumber,
+    workDir: context.workDir,
   }
-  const session = existing?.acpSessionId
+  const session = existing?.runtimeSessionId
     ? existing
     : await serverConnection.openAgentSession(projectId, sessionId, openBody, context.signal)
 
-  if (session.acpSessionId) {
+  if (session.runtimeSessionId) {
+    if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
     const cached = manager.get(key)
-    if (cached?.sessionId === session.acpSessionId) {
+    if (cached?.sessionId === session.runtimeSessionId) {
       return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
     }
-    const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
     return result
   }
@@ -155,6 +160,19 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
   const result = await runNewWorkflowAgentSession(context, prompt)
   if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
   return result
+}
+
+function isSupportedRuntimeBinding(session: { runtime?: string | null }): boolean {
+  return session.runtime?.toLowerCase() === SUPPORTED_RUNTIME
+}
+
+function missingRuntimeBindingResult(): AcpSessionResult {
+  return {
+    text: "",
+    success: false,
+    error: "Runtime session is unavailable. Reset the AgentSession to establish a new binding.",
+    exitCode: 1,
+  }
 }
 
 export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
@@ -251,7 +269,7 @@ export function createSharedPromptRunner(options: {
     const beforeText = options.getAgentText()
     const beforeActivity = options.getActivityCount()
     const beforeWorkActivity = options.getWorkActivityCount()
-    await emitSessionEvent(options.context, "session.input", buildPromptEvent(options.context, prompt, options.sessionId))
+    await emitSessionEvent(options.context, "session.input", buildPromptEvent(options.context, prompt, options.sessionId), options.sessionId)
     const promptResult = await monitorPrompt(options.context, options.connection, options.sessionId, prompt, {
       timeoutMs: options.timeoutMs,
       livenessQuietThresholdMs: options.livenessQuietThresholdMs,

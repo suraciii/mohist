@@ -364,7 +364,7 @@ public class ProjectEventsApiSpecs
         await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.work-started",
             time: t0,
             subject: "7",
-            data: new { stage = "build", attempt = 1, internalTrace = "not for activity" });
+            data: new { stage = "build", coderSessionId = "legacy-session", attempt = 1, internalTrace = "not for activity" });
 
         var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
             $"/api/projects/{project.Id}/events");
@@ -376,6 +376,7 @@ public class ProjectEventsApiSpecs
         Assert.Equal("application/json", entry.DataContentType);
         Assert.Equal(JsonValueKind.Object, entry.Data.ValueKind);
         Assert.Equal("build", entry.Data.GetProperty("stage").GetString());
+        Assert.False(entry.Data.TryGetProperty("coderSessionId", out _));
         Assert.False(entry.Data.TryGetProperty("attempt", out _));
         Assert.False(entry.Data.TryGetProperty("internalTrace", out _));
     }

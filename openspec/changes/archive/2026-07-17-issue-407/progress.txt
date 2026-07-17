@@ -1,0 +1,72 @@
+## Codebase Patterns
+
+- AgentSession state is persisted as JSON by AgentSessionStore. Optional Runtime parameters deserialize old state as null, and reads do not save or rewrite that state.
+- OpenAgentSessionCommand.AgentRuntime is authoritative when AgentSessionGrain creates a session. AttachPhysicalSession derives lineage and event Runtime from the persisted current binding, so it cannot relabel a legacy binding.
+- AgentSessionExtensions.IsRuntimeSessionMissing owns the binding check and accepts the backend-registration predicate. AgentSessionGrain currently registers only `opencode`; adding another runtime later must update that authority rather than infer a runtime from runner presence.
+- Compact and Reset enforce runtime presence inside the grain. Follow-up performs the same grain preflight before any SignalR send. Routes map RuntimeSessionMissingException to HTTP 409 `runtime_session_missing` with the stable sessionId and a Reset hint.
+- JSON.Options omits null values, so legacy AgentSessionRuntimeBound events do not expose a synthetic Runtime field.
+
+## T-001
+
+- Runtime is persisted on AgentSessionRuntime and RuntimeSessionLineageEntry and emitted on AgentSessionRuntimeBound. Legacy rows remain null and are never backfilled.
+- Missing bindings, null legacy runtimes, and retired `acp` runtimes are rejected before recovery mutation or follow-up dispatch. Recovery rejection leaves transcript state unchanged.
+- Verification: focused runtime/event unit tests passed 12/12; focused session grain/API/store specs passed 48/48; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2749, Web 4653, Runner 1014). The first full run exposed an unrelated order-sensitive Epic lifecycle failure; that test passed alone and the complete rerun passed.
+
+## T-002
+
+- Compact now records AgentSessionContextCompacted and compaction transcript evidence only; it preserves runtime, runtimeSessionId, stable sessionId, and lineage and emits no AgentSessionRuntimeBound.
+- Reset checks the shared idle boundary and ExpectedRuntimeSessionId before RebindRuntimeSession. StaleRuntimeSessionBindingException carries the stable sessionId plus expected and actual bindings; the workflow route maps it to stale_binding without mutation.
+- Reset's ReplacementRuntimeSessionId is the temporary seam for the runtime handler result. The workflow route still supplies it through the existing BuildNewAgentSessionId helper; T-003/T-005 must replace that temporary source with the runner SessionCommand result and remove route-side minting.
+- Compact and Reset use the same active-session exception message containing the stable sessionId, so both workflow conflicts expose the same session_active shape.
+- Verification: focused recovery/runtime unit tests passed 33/33; focused grain/API/event specs passed 29/29; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014). The first full run caught and corrected stale-scenario test data before the clean rerun.
+
+## T-003
+
+- AgentSessionRecoveryResult now exposes only the stable Id; the physical AgentSessionId/runtime binding is absent from Compact and Reset responses.
+- Workflow Reset reads the persisted current runtime binding through AgentSessionGrain.GetAsync. Until T-005 supplies the runner-created replacement, the route passes that same binding through ReplacementRuntimeSessionId, so the route neither mints nor rotates an id; T-005 must replace this pass-through with SessionCommandResult.RuntimeSessionId.
+- Workflow recovery API specs assert both responses keep the addressed stable Id and omit agentSessionId. BuildNewAgentSessionId and its route-side GUID generation are removed.
+- Verification: the pre-change and post-change focused recovery API/grain specs passed 19/19; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014).
+
+## T-004
+
+- The canonical `/agent-sessions/{sessionId}/compact|reset` routes validate project ownership through AgentSessionResolver.ResolveCanonicalIdAsync and deliberately do not filter by source, so Workflow and Agent-launch records address the same AgentSession grain.
+- Workflow-scoped recovery aliases delegate to AgentSessionRecoveryRoutes.ExecuteCompactAsync/ExecuteResetAsync. Command construction, stable response shapes, and runtime-missing/active/stale conflict mapping now have one authority for both entry surfaces.
+- Reset retains T-003's current-binding pass-through until T-005 supplies SessionCommandResult.RuntimeSessionId. Followup and Cancel already preserve canonical AgentSession identity; the Workflow followup runner target remains source-shaped for transport compatibility and is outside recovery routing.
+- Recovery route specs create Agent-launch-labeled sessions with GenericAgentSessionMetadata directly. Using the product Agent launcher made idle recovery setup nondeterministic because its dispatched AgentJob continued recording activity; direct grain setup keeps the route spec isolated and fake-time deterministic.
+- Verification: pre-refactor workflow recovery specs passed 14/14; focused recovery API specs passed 22/22; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2761, Web 4653, Runner 1014).
+
+## T-005
+
+- SessionCommandRequest/Result are Mohist-owned contracts mirrored by the server and runner. The request contains only stable session/runtime binding facts plus compact/reset; no Workflow Action Input or Agent definition enters the handler boundary.
+- AgentSessionGrain.PrepareSessionCommandAsync performs runtime-presence and idle preflight and snapshots the current binding. RunnerSessionCommandDispatcher invokes the owning runner's dedicated `SessionCommand` SignalR handler; Reset passes the returned replacement runtimeSessionId into the existing expected-binding-guarded grain transition, while Compact accepts no replacement id.
+- Handler `missing` and `conflict` results map to the existing runtime_session_missing Reset hint and shared session_active conflict. A runner without #409's runtime implementation returns unavailable rather than fabricating a compact or replacement session.
+- Contract coverage uses a fake runner handler to pin compact, reset, conflict, and missing request/result behavior. Active-session API specs also assert the runner is not invoked before the server idle boundary passes.
+- Verification: focused recovery specs passed 28/28; focused SessionCommand unit tests passed 5/5; runner source/test typechecks passed; full `npm test` passed (CLI 865, server unit 1356, architecture 22, server spec 2763, Web 4653, Runner 1019).
+
+## T-006
+
+- Session read models and runner lookup responses now expose the physical binding as `runtimeSessionId` plus `runtime`; lineage entries use the same pair. C# domain/state/event members remain `AgentRuntimeSessionId`, and no persisted shape was changed.
+- Web live-event models use stable `sessionId` for the logical AgentSession and `runtimeSessionId` for the physical runtime conversation. Transcript envelope normalization prefers canonical `runtimeSessionId` while still projecting the server's internal `agentSessionId` envelope member into that canonical field.
+- Runner server-response fields, follow-up events, runtime-event payload builders, liveness payloads, and action output use `runtimeSessionId`. `AcpSessionResult.acpSessionId` and ACP SDK-local variables remain internal adapter names and are not wire keys.
+- Project event activity projection no longer allow-lists `coderSessionId`. Negative API tests pin that the legacy field is filtered out.
+- Verification: focused server wire specs passed 73/73; runner source/test typechecks and Web typecheck passed; full `npm test` passed (CLI 865, server unit 1356, architecture 22, server spec 2763, Web 4654, Runner 1019). Wire-emission greps found no legacy keys outside explicit negative assertions and ACP-internal adapter names.
+
+## T-007
+
+- Named-agent Compact and Reset share one CLI builder, POST an empty body to the canonical `/agent-sessions/{sessionId}/compact|reset` routes, and use the same `SessionRecovery` output shape as the Workflow-scoped commands.
+- `SessionRecovery` table output now reads the stable recovery result `id` and prints it as `session id`; the removed physical `agentSessionId` is no longer rendered or asserted by CLI specs.
+- Workflow and named-agent help describes Compact and Reset as in-place operations. CLI specs pin stable-session wording for both `session_active` and `runtime_session_missing` responses without id-rotation language.
+- Verification: pre-change focused CLI specs passed 94/94; post-change focused CLI specs passed 112/112; full CLI tests passed 883/883.
+
+## T-008
+
+- Workflow-scoped and canonical generic Follow-up return the same `{ sessionId, status }` shape and share join-active-turn / start-user-initiated-idle-turn wording. Specs pin that neither path creates a TaskRun or AgentJob.
+- Follow-up `session.input` events carry the physical binding as `runtimeSessionId` for both Workflow and generic targets; `acpSessionId` is absent.
+- Canonical Cancel accepts Workflow and Agent-launch sessions, interrupts only the current turn, and leaves the stable sessionId, source, runtime binding, transcript, and lineage unchanged. It remains outside the Compact/Reset idle boundary.
+- Verification: focused server Follow-up/Cancel specs passed 41/41; runner Follow-up specs passed 27/27 and Cancel specs passed 9/9; runner source and test typechecks passed; focused CLI session specs passed 98/98.
+
+## T-009
+
+- The three implementation-gap footnotes now identify issue-407's stable AgentSession identity, Compact binding preservation, guarded Reset replacement, canonical `runtime` + `runtimeSessionId` wire, and explicit missing-runtime Reset hint as landed behavior.
+- The remaining OpenCode adapter and SDK integration gap stays attributed to issue-409; the spec bodies were not changed. The product CLI reference uses only product/domain terms and does not expose handler, grain, or wire-field details.
+- Verification: focused Workflow/named-agent CLI session specs passed 62/62; documentation assertions and `git diff --check` passed.

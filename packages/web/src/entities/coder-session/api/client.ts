@@ -21,9 +21,17 @@ export function getAgentSessionMetadata(number: number, name: string, projectId?
   )
 }
 
-export function getAgentSessionTranscript(number: number, name: string, projectId?: string | null) {
+export function getAgentSessionTranscript(
+  number: number,
+  name: string,
+  projectId?: string | null,
+  runtimeSessionId?: string | null,
+) {
+  const search = runtimeSessionId
+    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
+    : ''
   return request<AgentSessionTranscriptResponse>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript`),
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript${search}`),
   )
 }
 
@@ -35,7 +43,6 @@ export function getAgentSessionEvents(number: number, name: string, projectId?: 
 
 export interface SessionRecoveryResult {
   id: string
-  agentSessionId?: string | null
   status: string
   contextWindowSize?: number | null
   contextWindowUsed?: number | null
@@ -49,10 +56,11 @@ export function compactSession(
   number: number,
   name: string,
   projectId?: string | null,
+  idempotencyKey?: string,
 ): Promise<SessionRecoveryResult> {
   return request<SessionRecoveryResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/compact`),
-    { method: 'POST' },
+    { method: 'POST', headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined },
   )
 }
 
@@ -60,10 +68,33 @@ export function resetSession(
   number: number,
   name: string,
   projectId?: string | null,
+  idempotencyKey?: string,
 ): Promise<SessionRecoveryResult> {
   return request<SessionRecoveryResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/reset`),
-    { method: 'POST' },
+    { method: 'POST', headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined },
+  )
+}
+
+export function compactGenericSession(
+  sessionId: string,
+  projectId?: string | null,
+  idempotencyKey?: string,
+): Promise<SessionRecoveryResult> {
+  return request<SessionRecoveryResult>(
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/compact`),
+    { method: 'POST', headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined },
+  )
+}
+
+export function resetGenericSession(
+  sessionId: string,
+  projectId?: string | null,
+  idempotencyKey?: string,
+): Promise<SessionRecoveryResult> {
+  return request<SessionRecoveryResult>(
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/reset`),
+    { method: 'POST', headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined },
   )
 }
 
@@ -83,5 +114,20 @@ export function postFollowup(
       method: 'POST',
       body: JSON.stringify({ text }),
     },
+  )
+}
+
+export interface SessionCancelResult {
+  state: string
+}
+
+export function cancelSession(
+  number: number,
+  name: string,
+  projectId?: string | null,
+): Promise<SessionCancelResult> {
+  return request<SessionCancelResult>(
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/cancel`),
+    { method: 'POST' },
   )
 }

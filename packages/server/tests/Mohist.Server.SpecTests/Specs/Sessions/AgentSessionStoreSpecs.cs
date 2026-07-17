@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,6 +45,87 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAndLoad_PreservesCurrentRuntimeBindingAndLineage()
+    {
+        var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var session = AgentSession.Create(
+            $"session-{Guid.NewGuid():N}",
+            "runner-1",
+            "/work",
+            metadata: WorkflowMetadata(),
+            now: createdAt,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            "runtime-session-1",
+            model: null,
+            workDir: "/work",
+            changeDir: null,
+            processPid: null,
+            now: createdAt.AddMinutes(1));
+
+        await _store.SaveAsync(session.Id, session);
+        var rehydrated = await _store.LoadAsync(session.Id);
+
+        Assert.NotNull(rehydrated);
+        Assert.Equal("opencode", rehydrated!.Runtime.Runtime);
+        Assert.Equal("runtime-session-1", rehydrated.Status.AgentRuntimeSessionId);
+        Assert.Equal("runner-1", rehydrated.Runtime.RunnerId);
+        Assert.Equal("/work", rehydrated.Runtime.WorkDir);
+        Assert.Equal("opencode", Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
+    }
+
+    [Fact]
+    public async Task Load_LegacyStateWithoutRuntime_RemainsQueryableWithoutRewrite()
+    {
+        var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var session = AgentSession.Create(
+            $"legacy-session-{Guid.NewGuid():N}",
+            "runner-1",
+            "/work",
+            metadata: WorkflowMetadata(),
+            now: createdAt,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            "legacy-runtime-session",
+            model: null,
+            workDir: "/work",
+            changeDir: null,
+            processPid: null,
+            now: createdAt.AddMinutes(1));
+        await _store.SaveAsync(session.Id, session);
+
+        string legacyState;
+        await using (var db = new MohistDbContext(_options))
+        {
+            var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == session.Id);
+            var state = JsonNode.Parse(row.State)!.AsObject();
+            state["runtime"]!.AsObject().Remove("runtime");
+            state["status"]!["runtimeSessionLineage"]![0]!.AsObject().Remove("runtime");
+            var labels = state["metadata"]!["labels"]!.AsObject();
+            labels.Remove("mohist.io/project-id");
+            labels.Remove("mohist.io/source-kind");
+            labels.Remove("mohist.io/source-id");
+            labels.Remove("mohist.io/session-name");
+            legacyState = state.ToJsonString();
+            row.State = legacyState;
+            await db.SaveChangesAsync();
+        }
+
+        var rehydrated = await _store.LoadAsync(session.Id);
+
+        Assert.NotNull(rehydrated);
+        Assert.Equal("legacy-runtime-session", rehydrated!.Status.AgentRuntimeSessionId);
+        Assert.Null(rehydrated.Runtime.Runtime);
+        Assert.Null(Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
+        await using var verificationDb = new MohistDbContext(_options);
+        var persistedState = await verificationDb.AgentSessions
+            .Where(candidate => candidate.Id == session.Id)
+            .Select(candidate => candidate.State)
+            .SingleAsync();
+        Assert.Equal(legacyState, persistedState);
+    }
+
+    [Fact]
     public async Task SavePartsAsync_RetrySameCorrelationKey_UpdatesExistingPart()
     {
         var sessionId = $"transcript-{Guid.NewGuid():N}";
@@ -67,6 +149,13 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         var part = Assert.Single(partRows);
         Assert.Equal("hello world", part.Text);
     }
+
+    private static AgentSessionMetadata WorkflowMetadata() =>
+        new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
 
     [Fact]
     public async Task SavePartsAsync_NewCorrelationKey_InsertsAdditionalPart()

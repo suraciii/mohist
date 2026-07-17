@@ -61,11 +61,9 @@ public class AgentSessionRecordAccessorTests
         // Mirrors AgentSessionQuery.ToRecords: the record's Labels dictionary
         // is the very same instance as session.Metadata.Labels. Both reads
         // must agree.
-        var metadata = new AgentSessionMetadata(
-            Labels: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = "proj-coincide",
-            });
+        var labels = SourceLabels();
+        labels[AgentSessionQueryMetadataKeys.ProjectId] = "proj-coincide";
+        var metadata = new AgentSessionMetadata(Labels: labels);
         var session = AgentSession.Create(
             id: "sess-coincide",
             runnerId: "runner-1",
@@ -144,9 +142,10 @@ public class AgentSessionRecordAccessorTests
         IReadOnlyDictionary<string, string> recordLabels,
         IReadOnlyDictionary<string, string> metadataLabels)
     {
-        var metadata = new AgentSessionMetadata(
-            Labels: new Dictionary<string, string>(metadataLabels, StringComparer.Ordinal),
-            Annotations: null);
+        var labels = SourceLabels();
+        foreach (var (key, value) in metadataLabels)
+            labels[key] = value;
+        var metadata = new AgentSessionMetadata(Labels: labels, Annotations: null);
         var session = AgentSession.Create(
             id: "sess-under-test",
             runnerId: "runner-under-test",
@@ -172,4 +171,11 @@ public class AgentSessionRecordAccessorTests
         };
         return new AgentSessionRecord(row, session, recordLabels);
     }
+
+    private static Dictionary<string, string> SourceLabels() => new(StringComparer.Ordinal)
+    {
+        [AgentSessionQueryMetadataKeys.ProjectId] = "project-1",
+        [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+        [GenericAgentSessionMetadata.AgentId] = "agent-1",
+    };
 }

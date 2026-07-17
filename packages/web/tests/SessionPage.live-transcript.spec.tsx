@@ -58,7 +58,7 @@ function renderLiveTranscript(initialTurns: SessionTurn[] = [makeTurn()]) {
   return renderHookWithQueryClient(() => useSessionTranscript({
     issueNumber: 123,
     sessionId: 'session-123',
-    acpSessionId: 'acp-123',
+    runtimeSessionId: 'acp-123',
     initialTurns,
     isRunning: true,
   }))
@@ -73,8 +73,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-skill-live',
         toolName: 'unknown',
         state: 'started',
@@ -99,8 +99,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-websearch-live',
         toolName: 'unknown',
         state: 'started',
@@ -123,8 +123,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-todo-live',
         toolName: 'unknown',
         state: 'started',
@@ -148,8 +148,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-todowrite-live',
         toolName: 'todowrite',
         state: 'started',
@@ -175,8 +175,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-final',
         toolName: 'bash',
         state: 'started',
@@ -192,8 +192,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-final',
         toolName: 'bash',
         state: 'completed',
@@ -206,11 +206,11 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
   })
 
-  it('marks live transcript finalizing after completion live event until refetch', async () => {
+  it('marks live transcript finalizing after a bound completion event until refetch', async () => {
     const { result } = renderLiveTranscript()
     expect(result.current.isFinalizing).toBe(false)
     act(() => {
-      dispatchAgentEvent('coder_session_completed', { issueId: '123', projectId: 'project-1', coderSessionId: 'session-123', status: 'completed', duration: 1000 })
+      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'completed' })
     })
     await waitFor(() => expect(result.current.isFinalizing).toBe(true))
   })
@@ -218,7 +218,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends one recovery part for a single live recovery event', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_recovery_status', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', status: 'recovering', attempt: 1 })
+      dispatchAgentEvent('coder_recovery_status', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'recovering', attempt: 1 })
     })
     await waitFor(() => {
       const recoveryParts = result.current.turns.at(-1)?.assistant.filter((part) => part.type === 'error' && part.kind === 'recovery')
@@ -230,7 +230,8 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        acpSessionId: 'acp-123',
+        sessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         lastActivityType: 'agent_thought_chunk',
@@ -239,7 +240,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         activeProbeVersion: 4,
       })
       dispatchAgentEvent('session.liveness', {
-        acpSessionId: 'acp-123',
+        sessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
         status: 'running',
         lastDataAt: '2024-01-01T00:00:02.000Z',
         lastActivityType: 'tool_result',
@@ -257,7 +259,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('tool start and completion update same tool part without duplication', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'started', rawInput: { file_path: 'src/index.ts' } })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'started', rawInput: { file_path: 'src/index.ts' } })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -266,7 +268,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
     const firstToolId = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')?.id
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-converge', toolName: 'read', state: 'completed', rawOutput: 'file content' })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -280,14 +282,14 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('merges update-only events with pending tools by normalized name plus target', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-pending', toolName: 'read', state: 'started', title: 'src/app.ts', rawInput: { file_path: 'src/app.ts' } })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-pending', toolName: 'read', state: 'started', title: 'src/app.ts', rawInput: { file_path: 'src/app.ts' } })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(1)
     })
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-update', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-update', toolName: 'read', state: 'completed', rawOutput: 'file content' })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -299,10 +301,10 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('updates existing tool card on terminal events without creating duplicate', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'started', title: 'Run tests' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'started', title: 'Run tests' })
     })
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'completed', rawOutput: 'All tests passed' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-terminal', toolName: 'bash', state: 'completed', rawOutput: 'All tests passed' })
     })
     await waitFor(() => {
       const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
@@ -318,8 +320,8 @@ describe('useSessionTranscript live parity and convergence', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
+        runtimeSessionId: 'acp-123',
+        sessionId: 'session-123',
         toolCallId: 'tc-structured-terminal',
         toolName: 'bash',
         state: 'completed',
@@ -338,7 +340,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('replaces generic fallback titles with later semantic event titles', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'started', rawInput: {} })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'started', rawInput: {} })
     })
     await waitFor(() => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
@@ -346,7 +348,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
 
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'completed', title: 'Read src/app.ts', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-late-title', toolName: 'read', state: 'completed', title: 'Read src/app.ts', rawOutput: 'file content' })
     })
 
     await waitFor(() => {
@@ -359,7 +361,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('maps failed status correctly for tool calls', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-failed', toolName: 'edit', state: 'failed', rawOutput: 'File not found' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-failed', toolName: 'edit', state: 'failed', rawOutput: 'File not found' })
     })
     await waitFor(() => {
       const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
@@ -372,7 +374,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     await waitFor(() => expect(result.current.isThinking).toBe(true))
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', text: 'Hello world', coderSessionId: 'session-123' })
+      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', text: 'Hello world', sessionId: 'session-123' })
     })
     await waitFor(() => expect(result.current.isThinking).toBe(false))
   })
@@ -382,7 +384,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     act(() => result.current.setIsNearBottom(false))
     await waitFor(() => expect(result.current.isNearBottom).toBe(false))
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', text: 'New content', coderSessionId: 'session-123' })
+      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', text: 'New content', sessionId: 'session-123' })
     })
     await waitFor(() => expect(result.current.newContentAvailable).toBe(true))
     act(() => result.current.acknowledgeNewContent())
@@ -399,10 +401,10 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('preserves text append before and after tool events through reconciliation', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', text: 'Reading files...', coderSessionId: 'session-123' })
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'started', rawInput: { file_path: 'test.txt' } })
-      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', text: 'Done reading.', coderSessionId: 'session-123' })
-      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', acpSessionId: 'acp-123', coderSessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'completed', rawOutput: 'file content' })
+      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', text: 'Reading files...', sessionId: 'session-123' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'started', rawInput: { file_path: 'test.txt' } })
+      dispatchAgentEvent('coder_text_chunk', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', text: 'Done reading.', sessionId: 'session-123' })
+      dispatchAgentEvent('coder_tool_call', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', sessionId: 'session-123', toolCallId: 'tc-file', toolName: 'read', state: 'completed', rawOutput: 'file content' })
     })
     await waitFor(() => {
       const textPart = result.current.turns.at(-1)?.assistant.find((p): p is TextPart => p.type === 'text')
@@ -415,7 +417,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends recovery/terminal errors as dedicated parts', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_session_failed', { issueId: '123', projectId: 'project-1', coderSessionId: 'session-123', reason: 'Out of memory' })
+      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'failed', failureReason: 'Out of memory' })
     })
     await waitFor(() => {
       const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'failed')

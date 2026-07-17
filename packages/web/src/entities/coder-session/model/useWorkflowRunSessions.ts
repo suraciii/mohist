@@ -11,6 +11,17 @@ interface LiveSessionState {
   sessions: WorkflowRunSession[]
 }
 
+function matchesCurrentBinding(
+  session: WorkflowRunSession,
+  event: { sessionId?: string | null; runtimeSessionId?: string | null; runtime?: string | null },
+) {
+  return session.runtime != null
+    && session.runtimeSessionId != null
+    && event.sessionId === session.id
+    && event.runtime === session.runtime
+    && event.runtimeSessionId === session.runtimeSessionId
+}
+
 export type WorkflowRunSessionsFetcher = typeof getWorkflowRunSessions
 
 export function useWorkflowRunSessions(
@@ -57,13 +68,17 @@ export function useWorkflowRunSessions(
         if (detailWorkflowRunId && detailWorkflowRunId !== workflowRunId) return
         invalidate()
       }),
-      onAgentEvent('coder_session_completed', (detail) => {
+      onAgentEvent('com.mohist.agent-session.runtime-bound', () => {
+        if (!mountedRef.current) return
+        invalidate()
+      }),
+      onAgentEvent('session.closed', (detail) => {
         if (!mountedRef.current) return
         setLiveState((prev) => prev.workflowRunId === workflowRunId
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId
+                matchesCurrentBinding(session, detail)
                   ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
                   : session,
               ),
@@ -76,11 +91,11 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       status: detail.status,
-                      acpSessionId: detail.acpSessionId ?? session.acpSessionId,
+                      runtimeSessionId: detail.runtimeSessionId ?? session.runtimeSessionId,
                       ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
                       ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),
                     }
@@ -95,7 +110,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       usage: {
@@ -124,7 +139,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       usage: {

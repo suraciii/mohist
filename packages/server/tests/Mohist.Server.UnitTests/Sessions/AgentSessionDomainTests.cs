@@ -9,9 +9,10 @@ public class AgentSessionDomainTests
     private static AgentSession CreateSession()
     {
         var metadata = new AgentSessionMetadata()
-            .WithLabel("owner", "proj")
-            .WithLabel("source", "wf")
-            .WithLabel("name", "session");
+            .WithLabel("mohist.io/project-id", "proj")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "wf")
+            .WithLabel("mohist.io/session-name", "session");
 
         var session = AgentSession.Create(
             "proj/wf/session",
@@ -31,9 +32,9 @@ public class AgentSessionDomainTests
         var session = CreateSession();
 
         Assert.Equal("proj/wf/session", session.Id);
-        Assert.Equal("proj", session.Metadata.Label("owner"));
-        Assert.Equal("wf", session.Metadata.Label("source"));
-        Assert.Equal("session", session.Metadata.Label("name"));
+        Assert.Equal("proj", session.Metadata.Label("mohist.io/project-id"));
+        Assert.Equal("wf", session.Metadata.Label("mohist.io/source-id"));
+        Assert.Equal("session", session.Metadata.Label("mohist.io/session-name"));
         Assert.Null(session.Metadata.Label("work"));
         Assert.Null(session.Metadata.Annotation("title"));
         Assert.Equal("runner-1", session.Runtime.RunnerId);
@@ -41,6 +42,45 @@ public class AgentSessionDomainTests
         Assert.Null(session.Status.AgentRuntimeSessionId);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), session.Status.CreatedAt);
         Assert.NotNull(session.Status.UsageSummary);
+    }
+
+    [Fact]
+    public void MetadataMerge_PreservesSourceAndAcceptsAnnotationsOnly()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        var merged = metadata.Merge(new AgentSessionMetadata(
+            Annotations: new Dictionary<string, string> { ["title"] = "Build" }));
+
+        Assert.Equal("workflow", merged.Label("mohist.io/source-kind"));
+        Assert.Equal("Build", merged.Annotation("title"));
+        Assert.Throws<InvalidOperationException>(() => metadata.Merge(new AgentSessionMetadata(
+            Labels: new Dictionary<string, string> { ["mohist.io/source-kind"] = "agent-launch" })));
+    }
+
+    [Fact]
+    public void Create_RequiresACompleteKnownSource()
+    {
+        Assert.Throws<InvalidOperationException>(() => AgentSession.Create(
+            "source-required",
+            "runner-1",
+            "/work",
+            metadata: new AgentSessionMetadata(),
+            now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
+    }
+
+    [Fact]
+    public void LegacyMetadata_WithOnlyProjectLabel_RemainsReadable()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1");
+
+        metadata.ValidateSource(allowLegacySource: true);
+        Assert.Throws<InvalidOperationException>(() => metadata.ValidateSource());
     }
 
     [Fact]
@@ -114,21 +154,18 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_DifferentPhysicalSession_RebindsRuntimeSession()
+    public void AttachPhysicalSession_DifferentPhysicalSession_RequiresReset()
     {
         var session = CreateSession();
         var firstBoundAt = new DateTime(2026, 6, 17, 1, 0, 0, DateTimeKind.Utc);
-        var reboundAt = firstBoundAt.AddMinutes(1);
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(1)));
 
-        Assert.Equal("runtime-session-2", session.Status.AgentRuntimeSessionId);
-        Assert.Equal(reboundAt, session.Status.BoundAt);
-        Assert.Equal("model-b", session.Settings.Model);
-        Assert.Collection(events,
-            e => Assert.Equal("runtime-session-2", Assert.IsType<AgentSessionRuntimeBound>(e.Value).AgentRuntimeSessionId),
-            e => Assert.Equal("model-b", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
+        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("model-a", session.Settings.Model);
     }
 
     [Fact]
@@ -320,26 +357,19 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_RebindToNewPhysicalSession_AppendsLineageAndCarriesPrevious()
+    public void AttachPhysicalSession_RebindToNewPhysicalSession_RequiresReset()
     {
         var session = CreateSession();
         var firstBoundAt = new DateTime(2026, 6, 21, 1, 0, 0, DateTimeKind.Utc);
-        var reboundAt = firstBoundAt.AddMinutes(2);
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(2)));
 
         var lineage = session.Status.RuntimeSessionLineage!;
-        Assert.Equal(2, lineage.Count);
+        Assert.Single(lineage);
         Assert.Equal("runtime-session-1", lineage[0].AgentRuntimeSessionId);
-        Assert.Equal(firstBoundAt, lineage[0].BoundAt);
-        Assert.Equal("runtime-session-2", lineage[1].AgentRuntimeSessionId);
-        Assert.Equal(reboundAt, lineage[1].BoundAt);
-
-        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
-        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
-        Assert.Equal("runtime-session-2", bound.AgentRuntimeSessionId);
-        Assert.Equal("runtime-session-1", bound.PreviousAgentRuntimeSessionId);
+        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

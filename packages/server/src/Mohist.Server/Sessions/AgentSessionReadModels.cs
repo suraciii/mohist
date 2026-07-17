@@ -40,7 +40,8 @@ public sealed record AgentEventSummaryDto(
 public sealed record AgentSessionMetadataDto(
     string Id,
     string SessionName,
-    [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? AgentRuntime,
     [property: JsonPropertyName("status")] string Status,
     string? Model,
     string? Stage,
@@ -60,7 +61,8 @@ public sealed record AgentSessionMetadataDto(
 /// sessions compacted before T-001) so the field degrades to hidden.
 /// </summary>
 public sealed record RuntimeSessionLineageEntryDto(
-    [property: JsonPropertyName("agentRuntimeSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
     [property: JsonPropertyName("boundAt")] string BoundAt);
 
 public sealed record AgentSessionMetadataCounts(
@@ -90,6 +92,7 @@ public sealed class AgentSessionTranscriptUserDto
     public string Text { get; init; } = string.Empty;
     public string Kind { get; init; } = "task";
     public string SentAt { get; init; } = string.Empty;
+    public string? RuntimeSessionId { get; init; }
 }
 
 public sealed class AgentSessionTranscriptPartDto
@@ -124,14 +127,14 @@ public sealed class AgentSessionTranscriptToolDto
 public sealed record AgentSessionSummaryDto(
     string Id,
     string SessionName,
-    [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("executionId")] string? WorkId,
     [property: JsonPropertyName("taskDescription")] string? TaskTitle,
     [property: JsonPropertyName("status")] string Status,
     string CreatedAt,
     string? CompletedAt,
     string? Model,
-    [property: JsonPropertyName("coderType")] string? AgentRuntime,
+    [property: JsonPropertyName("runtime")] string? AgentRuntime,
     string? Stage,
     string? Title,
     [property: JsonPropertyName("lastDataAt")] string? LastActivityAt,
@@ -159,7 +162,8 @@ public sealed record WorkflowSessionDto(
     string Id,
     string WorkflowRunId,
     string SessionName,
-    [property: JsonPropertyName("acpSessionId")] string? AgentSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
     string? ProjectId,
     int? IssueNumber,
     string? RunnerId,
@@ -242,6 +246,8 @@ public sealed record GenericAgentSessionSummaryDto(
     string SessionId,
     string AgentId,
     string AgentName,
+    [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
     [property: JsonPropertyName("status")] string Status,
     string CreatedAt,
     string? LastActivityAt,
@@ -250,7 +256,9 @@ public sealed record GenericAgentSessionSummaryDto(
     int? ToolCallCount,
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage,
+    [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session

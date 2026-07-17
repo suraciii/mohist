@@ -366,7 +366,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
             $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/attach",
             new
             {
-                agentSessionId = sessionId,
+                runtimeSessionId = sessionId,
                 workDir = "/tmp/retry-guard",
                 processPid = 4321,
             });
@@ -387,10 +387,12 @@ public class WorkflowRetrySessionHealthGuardSpecs
 
     private async Task PushContextUsageAsync(string runnerId, string projectId, string workflowRunId, string sessionName, long contextWindowUsed, long contextWindowSize)
     {
+        var runtimeSessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
         await _client.PostOkAsync(
             $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/runtime-events",
             new
             {
+                runtimeSessionId,
                 workId = "task-1.1",
                 workType = "task",
                 stage = "build",

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Orleans.TestingHost;
@@ -35,6 +36,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
             "/mohist-tests/event-publishing/runner",
             "/mohist-tests/event-publishing/system-update.json",
             "/mohist-tests/event-publishing/logs",
+            TimeProvider,
             siloPort,
             gatewayPort);
     }
@@ -44,6 +46,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     public IServiceProvider Services => _factory.Services;
     public RecordingIEventPublisher RecordingPublisher => _factory.RecordingPublisher;
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
     public async Task InitializeAsync()
     {
@@ -68,8 +71,15 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         public RecordingIEventPublisher RecordingPublisher { get; }
         public RecordingTranscriptEventPublisher RecordingTranscriptPublisher { get; }
 
-        public EventPublishingWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath, string logsPath, int siloPort, int gatewayPort)
-            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider: null, siloPort, gatewayPort)
+        public EventPublishingWebApplicationFactory(
+            string connectionString,
+            string runnerRoot,
+            string systemUpdateStatePath,
+            string logsPath,
+            FakeTimeProvider timeProvider,
+            int siloPort,
+            int gatewayPort)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath, timeProvider, siloPort, gatewayPort)
         {
             RecordingPublisher = new RecordingIEventPublisher(new NoopEventPublisher());
             RecordingTranscriptPublisher = new RecordingTranscriptEventPublisher();

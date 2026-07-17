@@ -30,7 +30,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionHelp_ListsAllSixSubcommands()
+    public async Task SessionHelp_ListsAllEightSubcommands()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -44,6 +44,8 @@ public class CliAgentSessionCommandSpecs
         Assert.Contains("show", stdout, StringComparison.Ordinal);
         Assert.Contains("transcript", stdout, StringComparison.Ordinal);
         Assert.Contains("launch", stdout, StringComparison.Ordinal);
+        Assert.Contains("compact", stdout, StringComparison.Ordinal);
+        Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
         Assert.Contains("cancel", stdout, StringComparison.Ordinal);
     }
@@ -78,6 +80,9 @@ public class CliAgentSessionCommandSpecs
         Assert.Contains("--text", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-file", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-stdin", stdout, StringComparison.Ordinal);
+        Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
+        Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
+        Assert.Contains("without creating a TaskRun or AgentJob", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

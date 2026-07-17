@@ -19,7 +19,7 @@
 // depend on lives).
 
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
-import type { SessionTarget } from "../runtime/acp-connection.js"
+import type { RuntimeSessionBinding, SessionTarget } from "../runtime/acp-connection.js"
 
 /**
  * The resolver's return value. Carries the live `ClientSideConnection`
@@ -35,6 +35,12 @@ export interface FollowupTarget {
   readonly projectId: string
 }
 
+export interface FollowupTargetUnavailable {
+  readonly unavailable: true
+}
+
+export const FOLLOWUP_TARGET_UNAVAILABLE: FollowupTargetUnavailable = { unavailable: true }
+
 /**
  * The runner-side resolver turns a discriminated `SessionTarget`
  * (issue-129 T-004) into a live `FollowupTarget`, or `null` when no
@@ -42,7 +48,13 @@ export interface FollowupTarget {
  * `CancelAgentSession` call into this resolver; a single registration
  * keeps the wire-decoding logic in one place.
  */
-export type FollowupTargetResolver = (target: SessionTarget) => FollowupTarget | null
+export type FollowupTargetResolution = FollowupTarget | FollowupTargetUnavailable | null
+
+export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>
+
+export function isFollowupTargetUnavailable(value: FollowupTargetResolution): value is FollowupTargetUnavailable {
+  return value !== null && "unavailable" in value
+}
 
 /**
  * Discriminated session target carried in the unified
@@ -59,6 +71,7 @@ export interface ReceiveFollowupSessionTarget {
   workflowRunId?: string
   sessionName?: string
   sessionId?: string
+  binding?: Partial<RuntimeSessionBinding>
 }
 
 /**
@@ -74,6 +87,7 @@ export interface ReceiveFollowupPayload {
   sessionName?: string
   target?: ReceiveFollowupSessionTarget
   text: string
+  operationId?: string
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
@@ -123,19 +137,7 @@ export interface CancelAgentSessionReply {
 export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTarget | null {
   const target = payload.target
   if (target) {
-    if (target.kind === "workflow") {
-      if (!target.workflowRunId || !target.sessionName) return null
-      const projectId = target.projectId ?? ""
-      if (!projectId) return null
-      return { kind: "workflow", projectId, workflowRunId: target.workflowRunId, sessionName: target.sessionName }
-    }
-    if (target.kind === "generic") {
-      if (!target.sessionId) return null
-      const projectId = target.projectId ?? ""
-      if (!projectId) return null
-      return { kind: "generic", projectId, sessionId: target.sessionId }
-    }
-    return null
+    return sessionTargetFromWireTarget(target)
   }
 
   // Legacy fallback for older server builds (no `target` field).
@@ -143,4 +145,47 @@ export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTa
     return { kind: "workflow", projectId: "", workflowRunId: payload.workflowRunId, sessionName: payload.sessionName }
   }
   return null
+}
+
+export function sessionTargetFromWireTarget(target: ReceiveFollowupSessionTarget | null | undefined): SessionTarget | null {
+  if (!target) return null
+  const projectId = target.projectId ?? ""
+  if (!projectId) return null
+  const binding = runtimeBindingFromWireTarget(target.binding)
+  if (target.binding !== undefined && !binding) return null
+
+  if (target.kind === "workflow" && target.workflowRunId && target.sessionName) {
+    return {
+      kind: "workflow",
+      projectId,
+      workflowRunId: target.workflowRunId,
+      sessionName: target.sessionName,
+      ...(binding ? { binding } : {}),
+    }
+  }
+  if (target.kind === "generic" && target.sessionId) {
+    return {
+      kind: "generic",
+      projectId,
+      sessionId: target.sessionId,
+      ...(binding ? { binding } : {}),
+    }
+  }
+  return null
+}
+
+function runtimeBindingFromWireTarget(value: unknown): RuntimeSessionBinding | null {
+  if (!value || typeof value !== "object") return null
+  const binding = value as Partial<RuntimeSessionBinding>
+  return typeof binding.runtime === "string" && binding.runtime.length > 0
+    && typeof binding.runtimeSessionId === "string" && binding.runtimeSessionId.length > 0
+    && typeof binding.runnerId === "string" && binding.runnerId.length > 0
+    && (binding.workDir === undefined || binding.workDir === null || (typeof binding.workDir === "string" && binding.workDir.length > 0))
+    ? {
+        runtime: binding.runtime,
+        runtimeSessionId: binding.runtimeSessionId,
+        runnerId: binding.runnerId,
+        workDir: binding.workDir ?? null,
+      }
+    : null
 }

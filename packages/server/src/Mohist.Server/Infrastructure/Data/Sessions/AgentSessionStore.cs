@@ -142,7 +142,7 @@ public static class AgentSessionJson
             var session = JsonSerializer.Deserialize<AgentSession>(row.State, JsonOptions);
             if (session is null) return null;
             ApplyColumnDefaults(session, row);
-            session.ValidateState();
+            session.ValidateState(allowLegacySource: true);
             return session;
         }
         catch

@@ -69,6 +69,7 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.NotNull(record);
             Assert.Equal(sessionId, record!.Session.Id);
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+
             Assert.Equal("reviewer", record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentName));
             Assert.Equal(projectId, record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
 
@@ -105,12 +106,13 @@ public class AgentSessionLaunchRoutesSpecs
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-launch-read"));
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
                     Type: RuntimeEventTypes.SessionInput,
                     PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
-            }));
+            }, "runtime-launch-read"));
             await grain.FlushForTestAsync();
 
             using var metadata = await _fixture.Client.GetAsync(
@@ -510,6 +512,12 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.NotNull(record);
             Assert.Equal(sessionId, record!.Session.Id);
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+
+            var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
+            Assert.Equal("failed", closePayload.GetProperty("status").GetString());
+            Assert.Contains(AgentJobFailureReasons.ReportTimeout, closePayload.GetProperty("failureReason").GetString(), StringComparison.Ordinal);
         }
         finally
         {

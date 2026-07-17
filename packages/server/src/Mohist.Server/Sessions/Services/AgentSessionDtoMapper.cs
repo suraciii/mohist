@@ -120,6 +120,7 @@ internal static class AgentSessionDtoMapper
             return lineage
                 .Select(e => new RuntimeSessionLineageEntryDto(
                     e.AgentRuntimeSessionId,
+                    e.Runtime,
                     e.BoundAt.ToString("o")))
                 .ToList();
         }
@@ -131,6 +132,7 @@ internal static class AgentSessionDtoMapper
             [
                 new RuntimeSessionLineageEntryDto(
                     domainSession.Status.AgentRuntimeSessionId,
+                    domainSession.Runtime.Runtime,
                     boundAt.ToString("o"))
             ];
         }

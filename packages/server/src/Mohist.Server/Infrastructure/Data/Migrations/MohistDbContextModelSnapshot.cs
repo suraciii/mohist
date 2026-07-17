@@ -1343,6 +1343,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RuntimeSessionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("Sequence")
                         .HasColumnType("INTEGER");
 
@@ -1361,6 +1365,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("SessionId", "Sequence")
                         .IsUnique();
+
+                    b.HasIndex("SessionId", "RuntimeSessionId", "Sequence");
 
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
                 });

@@ -18,7 +18,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionHelp_ListsFiveSubcommandsAndDocumentsNameSource()
+    public async Task SessionHelp_ListsSixSubcommandsAndDocumentsNameSource()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -33,8 +33,49 @@ public class CliIssueSessionSpecs
         Assert.Contains("compact", stdout, StringComparison.Ordinal);
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
+        Assert.Contains("cancel", stdout, StringComparison.Ordinal);
         Assert.Contains("mo issue sessions", stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("compact", "Compact the session in place")]
+    [InlineData("reset", "Reset the session in place")]
+    public async Task SessionRecoveryHelp_DescribesInPlaceOperation(string operation, string description)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called for help"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "session", operation, "--help"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains(description, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("new session id", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rotat", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionCancel_PostsToWorkflowSessionEndpointAndPrintsReturnedState()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { state = "not-cancellable" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "session", "cancel", "42", "plan"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/cancel", request.RequestUri?.PathAndQuery);
+        Assert.Contains("not-cancellable", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
@@ -248,7 +289,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionCompact_Table_PrintsCurrentRuntimeSessionId()
+    public async Task SessionCompact_Table_PrintsStableSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -257,7 +298,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "acp_123",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 512,
@@ -277,13 +317,14 @@ public class CliIssueSessionSpecs
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/compact", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         var stdout = output.ToString();
-        Assert.Contains("Runtime session: acp_123", stdout, StringComparison.Ordinal);
+        Assert.Contains("session id: sess_1", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("New session", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("context:     4096 → 512 (6.25)", stdout, StringComparison.Ordinal);
         Assert.Contains("operation:   compact", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionCompact_DefaultOutput_PrintsCurrentRuntimeSessionId()
+    public async Task SessionCompact_DefaultOutput_PrintsStableSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -292,7 +333,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "acp_123",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 512,
@@ -310,7 +350,7 @@ public class CliIssueSessionSpecs
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/compact", request.RequestUri?.PathAndQuery);
-        Assert.Contains("Runtime session: acp_123", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("session id: sess_1", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -323,7 +363,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "acp_123",
                     status = "idle",
                     operation = "compact",
                     wasCompacted = true,
@@ -335,7 +374,8 @@ public class CliIssueSessionSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("\"agentSessionId\": \"acp_123\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"id\": \"sess_1\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("agentSessionId", stdout, StringComparison.Ordinal);
         Assert.Contains("\"wasCompacted\": true", stdout, StringComparison.Ordinal);
     }
 
@@ -360,7 +400,7 @@ public class CliIssueSessionSpecs
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
-                "Cannot compact while session is active",
+                "AgentSession sess_1 is currently active; Compact and Reset require an idle session.",
                 "session_active",
                 HttpStatusCode.Conflict)));
 
@@ -369,13 +409,15 @@ public class CliIssueSessionSpecs
 
         Assert.Equal(1, exitCode);
         var stderr = error.ToString();
-        Assert.Contains("Cannot compact while session is active", stderr, StringComparison.Ordinal);
+        Assert.Contains("AgentSession sess_1 is currently active", stderr, StringComparison.Ordinal);
         Assert.Contains("session_active", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("new session id", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rotat", stderr, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(output.ToString());
     }
 
     [Fact]
-    public async Task SessionReset_Table_ExplainsDeferredRuntimeSessionCreation()
+    public async Task SessionReset_Table_PrintsStableSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -402,11 +444,11 @@ public class CliIssueSessionSpecs
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/reset", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
-        Assert.Contains("Runtime session: will be created on the next task", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("session id: sess_1", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionReset_DefaultOutput_ExplainsDeferredRuntimeSessionCreation()
+    public async Task SessionReset_DefaultOutput_PrintsStableSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -432,7 +474,7 @@ public class CliIssueSessionSpecs
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/reset", request.RequestUri?.PathAndQuery);
-        Assert.Contains("Runtime session: will be created on the next task", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("session id: sess_1", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -455,7 +497,9 @@ public class CliIssueSessionSpecs
             http, ["issue", "session", "reset", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.DoesNotContain("\"agentSessionId\"", output.ToString(), StringComparison.Ordinal);
+        var stdout = output.ToString();
+        Assert.Contains("\"id\": \"sess_1\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("agentSessionId", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -479,7 +523,7 @@ public class CliIssueSessionSpecs
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
-                "Cannot reset while session is active",
+                "AgentSession sess_1 is currently active; Compact and Reset require an idle session.",
                 "session_active",
                 HttpStatusCode.Conflict)));
 
@@ -488,8 +532,33 @@ public class CliIssueSessionSpecs
 
         Assert.Equal(1, exitCode);
         var stderr = error.ToString();
-        Assert.Contains("Cannot reset while session is active", stderr, StringComparison.Ordinal);
+        Assert.Contains("AgentSession sess_1 is currently active", stderr, StringComparison.Ordinal);
         Assert.Contains("session_active", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("new session id", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rotat", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(output.ToString());
+    }
+
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task SessionRecovery_RuntimeSessionMissing_ReferencesStableSessionId(string operation)
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "Runtime session missing for AgentSession sess_1: no runtime session is bound. Reset the session to establish a new binding.",
+                "runtime_session_missing",
+                HttpStatusCode.Conflict)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "session", operation, "42", "plan"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        var stderr = error.ToString();
+        Assert.Contains("AgentSession sess_1", stderr, StringComparison.Ordinal);
+        Assert.Contains("runtime_session_missing", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("new session id", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rotat", stderr, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(output.ToString());
     }
 
@@ -499,13 +568,14 @@ public class CliIssueSessionSpecs
     [InlineData("compact", new string[] { })]
     [InlineData("reset", new string[] { })]
     [InlineData("followup", new string[] { "--text", "x" })]
+    [InlineData("cancel", new string[] { })]
     public async Task SessionSubcommand_ProjectIdOverride_UsesProjectIdArgument(string verb, string[] extraArgs)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((req, _) =>
         {
             var isPost = req.Method == HttpMethod.Post;
             object payload = isPost
-                ? new { success = true, data = new { id = "sess_1", agentSessionId = "new_acp_123", status = "idle", operation = verb, wasCompacted = true } }
+                ? new { success = true, data = new { id = "sess_1", status = "idle", operation = verb, wasCompacted = true } }
                 : new { success = true, data = new { id = "sess_1", sessionName = "plan", status = "idle" } };
             return Task.FromResult(RecordingHttpHandler.Json(payload));
         });
@@ -525,13 +595,14 @@ public class CliIssueSessionSpecs
     [InlineData("compact", new string[] { })]
     [InlineData("reset", new string[] { })]
     [InlineData("followup", new string[] { "--text", "x" })]
+    [InlineData("cancel", new string[] { })]
     public async Task SessionSubcommand_ProjectOverride_UsesProjectArgument(string verb, string[] extraArgs)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((req, _) =>
         {
             var isPost = req.Method == HttpMethod.Post;
             object payload = isPost
-                ? new { success = true, data = new { id = "sess_1", agentSessionId = "new_acp_123", status = "idle", operation = verb, wasCompacted = true } }
+                ? new { success = true, data = new { id = "sess_1", status = "idle", operation = verb, wasCompacted = true } }
                 : new { success = true, data = new { id = "sess_1", sessionName = "plan", status = "idle" } };
             return Task.FromResult(RecordingHttpHandler.Json(payload));
         });
@@ -551,6 +622,7 @@ public class CliIssueSessionSpecs
     [InlineData("compact")]
     [InlineData("reset")]
     [InlineData("followup")]
+    [InlineData("cancel")]
     public async Task SessionSubcommand_InvalidOutput_FailsWithoutCallingApi(string verb)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
@@ -744,6 +816,9 @@ public class CliIssueSessionSpecs
         Assert.Contains("--text", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-file", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-stdin", stdout, StringComparison.Ordinal);
+        Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
+        Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
+        Assert.Contains("without creating a TaskRun or AgentJob", stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

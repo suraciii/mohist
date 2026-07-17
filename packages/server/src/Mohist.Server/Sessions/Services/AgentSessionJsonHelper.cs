@@ -10,6 +10,8 @@ public static class AgentSessionJsonHelper
 
     public static string StatusName(AgentSession session, DateTime now) =>
         session.Status.AgentRuntimeSessionId is not null
+        && (session.Status.CurrentTurnEndedAt is null
+            || session.Status.LastDataAt is not null && session.Status.LastDataAt > session.Status.CurrentTurnEndedAt)
         && session.Status.LastDataAt is not null
         && now - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
             ? "active"

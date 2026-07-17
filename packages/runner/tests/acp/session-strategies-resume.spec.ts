@@ -46,7 +46,7 @@ function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentA
 describe("mohist/acp-agent resumed shared sessions", () => {
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
 
     const context = contextWithOverrides({
       prompt: "long resumed task",
@@ -78,7 +78,7 @@ describe("mohist/acp-agent resumed shared sessions", () => {
   it("PersistedSessionWithDifferentModelAndVariant_ResumesSamePhysicalSession", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      sessionRecord: { acpSessionId: "server-session-1", model: "kimi-for-coding/k2p6" },
+      sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode", model: "kimi-for-coding/k2p6" },
     })
 
     const action = acpAgentAction(contextWithOverrides({
@@ -98,5 +98,18 @@ describe("mohist/acp-agent resumed shared sessions", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
     expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "unstable_setSessionModel", sessionId: "server-session-1", modelId: "openai/gpt-5.5/high" }))
     expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "prompt", sessionId: "server-session-1" }))
+  })
+
+  it.each(["acp", undefined])("WorkflowSessionWithUnsupportedRuntime_DoesNotResumeAndGuidesReset", async (runtime) => {
+    const shared = createSharedSessionFixture("thought-liveness", {
+      sessionRecord: { runtimeSessionId: "legacy-runtime-session", runtime },
+    })
+    const context = contextWithOverrides({ prompt: "continue", session: "shared-session" }, undefined, shared.context())
+
+    const result = await acpAgentAction(context)
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("Reset")
+    expect(shared.agent.calls).not.toContainEqual(expect.objectContaining({ event: "resumeSession" }))
   })
 })
