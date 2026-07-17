@@ -1,0 +1,145 @@
+{
+  "project": "mohist-local",
+  "description": "Replace the Workflow Inline Agent execution backend with a native @opencode-ai/sdk/v2 OpenCodeRuntime deep module: pin and smoke-verify the SDK surface, build the runtime (lifecycle/readiness/catalog/errors), gate Runner work on readiness, switch the mohist/opencode turn path off ACP, run session commands (follow-up/compact/reset/cancel) over the native SDK, and retire Workflow-source ACP artifacts while leaving the AgentJob ACP path for #410.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Pin @opencode-ai/sdk and smoke-verify the asserted call surface",
+      "spec": "specs/opencode-runtime/spec.md#the-sdk-call-surface-is-pinned-and-smoke-verified",
+      "description": "Add a pinned @opencode-ai/sdk dependency to packages/runner/package.json (imported via the /v2 subpath); retain @agentclientprotocol/sdk for the AgentJob path until #410. Run a one-time smoke verification against a real OpenCode confirming the asserted surface behaves per the design call table: client.session.create/prompt/promptAsync/abort/summarize/get/messages/status, client.global.event(), and read-only client.v2.model.list()/client.v2.provider.list(); confirm client.v2.session.wait()/compact() report unavailable. Record the pinned version and smoke result, and reconcile any drift into design/runtimes/opencode.md before further implementation.",
+      "acceptanceCriteria": [
+        "packages/runner/package.json pins @opencode-ai/sdk to an exact version and the /v2 subpath import resolves under tsc",
+        "@agentclientprotocol/sdk is retained (its removal is scoped to #410)",
+        "A smoke-verification record confirms each asserted operation is available and behaves per the design call table, and confirms client.v2.session.wait()/compact() are unavailable",
+        "Any drift discovered during smoke is reconciled into design/runtimes/opencode.md (call-surface table) before subsequent tasks begin",
+        "npm install and npm run typecheck -w packages/runner pass after adding the dependency"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "Pinned @opencode-ai/sdk in packages/runner/package.json plus a recorded smoke-verification result (version + per-operation availability) referenced from the design call-surface table",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Gate task: every later task assumes the asserted SDK surface is real. Smoke requires a real OpenCode CLI in the environment; if unavailable, pin the version and record the asserted surface to verify, but do not proceed to implementation on assumptions. Do not call client.v2.session.wait()/compact(). Key file: packages/runner/package.json."
+    },
+    {
+      "id": "T-002",
+      "title": "Build the OpenCodeRuntime deep module (lifecycle, readiness, catalog, error normalization, factory seam)",
+      "spec": "specs/opencode-runtime/spec.md",
+      "description": "Create the OpenCodeRuntime deep module under packages/runner/src/runtime/opencode/. It owns the shared Server/Client lifecycle via createOpencodeServer()/createOpencodeClient() (no direct spawn, no --pure, no .opencode lockfile cleanup), the single client.global.event() subscription routed by Session ID + directory, the readiness check (health plus model catalog loaded via client.v2.provider.list() and client.v2.model.list()), error normalization to the small Mohist result set (invalid input, unavailable runtime, missing Session, incompatible runtime, permission required, interrupted, turn failed) with provider detail carried only as diagnostics, and the permissions-not-approved behavior. Define the Mohist-owned request/result types at the boundary so no generated SDK DTO leaks past it, and expose an injectable factory (e.g. setOpenCodeRuntimeFactoryForTest) so tests drive a fake runtime or fake generated Client/Server with no real process/network/fs/clock.",
+      "acceptanceCriteria": [
+        "OpenCodeRuntime exposes only Mohist-owned request/result types; no generated SDK type is exported across the module boundary",
+        "start()/ready()/diagnostic(): ready() is false until the health check passes AND the catalog loads via client.v2.provider.list() + client.v2.model.list(); ready() is true afterwards",
+        "On a simulated server exit (fake), ready() becomes false, in-flight turns fail, and a background rebuild re-passes ready() only after health + catalog re-load (fake-driven)",
+        "The catalog is loaded via the v2 list APIs and reported for Runner registration; the runtime does not shell out to `opencode models`",
+        "SDK errors normalize to the small result set; provider-specific detail is carried as diagnostics, not as output fields",
+        "An unsatisfiable interactive permission request aborts the turn with a permission required result; the runtime never auto-approves and never creates a Workflow Approval",
+        "Unit tests inject a fake runtime or fake generated Client/Server factory; no real OpenCode process, network, filesystem configuration, or wall clock is used",
+        "npm run typecheck and npm run test:run -w packages/runner pass for the new module tests"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New packages/runner/src/runtime/opencode/ module with Mohist-owned boundary types, readiness/catalog/health, error normalization, and an injectable factory, plus fake-driven unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Deep module per design D1/D2/D8. Mirrors the setAcpProcessFactoryForTest seam. Does not yet wire into the host or execute turns/commands — those are T-003/T-004/T-005. Key spec coverage: topology, deep-module isolation, readiness check, pinned/smoke surface, error normalization, permissions authoritative, default tests use a fake."
+    },
+    {
+      "id": "T-003",
+      "title": "Wire OpenCodeRuntime into the host and gate work claiming on readiness",
+      "spec": "specs/opencode-runtime/spec.md#the-runner-gates-new-work-on-opencode-readiness-before-claiming-it",
+      "description": "Integrate OpenCodeRuntime into RunnerHost: in connectRunner/initializeSharedConnection start the shared server, run health + catalog (replacing the discoverOpencodeModels CLI discovery), construct the WorkExecutor with the runtime handle, and expose the runtime handle on ActionContext for Workflow work (the AgentJob path keeps receiving the ACP connection). Gate runWorkerPool/pollOnce on runtime.ready(): when not ready, skip claiming new work and emit the actionable readiness diagnostic while still draining awaitingAck reports; on server exit the runtime rebuilds and re-passes before claiming resumes. Report the runtime-loaded catalog on RunnerRegistration (coderModels/coderModelVariants). Retire runtime/opencode-models.ts (CLI parsing) and the Workflow-path usage of runtime/opencode-log-diagnostics.ts (log heuristics).",
+      "acceptanceCriteria": [
+        "connectRunner/initializeSharedConnection start the OpenCode server + client and load the catalog via the runtime; discoverOpencodeModels CLI parsing is no longer used",
+        "pollOnce is skipped with an actionable readiness diagnostic while runtime.ready() is false; awaitingAck reports still drain",
+        "On a simulated server exit (fake runtime) the runner stops claiming, in-flight Workflow turns fail without auto-replay, and claiming resumes only after health + catalog re-pass",
+        "RunnerRegistration reports the catalog sourced from the runtime",
+        "runtime/opencode-models.ts CLI discovery is removed/unused and Workflow-path log-file scanning is removed",
+        "The runtime handle reaches ActionContext for Workflow work; the AgentJob path still receives the ACP connection",
+        "Runner host tests (fake runtime) cover ready-claim, not-ready-skip-plus-diagnostic, server-exit-rebuild-resume, and the transitional gating of AgentJob work",
+        "npm run typecheck and npm run test:run -w packages/runner pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerHost wired to the OpenCodeRuntime lifecycle + readiness gate, catalog reported on registration, CLI model discovery and Workflow-path log heuristics retired, with host tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Design D3. Transitional behavior (one readiness gate also pauses AgentJob work still on ACP) is accepted per the issue and removed by #410. Key files: packages/runner/src/runtime/host.ts (connectRunner ~804, initializeSharedConnection ~407, runWorkerPool ~435, pollOnce ~486, registrationState ~794), runtime/opencode-models.ts, runtime/opencode-log-diagnostics.ts, core/types.ts (ActionContext runtime handle)."
+    },
+    {
+      "id": "T-004",
+      "title": "Run Workflow Inline Agent turns on the OpenCode SDK and retire the Workflow-path ACP bridge",
+      "spec": "specs/opencode-turn-execution/spec.md",
+      "description": "Switch opencodeAction from the ACP bridge to OpenCodeRuntime: resolve/create the physical Session via client.session.create(); construct the SDK model DTO from the first-slash-parsed provider/model with variant as a sibling; apply model/variant per turn (on session creation + first prompt for new sessions, per-prompt for reused sessions) without rotating the physical Session; call and await client.session.prompt() for completion; project the assistant message + events and reconcile via session.messages() when needed; return ActionResult with turnFact.finalAssistantText and do not evaluate expect or synthesize { promise }. Enforce the reuse invariants (binding + runtime + directory; model/variant never rotate, never enter the cache key, never trigger lineage; directory change creates a new physical Session; same WorkflowRun + sessionName reuses the current binding; unrestorable persisted binding fails with a Reset hint), the single in-flight work prompt per logical Session, and restart/reconnect reconciliation from the persisted binding plus a session.status()/get()/messages() snapshot with no V2 replay state. Use the executor-owned deadline (default 60 min) and call client.session.abort() on deadline; remove ACP liveness for the Workflow path. Retire Workflow-path ACP artifacts: restoreAgentToolNoise/.opencode lockfile restore, withOpencodeAgentBinding, the Workflow branch of runAcpWorkflowAgentSession, and the Workflow-path usage of liveness/compaction/model-resolution/session-events. Leave the AgentJob generic path on ACP.",
+      "acceptanceCriteria": [
+        "opencodeAction runs the turn via OpenCodeRuntime (create/resume + awaited client.session.prompt()), not runAcpWorkflowAgentSession",
+        "turnFact.finalAssistantText is populated; the Action does not evaluate expect and does not synthesize { promise } (the executor does, per #408)",
+        "model/variant are applied per turn; a model or variant change reuses the same physical Session (no rotation, no cache-key change, no lineage entry)",
+        "A multi-slash model (openrouter/vendor/family/model) yields provider openrouter + model id vendor/family/model; variant stays independent; unknown option keys are ignored with a diagnostic and do not fail the turn; a non-string model/variant fails actionably",
+        "A working-directory change creates a new physical Session with a lineage entry; the same WorkflowRun + sessionName reuses the current binding across tasks, retries, and restart",
+        "A persisted binding that cannot be restored fails with an explicit Reset hint (no implicit create to fabricate context)",
+        "At most one work prompt runs per logical AgentSession; a user Follow-up is receivable while a work turn is active",
+        "The executor deadline aborts the turn via client.session.abort() and returns interrupted; no ACP liveness probe runs on the Workflow path and client.v2.session.wait() is never called",
+        "Restart/reconnect reconciles from the persisted binding plus a session.status()/get()/messages() snapshot; no V2 history cursor, aggregate sequence, replay state, or deterministic Prompt ID is added",
+        "restoreAgentToolNoise/.opencode lockfile restore and withOpencodeAgentBinding are removed; the Workflow branch of runAcpWorkflowAgentSession and the Workflow-path usage of liveness/compaction/model-resolution/session-events are removed; the AgentJob generic path still compiles on ACP",
+        "Runner tests (fake runtime) cover: turn happy path + turn fact, model/variant non-rotation, multi-slash model, legacy-key tolerance, reuse/rotation invariants, unrestorable-binding Reset hint, single in-flight, deadline abort, restart reconciliation, no-replay, and the minimal { promise } output via the existing executor projection",
+        "npm run typecheck and npm run test:run -w packages/runner pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mohist/opencode Action executing turns natively via OpenCodeRuntime, Workflow-path ACP bridge retired (AgentJob ACP retained), with fake-runtime runner tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Design D4/D6/D7/D9. The existing parseOpencodeInput first-slash validation (from #408) stays at the Action boundary; this task adds SDK DTO construction + per-turn application inside the runtime. Existing executor completion/projection (from #408) is unchanged. Key files: packages/runner/src/actions/opencode.ts, actions/acp/session-strategies.ts (Workflow branch only), actions/acp/liveness.ts, actions/acp/compaction.ts, actions/acp/model-resolution.ts, actions/acp/session-events.ts."
+    },
+    {
+      "id": "T-005",
+      "title": "Run Workflow-source session commands (follow-up/compact/reset/cancel) over the native SDK",
+      "spec": "specs/opencode-session-operations/spec.md",
+      "description": "Route Workflow-source session commands and follow-up through OpenCodeRuntime (the AgentJob source keeps the ACP path until #410). Follow-up calls client.session.promptAsync() and returns immediately, joining the active execution or starting an idle turn, with no auto-retry/replay. Compact reads the current model then calls client.session.summarize(), is idle-only (conflict shared with Reset), keeps the binding/sessionId/runtime unchanged, has no synthetic fallback, and errors actionably when there is no current model. Reset calls client.session.create() in the same work directory under the #407 expected-binding guard, replacing the binding and appending lineage only on success and only when the expected binding is current, preserving the stable sessionId. Cancel calls client.session.abort() and preserves the AgentSession/transcript/lineage. Implement the notStarted/unavailable result taxonomy and honour the operationId dedup journal (at most one compaction fact and one replacement lineage per operation). Reconcile restart routing from the persisted binding plus a snapshot. Ensure Workflow-source requests, results, and diagnostics expose no ACP identity (no acpSessionId).",
+      "acceptanceCriteria": [
+        "Follow-up uses client.session.promptAsync() and returns immediately; it joins an active execution or starts an idle turn; a routing/admission failure is returned to the user with no auto-retry or replay",
+        "Compact uses client.session.summarize() in place; runtimeSessionId/runtime/sessionId are unchanged and no new physical Session is created; a turn-active Compact returns a conflict; Compact with no current model returns an actionable error",
+        "Reset uses client.session.create() under the expected-binding guard; it replaces the binding + lineage only on success and only when the expected binding is current; a stale expected binding is rejected; the stable sessionId is preserved",
+        "Cancel uses client.session.abort() and returns interrupted; the AgentSession, transcript, and lineage remain under the same sessionId",
+        "Command results distinguish notStarted (rejected before any runtime call; the reservation may end) from unavailable (timeout/loss/unconfirmable after a runtime call may have begun; the operation is preserved and redelivery reuses the same operation id)",
+        "Repeated delivery of one operation records at most one compaction fact and at most one replacement lineage entry",
+        "A missing current Runtime Session fails compact/reset/follow-up with an explicit Reset hint and no fabricated continuous conversation",
+        "Workflow-source command requests, results, and diagnostics carry no acpSessionId or ACP-Action identity; the handler fulfils the command from the Mohist-owned request alone; mohist/acp-agent remains registered only for the AgentJob path",
+        "Runner tests (fake runtime) cover promptAsync follow-up (active + idle), summarize compact (in-place, conflict, no-model error), create reset (guarded, stale rejection, missing hint), abort cancel (preserves session), the notStarted/unavailable taxonomy, operation dedup, and no-ACP-identity for the Workflow source",
+        "npm run typecheck and npm run test:run -w packages/runner pass"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow-source session commands executing via OpenCodeRuntime (follow-up/compact/reset/cancel) with the result taxonomy, operation dedup, and no ACP identity, plus fake-runtime runner tests",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Design D5. Fulfils the #407 command contract over native SDK calls (today the runner returns unavailable for compact/reset). Key files: packages/runner/src/runtime/host.ts (handleSessionCommand ~167, resolveFollowupTarget ~181, restoreSessionTarget ~204), runtime/acp-session-command.ts, server/session-target.ts, server/followup-handler.ts, server/cancel-handler.ts."
+    },
+    {
+      "id": "T-006",
+      "title": "Verify the Workflow source is ACP-free and align design/doc gap notes",
+      "spec": "specs/opencode-session-operations/spec.md",
+      "description": "Confirm that Workflow-source configuration, Session state, and user-visible diagnostics no longer expose an ACP Action or ACP Session identity, and that mohist/acp-agent is retained only for the AgentJob path. Confirm no feature flag, compatibility alias, or ACP fallback was introduced for the Workflow source. Update the gap/实装差距 sections in design/runtimes/opencode.md, design/agent-execution.md, and docs/actions/opencode.md to reflect the landed native OpenCode runtime for the Workflow source and the deferred AgentJob ACP removal (#410). Per the spec-first convention, update only the gap footnotes, not the spec body.",
+      "acceptanceCriteria": [
+        "A grep over packages/runner/src and the server/web Workflow-source surfaces confirms no Workflow-source emission of acpSessionId or ACP-Action identity (internal ACP SDK names retained for the AgentJob path are expected and out of scope)",
+        "Built-in profiles still use mohist/opencode; mohist/acp-agent is registered only for the AgentJob path",
+        "No feature flag, compatibility alias, or ACP fallback exists for the Workflow source",
+        "design/runtimes/opencode.md, design/agent-execution.md, and docs/actions/opencode.md gap sections reflect the landed native Workflow runtime and the #410 AgentJob deferral",
+        "No product-language doc (docs/) introduces technical language (grain/handler/field names) outside the design layer",
+        "npm run typecheck and npm run test:run -w packages/runner pass; server/web builds are unaffected"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ACP-free verification for the Workflow source and updated gap notes in design/runtimes/opencode.md, design/agent-execution.md, docs/actions/opencode.md",
+      "dependsOn": ["T-004", "T-005"],
+      "passes": false,
+      "notes": "Per AGENTS.md: body is spec, gap note is footnote. AC #15 of the issue. Most wire-level ACP-identity removal was already done by #407; this task verifies the Workflow source and updates the gap footnotes. Key files: design/runtimes/opencode.md (实装差距 ~337), design/agent-execution.md (实装差距 ~168), docs/actions/opencode.md (实装差距 ~139)."
+    }
+  ]
+}
