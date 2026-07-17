@@ -407,14 +407,14 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => {
-        if (!isCurrentIssueEvent(detail) || !isCurrentSessionEvent(detail) || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !isCurrentLogicalSessionEvent(detail) || !mountedRef.current) return
         dispatch(contextCompactedReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
-        if (!isCurrentIssueEvent(detail) || !isCurrentSessionEvent(detail) || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !isCurrentLogicalSessionEvent(detail) || !mountedRef.current) return
         dispatch(contextHealthUpdatedReducer, detail)
       }),
     )

@@ -123,7 +123,6 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         new(
             store,
             services.GetRequiredService<WorkflowProfileManager>(),
-            services.GetRequiredService<WorkflowSessionHealthService>(),
             TimeProvider,
             NullLogger<WorkflowGrain>.Instance)
         {

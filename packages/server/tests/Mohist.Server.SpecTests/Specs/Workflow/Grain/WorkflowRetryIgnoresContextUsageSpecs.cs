@@ -3,7 +3,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -48,7 +51,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     [InlineData(960L, 1000L, "near-capacity usage")]
     public async Task TaskFails_RetrySucceedsRegardlessOfContextUsage(long contextWindowUsed, long contextWindowSize, string label)
     {
-        var (projectId, issueNumber, issueId, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
+        var (projectId, issueNumber, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
         var runnerId = $"retry-{Guid.NewGuid():N}";
         await RegisterRunnerAsync(runnerId, projectId);
         try
@@ -89,7 +92,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     [Fact]
     public async Task TaskFails_NoSession_RetrySucceeds()
     {
-        var (projectId, issueNumber, issueId, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
+        var (projectId, issueNumber, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
         var runnerId = $"retry-no-session-{Guid.NewGuid():N}";
         await RegisterRunnerAsync(runnerId, projectId);
         try
@@ -106,7 +109,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         }
     }
 
-    private async Task<(string ProjectId, int IssueNumber, string IssueId, string WorkflowRunId, string SessionName)> SeedProjectIssueWorkflowAsync()
+    private async Task<(string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName)> SeedProjectIssueWorkflowAsync()
     {
         var projectId = $"retry-guard-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectId);
@@ -123,11 +126,12 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             isDraft = false,
         });
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         var workflowRunId = await issueGrain.StartWorkAsync();
+        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
         var sessionName = $"task-{Guid.NewGuid():N}";
-        return (project.Id, issue.Number, issue.Id, workflowRunId, sessionName);
+        return (project.Id, issue.Number, workflowRunId, sessionName);
     }
 
     private async Task RegisterRunnerAsync(string runnerId, string projectId)
@@ -271,5 +275,5 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     private sealed record WorkDispatchInfo(string WorkId, string Stage, string? Title);
 
     private sealed record ProjectDto(string Id, string Name);
-    private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record IssueDto(int Number, string Title);
 }
