@@ -95,6 +95,54 @@ describe("ServerConnection.poll recovery state", () => {
     expect(Object.prototype.hasOwnProperty.call(works[1], "recoveryRemaining")).toBe(true)
     expect(Object.prototype.hasOwnProperty.call(works[2], "recoveryRemaining")).toBe(false)
   })
+
+  it("parses expect from the dispatch response into RenderedWorkItem.expect", async () => {
+    // T-003 acceptance: "RenderedWorkItem and AddTaskInput carry
+    // expect; connection.ts toWorkItem parses expect from the dispatch
+    // response".
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify({
+        dispatches: [
+          {
+            workflowRunId: "wf-1",
+            workId: "opencode-1",
+            workType: "task",
+            uses: "mohist/opencode",
+            with: JSON.stringify({ prompt: "do work" }),
+            expect: JSON.stringify({
+              markers: [{ path: "_output", oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"] }],
+            }),
+          },
+          {
+            workflowRunId: "wf-1",
+            workId: "no-expect-1",
+            workType: "task",
+            uses: "mohist/rebase",
+            with: JSON.stringify({ baseBranch: "main" }),
+          },
+        ],
+      }),
+    }))
+
+    const connection = new ServerConnection(options())
+    const works = await connection.poll(new AbortController().signal)
+
+    // Expect is decoded as a structured object (NOT stringified) so
+    // the executor's completion evaluator can read it.
+    expect(works[0]?.expect).toEqual({
+      markers: [{ path: "_output", oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"] }],
+    })
+    // Action Input (`with`) is decoded independently and DOES NOT
+    // contain the completion contract.
+    expect(works[0]?.with).toEqual({ prompt: "do work" })
+
+    // An absent `expect` field surfaces as `null` so the executor can
+    // tell "no completion contract" apart from "completion contract
+    // was empty".
+    expect(works[1]?.expect).toBeNull()
+    expect(Object.prototype.hasOwnProperty.call(works[1] ?? {}, "expect")).toBe(true)
+  })
 })
 
 describe("ServerConnection.patchRunVars", () => {

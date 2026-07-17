@@ -81,6 +81,11 @@ marker 的 `path` 可以是特殊值 `_output`，表示对回合最终 assistant
 文件内容。task executor 从 Action result 携带的回合事实中取得该文本；它不进入
 Action Output，也不要求 Action 额外声明。
 
+`_output` 只识别 promise-tag 形式（`<promise>VALUE</promise>`）。多个被接受的值出现
+时，按文本中最后出现的为准（与 file marker 的“声明顺序优先”不同）。若需要按字面
+substring 匹配最终 assistant 文本，请把字面值编码为 `oneOf` 中 promise tag 的内部
+VALUE。`_output` 不读取文件系统，evidence 也不会把它当作可抓取的文件路径。
+
 ## 错误字段与 recovery
 
 Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。
@@ -98,22 +103,42 @@ Recovery `when` 可以匹配任意字段，例如 `errorCode=base-moved`、`prom
 [`../agent-execution.md`](../agent-execution.md)。Runtime 已由 `uses` 选择，因此输入
 不需要 `kind` 或 `type` discriminator。
 
+输入契约：
+
+```ts
+type OpenCodeActionInput = {
+  prompt: string                    // 已展开的非空字符串
+  session?: string                  // 逻辑 Session 名称
+  options?: {
+    model?: string                  // provider/model；model 自身可包含 '/'
+    variant?: string                // 与 model 同级的独立字段，不拼进 model ID
+  }
+}
+```
+
 Action 只接收展开后的 `prompt`、可选逻辑 `session` 名称和可选 OpenCode 模型
 `options`（`model` / `variant`）。`options` 通常由 `${{ vars.agent }}` 整值展开而来，
 模板展开语义与示例见 [`profile.md`](profile.md)。`options` 中除 `model` 与 `variant`
 之外的键被忽略并记入诊断，不使回合失败。Workflow 把 `expect` 作为 task 完成契约
-单独提供。Action 不会把 `vars.agent` 当作隐藏 fallback。除非 expectation 命中
-promise marker，否则 output 为 `null`；命中时只返回：
+单独提供；Action 不会把 `vars.agent` 当作隐藏 fallback，也不再读取 `with` 内部的
+`expect` / `agent`。旧结构 `with.expect`、`with.agent` 在 profile 加载阶段就被可操作
+错误拒绝。
+
+输出契约：
+
+```ts
+type OpenCodeActionOutput = null | { promise: string }
+```
+
+除非 expectation 命中 promise marker，否则 output 为 `null`；命中时只返回：
 
 ```json
 { "promise": "PASS" }
 ```
 
 该 `{ promise }` output 由 Workflow task executor 依据 `expect` 合成；Action 与
-Runtime 都不产生它。
-
-Runtime Session 身份、model、usage、transcript、诊断信息和 expectation 明细保存在
-各自所属模型中，不复制到 Action output。OpenCode 实现见
+Runtime 都不产生它。Runtime Session 身份、model、usage、transcript、诊断信息和
+expectation 明细保存在各自所属模型中，不复制到 Action output。OpenCode 实现见
 [`../runtimes/opencode.md`](../runtimes/opencode.md)。
 
 ## GitHub PR Action

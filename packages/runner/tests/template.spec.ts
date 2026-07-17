@@ -115,6 +115,43 @@ describe("renderTemplate", () => {
     expect(rendered.expect.markers[0].contains).toBe("literal-0: ${{ a }}")
     expect(rendered.expect.markers[1].contains).toBe("literal-1: ${{ a }}")
   })
+
+  it("LiteralFieldPath_StandaloneExpectRoot_ProtectsMarkersContainsAndOneOfEntries", () => {
+    // T-003 acceptance: "template.ts LITERAL_FIELD_PATHS protects
+    // markers.*.contains and markers.*.oneOf.* when rendering expect
+    // as a standalone object" (i.e. when the renderer is called on
+    // `expect` directly, not on `with`).
+    const rendered = renderTemplate({
+      markers: [
+        {
+          path: "${{ openspecChangeDir }}/review.md",
+          contains: "see ${{ docs }} for details",
+          oneOf: ["<promise>${{ verdict }}</promise>", "<promise>FAIL</promise>"],
+        },
+      ],
+    }, {
+      openspecChangeDir: "openspec/changes/issue-408",
+      docs: "should-not-be-rendered-here",
+      verdict: "PASS",
+    }) as { markers: Array<{ path: string; contains: string; oneOf: string[] }> }
+
+    // `path` is a regular (non-literal) field; the embedded template
+    // expression resolves to the dispatch value.
+    expect(rendered.markers[0].path).toBe("openspec/changes/issue-408/review.md")
+    // `contains` is a literal-field path: the embedded `${{ docs }}`
+    // reference survives rendering byte-identically so the marker
+    // text can be searched for verbatim.
+    expect(rendered.markers[0].contains).toBe("see ${{ docs }} for details")
+    // `oneOf` entries are literal-field paths: the array entries
+    // remain untouched. The `verdict` variable would otherwise expand
+    // to `PASS` and turn `<promise>${{ verdict }}</promise>` into
+    // `<promise>PASS</promise>`; we lock the byte-identical
+    // rendering for this acceptance criterion.
+    expect(rendered.markers[0].oneOf).toEqual([
+      "<promise>${{ verdict }}</promise>",
+      "<promise>FAIL</promise>",
+    ])
+  })
 })
 
 describe("findTemplateReferences", () => {

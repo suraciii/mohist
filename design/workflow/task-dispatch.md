@@ -23,8 +23,10 @@ redelivery 和 retry 都会重新读取。
 `${{ failure.* }}` 例外：runner 构造恢复任务时就地展开——触发恢复的任务输出只在 runner
 手上。插入引擎的恢复任务不再含该表达式，其余表达式与普通任务相同，dispatch 前展开。
 
-Variables 的解析、deep merge 与动态生效语义见 [`variables.md`](variables.md)。展开后的
-`with` 是 Action 唯一的变量与配置输入；Action 不再次读取 Variables resource。
+Variables 的解析、跨 scope merge 与动态生效语义见 [`variables.md`](variables.md)。
+展开后的 `with` 是 Action 唯一的变量与配置输入；Action 不再次读取 Variables
+resource。`with` 内部不再做 same-key deep-merge，配置进入 Action 只能通过显式
+`options: ${{ vars.agent }}` 等整值 `${{ vars.* }}` 绑定。
 
 `expect` 单独展开并随 dispatch 发送，作为 Workflow 拥有的 task 完成契约。它不进入
 `with`，也不属于 Runtime-specific Action Input。

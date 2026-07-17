@@ -246,7 +246,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 tasks:
                   - id: replacement-plan-task
                     title: Replacement Plan Task
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                 checks:
                   - name: replacement-plan-check
                     title: Replacement Plan Check
@@ -255,7 +255,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 tasks:
                   - id: new-synced-task
                     title: New Synced Task
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                 checks:
                   - name: new-build-check
                     title: New Build Check
@@ -293,47 +293,46 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     private const string NoArtifactTemplateYaml = """
         id: mohist-test-noartifacts-profile
         variables:
-          agent:
-            type: opencode
+          agent: {}
         stages:
           - stage: plan
             requiresApproval: true
             tasks:
               - id: proposal
                 title: Generate proposal
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.proposal }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: specs
                 title: Write specs
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.specs }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: design
                 title: Create design
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.design }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: tasks
                 title: Generate tasks
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.tasks }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
               - id: self-review
                 title: Self review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   session: plan
                   prompt: ${{ prompts.self-review }}
-                  agent: ${{ vars.agent }}
+                  options: ${{ vars.agent }}
             checks:
               - name: health
                 title: Health
@@ -348,9 +347,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 with:
                   path: ${{ openspecChangeDir }}/tasks.json
                   task:
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                     with:
-                      agent: ${{ vars.agent }}
+                      options: ${{ vars.agent }}
                       prompt:
                         uses: mohist/openspec-task-prompt
                         with:

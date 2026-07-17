@@ -268,7 +268,7 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
-  async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string | null; with?: JsonObject | null }>) {
+  async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string | null; with?: JsonObject | null; expect?: JsonObject | null }>) {
     const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -345,6 +345,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     title: dispatch.title,
     uses: dispatch.uses,
     with: parseObject(dispatch.with),
+    expect: parseObject(dispatch.expect),
     variables: parseObject(dispatch.variables),
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,

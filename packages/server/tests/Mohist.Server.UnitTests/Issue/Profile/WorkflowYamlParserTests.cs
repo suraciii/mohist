@@ -27,7 +27,7 @@ public class WorkflowYamlParserTests
                 repairTask:
                   id: fix-health
                   title: Fix health
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     prompt: Fix it
         """));
@@ -53,7 +53,7 @@ public class WorkflowYamlParserTests
                 repairTask:
                   id: fix-health
                   title: Fix health
-                  uses: mohist/acp-agent
+                  uses: mohist/opencode
                   with:
                     prompt: Fix it
                 verifyTask:
@@ -76,15 +76,15 @@ public class WorkflowYamlParserTests
             tasks:
               - id: doc-task
                 title: Document task
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: Write docs
-                  expect:
-                    files:
-                      - path: docs/readme.md
-                    markers:
-                      - path: docs/readme.md
-                        contains: "## Getting Started"
+                expect:
+                  files:
+                    - path: docs/readme.md
+                  markers:
+                    - path: docs/readme.md
+                      contains: "## Getting Started"
             checks: []
         """);
 
@@ -105,15 +105,15 @@ public class WorkflowYamlParserTests
             tasks:
               - id: bad-task
                 title: Bad task
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: Do work
-                  expect:
-                    files:
-                      - path: result.md
-                    markers:
-                      - path: result.md
-                        contains: {marker}
+                expect:
+                  files:
+                    - path: result.md
+                  markers:
+                    - path: result.md
+                      contains: {marker}
             checks: []
         """;
 
@@ -132,19 +132,19 @@ public class WorkflowYamlParserTests
             tasks:
               - id: proposal
                 title: Generate proposal
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.proposal }}
-                  expect:
-                    files:
-                      - path: ${{ openspecChangeDir }}/proposal.md
+                expect:
+                  files:
+                    - path: ${{ openspecChangeDir }}/proposal.md
                 artifacts:
                   files:
                     - path: ${{ openspecChangeDir }}/proposal.md
                     - path: ${{ openspecChangeDir }}/specs
               - id: design
                 title: Design
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.design }}
                 artifacts:
@@ -179,7 +179,7 @@ public class WorkflowYamlParserTests
             tasks:
               - id: declare-task
                 title: Declare artifacts
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: hello
                 artifacts:
@@ -207,15 +207,15 @@ public class WorkflowYamlParserTests
             tasks:
               - id: expect-only
                 title: Expect files only
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: hello
-                  expect:
-                    files:
-                      - path: docs/expected.md
-                    markers:
-                      - path: docs/expected.md
-                        contains: "# Done"
+                expect:
+                  files:
+                    - path: docs/expected.md
+                  markers:
+                    - path: docs/expected.md
+                      contains: "# Done"
             checks: []
         """);
 
@@ -232,15 +232,15 @@ public class WorkflowYamlParserTests
             tasks:
               - id: review
                 title: Review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: Review
-                  expect:
-                    markers:
-                      - path: ${{ openspecChangeDir }}/review.md
-                        oneOf:
-                          - <promise>PASS</promise>
-                          - <promise>FAIL</promise>
+                expect:
+                  markers:
+                    - path: ${{ openspecChangeDir }}/review.md
+                      oneOf:
+                        - <promise>PASS</promise>
+                        - <promise>FAIL</promise>
                 artifacts:
                   files:
                     - path: ${{ openspecChangeDir }}/review.md
@@ -250,9 +250,10 @@ public class WorkflowYamlParserTests
         var task = definition.Stages.Single().Tasks.Single();
         Assert.NotNull(task.Artifacts);
         Assert.Equal(new[] { "${{ openspecChangeDir }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
-        var withJson = JsonSerializer.Serialize(task.With);
-        Assert.Contains("expect", withJson);
-        Assert.Contains("markers", withJson);
+        Assert.NotNull(task.Expect);
+        var expectJson = JsonSerializer.Serialize(task.Expect);
+        Assert.Contains("markers", expectJson);
+        Assert.DoesNotContain("expect", JsonSerializer.Serialize(task.With));
     }
 
     [Fact]
@@ -264,7 +265,7 @@ public class WorkflowYamlParserTests
             tasks:
               - id: bad
                 title: Bad
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: hi
                 artifacts:
@@ -285,7 +286,7 @@ public class WorkflowYamlParserTests
             tasks:
               - id: ai-review
                 title: AI review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: review
                 artifacts:
@@ -298,7 +299,7 @@ public class WorkflowYamlParserTests
                       tasks:
                         - id: recover:fix-review
                           title: Fix review
-                          uses: mohist/acp-agent
+                          uses: mohist/opencode
                           with:
                             prompt: fix
                       retrySelf: true
@@ -349,7 +350,7 @@ public class WorkflowYamlParserTests
             task:
               id: apply-feedback
               title: Apply approval feedback
-              uses: mohist/acp-agent
+              uses: mohist/opencode
               with:
                 session: ${{ stage.name }}
                 prompt: ${{ prompts.apply-feedback }}
@@ -365,7 +366,7 @@ public class WorkflowYamlParserTests
         Assert.NotNull(task);
         Assert.Equal("apply-feedback", task!.Id);
         Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);
         Assert.True(task.With!.ContainsKey("session"));
         Assert.True(task.With!.ContainsKey("prompt"));
@@ -394,7 +395,7 @@ public class WorkflowYamlParserTests
           feedback:
             task:
               title: Apply approval feedback
-              uses: mohist/acp-agent
+              uses: mohist/opencode
         stages:
           - stage: build
             tasks: []
@@ -413,7 +414,7 @@ public class WorkflowYamlParserTests
           feedback:
             task:
               id: apply-feedback
-              uses: mohist/acp-agent
+              uses: mohist/opencode
         stages:
           - stage: build
             tasks: []

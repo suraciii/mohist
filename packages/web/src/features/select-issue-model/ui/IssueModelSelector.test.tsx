@@ -147,7 +147,7 @@ describe('IssueModelSelector default-model variant chips', () => {
       expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
         42,
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: 'medium' },
+        { model: 'anthropic/claude', variant: 'medium' },
         'proj_test',
       )
     })
@@ -179,7 +179,7 @@ describe('IssueModelSelector default-model variant chips', () => {
       expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
         42,
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: null },
+        { model: 'anthropic/claude', variant: null },
         'proj_test',
       )
     })
@@ -211,7 +211,7 @@ describe('IssueModelSelector default-model variant chips', () => {
       expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
         42,
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: null },
+        { model: 'anthropic/claude', variant: null },
         'proj_test',
       )
     })
@@ -368,7 +368,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
         42,
         'build',
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: 'high' },
+        { model: 'anthropic/claude', variant: 'high' },
         'proj_test',
       )
     })
@@ -400,7 +400,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
         42,
         'build',
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: 'high' },
+        { model: 'anthropic/claude', variant: 'high' },
         'proj_test',
       )
     })
@@ -463,7 +463,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
         42,
         'build',
         'agent',
-        { type: 'opencode', model: 'anthropic/claude', variant: null },
+        { model: 'anthropic/claude', variant: null },
         'proj_test',
       )
     })
@@ -508,7 +508,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
       42,
       'plan',
       'agent',
-      { type: 'opencode', model: 'anthropic/claude', variant: null },
+      { model: 'anthropic/claude', variant: null },
       'proj_test',
     )
 

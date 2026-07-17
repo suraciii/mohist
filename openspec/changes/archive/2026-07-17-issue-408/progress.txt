@@ -1,0 +1,408 @@
+## T-001 Server task contract: Expect field, YAML parsing, legacy validation, and dispatch
+
+### Codebase patterns discovered
+
+- Workflow task definition surfaces in three places (definition, persistence, grain call):
+  - `TaskDefinition` record in `WorkflowDefinition.cs` (5 fields: `With, Artifacts, SetVars, Recovery` — added `Expect`).
+  - `TaskRun` class in `TaskRun.cs` carries runtime `WithInput` (added `ExpectInput`). Orleans serialization uses `GenerateSerializer` so no surrogate needed for the class (Orleans handles records / classes via attribute).
+  - `WorkflowTaskWork` and `WorkItem` Orleans-serialized records (or task-variant only). WorkItem now carries `[property: Id(11)] Dictionary<string, JsonElement?>? Expect`.
+- Tasks are stored on `TaskRun.WithInput` and `TaskRun.ExpectInput` — both `Dictionary<string, JsonElement?>?`.
+- Approval feedback task was previously a reduced `FeedbackTaskConfig` (id/title/uses/with) — promoted to full `TaskDefinition` so feedback tasks can carry `expect/artifacts/setVars/recovery`.
+- `WorkflowYamlSerializer` `With` is a `Dictionary<string, object?>` (yaml nodes, post-Normalize). `JsonElementMap` is the bridge into the `JsonElement` shape used everywhere else.
+- `mohist/github-pr-status` defines its own `expect` input that is **Action-owned**, not Workflow completion policy — must not be caught by the legacy validation.
+- The runner-side `WorkDispatch` envelope serializes every contract field as a JSON string (`With`, `Variables`, `Artifacts`, `SetVars`, `Recovery`). Orleans `[property: Id(N)]` slots are sequential; new fields extend the list.
+- `TaskRunExtensions.ExtractRequiredFiles` previously took a `withInput` and dived into `withInput["expect"]`. Now it takes the `expect` dict directly (`Dictionary<string, JsonElement?>`).
+
+### Gotchas
+
+- `WorkItem` uses `[property: Id(N)]`; consuming code reads via `Item.Expect`. `[property: Id]` slots must be sequential and unique; `TaskDispatch.Expect` lives at Id(18), `WorkItem.Expect` at Id(11).
+- `OptionalMap` (in `WorkflowYamlSerializer`) calls `Map(...)` which throws on non-dict values. Detection of `with.expect` must not route through `OptionalMap` because the value's structure is unknown until inspected; use `withMap.TryGetValue(key, out var value)` and normalize the value lazily.
+- The verdict-marker rule (reject `<promise>PASS</promise>` inside marker `contains`) now applies to **task-level `expect`**, not `with.expect`. It applies to all tasks regardless of `uses`. Action-owned `with.expect: merged` on `mohist/github-pr-status` is a string value, not a marker structure, so it doesn't trip the rule.
+- Tests that previously asserted `task.With["expect"]["files"]` must read `task.Expect["files"]` after the split. Several test files needed updates.
+- Removing the deep-merge branch is a behavior flip: tests that asserted `vars.agent` keys overlaid a literal `with.agent` object now need a literal `with.options` (or `options: ${{ vars.agent }}`) for binding.
+- The legacy-shape rejection (`with.expect`, `with.agent`) rejects `mohist/acp-agent` and `mohist/opencode` tasks. Built-in profile YAMLs (loaded as Lazy) had to migrate so the `MohistWorkflow.Definition` getter doesn't throw for every spec run.
+
+### Patterns established
+
+- Action-aware legacy validation lives in `WorkflowYamlSerializer.ValidateTaskExpectations(taskId, uses, withMap)`. Two triggers: `with.expect` containing completion-policy shapes (`files`/`markers`/`failIf`) and `with.agent` presence. Error message names the task id and directs the author to the replacement.
+- `WorkflowItemTranslator.BuildTaskDispatchAsync` now expands both `with` and `expect` via `WorkflowProfileManager.ExpandTaskWith` (whole-value template resolution only) and serializes them into `WorkDispatch` (`With` slot for Action input, new `Expect` slot at Id(18) for completion contract).
+- `WorkItem.Task` and `ResolveFeedbackTask` accept an `expect` parameter; `BuildDefaultFeedbackTask` always emits `options: ${{ vars.agent }}` so the default feedback task honors explicit model selection.
+- `TaskRun.Expect` is a separate field; `ExtractRequiredFiles(expect)` reads it directly; `ToDefinition()` includes it.
+- `TaskRun.ToDefinition` and `WorkflowRun.NextWork`/`ActiveTask` propagate `ExpectInput` so dispatch and rendering see the same expectation source.
+
+### Tests touched
+
+- Unit: `TaskRequiredFilesTests`, `ApprovalFeedbackTests`, `WorkflowProjectionTests` now construct `expect` dictionaries directly rather than via `withInput["expect"]`.
+- Unit: `WorkflowProjectionTests.WorkflowStatusMapper_MapTasks_FromDefinition` reads required files from `t.Expect`, not `t.With` (the chain was `WorkflowStatusMapper` → `ExtractRequiredFiles(t.With)`).
+- Spec: `WorkflowYamlSerializer_PreservesFailIfInTaskExpect` now parses top-level `expect`. `WorkflowProfileManagerSpecs.ExpandTaskWith_DeepMergesObjectKey` replaced by `ExpandTaskWith_ObjectKeyIsLeftVerbatim_NoDeepMerge` and added `ExpandTaskWith_WholeTemplateObjectPlaceholderResolvesToObject` to assert whole-value JSON type preservation.
+- Spec: tests using inline `mohist/acp-agent` with `with.agent` / `with.expect` updated to `mohist/opencode` + `options` + top-level `expect`. Built-in profile YAMLs (`mohist-local.workflow.yaml`, `mohist-github-pr.workflow.yaml`) migrated — they're shipped artifacts and tests assert their content.
+
+### Verification
+
+- Solution build: 0 warnings, 0 errors.
+- Server unit tests: 1399 / 1399 passing.
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- CLI tests: 933 / 933 passing.
+- Web typecheck: clean.
+
+### Decisions worth flagging for review
+
+- Migrating the built-in profile YAMLs was originally in T-005; T-001 picked them up because the legacy validation rejects `mohist/acp-agent` + `with.expect` shapes and the spec suite cannot survive the rejection at T-001 boundary. Migration is mechanical and matches D9 in `design.md`.
+- The verdict-marker rule now applies to top-level `expect`. The rule rejects `<promise>PASS</promise>` etc. inside marker `contains` for all tasks. This matches the spec's intent ("verdict marker requirements belong in a check definition"); a top-level `expect` with verdict markers fails just like `with.expect` did previously.
+
+## T-002 Model config validation and writer convergence
+
+### Codebase patterns discovered
+
+- `IssueModelMetadata.ProviderModelFormat` regex `^[^/\s]+/[^/\s]+$` enforced exactly-one-slash semantics — the model-ID segment rejected further `/` characters. The fix moves to first-slash-split by replacing the model segment with `\S+` (`[^/\s]+/\S+`), which keeps the "non-empty, non-whitespace provider" check but lets the model ID carry any number of `/` segments.
+- `MohistIssueWorkflowProfileBase.BuildAgentConfig` was the only server-side code path that **seeded** `vars.agent.type = "opencode"` on every fresh issue. Project/global agent configs set this key too, but those are user-controlled and remain untouched by the change.
+- `IssueModelSelector.tsx` writes via four `patchIssueWorkflowDefinitionVar` / `patchIssueWorkflowStageDefinitionVar` calls. The test file mirrors each expected call shape; both files had to drop `type: 'opencode'` so writes only carry model/variant.
+- Other code paths (project/global agent config, `IssueVariableBuilder.Build`, runner-side `template.ts`/`openspec.ts` defaults, settings page) still write or consume `type: "opencode"` in fixtures, but they represent persisted state or upstream-runtime tests, not writer surfaces in scope of T-002.
+
+### Gotchas
+
+- Removing the default `type: "opencode"` from `BuildAgentConfig` breaks a single spec test that explicitly asserts on it: `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable`. The new expectation is "the seeded agent block has no `type` key" — covered by `Assert.False(agent.TryGetProperty("type", out _))`. The spec's broader rule (legacy keys are inert under the options contract) still holds; this is a server-side write change, not a runner-side contract change.
+- The new regex `[^/\s]+/\S+` accepts `provider//model` (double slash, with empty segment between them) because `\S+` only forbids whitespace. The spec only requires "non-empty before/after the first `/`", so this is intentionally permissive — openrouter already ships IDs like `openrouter/anthropic/claude-3-opus` and intermediate empty segments are not actionable. The error message remains "expected 'provider/model' format" so the diagnostic surface is unchanged.
+- `[^/\s]+/\S+$` correctly rejects the cases the spec lists (`model-only`, `/model`, `provider/`, `provider/ `, `with space/inside`, `inside/with space`, `/`). `provider/ ` (trailing whitespace) is new — old regex allowed it because `[^/\s]+` was the model ID and the trailing space wasn't matched; new regex anchors `\S+$` and rejects it.
+- `MohistIssueWorkflowProfileBase` does not write the profile-default model; the project's `IssueWorkflowProfile` API path also routes through `BuildAgentConfig` for fresh variable bundles. Tests in `IssueWorkflowProfileStorageIntegritySpecs` and `IssueWorkflowProfileManagerSpecs` set `type = "opencode"` in user fixtures, not via the profile default — those tests remain valid.
+
+### Patterns established
+
+- Model-ID validation now lives entirely in `ValidateModel`, with one shared regex. Both top-level `Validate` and per-stage `Validate` call the same helper, so the multi-slash acceptance is automatically applied to per-stage selectors — verified by a new spec assertion `Validate_AcceptsMultiSlashModelInTopLevelAndStageSelectors` and a sibling rejection `Validate_RejectsInvalidMultiSlashStageModelFormat`.
+- `BuildAgentConfig` starts from an empty `Dictionary<string, object?>` and only merges the optional `globalAgentConfig`. The merge remains set-replace on `agent` (preserves non-overlapping keys), so legacy `type: "opencode"` already persisted in user config still rides through unchanged — only the default seeding goes away.
+- Issue model-selector writes now use the canonical model/variant-only shape `{ model, variant }`. No other keys are added; clearing patches still emit `{ model: null, variant: null }` for idempotent delete semantics.
+
+### Tests touched
+
+- Unit: `IssueModelMetadataTests.ValidateModel_AcceptsProviderSlashModelFormat` extended with `openrouter/vendor/family/model` and `openai/org/team/model-name`. `ValidateModel_RejectsNonProviderSlashModelFormat` adds `model-only`, `/model`, `provider/ ` to lock the spec scenarios.
+- Unit: two new `Validate_AcceptsMultiSlashModelInTopLevelAndStageSelectors` and `Validate_RejectsInvalidMultiSlashStageModelFormat` facts confirm per-stage multi-slash acceptance.
+- Spec: `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable` no longer asserts `agent.type == "opencode"`; uses `TryGetProperty` to confirm the seeded agent has no `type` key.
+- Web: `IssueModelSelector.test.tsx` — 7 assertions across both describe blocks had `type: 'opencode'` removed from the expected `patchIssueWorkflowDefinitionVar` / `patchIssueWorkflowStageDefinitionVar` argument shape.
+
+### Verification
+
+- Server unit tests: 1405 / 1405 passing (added 4 new `InlineData` cases + 2 new facts).
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- Web typecheck: clean.
+- Web vitest: 4698 / 4698 passing.
+
+
+## T-003 Runner completion evaluator, output projection, and dispatch contract
+
+### Codebase patterns discovered
+
+- `ActionResult.turnFact` (private channel) lives on the *internal* `ActionResult` type only. The runner MUST strip it before any `WorkItemResult` field reaches the server. The strip is centralized at `stripRunnerPrivateFacts` so the Action cannot leak final assistant text via `output`, `setVars`, `capturedOutputs`, artifacts, recovery matching, or the wire report.
+- `evaluateCompletion(expect, workDir, finalAssistantText)` is the new Workflow-owned completion evaluator. It takes the *rendered* `expect` object directly — the executor passes the dispatch's `RenderedWorkItem.expect` after template expansion. It does NOT receive `ActionContext` or read `with.expect`.
+- The Action↔executor boundary changed: `verifyExpectations(context, agentText)` is gone. `expectations.ts` now exports `evaluateCompletion`, `CompletionEvaluation`, `FailIfMatch`, and `parseLastMarker(text, accepted)` — no Action-context-aware API.
+- `parseLastMarker` is *generalized*: it accepts arbitrary `<promise>VALUE</promise>` markers with `VALUE`s drawn from the marker's `oneOf`/`contains` list (no longer hardcoded `done|unfinished`). The marker precedence rules are asymmetric: file markers use first-in-declaration-order; `_output` markers use last-accepted-occurrence in text.
+- `_output` markers are unsatisfied when `finalAssistantText` is null — the executor never falls back to Action Output as a text source (spec scenario "The turn fact is unavailable").
+- Output projection lives in the executor (`projectTaskOutput`). For `mohist/opencode` (the one Action in `PROMISE_PROJECTED_ACTIONS`), the handler's output is dropped. If a promise marker matched, output becomes `{ "promise": "<value>" }`; otherwise `null`. Every other Action's output is preserved unchanged.
+- Branch-stability evidence attachment is bypassed for opencode so the minimal `null | { promise }` contract is preserved on the wire (no `branchStability` key leaks into the opencode output JSON).
+- Successful Action + unsatisfied completion → failed completion with diagnostic `message`. Action failure (regardless of completion) stays an Action failure; completion does not rescue Action failures.
+- `tryRecovery` copies `work.expect` (alongside `with`/`recovery`/`recoveryRemaining`) into the self-retry `AddTaskInput`. The decoupled contract now survives the round-trip.
+
+### Gotchas
+
+- `expectations.ts` keeps `resolveActionPath(workDir, value)` exported for non-completion callers (`core/artifact-exists`, `core/marker`, `mohist/openspec-tasks`, `mohist/archive-change`). The signature changed from `(context, value)` to `(workDir, value)` and required updating 3 callsites.
+- `acp-agent.ts` no longer reads `with.expect`, no longer emits `output.expectation/promise/failIfMarker`, and no longer triggers expectation repair. The Action sets `turnFact.finalAssistantText` from the agent's transcript text. The text NEVER becomes Action Output.
+- `acp/session-strategies.ts` still exports no implicit repair turn logic. Removed: `satisfyExpectations`, `expectationRepairLimit`, `buildExpectationRepairPrompt`, `appendAgentText`, and the `expectation` field on `AcpSessionResult`. Three test cases that locked the legacy Action-private verifyExpectations behavior were rewritten to lock the new contract.
+- The executor's whole-string-unresolved check now reports unresolved references in BOTH `with` and `expect`. This catches `${{ openspecChangeDir }}` in `expect.markers.*.path` before the Action is invoked, with the existing actionable error message.
+- `template.ts` `LITERAL_FIELD_PATHS` was extended with `markers.*.contains` and `markers.*.oneOf.*` (in addition to the existing `expect.markers.*.contains` and `expect.markers.*.oneOf.*`). The `expect.*` variants remain for legacy callers that render the `with.expect` shape; the unprefixed versions cover the new contract rendering `expect` standalone.
+- The `executor-completion` test fixture uses `{} as never` for `sessionManager` and `acpConnection` because the completion path never reaches them. The `silentConnection()` helper is cast to `ServerConnection` (instead of `Pick`) so the executor constructor accepts it directly.
+- `RenderedWorkItem.expect` is parsed at the connection boundary via `parseObject(dispatch.expect)` — the same path `with`/`recovery` take — so absent vs empty-string vs JSON-stringified expectations are decoded uniformly.
+- ActionContext does not gain an `expect` field. The Action never receives the completion contract; it's read only by the executor's completion evaluator.
+
+### Patterns established
+
+- The completion evaluator is called between `action(...)` return and `tryRecovery(...)`:
+  ```
+  render with → render expect → Action → stripRunnerPrivateFacts
+    → evaluateCompletion(renderedExpect, workDir, finalAssistantText)
+    → projectTaskOutput(work, publicActionResult, completion)
+    → normalize(work, projected)
+    → tryRecovery(work, normalized)
+    → branch-stability (non-opencode path only) → worktree → artifacts → setVars
+  ```
+- `stripRunnerPrivateFacts(ActionResult)` returns `{ publicActionResult, turnFact }` and is the canonical boundary. Callers that previously passed `result` downstream now pass `publicActionResult`. `turnFact` is consumed only by completion evaluation.
+- `projectTaskOutput` is the single place that decides what the wire `output` is. It is the only place that knows about `mohist/opencode`'s projection rule.
+- All completion tests live in `tests/expectations.spec.ts` (function-level) and `tests/executor-completion.spec.ts` (executor-flow). Connection-layer expectation parsing is locked in `tests/server-connection-report.spec.ts`.
+- Template literal-field-path coverage is asserted for the standalone-`expect` rendering in `tests/template.spec.ts` so the rule survives future refactors.
+
+### Tests touched
+
+- **NEW**: `tests/executor-completion.spec.ts` (16 tests) — locks the executor's step ordering, output projection (opencode and non-opencode paths), `_output` private fact channel, self-retry `expect` copy, failIf-match + recovery interaction, and `turnFact` privacy.
+- **NEW**: `tests/server-connection-report.spec.ts` `parses expect from the dispatch response into RenderedWorkItem.expect` — locks the `expect` JSON-string parse and the `expect: null` for absent dispatch fields.
+- **NEW**: `tests/template.spec.ts` `LiteralFieldPath_StandaloneExpectRoot_ProtectsMarkersContainsAndOneOfEntries` — locks the bare-rooted literal field paths for `markers.*.contains` and `markers.*.oneOf.*`.
+- **UPDATED**: `tests/expectations.spec.ts` — full rewrite (32 tests) using the new `evaluateCompletion(expect, workDir, finalAssistantText)` API + new `parseLastMarker` tests (returns last-accepted, ignores non-accepted trailing values, returns null for empty/empty-list).
+- **UPDATED**: `tests/acp/session-strategies-expectations-and-liveness.spec.ts` — replaced three Action-private-expect tests with `DoesNotPerformExpectationRepair_WhenExpectationUnmet` proving the Action ignores `with.expect` (the legacy shape) and the action output no longer carries `expectation`/`promise`/`failIfMarker` fields.
+
+### Verification
+
+- `npm run typecheck` (runner src): clean.
+- `npm run typecheck:tests` (runner tests): clean.
+- `npm run test:ci` (runner): 1093 / 1093 passing across 95 test files.
+- `npm test` (full monorepo):
+  - Mohist.Cli.Tests: 933 / 933 passing.
+  - Mohist.Server.UnitTests: 1405 / 1405 passing.
+  - Mohist.Server.ArchTests: 27 / 27 passing.
+  - Mohist.Server.SpecTests: 2869 / 2869 passing.
+  - Web Vitest: 4698 / 4698 passing.
+  - Runner Vitest: 1093 / 1093 passing.
+
+### Decisions worth flagging for review
+
+- The Action private `verifyExpectations(context, agentText)` API was deleted entirely (not deprecated). Some session-strategies call sites that imported it were also deleted. The Action's `acp-agent.ts` handler now returns the run's `text` as `turnFact.finalAssistantText` and trusts the executor to interpret completion. If future Actions need Action-private verification (we don't expect this), they can re-introduce the function with a non-`ActionContext` API.
+- The branch-stability-evidence attachment (`attachBranchStabilityEvidence`) is now skipped for `mohist/opencode` only. This protects the minimal `null | { promise }` output contract (no `branchStability` key in the opencode output). Other Actions still get the evidence attachment in their wire output because their output contract tolerates it. This trade-off is narrow and reversible once a separate diagnostics channel exists.
+- `RenderedWorkItem.expect` is rendered (`renderTemplate`) before completion evaluation, mirroring `with`. This catches `${{ openspecChangeDir }}`-style references in `expect.markers.*.path`. The same whole-string-unresolved guard fires if the marker path is missing a variable; the error message names the task id and the unresolved reference.
+
+## T-004 mohist/opencode bridge handler and openspec task generator
+
+### Codebase patterns discovered
+
+- The `mohist/opencode` Action contract is wired into the runner's Action
+  registry (`registry.ts:58`), with input validation
+  (`actions/opencode.ts:parseOpencodeInput`) and a bridge handler
+  (`actions/opencode.ts:opencodeAction`) that delegates to the existing
+  ACP runtime. The bridge translates `options.model`/`options.variant`
+  into the equivalent `with.agent` shape so the underlying ACP runtime
+  reads them as before.
+- `acp-agent.ts` no longer references `verifyExpectations`,
+  `expectation`, or any repair-turn logic. The Action only delegates to
+  the ACP runtime and surfaces the raw turn fact via
+  `turnFact.finalAssistantText`.
+- `acp/session-strategies.ts` still exports no implicit repair turn
+  logic — the `satisfyExpectations` / `expectationRepairLimit` /
+  `buildExpectationRepairPrompt` / `appendAgentText` helpers and the
+  `expectation` field on `AcpSessionResult` were removed in T-003.
+- `acp/model-resolution.ts` no longer composes `${model}/${variant}`;
+  `variant` rides as a sibling. `applyRequestedModel` gained an optional
+  `silenceMissingModelWarning` flag, threaded through every session
+  strategy entrypoint (`AcpSessionOptions`), so callers can opt out of
+  the missing-model warning when the contract intentionally allows an
+  unconfigured model.
+- `actions/openspec.ts` defaults `defaultUses` to `mohist/opencode` (the
+  canonical contract), and `mergeTaskExpect(task)` propagates the
+  task-level `expect` declaration into the generated AddTaskInput
+  alongside `with`/`uses` (so the executor's completion evaluator can
+  read it from the dispatch envelope).
+
+### Gotchas
+
+- The test harness mocks `console.warn`/`console.error` and treats any
+  unexpected call as a failure (`tests/setup.common.ts`). The legacy
+  ACP runtime path emits "mohist acp model not configured; using
+  provider default" when no model is set, but the opencode contract
+  intentionally allows no model. To keep the bridge silent, the
+  handler passes `silenceMissingModelWarning: true` whenever the
+  caller did not declare `options.model`. When `options.model` IS set,
+  the flag stays `false` so genuine runtime failures still surface
+  (e.g. the "set requested model failed" warning continues to fire).
+- The `OpencodeTurn_FailureFromAgentTurn_PropagatesAsFailure_WithTurnFact`
+  scenario uses `empty-complete` which produces no text and no work
+  activity; the bridge must still populate `turnFact.finalAssistantText`
+  with the empty string (the text was never assigned). This matches the
+  executor's `_output` semantics — `finalAssistantText: ""` is
+  different from `null` (no fact) and the completion evaluator surfaces
+  the difference correctly.
+- The bridge handler `withOpencodeAgentBinding` deliberately does not
+  inject `with.agent` when no options are present, so the ACP runtime
+  sees the same context shape as `mohist/acp-agent` and the legacy
+  expectations around the runtime contract remain unchanged.
+
+### Patterns established
+
+- The `silenceMissingModelWarning` option travels with `AcpSessionOptions`
+  (`session-strategies.ts:69`), passed through every entrypoint that
+  ultimately calls `applyRequestedModel`. Only the opencode bridge sets
+  the flag; the `mohist/acp-agent` callers stay silent on the option.
+- The `mergeTaskExpect(task)` helper in `openspec.ts` mirrors the
+  shape of `mergeTaskWith`: a single, named, side-effect-free function
+  that returns the field for the AddTaskInput. A missing `expect`
+  becomes `null`; the executor's `evaluateCompletion` skips when
+  `expect` is `null`.
+- The opencode handler's output JSON keeps `kind: "opencode"` (its own
+  shape) and does NOT include any of the legacy `expectation` /
+  `promise` / `failIfMarker` fields — those belong to the executor's
+  completion projection, not the Action contract.
+
+### Tests touched
+
+- **NEW**: `tests/opencode-bridge-handler.spec.ts` (29 tests).
+  - `parseOpencodeInput` validation matrix (no options, explicit null,
+    non-object options, valid model only, multi-segment model ID,
+    missing provider / model-id / trailing slash, non-string model,
+    variant-only, variant-as-sibling, non-string variant, unknown keys
+    ignored, blank model).
+  - Turn delegation + turnFact: basic turn delegates to ACP runtime
+    and populates `turnFact.finalAssistantText`, multi-segment model
+    ID is delivered verbatim, variant is NOT appended to the model ID,
+    no expectation evaluation runs in the Action (single prompt call,
+    no `expectation`/`promise`/`failIfMarker` in output), prompt-only
+    tasks work without `agent`/`kind`/`type`, blank prompt rejected
+    before initialize/newSession, missing prompt rejected before turn,
+    invalid model type rejected before turn, non-provider/slash model
+    rejected before turn, output is `kind: "opencode"` not
+    `kind: "acp-agent"`, agent failure still populates turn fact.
+  - Registry binding: `mohist/opencode` resolves to `opencodeAction`,
+    case-insensitive, `mohist/acp-agent` still registered for legacy
+    fallback.
+
+- **UPDATED**: `tests/openspec-tasks.spec.ts` — added 4 tests:
+  - `OpenSpecTaskWithoutProfileUses_DefaultsToMohistOpencode` (both
+    omitted uses → `mohist/opencode`).
+  - `OpenSpecTaskWithExplicitUses_PreservesCallerChoice` (custom
+    `uses` survives, sibling falls back).
+  - `OpenSpecTaskWithTaskLevelExpect_PropagatesExpectIntoAddTaskInput`
+    (the full `expect` JSON object survives into the AddTaskInput;
+    missing `expect` becomes `null`).
+  - `OpenSpecTaskWithMarkerOnOutputPath_PropagatesExpectAsIs`
+    (`_output` markers propagate verbatim).
+
+### Verification
+
+- `npm run typecheck` (runner src): clean.
+- `npm run typecheck:tests` (runner tests): clean.
+- `npm run test:ci` (runner): 1126 / 1126 passing across 96 test files
+  (added 29 new opencode-bridge-handler tests + 4 new openspec-tasks
+  tests on top of the 1093 baseline from T-003).
+- `npm test` (full monorepo):
+  - Mohist.Cli.Tests: 933 / 933 passing.
+  - Mohist.Server.UnitTests: 1405 / 1405 passing.
+  - Mohist.Server.ArchTests: 27 / 27 passing.
+  - Mohist.Server.SpecTests: 2869 / 2869 passing.
+  - Web Vitest: 4698 / 4698 passing.
+  - Runner Vitest: 1126 / 1126 passing.
+
+### Decisions worth flagging for review
+
+- The `silenceMissingModelWarning` flag is the minimum surgical change
+  to keep the opencode bridge silent when no model is configured. The
+  alternative — making the warning conditional on a context flag like
+  `_bridgeSource` — would have been more semantically explicit but
+  added state to `ActionContext`. The options-parameter approach keeps
+  the `ActionContext` clean and survives future bridge handler
+  variants (e.g. an OpenCode SDK bridge in the sibling issue).
+- The bridge still calls `runAcpWorkflowAgentSession` directly. When
+  the native `@opencode-ai/sdk/v2` runtime lands, the bridge can be
+  replaced with an SDK-native implementation that drops the
+  `silenceMissingModelWarning` indirection entirely. The contract on
+  the executor side (`mohist/opencode` resolves, validates input,
+  populates `turnFact`) does not change.
+
+## T-005 Built-in profile migration and design doc alignment
+
+### Codebase patterns discovered
+
+- T-001 already performed the mechanical migration on the two built-in
+  profile YAMLs (`mohist-local.workflow.yaml`,
+  `mohist-github-pr.workflow.yaml`) as a precondition for the legacy
+  validation to even let the spec suite boot. After T-001 both YAMLs
+  satisfy every acceptance criterion in T-005: 29 `uses: mohist/opencode`
+  in `mohist-github-pr` and the same count in `mohist-local`, each one
+  binding `options: ${{ vars.agent }}` (no leftover `with.agent`); no
+  `with.expect` anywhere on agent tasks; `expect` is top-level beside
+  `with` / `artifacts` / `setVars` / `recovery`; `variables.agent: {}`
+  on both profiles; the `apply-feedback` task in both profiles carries
+  `options: ${{ vars.agent }}` so approval feedback honors explicit
+  model selection; the `mohist/github-pr-status` check keeps
+  `with.expect: merged` (Action-owned input, not migrated).
+- Previously discarded top-level `expect` declarations in
+  `mohist/github-pr` (`proposal`, `design`, `tasks`, `self-review`,
+  `ai-review`) now take effect — failing the task if the expected file
+  or marker is missing. This is the intentional behavior correction
+  called out in the proposal and design.
+- `design/workflow/builtin-workflows.md` had a "实装差距" section
+  flagging the unfinished migration as a current-state gap. After T-001
+  resolved that gap, the section is stale; T-005 collapses it into a
+  positive invariant note about the migrated shape so the spec remains
+  the target rather than a status report.
+- `design/workflow/actions.md` had prose describing the opencode
+  contract but no explicit input/output types. T-005 adds the
+  `OpenCodeActionInput` and `OpenCodeActionOutput` type declarations
+  mirroring `design/runtimes/opencode.md`, plus a sentence naming the
+  legacy-shape rejection rule (`with.expect` / `with.agent` rejected at
+  profile load) so the contract spec reflects the loader behavior.
+- `design/workflow/task-dispatch.md` previously said "Variables 的解析、
+  deep merge 与动态生效语义见 variables.md". After T-001's
+  deep-merge removal, "deep merge" applied to `with` is misleading even
+  though it still applies to variables scope merging. T-005 rewrites it
+  to "跨 scope merge" and adds an explicit sentence that `with` does
+  not deep-merge anymore and configuration reaches an Action only
+  through explicit whole-value `${{ vars.* }}` bindings.
+
+### Gotchas
+
+- The `mohist/github-pr-status` check's `with.expect: merged` is an
+  Action-owned input that Action-aware legacy validation must NOT
+  migrate to top-level `expect`. It's a string value, not a marker
+  structure, so the verdict-marker rule does not trip on it either —
+  already verified in T-001's spec scenario
+  `AcceptsAnotherActionOwnsInputNamedExpect`.
+- The `apply-feedback` task was promoted to `TaskDefinition` in T-001
+  (FeedbackTaskConfig retired). The migration adds `options: ${{ vars.agent }}`
+  to it so approval feedback honors the issue-level model selection.
+- The github-pr `merge-verified` check still uses
+  `mohist/github-pr-status` with `expect: merged` — Action-owned,
+  untouched.
+- The `_output` marker on `recover:fix-tests` (build stage, mohist/local)
+  is at top-level `expect`, migrated from the old `with.expect`. The
+  completion evaluator (T-003) reads it from the dispatch envelope's
+  `RenderedWorkItem.expect`, matches the last `<promise>VALUE</promise>`
+  in the turn's final assistant text, and uses general `parseLastMarker`
+  semantics (not legacy lowercase `done|unfinished`).
+
+### Patterns established
+
+- T-005 is the documentation-alignment half of the migration. The
+  mechanical YAML side landed in T-001 (with progress.txt noting why);
+  T-005's responsibility is making sure the `design/workflow/*.md`
+  trio reflects the migrated contract, removes stale current-state
+  notes, and explicitly names the input/output types so future readers
+  don't need to cross-reference `design/runtimes/opencode.md`.
+- The "实装差距" pattern remains valid in WIP design docs (variables.md
+  keeps it as a WIP status marker, event-routing.md and eventbus.md
+  keep their own implementation-gap sections). It's only removed when
+  the gap itself has been resolved and the doc is no longer WIP.
+
+### Tests touched
+
+- No new tests were added — the migration landed in T-001 and is
+  verified by the existing profile spec suite. T-005 only re-verified
+  the existing assertions on the migrated shape:
+  - `MohistLocalWorkflowProfileSpecs` — top-level `expect` shape,
+    no legacy keys, `variables.agent` minimal.
+  - `MohistPrIssueWorkflowProfileSpecs` — same, plus
+    `mohist/github-pr-status` `with.expect: merged` preserved.
+  - `WorkflowYamlSerializer_PreservesFailIfInTaskExpect` — top-level
+    `expect` round-trip.
+  - `WorkflowProfileManagerSpecs.ExpandTaskWith_*` — whole-value
+    `${{ vars.* }}` resolution, no deep-merge.
+
+### Verification
+
+- Solution build: 0 warnings, 0 errors.
+- Server unit tests: 1405 / 1405 passing.
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- CLI tests: 933 / 933 passing.
+- Runner tests: 1126 / 1126 passing.
+- Web tests: 4698 / 4698 passing.
+
+### Decisions worth flagging for review
+
+- The `_output` marker on `recover:fix-tests` (build stage, mohist/local)
+  is intentionally at top-level `expect`. When a recovery handler's
+  retry-self path fails to produce a turn text containing
+  `<promise>done</promise>` or `<promise>unfinished</promise>`, the
+  completion evaluator reports an unsatisfied `_output` marker, the
+  executor projects output to `null`, and the task fails. The previous
+  `with.expect` location would have produced the same outcome (failure),
+  so this migration is behavior-preserving for the recovery contract.
+- The two built-in profiles use `expect` only on file-existence checks
+  and on promise-marker checks; `_output` markers appear only inside
+  recovery tasks. If future profiles introduce `_output` markers on
+  the primary task path, the rule from `parseLastMarker` (last
+  accepted occurrence wins) and the `finalAssistantText: null` →
+  unsatisfied behavior apply uniformly.

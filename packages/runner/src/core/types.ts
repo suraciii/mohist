@@ -73,6 +73,13 @@ export type WorkDispatchResponse = {
   workId: string
   uses?: string | null
   with?: string | null
+  /**
+   * Task-level completion contract rendered by the server for this
+   * dispatch and re-expanded by the runner's executor. The Action
+   * Input (`with`) MUST NOT contain this. Mirrors `WorkDispatch.Expect`
+   * on the server.
+   */
+  expect?: string | null
   variables?: string | null
   workType: string
   stage?: string | null
@@ -143,6 +150,13 @@ export interface RenderedWorkItem {
   title?: string | null
   uses?: string | null
   with?: JsonObject | null
+  /**
+   * Task-level completion contract, separate from `with`. The
+   * executor applies this AFTER the Action returns; the Action
+   * never receives or interprets it. Mirrors the `WorkDispatch.Expect`
+   * field on the server.
+   */
+  expect?: JsonObject | null
   variables?: JsonObject | null
   projectId?: string | null
   issueNumber?: number | null
@@ -173,6 +187,12 @@ export interface AddTaskInput {
   setVars?: Record<string, string> | null
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
+  /**
+   * Task-level completion contract, separate from `with`. Self-retry
+   * copies this alongside the existing fields so completion policy
+   * follows the retry attempt.
+   */
+  expect?: JsonObject | null
 }
 
 export interface WorkItemResult {
@@ -232,6 +252,16 @@ export interface ActionResult {
   message?: string | null
   output?: string | null
   exitCode?: number | null
+  /**
+   * Runner-private Action-result facts that must never be serialized
+   * into `WorkItemResult.output`, `TaskRun.Output`, recovery matching,
+   * `setVars` projections, captured outputs, or artifacts. The boundary
+   * between `ActionResult` (internal) and `WorkItemResult` (wire) is
+   * where the fact is dropped. Only `mohist/opencode`-style agent
+   * Actions populate `finalAssistantText`; the executor uses it as the
+   * text corpus for `_output` markers (design D4).
+   */
+  turnFact?: { finalAssistantText?: string | null } | null
 }
 
 export interface RunnerOptions {

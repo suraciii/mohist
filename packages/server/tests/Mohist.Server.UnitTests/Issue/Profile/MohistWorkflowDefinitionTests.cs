@@ -20,8 +20,8 @@ public class MohistWorkflowDefinitionTests
 
         var proposal = definition.Stages[0].Tasks[1];
         Assert.Equal("proposal", proposal.Id);
-        Assert.Equal("mohist/acp-agent", proposal.Uses);
-        Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.With));
+        Assert.Equal("mohist/opencode", proposal.Uses);
+        Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.Expect));
 
         var build = definition.Stages[1];
         var loadTask = build.Tasks[1];
@@ -109,7 +109,7 @@ public class MohistWorkflowDefinitionTests
         var withJson = JsonSerializer.Serialize(loadTask.With);
 
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
-        Assert.Contains("\"uses\":\"mohist/acp-agent\"", withJson);
+        Assert.Contains("\"uses\":\"mohist/opencode\"", withJson);
         Assert.Contains("\"prompt\":", withJson);
         Assert.Contains("\"uses\":\"mohist/openspec-task-prompt\"", withJson);
         Assert.Contains("${{ openspecChangeDir }}/tasks.json", withJson);
@@ -179,7 +179,8 @@ public class MohistWorkflowDefinitionTests
         var failIf = FailIfMarker(task);
         if (failIf != "<promise>FAIL</promise>") return false;
 
-        var expect = JsonSerializer.SerializeToElement(task.With!["expect"]);
+        if (task.Expect is null) return false;
+        var expect = JsonSerializer.SerializeToElement(task.Expect);
         if (!expect.TryGetProperty("markers", out var markers)) return false;
         foreach (var marker in markers.EnumerateArray())
         {
@@ -193,10 +194,9 @@ public class MohistWorkflowDefinitionTests
 
     private static string? FailIfMarker(TaskDefinition task)
     {
-        if (task.With is null || !task.With.TryGetValue("expect", out var expect) || !expect.HasValue)
-            return null;
+        if (task.Expect is null) return null;
 
-        var expectElement = JsonSerializer.SerializeToElement(expect);
+        var expectElement = JsonSerializer.SerializeToElement(task.Expect);
         if (!expectElement.TryGetProperty("markers", out var markers)) return null;
         foreach (var marker in markers.EnumerateArray())
         {
@@ -252,8 +252,8 @@ public class MohistWorkflowDefinitionTests
         Assert.DoesNotContain(check.Checks, c => c.Name == "review-passed");
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
-        Assert.NotNull(aiReview.With);
-        var expectElement = JsonSerializer.SerializeToElement(aiReview.With!["expect"]);
+        Assert.NotNull(aiReview.Expect);
+        var expectElement = JsonSerializer.SerializeToElement(aiReview.Expect);
         Assert.True(expectElement.TryGetProperty("markers", out var markers));
         var firstMarker = markers[0];
         Assert.True(firstMarker.TryGetProperty("oneOf", out var oneOf));
@@ -272,10 +272,9 @@ public class MohistWorkflowDefinitionTests
 
     private static void AssertMarkerOneOf(TaskDefinition task)
     {
-        Assert.NotNull(task.With);
-        Assert.True(task.With!.ContainsKey("expect"), "task is missing 'expect' input");
+        Assert.NotNull(task.Expect);
 
-        var expectElement = JsonSerializer.SerializeToElement(task.With["expect"]);
+        var expectElement = JsonSerializer.SerializeToElement(task.Expect);
         Assert.Equal(JsonValueKind.Object, expectElement.ValueKind);
         Assert.True(expectElement.TryGetProperty("markers", out var markers),
             "task 'expect' is missing the 'markers' entry");
@@ -324,10 +323,10 @@ public class MohistWorkflowDefinitionTests
         var task = Assert.Single(handler.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
         Assert.Equal("Resolve rebase conflicts", task.Title);
-        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.Equal("mohist/opencode", task.Uses);
         Assert.Equal(session, task.With!["session"]!.Value.GetString());
         Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
-        Assert.Equal("${{ vars.agent }}", task.With!["agent"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With!["options"]!.Value.GetString());
     }
 
     private static void AssertArtifactPaths(TaskDefinition task, params string[] expectedPathSuffixes)
@@ -431,10 +430,11 @@ public class MohistWorkflowDefinitionTests
         Assert.NotNull(task);
         Assert.Equal("apply-feedback", task!.Id);
         Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);
         Assert.Equal("${{ stage.name }}", task.With!["session"]?.GetString());
         Assert.Equal("${{ prompts.apply-feedback }}", task.With["prompt"]?.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With["options"]?.GetString());
     }
 
 }

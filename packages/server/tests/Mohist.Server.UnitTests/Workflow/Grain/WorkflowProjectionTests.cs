@@ -63,11 +63,14 @@ public class WorkflowProjectionTests
                             Status = TaskRunStatus.Completed,
                             Uses = "mohist/acp-agent",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-                                {"expect": {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}}
+                                {"session": "plan"}
+                                """),
+                            ExpectInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}
                                 """),
                             RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
                                 JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-                                    {"expect": {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}}
+                                    {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}
                                     """)),
                             Classification = TaskClassification.UserFacing
                         }
@@ -184,11 +187,11 @@ public class WorkflowProjectionTests
     [Fact]
     public void TaskRunExtensions_ExtractRequiredFiles_PreservesMarkers()
     {
-        var withInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-            {"expect": {"files": [{"path": "design.md", "markers": ["<promise>PASS</promise>", "<promise>REVIEW</promise>"]}]}}
+        var expect = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+            {"files": [{"path": "design.md", "markers": ["<promise>PASS</promise>", "<promise>REVIEW</promise>"]}]}
             """);
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         var markers = result[0].Markers;
@@ -377,11 +380,14 @@ public class WorkflowProjectionTests
                             Status = TaskRunStatus.Completed,
                             Uses = "mohist/acp-agent",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-                                {"expect": {"files": [{"path": "proposal.md"}]}}
+                                {"session": "plan"}
+                                """),
+                            ExpectInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                {"files": [{"path": "proposal.md"}]}
                                 """),
                             RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
                                 JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-                                    {"expect": {"files": [{"path": "proposal.md"}]}}
+                                    {"files": [{"path": "proposal.md"}]}
                                     """)),
                             Classification = TaskClassification.UserFacing
                         },

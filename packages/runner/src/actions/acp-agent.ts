@@ -1,7 +1,6 @@
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { runCommand } from "../system/process.js"
-import { promiseValue, verifyExpectations } from "./expectations.js"
 import { resolveAgentConfig, buildPromptLoaderContext } from "./acp/agent-config.js"
 import { emitSessionEvent } from "./acp/session-events.js"
 import { runAcpWorkflowAgentSession } from "./acp/session-strategies.js"
@@ -34,19 +33,17 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
   await restoreAgentToolNoise(context)
-  const verification = result.expectation ?? await verifyExpectations(context)
-  const failIfMatch = verification.failIfMatches[0]
-  const failIfTriggered = !!failIfMatch
-  const ok = result.success && verification.satisfied && !failIfTriggered
+  const ok = result.success
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
-  const promise = promiseValue(verification.matched)
-  const failureReason = ok ? null : failIfTriggered
-    ? `failIf marker matched: ${failIfMatch.marker}`
-    : result.error ?? verification.message
+  const failureReason = ok ? null : result.error ?? "ACP agent task failed"
   if (context.ownerKind !== "agent-job" || !context.agentSessionId) {
     await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) }, result.acpSessionId ?? null)
   }
+  // Completion evaluation (expect files/markers/failIf/_output) is owned
+  // by the Workflow task executor; the Action returns its raw turn
+  // facts. The boundary between ActionResult (internal) and
+  // WorkItemResult (wire) is where completion is applied.
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : failureReason,
@@ -58,10 +55,8 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
       text: result.text,
       error: result.error,
       providerError: result.providerError,
-      expectation: verification,
-      promise,
-      failIfMarker: failIfTriggered ? failIfMatch.marker : null,
     }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
+    turnFact: { finalAssistantText: result.text ?? null },
   }
 }
