@@ -1,0 +1,34 @@
+# issue-409 build progress
+
+## Codebase Patterns
+
+- **`@opencode-ai/sdk/v2` shape:** `createOpencodeServer()` returns `{url, close}`; `createOpencodeClient({baseUrl, directory})` returns an `OpencodeClient`. The mature session namespace is `client.session.*` (create/prompt/promptAsync/abort/summarize/get/messages/status); `client.global.event()` is the SSE subscription returning `{stream: AsyncIterable}`; `client.v2.model.list()` and `client.v2.provider.list()` return wrappers shaped `{data: {location, data: Array}}` — the catalog array lives at `.data.data`.
+- **Readiness gates are accepted transitional scope:** per D3, one readiness gate pauses AgentJob work still on ACP until #410.
+- **Existing seams to mirror:** `setAcpProcessFactoryForTest` is the test factory seam pattern — `OpenCodeRuntime` will mirror it as `setOpenCodeRuntimeFactoryForTest` (T-002).
+- **`/v2` subpath import:** `@opencode-ai/sdk/v2` is the documented entry; `@opencode-ai/sdk/v2/client` is a secondary alias. The package `exports` field already declares both.
+- **`mohist/opencode` Action contract (from #408):** `parseOpencodeInput` already does first-slash model split + sibling variant + ignores unknown option keys; T-004 will reuse this for SDK DTO construction.
+
+## T-001 findings
+
+### Pinned version
+- `@opencode-ai/sdk` pinned to **1.18.3** in `packages/runner/package.json`. Matches the `opencode` CLI on PATH (also 1.18.3). The design spec body mentioned 1.17.18 as a reference point; the gap section in `design/runtimes/opencode.md` now records the actual pinned version so subsequent tasks (T-002+) implement against 1.18.3.
+
+### Why 1.18.3 and not 1.17.18
+- 1.17.18 is no longer the latest, and the design's call-table assertions were confirmed against 1.18.3 (latest stable). The smoke verified the exact same shape — `client.session.*` works, `client.v2.session.wait/compact` return `ServiceUnavailableError`. Pinning to the CLI version also reduces drift between installed runtime and SDK DTOs.
+
+### Smoke verification
+- Recorded in `openspec/changes/issue-409/sdk-smoke-verification.json`.
+- Live OpenCode server used: the pre-existing `opencode acp --pure` process (PID 3947353) listens on `127.0.0.1:4096` and serves the same v2 SDK routes used by `opencode serve`. All `client.session.*`, `client.global.event()`, and `client.v2.model.list()`/`v2.provider.list()` calls succeeded end-to-end (real `session.prompt` round-trip, real `session.summarize`, real SSE subscription emitting `server.connected` event).
+- `client.v2.session.wait()` and `client.v2.session.compact()` return `ServiceUnavailableError` with messages `"Session wait is not available yet"` / `"Session compact is not available yet"` — confirms the design call table.
+
+### Drift vs design call-surface table
+- No drift on the asserted operations themselves. Smoke confirms every row in the call table.
+- Catalog response shape: `client.v2.provider.list().data` is `{location, data: Provider[]}` (not a bare array) — the runtime must read `response.data.data` to get the catalog. Not a design call-table change, but worth flagging for T-002.
+
+### Non-goals preserved
+- `@agentclientprotocol/sdk` retained (its removal is #410's scope, not T-001's).
+- No `client.v2.session.wait()` / `client.v2.session.compact()` calls introduced.
+
+### Verification commands used
+- `npm install` — added `@opencode-ai/sdk@1.18.3` without conflict.
+- `npm run typecheck -w packages/runner` — passes with the `/v2` subpath import (`import { createOpencodeServer, createOpencodeClient } from "@opencode-ai/sdk/v2"`).

@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.21.0",
-    "@microsoft/signalr": "^10.0.0"
+    "@microsoft/signalr": "^10.0.0",
+    "@opencode-ai/sdk": "1.18.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

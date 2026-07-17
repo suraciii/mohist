@@ -1,0 +1,202 @@
+{
+  "serverUrl": "http://127.0.0.1:4096",
+  "serverDirectory": "/home/szf/repos/mohist",
+  "smokeDirectory": "/tmp/opencode/smoke",
+  "sdk": "@opencode-ai/sdk@1.18.3",
+  "cli": "opencode 1.18.3",
+  "tsVersion": "v22.23.1",
+  "operations": {
+    "session.status": {
+      "ok": true,
+      "latencyMs": 11,
+      "summary": {
+        "data": {},
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "v2.provider.list": {
+      "ok": true,
+      "latencyMs": 7,
+      "summary": {
+        "data": {
+          "location": "{...}",
+          "data": "Array(len=4)"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "v2.model.list": {
+      "ok": true,
+      "latencyMs": 114,
+      "summary": {
+        "data": {
+          "location": "{...}",
+          "data": "Array(len=97)"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.create": {
+      "ok": true,
+      "latencyMs": 9,
+      "summary": {
+        "data": {
+          "id": "ses_08f2ef0b8ffe3moPpF1YMylIi5",
+          "slug": "misty-rocket",
+          "projectID": "global",
+          "directory": "/tmp/opencode/smoke",
+          "path": "tmp/opencode/smoke",
+          "cost": "0"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.get": {
+      "ok": true,
+      "latencyMs": 4,
+      "summary": {
+        "data": {
+          "id": "ses_08f2ef0b8ffe3moPpF1YMylIi5",
+          "slug": "misty-rocket",
+          "projectID": "global",
+          "directory": "/tmp/opencode/smoke",
+          "path": "tmp/opencode/smoke",
+          "cost": "0"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.messages.empty": {
+      "ok": true,
+      "latencyMs": 8,
+      "summary": {
+        "data": "Array(len=0)",
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.prompt": {
+      "ok": true,
+      "latencyMs": 2352,
+      "summary": {
+        "data": {
+          "info": "{...}",
+          "parts": "Array(len=4)"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.messages.after": {
+      "ok": true,
+      "latencyMs": 11,
+      "summary": {
+        "data": "Array(len=2)",
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.promptAsync": {
+      "ok": true,
+      "latencyMs": 7,
+      "summary": {
+        "data": null,
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.abort": {
+      "ok": true,
+      "latencyMs": 6,
+      "summary": {
+        "data": "true",
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "session.summarize": {
+      "ok": true,
+      "latencyMs": 3977,
+      "summary": {
+        "data": "true",
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "global.event": {
+      "ok": true,
+      "summary": {
+        "eventCount": 2,
+        "firstEvent": "{\"payload\":{\"id\":\"evt_f70d1282a001gmno6YHRvv02cG\",\"type\":\"server.connected\",\"properties\":{}}}"
+      }
+    },
+    "v2.session.wait": {
+      "ok": true,
+      "latencyMs": 5,
+      "summary": {
+        "error": {
+          "_tag": "ServiceUnavailableError",
+          "message": "Session wait is not available yet",
+          "service": "session.wait"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    },
+    "v2.session.compact": {
+      "ok": true,
+      "latencyMs": 4,
+      "summary": {
+        "error": {
+          "_tag": "ServiceUnavailableError",
+          "message": "Session compact is not available yet",
+          "service": "session.compact"
+        },
+        "request": {
+          "timeout": "false"
+        },
+        "response": {}
+      }
+    }
+  },
+  "callTableDelta": {
+    "v2.session.wait": "Confirms design call table — returns ServiceUnavailableError: 'Session wait is not available yet'",
+    "v2.session.compact": "Confirms design call table — returns ServiceUnavailableError: 'Session compact is not available yet'"
+  },
+  "notes": [
+    "The pre-existing `opencode acp --pure` process (PID 3947353) listens on 127.0.0.1:4096 and serves the same SDK v2 routes used by `opencode serve`. The smoke test runs against this live server.",
+    "v2.provider.list().data and v2.model.list().data are wrappers shaped {location, data: Provider[]|Model[]}. The catalog array lives at .data.data.",
+    "global.event() returns { stream: AsyncIterable } (not a Body stream with getReader). The first event on connect is `{payload: {type: 'server.connected', ...}}`.",
+    "session.summarize({sessionID, providerID, modelID}) works and returns `data: []` for a session with a short prompt.",
+    "v2.session.wait() and v2.session.compact() return ServiceUnavailableError with message 'Session wait is not available yet' / 'Session compact is not available yet' — design call table is correct."
+  ]
+}

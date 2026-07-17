@@ -391,7 +391,13 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 一个深模块，不改变 Workflow Action 或 Session 产品契约。
 
 实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 OpenCode 上做
-一次冒烟验证；发现漂移时先修订本表，再进入实现。
+一次冒烟验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3
+服务器上对上表每个调用做了一次冒烟验证（详见
+[`openspec/changes/issue-409/sdk-smoke-verification.json`](../../openspec/changes/issue-409/sdk-smoke-verification.json)）：
+表内 `client.session.*`、`client.global.event()`、`client.v2.model.list()`、
+`client.v2.provider.list()` 全部可用；`client.v2.session.wait()` 与
+`client.v2.session.compact()` 仍返回 `ServiceUnavailableError`，确认不进入执行链。
+实际锁定的 SDK 版本见实装差距小节。
 
 ## 实装差距
 
@@ -408,3 +414,8 @@ Workflow schema 也仍把 `expect` 放在 `with` 内，内置 profile 中写在 
 
 「回合期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止回合，agent 没有收尾机会。
+
+T-001 完成时实际锁定的 SDK 版本是 `@opencode-ai/sdk@1.18.3`（与安装在 PATH 上的
+`opencode` CLI 版本一致），不是 1.17.18。决策文本保留 1.17.18 作为该节撰写时点的
+参考版本；后续 T-002+ 实现时按 1.18.3 进行。冒烟记录在
+[`openspec/changes/issue-409/sdk-smoke-verification.json`](../../openspec/changes/issue-409/sdk-smoke-verification.json)。
