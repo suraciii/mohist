@@ -242,6 +242,32 @@ public sealed class WorkflowRecoveryRoundTests
     }
 
     [Fact]
+    public void LegacyGroupWithPartialRecoveryDeclarationSkipsNormalizationInsteadOfFailing()
+    {
+        // Historical persistence can leave a definition id's attempts split:
+        // some carry a recovery declaration, others do not (older writers,
+        // non-recovery task shapes, partially migrated rows). That ambiguity
+        // is not data corruption and must not poison the whole run projection.
+        // The group is skipped (attempts preserved as-is) rather than thrown.
+        const string json = """
+            {"stages":[{"tasks":[
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":2},
+              {"definitionId":"review","attempt":3,"recovery":{"budget":0,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}}
+            ]}]}
+            """;
+
+        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(json);
+
+        using var result = JsonDocument.Parse(normalized);
+        var tasks = result.RootElement.GetProperty("stages")[0].GetProperty("tasks");
+        var attempts = tasks.EnumerateArray().Select(t => t.GetProperty("attempt").GetInt32()).ToArray();
+        Assert.Equal(new[] { 1, 2, 3 }, attempts);
+        Assert.All(tasks.EnumerateArray(), task => Assert.False(task.TryGetProperty("recoveryRemaining", out _)));
+        Assert.Equal(normalized, WorkflowRunStore.MigrateLegacyWorkflowRunJson(normalized));
+    }
+
+    [Fact]
     public void WorkDispatchResponseSerializesExplicitNullRecoveryState()
     {
         var response = new Mohist.Server.Api.WorkDispatchResponse(
