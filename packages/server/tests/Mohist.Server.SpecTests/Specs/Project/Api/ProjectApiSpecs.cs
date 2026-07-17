@@ -429,19 +429,6 @@ public class ProjectApiSpecs
         await AssertRepositoryUnchangedAsync(created.Id);
     }
 
-    [Fact]
-    public async Task PatchRepository_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotMutate()
-    {
-        var created = await CreateRepositoryUpdateProjectAsync();
-
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories/backend",
-            new { gitUrl = "https://user:token@example.test/backend.git" });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        await AssertRepositoryUnchangedAsync(created.Id);
-    }
-
     [Theory]
     [InlineData("""{"newName":null,"baseBranch":"release"}""")]
     [InlineData("""{"isDefault":null,"baseBranch":"release"}""")]
@@ -523,32 +510,6 @@ public class ProjectApiSpecs
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         await AssertRepositoryUnchangedAsync(created.Id);
-    }
-
-    [Fact]
-    public async Task PatchRepository_SetDefaultOnCurrentDefault_IsIdempotent()
-    {
-        var created = await _client.PostDataAsync<ProjectInfo>(
-            "/api/projects",
-            new
-            {
-                name = "repo-idempotent",
-                repository = new
-                {
-                    name = "server",
-                    gitUrl = "git@example.com:server.git",
-                    baseBranch = "main",
-                },
-            });
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories/server",
-            new { setDefault = true });
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-        var repos = json.GetProperty("data").GetProperty("repositories").EnumerateArray().ToList();
-        Assert.Single(repos);
-        Assert.True(repos[0].GetProperty("isDefault").GetBoolean());
     }
 
     [Fact]

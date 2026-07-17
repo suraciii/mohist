@@ -543,6 +543,33 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task GetRunnerAsync_IsReadOnly_DoesNotMutateRunnerState()
+    {
+        var runnerId = $"runner-readonly-proj-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "readonly-proj-host", "test-project"));
+        await runner.HeartbeatAsync();
+
+        var workflowId = $"wf-readonly-proj-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
+
+        var beforeRuntime = await runner.GetRuntimeStateAsync();
+        var beforeInfo = await runner.GetInfoAsync();
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
+        var view = await service.GetRunnerAsync("test-project", runnerId);
+        Assert.NotNull(view);
+
+        var afterRuntime = await runner.GetRuntimeStateAsync();
+        var afterInfo = await runner.GetInfoAsync();
+        Assert.Equal(beforeRuntime.LastHeartbeatAt, afterRuntime.LastHeartbeatAt);
+        Assert.Single(afterRuntime.ActiveWorks);
+        Assert.Equal(workflowId, afterRuntime.ActiveWorks[0].OwnerId);
+        Assert.NotNull(afterInfo);
+        Assert.Equal(beforeInfo!.RegisteredAt, afterInfo.RegisteredAt);
+    }
+
+    [Fact]
     public async Task GetCapacityAsync_AcrossOnlineRunners_SumsUsedAndTotalSlots()
     {
         await ClearGlobalRunnerRegistryAsync();

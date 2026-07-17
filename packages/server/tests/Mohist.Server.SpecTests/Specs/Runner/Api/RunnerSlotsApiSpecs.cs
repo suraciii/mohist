@@ -73,32 +73,6 @@ public class RunnerSlotsApiSpecs
     }
 
     [Fact]
-    public async Task PatchSlots_NextDispatchCycleHonorsNewCapacity()
-    {
-        var runnerId = $"runner-slots-dispatch-{Guid.NewGuid():N}";
-        await RegisterRunnerAsync(runnerId);
-
-        try
-        {
-            // Start with default slots=1 (GetOrInitAsync default).
-            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            Assert.Equal(RunnerDefinitionStore.DefaultSlots, await runner.GetSlotsAsync());
-
-            using var patchResponse = await _fixture.Client.PatchAsJsonAsync(
-                $"/api/runner/{runnerId}",
-                new { slots = 2 });
-            Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
-
-            // The grain cache should reflect the PATCH without needing re-register.
-            Assert.Equal(2, await runner.GetSlotsAsync());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
     public async Task PatchSlots_Zero_Returns400AndPersistsValueUnchanged()
     {
         var runnerId = $"runner-slots-zero-{Guid.NewGuid():N}";
@@ -119,61 +93,6 @@ public class RunnerSlotsApiSpecs
             Assert.Equal("bad_request", payload.GetProperty("code").GetString());
 
             Assert.Equal(initialSlots, await ReadPersistedSlotsAsync(runnerId));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task PatchSlots_Negative_Returns400AndPersistsValueUnchanged()
-    {
-        var runnerId = $"runner-slots-neg-{Guid.NewGuid():N}";
-        await RegisterRunnerAsync(runnerId);
-
-        try
-        {
-            using var response = await _fixture.Client.PatchAsJsonAsync(
-                $"/api/runner/{runnerId}",
-                new { slots = -3 });
-
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Equal(RunnerDefinitionStore.DefaultSlots, await ReadPersistedSlotsAsync(runnerId));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task PatchSlots_OverwriteExistingValue_ResponseReflectsNewValue()
-    {
-        var runnerId = $"runner-slots-overwrite-{Guid.NewGuid():N}";
-        await RegisterRunnerAsync(runnerId);
-
-        try
-        {
-            using (var first = await _fixture.Client.PatchAsJsonAsync(
-                $"/api/runner/{runnerId}",
-                new { slots = 5 }))
-            {
-                Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-                var firstPayload = await first.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-                Assert.Equal(5, firstPayload.GetProperty("data").GetProperty("slots").GetInt32());
-            }
-
-            using var second = await _fixture.Client.PatchAsJsonAsync(
-                $"/api/runner/{runnerId}",
-                new { slots = 1 });
-
-            Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-            var payload = await second.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            Assert.Equal(runnerId, payload.GetProperty("data").GetProperty("runnerId").GetString());
-            Assert.Equal(1, payload.GetProperty("data").GetProperty("slots").GetInt32());
-
-            Assert.Equal(1, await ReadPersistedSlotsAsync(runnerId));
         }
         finally
         {

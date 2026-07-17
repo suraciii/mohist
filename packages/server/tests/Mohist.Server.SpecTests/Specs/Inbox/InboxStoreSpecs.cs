@@ -168,6 +168,20 @@ public class InboxStoreSpecs
     }
 
     [Fact]
+    public async Task MarkReadAsync_RepeatedCall_StillMatches()
+    {
+        await using var database = CreateDatabase();
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
+        var result = await store.InsertAsync(Draft("proj_a", "issue_1", 1, "evt-1"));
+
+        var first = await store.MarkReadAsync("proj_a", result.Id);
+        var second = await store.MarkReadAsync("proj_a", result.Id);
+
+        Assert.Equal(1, first);
+        Assert.Equal(1, second);
+    }
+
+    [Fact]
     public async Task MarkAllReadAsync_OnlyTouchesTargetProject()
     {
         await using var database = CreateDatabase();

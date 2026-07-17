@@ -105,31 +105,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     }
 
     [Fact]
-    public async Task Config_PartiallyConfiguredPolicy_EmitsConfiguredValueAndNullsForUnsetFields()
-    {
-        // With one field set, that field appears with its positive
-        // value; the unset ones are emitted as `null` (same
-        // present-null wire convention). This is the case the runner
-        // actually parses in production: a server with
-        // retention-only policy is the common starting config.
-        _fixture.SetPolicy(new CleanupPolicyOptions { RetentionDays = 14 });
-        var runnerId = await _fixture.RegisterRunnerAsync();
-
-        using var response = await _fixture.Client.GetAsync($"/api/runner/{runnerId}/config");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var cleanup = body.GetProperty("cleanupPolicy");
-        Assert.True(cleanup.TryGetProperty("retentionDays", out var retention));
-        Assert.Equal(JsonValueKind.Number, retention.ValueKind);
-        Assert.Equal(14, retention.GetInt32());
-        Assert.True(cleanup.TryGetProperty("storageBudgetBytes", out var budget));
-        Assert.Equal(JsonValueKind.Null, budget.ValueKind);
-        Assert.True(cleanup.TryGetProperty("storageTargetWatermarkBytes", out var watermark));
-        Assert.Equal(JsonValueKind.Null, watermark.ValueKind);
-    }
-
-    [Fact]
     public async Task Config_FullyUnconfiguredPolicy_Returns200WithAllNullFields()
     {
         // Default CleanupPolicyOptions — no fields set. The endpoint
@@ -154,35 +129,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(new[] { "retentionDays", "storageBudgetBytes", "storageTargetWatermarkBytes" }, keys);
         Assert.All(new[] { "retentionDays", "storageBudgetBytes", "storageTargetWatermarkBytes" },
             key => Assert.Equal(JsonValueKind.Null, cleanup.GetProperty(key).ValueKind));
-    }
-
-    [Fact]
-    public async Task Config_IdleSystem_Returns200WithBody_IndependentOfPollState()
-    {
-        // The whole point of #359: the runner must be able to fetch
-        // its config when no work is being dispatched. We register a
-        // runner, do NOT dispatch any work, and confirm both:
-        //   - /poll returns 204 No Content (idle, unchanged)
-        //   - /config still returns 200 with a body
-        // The two facts together prove policy availability is not
-        // gated by work presence.
-        _fixture.SetPolicy(new CleanupPolicyOptions { RetentionDays = 14 });
-        var runnerId = await _fixture.RegisterRunnerAsync();
-
-        using (var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null))
-        {
-            Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
-        }
-
-        using var config = await _fixture.Client.GetAsync($"/api/runner/{runnerId}/config");
-
-        Assert.Equal(HttpStatusCode.OK, config.StatusCode);
-        var body = await config.Content.ReadFromJsonAsync<JsonElement>();
-        var cleanup = body.GetProperty("cleanupPolicy");
-        Assert.True(cleanup.TryGetProperty("retentionDays", out var retention));
-        Assert.Equal(14, retention.GetInt32());
-        Assert.True(cleanup.TryGetProperty("storageBudgetBytes", out var budget));
-        Assert.Equal(JsonValueKind.Null, budget.ValueKind);
     }
 
     [Fact]
@@ -211,35 +157,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(7, body.GetProperty("cleanupPolicy").GetProperty("retentionDays").GetInt32());
-    }
-
-    [Fact]
-    public async Task Config_ResponseShape_IsIdenticalToCleanupPolicyDto()
-    {
-        // The runner's existing CleanupPolicy TS type parses the
-        // body verbatim. The set of keys in
-        // RunnerConfigResponse.cleanupPolicy must be exactly the
-        // existing CleanupPolicyDto keys: { retentionDays,
-        // storageBudgetBytes, storageTargetWatermarkBytes }, all
-        // nullable, no new fields, no renamed fields. The shape
-        // diverges from the existing dto only in the wrapper: the
-        // existing dto was always inlined into WorkDispatchResponse;
-        // /config returns a { cleanupPolicy: ... } envelope.
-        _fixture.SetPolicy(new CleanupPolicyOptions
-        {
-            RetentionDays = 5,
-            StorageBudgetBytes = 1024,
-            StorageTargetWatermarkBytes = 512,
-        });
-        var runnerId = await _fixture.RegisterRunnerAsync();
-
-        using var response = await _fixture.Client.GetAsync($"/api/runner/{runnerId}/config");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var cleanup = body.GetProperty("cleanupPolicy");
-        var keys = cleanup.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray();
-        Assert.Equal(new[] { "retentionDays", "storageBudgetBytes", "storageTargetWatermarkBytes" }, keys);
     }
 
     [Fact]

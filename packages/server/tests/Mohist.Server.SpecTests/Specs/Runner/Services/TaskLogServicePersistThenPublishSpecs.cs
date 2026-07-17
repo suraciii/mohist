@@ -230,6 +230,21 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AppendAsync_WorkflowWorkFromAnotherRunner_ReturnsFalse()
+    {
+        await SeedWorkflowRunAsync("wf-owned", "task-1", "w-1");
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        var ok = await service.AppendAsync(
+            "runner-B", TaskLogOwnershipKinds.Workflow, "wf-owned", "w-1",
+            NewEntries(1, 1), truncated: false);
+
+        Assert.False(ok);
+        Assert.Empty(publisher.Published);
+    }
+
+    [Fact]
     public async Task AppendAsync_AgentJobOwner_StampsNullTaskId()
     {
         // Agent-job owned work has no taskId mapping; the
