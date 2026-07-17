@@ -5,14 +5,79 @@ namespace Mohist.Cli;
 
 internal static class EventCommands
 {
+    internal static CancellationToken TailCancellationOverride { get; set; }
+
     public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var events = new Command("event", "Event delivery operations");
+        var events = new Command("events", "Event delivery operations");
+        events.Subcommands.Add(BuildTail(api));
         var deadLetter = new Command("dead-letter", "Inspect and recover dead-lettered event deliveries");
         deadLetter.Subcommands.Add(BuildList(api, credentials));
         deadLetter.Subcommands.Add(BuildRedeliver(api, credentials));
         events.Subcommands.Add(deadLetter);
         return events;
+    }
+
+    private static Command BuildTail(MohistCliApi api)
+    {
+        var cmd = new Command("tail", "Follow the project's live event stream; emit one compact envelope per line. With --match, only matching envelopes are emitted.");
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var matchOpt = new Option<string?>("--match") { Description = "Match expression (CEL subset) forwarded to the server; the server is the single compile authority" };
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(matchOpt);
+        cmd.SetAction(async ctx =>
+        {
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var match = ctx.GetValue(matchOpt);
+
+            var resolved = await api.ResolveProjectIdAsync(project, projectId).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(resolved))
+            {
+                api.Error.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+                return 1;
+            }
+
+            var path = $"/api/projects/{Uri.EscapeDataString(resolved)}/events/tail";
+            if (!string.IsNullOrWhiteSpace(match))
+                path += $"?match={Uri.EscapeDataString(match!)}";
+
+            return await RunTailAsync(api, path).ConfigureAwait(false);
+        });
+        return cmd;
+    }
+
+    internal static async Task<int> RunTailAsync(MohistCliApi api, string path)
+    {
+        if (TailCancellationOverride != default)
+            return await NdjsonStream.ReadAsync(api.Http, path, api.Output, api.Error, TailCancellationOverride)
+                .ConfigureAwait(false);
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += OnCancel;
+        try
+        {
+            return await NdjsonStream.ReadAsync(api.Http, path, api.Output, api.Error, cts.Token)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancel;
+            cts.Dispose();
+        }
+
+        void OnCancel(object? sender, ConsoleCancelEventArgs args)
+        {
+            args.Cancel = true;
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
     }
 
     private static Command BuildList(MohistCliApi api, OperatorCredentialProvider credentials)

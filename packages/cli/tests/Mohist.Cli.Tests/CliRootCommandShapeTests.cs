@@ -178,6 +178,21 @@ public class CliRootCommandShapeTests
     }
 
     [Fact]
+    public async Task LegacyEventNoun_FailsToResolveAndExitsNonZero()
+    {
+        // The singular `mo event` noun was consolidated under the plural
+        // `mo events` noun in issue-413 T-003 (BREAKING). The legacy
+        // singular form must no longer resolve.
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["event", "dead-letter", "list"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task MoInfo_DefaultOutputAndExitAreUnchanged()
     {
         // The `mo info` controlled exception must remain byte-identical
