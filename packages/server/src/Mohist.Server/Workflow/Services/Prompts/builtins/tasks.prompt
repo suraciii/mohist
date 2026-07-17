@@ -43,38 +43,44 @@ Write to: `${{ openspecChangeDir }}/tasks.json`
 <instruction>
 Create `tasks.json`, a machine-readable implementation plan for Mohist agents.
 
-任务按功能模块/切面拆分，每个任务是一个可独立交付的完整功能单元。
+Split tasks by feature module / vertical slice: each task is a complete,
+independently deliverable feature unit.
 
-拆分原则：
-- 按业务功能模块拆分，不是按技术步骤拆分
-- 每个任务交付后，对应的功能模块应处于可用状态
-- 设计中明确的独立模块可以作为单独任务
-- 同一功能模块的紧密耦合变更应合并（如：接口+实现+引用切换）
-- 每个任务必须包含相关测试覆盖，不做单独的测试任务
+Splitting principles:
+- Split by business capability, not by technical step.
+- After a task is delivered, its feature module must be in a usable state.
+- Independent modules identified in the design may become their own tasks.
+- Tightly coupled changes within one feature module are merged
+  (e.g. interface + implementation + call-site switchover).
+- Every task must include its relevant test coverage; no standalone test tasks.
 
-可以拆分的边界（不同功能模块）：
-- 跨平台抽象层 vs 具体平台实现
-- 设计中明确的独立组件
-- 前置重构 vs 新功能实现（如果重构量很大）
+Valid split boundaries (different feature modules):
+- Abstraction layer vs concrete implementations (e.g. adapters for different
+  platforms or vendors)
+- Independent components called out in the design
+- Preparatory refactoring vs new feature work (when the refactor is large)
 
-不应拆分的情况（技术步骤过度拆分）：
-- "定义接口" / "实现接口" / "注册DI"
-- "实现安装方法" / "实现启动方法" / "实现停止方法"
-- "移动文件" / "重命名类"（作为独立任务）
+Do NOT split (over-granular technical steps):
+- "Define interface" / "Implement interface" / "Register in DI container"
+- "Implement install method" / "Implement start method" / "Implement stop method"
+- "Move file" / "Rename class" (as standalone tasks)
 
-示例：
-- ✅ "提取跨平台服务安装抽象并迁移 Linux 实现"
-  （包含：定义接口 + 迁移实现 + 切换引用 + 回归测试）
-- ✅ "实现 Windows 后台服务安装与生命周期"
-  （包含：launcher渲染 + schtasks参数 + 安装/回退 + 启动/停止/重启/状态/日志/卸载 + 单元测试）
-- ❌ "定义 IServiceInstaller 接口"
-- ❌ "注册 IServiceInstaller 到 DI 容器"
-- ❌ "实现 Windows 安装方法"
-- ❌ "实现 Windows 启动方法"
-- ❌ "添加 Windows 功能测试"（测试应在实现任务中完成）
+Examples:
+- ✅ "Extract the notification-channel abstraction and migrate the email
+  notification implementation"
+  (includes: define the interface + migrate the implementation + switch
+  call sites + regression tests)
+- ✅ "Implement the SMS notification channel and its lifecycle"
+  (includes: message rendering + provider parameters + send/retry/status
+  query + unit tests)
+- ❌ "Define the INotificationChannel interface"
+- ❌ "Register INotificationChannel in the DI container"
+- ❌ "Implement the SMS send method"
+- ❌ "Implement the SMS retry method"
+- ❌ "Add SMS notification tests" (tests belong inside the implementation task)
 
-每个任务应有明确的验收标准，验证该功能模块是否可用。
-验收标准中必须包含测试相关的验证项。
+Every task needs explicit acceptance criteria that verify its feature module
+is usable, and the criteria must include test-related verification.
 
 Reference specs for what needs to be built and design for how to build it.
 </instruction>
