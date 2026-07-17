@@ -18,6 +18,23 @@ public partial class BackfillCanonicalEpicReferences : Migration
     {
         migrationBuilder.Sql(CanonicalEpicReferenceReconciliation.Sql);
 
+        migrationBuilder.Sql("UPDATE \"IssueEvents\" SET \"TimelineSource\" = \"Source\";");
+        migrationBuilder.Sql("UPDATE \"EpicEvents\" SET \"TimelineSource\" = \"Source\";");
+        migrationBuilder.Sql("""
+            UPDATE "IssueEvents" AS event
+            SET "TimelineSource" = '/mohist/projects/' || issue."ProjectId" || '/issues/' || issue."Number"
+            FROM "Issues" AS issue
+            WHERE event."Source" = '/mohist/issues/' || issue."IssueId";
+            """);
+        migrationBuilder.Sql("""
+            UPDATE "EpicEvents" AS event
+            SET "TimelineSource" = '/mohist/projects/' || epic."ProjectId" || '/epics/' || epic."Number"
+            FROM "Epics" AS epic
+            WHERE event."Source" = '/mohist/epics/' || epic."Id";
+            """);
+        migrationBuilder.Sql("CREATE INDEX \"IX_IssueEvents_TimelineSource_Time_Source_Id\" ON \"IssueEvents\" (\"TimelineSource\", \"Time\", \"Source\", \"Id\");");
+        migrationBuilder.Sql("CREATE INDEX \"IX_EpicEvents_TimelineSource_Time_Source_Id\" ON \"EpicEvents\" (\"TimelineSource\", \"Time\", \"Source\", \"Id\");");
+
         migrationBuilder.Sql("""
             CREATE TABLE "__EpicIssues" (
                 "EpicId" TEXT NOT NULL,

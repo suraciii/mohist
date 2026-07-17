@@ -360,6 +360,10 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Source)
                 .HasMaxLength(256)
                 .IsRequired();
+            entity.Property(e => e.TimelineSource)
+                .HasMaxLength(256)
+                .IsRequired()
+                .HasDefaultValue("");
             entity.Property(e => e.EventId)
                 .HasMaxLength(128)
                 .IsRequired();
@@ -391,6 +395,8 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, stored: true);
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
+            entity.HasIndex(e => new { e.TimelineSource, e.Time, e.Source, e.Id })
+                .HasDatabaseName("IX_IssueEvents_TimelineSource_Time_Source_Id");
             entity.HasIndex(e => new { e.TimeSortKey, e.Source, e.Id })
                 .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
@@ -406,6 +412,10 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Source)
                 .HasMaxLength(256)
                 .IsRequired();
+            entity.Property(e => e.TimelineSource)
+                .HasMaxLength(256)
+                .IsRequired()
+                .HasDefaultValue("");
             entity.Property(e => e.EventId)
                 .HasMaxLength(128)
                 .IsRequired();
@@ -435,6 +445,8 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(EpicEventRow.Type), nameof(EpicEventRow.Source), nameof(EpicEventRow.Id));
+            entity.HasIndex(e => new { e.TimelineSource, e.Time, e.Source, e.Id })
+                .HasDatabaseName("IX_EpicEvents_TimelineSource_Time_Source_Id");
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt");

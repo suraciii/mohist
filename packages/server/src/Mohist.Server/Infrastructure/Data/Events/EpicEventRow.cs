@@ -15,6 +15,7 @@ public sealed class EpicEventRow : IEventRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }
+    public string TimelineSource { get; init; } = "";
     public required string EventId { get; init; }
     public required string Type { get; init; }
     public required DateTimeOffset Time { get; init; }

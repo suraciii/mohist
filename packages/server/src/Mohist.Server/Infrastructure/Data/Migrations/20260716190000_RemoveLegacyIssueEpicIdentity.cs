@@ -8,6 +8,37 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql("""
+            UPDATE "IssueEvents" AS event
+            SET "TimelineSource" = '/mohist/projects/' || issue."ProjectId" || '/issues/' || issue."Number"
+            FROM "Issues" AS issue
+            WHERE event."Source" = '/mohist/issues/' || issue."IssueId";
+            """);
+        migrationBuilder.Sql("""
+            UPDATE "IssueEvents" AS event
+            SET "ExtensionsJson" = json_set(
+                event."ExtensionsJson",
+                '$.projectid', issue."ProjectId",
+                '$.issue', CAST(issue."Number" AS TEXT))
+            FROM "Issues" AS issue
+            WHERE event."DispatchedAt" IS NULL
+              AND event."Type" = 'com.mohist.issue.work-started'
+              AND event."Source" = '/mohist/issues/' || issue."IssueId";
+            """);
+        migrationBuilder.Sql("""
+            UPDATE "WorkflowRunEvents" AS event
+            SET "ExtensionsJson" = json_set(
+                event."ExtensionsJson",
+                '$.projectid', run."MetadataProjectId",
+                '$.issue', CAST(run."IssueNumber" AS TEXT),
+                '$.workflowrunid', run."WorkflowRunId")
+            FROM "WorkflowRuns" AS run
+            WHERE event."DispatchedAt" IS NULL
+              AND event."Type" = 'com.mohist.workflow.run.completed'
+              AND run."MetadataProjectId" IS NOT NULL
+              AND run."IssueNumber" IS NOT NULL
+              AND event."Source" = '/mohist/workflows/' || run."WorkflowRunId";
+            """);
         migrationBuilder.Sql("ALTER TABLE \"WorkflowRuns\" DROP COLUMN \"EpicId\";");
         migrationBuilder.Sql("""
             UPDATE "WorkflowRuns"

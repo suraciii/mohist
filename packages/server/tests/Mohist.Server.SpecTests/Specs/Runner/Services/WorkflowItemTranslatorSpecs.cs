@@ -89,6 +89,8 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["projectId"] = projectId,
+            ["issueNumber"] = "42",
+            ["epicNumber"] = "7",
         };
         var run = WorkflowRunExtensions.Create(
             workflowRunId,
@@ -167,6 +169,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.NotNull(dispatch.Variables);
         Assert.NotNull(dispatch.Artifacts);
         Assert.NotNull(dispatch.SetVars);
+        Assert.Equal(7, dispatch.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -213,6 +216,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("build", dispatch.Stage);
         Assert.Equal("Stage checks", dispatch.Title);
         Assert.NotNull(dispatch.With);
+        Assert.Equal(7, dispatch.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

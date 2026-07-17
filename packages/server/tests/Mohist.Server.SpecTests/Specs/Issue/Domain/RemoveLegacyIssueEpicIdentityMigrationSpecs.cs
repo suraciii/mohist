@@ -32,6 +32,13 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
                 INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "EpicId", "EpicNumber", "ETag")
                 VALUES ('run_alpha', '{{"id":"run_alpha","metadata":{{"annotations":{{"projectId":"proj_alpha","issueNumber":"42","issueId":"issue_alpha_42","epicNumber":"7","epicId":"epic_alpha_7"}}}}}}', 'epic_alpha_7', 7, 1),
                        ('run_beta', '{{"Id":"run_beta","Metadata":{{"Annotations":{{"ProjectId":"proj_beta","IssueNumber":"42","IssueId":"issue_beta_42","EpicNumber":"7","EpicId":"epic_beta_7"}}}}}}', 'epic_beta_7', 7, 1);
+
+                INSERT INTO "IssueEvents" ("Source", "Id", "EventId", "Type", "SpecVersion", "DataContentType", "Data", "ExtensionsJson", "Time", "DispatchedAt")
+                VALUES ('/mohist/issues/issue_alpha_42', 1, 'issue_pending', 'com.mohist.issue.work-started', '1.0', 'application/json', '{{}}', '{{"issueid":"issue_alpha_42","custom":"preserve"}}', '2026-07-17 00:00:00+00:00', NULL),
+                       ('/mohist/issues/issue_alpha_42', 2, 'issue_dispatched', 'com.mohist.issue.work-started', '1.0', 'application/json', '{{}}', '{{"issueid":"issue_alpha_42"}}', '2026-07-17 00:00:00+00:00', '2026-07-17 00:01:00+00:00');
+
+                INSERT INTO "WorkflowRunEvents" ("Source", "Id", "EventId", "Type", "SpecVersion", "DataContentType", "Data", "ExtensionsJson", "Time", "DispatchedAt")
+                VALUES ('/mohist/workflows/run_alpha', 1, 'workflow_pending', 'com.mohist.workflow.run.completed', '1.0', 'application/json', '{{}}', '{{"custom":"preserve"}}', '2026-07-17 00:00:00+00:00', NULL);
                 """);
 
             await seed.GetService<IMigrator>().MigrateAsync(TargetMigration);
@@ -60,6 +67,19 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
 
         var issues = await verify.Issues.AsNoTracking().OrderBy(row => row.ProjectId).ToListAsync();
         Assert.All(issues, row => Assert.Equal(7, IssueStore.Deserialize(row.State)!.EpicNumber));
+
+        Assert.Equal(
+            ["/mohist/issues/issue_alpha_42:/mohist/projects/proj_alpha/issues/42"],
+            await ReadStringsAsync(verify, "SELECT \"Source\" || ':' || \"TimelineSource\" AS \"Value\" FROM \"IssueEvents\" WHERE \"EventId\" = 'issue_pending'"));
+        Assert.Equal(
+            ["proj_alpha:42:preserve"],
+            await ReadStringsAsync(verify, "SELECT json_extract(\"ExtensionsJson\", '$.projectid') || ':' || json_extract(\"ExtensionsJson\", '$.issue') || ':' || json_extract(\"ExtensionsJson\", '$.custom') AS \"Value\" FROM \"IssueEvents\" WHERE \"EventId\" = 'issue_pending'"));
+        Assert.Equal(
+            ["issue_alpha_42"],
+            await ReadStringsAsync(verify, "SELECT json_extract(\"ExtensionsJson\", '$.issueid') AS \"Value\" FROM \"IssueEvents\" WHERE \"EventId\" = 'issue_dispatched'"));
+        Assert.Equal(
+            ["proj_alpha:42:run_alpha:preserve"],
+            await ReadStringsAsync(verify, "SELECT json_extract(\"ExtensionsJson\", '$.projectid') || ':' || json_extract(\"ExtensionsJson\", '$.issue') || ':' || json_extract(\"ExtensionsJson\", '$.workflowrunid') || ':' || json_extract(\"ExtensionsJson\", '$.custom') AS \"Value\" FROM \"WorkflowRunEvents\" WHERE \"EventId\" = 'workflow_pending'"));
 
         var runStates = await ReadStringsAsync(verify, "SELECT \"State\" AS \"Value\" FROM \"WorkflowRuns\" ORDER BY \"WorkflowRunId\"");
         Assert.All(runStates, state =>

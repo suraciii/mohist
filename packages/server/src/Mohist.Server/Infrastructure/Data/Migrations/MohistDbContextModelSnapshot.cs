@@ -401,11 +401,20 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimelineSource")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasDefaultValue("")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Source", "Id");
 
                     b.HasIndex("Source", "Id", "DispatchedAt")
                         .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
+
+                    b.HasIndex("TimelineSource", "Time", "Source", "Id")
+                        .HasDatabaseName("IX_EpicEvents_TimelineSource_Time_Source_Id");
 
                     b.HasIndex("Type", "Source", "Id");
 
@@ -459,6 +468,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("strftime('%Y-%m-%dT%H:%M:%S', \"Time\") ||\nsubstr(\n    CASE\n        WHEN instr(substr(\"Time\", 20), '+') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '+') - 1)\n        WHEN instr(substr(\"Time\", 20), '-') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '-') - 1)\n        ELSE ''\n    END || '.0000000',\n    1,\n    8\n) || 'Z'", true);
 
+                    b.Property<string>("TimelineSource")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasDefaultValue("")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -472,6 +487,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("TimeSortKey", "Source", "Id")
                         .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
+
+                    b.HasIndex("TimelineSource", "Time", "Source", "Id")
+                        .HasDatabaseName("IX_IssueEvents_TimelineSource_Time_Source_Id");
 
                     b.HasIndex("Type", "Source", "Id");
 

@@ -58,6 +58,10 @@ function mergeRoutingLineage(
       normalized = { ...normalized, issueNumber }
     }
   }
+  const extensionSessionId = extensions?.sessionid
+  if (isNonEmptyString(extensionSessionId) && normalized.sessionId !== extensionSessionId) {
+    normalized = { ...normalized, sessionId: extensionSessionId }
+  }
   return normalized
 }
 

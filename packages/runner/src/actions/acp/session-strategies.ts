@@ -91,6 +91,7 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       title: context.title,
       issueNumber: context.issueNumber,
       workDir: context.workDir,
+      epicNumber: context.epicNumber,
     }, context.signal)
 
     if (session.runtimeSessionId) {
@@ -116,6 +117,7 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
+      epicNumber: context.epicNumber,
     }, context.signal)
   }
 

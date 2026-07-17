@@ -74,6 +74,7 @@ public class EventStore : IEventStore
             {
                 Id = nextSequence,
                 Source = source,
+                TimelineSource = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
                 Time = envelope.Time,
@@ -93,6 +94,7 @@ public class EventStore : IEventStore
             {
                 Id = nextSequence,
                 Source = source,
+                TimelineSource = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
                 Time = envelope.Time,
@@ -140,13 +142,18 @@ public class EventStore : IEventStore
         var source = IssueEventPersistence.IssueSource(projectId, issueNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.IssueEvents.AsNoTracking()
-            .Where(e => e.Source == source)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
+            .Where(e => e.TimelineSource == source)
             .ToListAsync(ct);
 
-        return rows.Select(ToIssueStored).ToList();
+        return rows.OrderByDescending(e => e.Time)
+            .ThenByDescending(e => e.Source)
+            .ThenByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Time)
+            .ThenBy(e => e.Source)
+            .ThenBy(e => e.Id)
+            .Select(ToIssueStored)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default)
@@ -154,13 +161,18 @@ public class EventStore : IEventStore
         var source = EpicEventPersistence.EpicSource(projectId, epicNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.EpicEvents.AsNoTracking()
-            .Where(e => e.Source == source)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
+            .Where(e => e.TimelineSource == source)
             .ToListAsync(ct);
 
-        return rows.Select(ToEpicStored).ToList();
+        return rows.OrderByDescending(e => e.Time)
+            .ThenByDescending(e => e.Source)
+            .ThenByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Time)
+            .ThenBy(e => e.Source)
+            .ThenBy(e => e.Id)
+            .Select(ToEpicStored)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)

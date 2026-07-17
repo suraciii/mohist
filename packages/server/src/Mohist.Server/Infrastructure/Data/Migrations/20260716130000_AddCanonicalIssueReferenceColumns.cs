@@ -12,6 +12,8 @@ public partial class AddCanonicalIssueReferenceColumns : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql("ALTER TABLE \"IssueEvents\" ADD COLUMN \"TimelineSource\" TEXT NOT NULL DEFAULT '';" );
+        migrationBuilder.Sql("ALTER TABLE \"EpicEvents\" ADD COLUMN \"TimelineSource\" TEXT NOT NULL DEFAULT '';" );
         migrationBuilder.AddColumn<string>(
             name: "ProjectId",
             table: "IssueWorkflowProfiles",

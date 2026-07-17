@@ -118,7 +118,8 @@ public record WorkDispatch(
     /// dispatches. New field; older-field consumers ignore it.
     /// </summary>
     [property: Id(16)] string? AgentSessionId = null,
-    [property: Id(17)] [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null)
+    [property: Id(17)] [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
+    [property: Id(18)] int? EpicNumber = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

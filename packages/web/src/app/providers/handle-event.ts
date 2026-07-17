@@ -167,6 +167,14 @@ function workflowRunHandler(ctx: HandlerContext): void {
   }
 }
 
+function agentSessionHandler(ctx: HandlerContext): void {
+  workflowRunHandler(ctx)
+  const { sessionId } = ctx.parsed as { sessionId?: string }
+  if (typeof sessionId !== 'string' || !sessionId) return
+  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId], exact: true })
+  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId, 'transcript'], exact: true })
+}
+
 function approvalHandler(ctx: HandlerContext): void {
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.StageApprovalRequested) {
     const evt = ctx.parsed as { issueNumber?: number }
@@ -249,9 +257,9 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed]: workflowRunHandler,
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying]: workflowRunHandler,
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: workflowRunHandler,
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: workflowRunHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: agentSessionHandler,
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: agentSessionHandler,
 
   [REVERSE_DNS_EVENT_TYPES.StageApprovalRequested]: approvalHandler,
   [REVERSE_DNS_EVENT_TYPES.StageApprovalResolved]: approvalHandler,

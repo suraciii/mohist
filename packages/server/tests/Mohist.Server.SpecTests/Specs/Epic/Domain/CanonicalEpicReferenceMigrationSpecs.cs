@@ -30,6 +30,9 @@ public sealed class CanonicalEpicReferenceMigrationSpecs
         await using var verify = database.CreateDbContext();
         Assert.Equal(before, await CountOwnersAsync(verify));
         Assert.Equal(historicalBefore, await ReadHistoricalEventAsync(verify));
+        Assert.Equal(
+            new[] { "/mohist/epics/epic_alpha_7:/mohist/projects/proj_alpha/epics/7" },
+            await ReadStringsAsync(verify, "SELECT \"Source\" || ':' || \"TimelineSource\" AS \"Value\" FROM \"EpicEvents\" WHERE \"EventId\" = 'event_legacy'"));
 
         Assert.Equal(
             new[] { "proj_alpha:7", "proj_beta:7" },
