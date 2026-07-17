@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "packages/runner/src/runtime/workspace-registry.ts (phase type + markStuck + load validation + markEligible guard) with new/updated unit tests under packages/runner/tests/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This is the data-model foundation for both spec requirements: the `stuck` phase is what makes resolution (req 1) and persisted survival across restart (req 2) possible. `register()` is intentionally left to set `active` on re-materialize (a re-dispatched run reusing a workflowRunId legitimately restarts the entry); do not change that behavior. Per D1 do NOT evict the entry or move the directory — the stuck phase only ends re-evaluation, the on-disk workspace is untouched."
     },
     {
@@ -44,7 +44,7 @@
       "type": "WRITE",
       "output": "packages/runner/src/runtime/cleanup-loop.ts (evaluateGuards + resolution pass + stuckResolved counter), packages/runner/src/runtime/host.ts (summary log surface), packages/runner/tests/cleanup-loop-guards.spec.ts + support/cleanup-loop-fixture.ts (updated/new specs)",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "The phase transition is the structural warning de-duplication — do NOT add a separate rate-limiter/log-throttle. In normal operation the resolution pass marks the entry stuck before the retention/budget passes re-list eligible, so `safeRemove`'s guard-refusal branch is only reachable in a marker-deleted-mid-tick race (a rare, single extra warning is acceptable). Per design, persistent `deleteDirectory` failure is explicitly out of scope (would need a retry budget); do not conflate it with deterministic guard refusals."
     }
   ]

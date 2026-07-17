@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
       retentionRemoved: 0,
       budgetRemoved: 0,
       guardAborted: 0,
+      stuckResolved: 0,
       workspaceUsageBytes: null,
     },
   }
@@ -139,6 +140,7 @@ function resetState() {
     retentionRemoved: 0,
     budgetRemoved: 0,
     guardAborted: 0,
+    stuckResolved: 0,
     workspaceUsageBytes: null,
   }
 }
@@ -303,6 +305,7 @@ describe("RunnerHost idle-system cleanup", () => {
       retentionRemoved: 1,
       budgetRemoved: 0,
       guardAborted: 0,
+      stuckResolved: 0,
       workspaceUsageBytes: 200_000,
     }
 
@@ -345,6 +348,7 @@ describe("RunnerHost idle-system cleanup", () => {
       retentionRemoved: 0,
       budgetRemoved: 0,
       guardAborted: 0,
+      stuckResolved: 0,
       workspaceUsageBytes: null,
     }
 
@@ -391,6 +395,7 @@ describe("RunnerHost idle-system cleanup", () => {
       retentionRemoved: 1,
       budgetRemoved: 0,
       guardAborted: 0,
+      stuckResolved: 0,
       workspaceUsageBytes: 100_000,
     }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)

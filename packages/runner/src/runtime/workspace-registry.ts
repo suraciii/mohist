@@ -165,14 +165,16 @@ export class WorkspaceRegistry {
   // cleanup loop's resolution pass when a pre-delete guard refuses an
   // `eligible` entry — the entry leaves the eligible set so it is no
   // longer re-evaluated or re-warned on subsequent ticks (the phase
-  // transition is the structural warning de-duplication). Idempotent:
-  // an already-stuck entry is returned unchanged and the on-disk file
-  // is not rewritten. Returns null when no entry exists.
+  // transition is the structural warning de-duplication). Only an
+  // `eligible` entry transitions: an `active` entry is not yet
+  // terminal, and an already-`stuck` entry is a no-op. Idempotent: a
+  // non-eligible entry is returned unchanged and the on-disk file is
+  // not rewritten. Returns null when no entry exists.
   async markStuck(workflowRunId: string): Promise<WorkspaceRegistryEntry | null> {
     this.ensureLoaded()
     const existing = this.entries.get(workflowRunId)
     if (!existing) return null
-    if (existing.phase === "stuck") return { ...existing }
+    if (existing.phase !== "eligible") return { ...existing }
     existing.phase = "stuck"
     await this.persist()
     return { ...existing }

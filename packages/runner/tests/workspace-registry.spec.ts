@@ -330,6 +330,29 @@ describe("WorkspaceRegistry", () => {
     expect(afterRewrite).toEqual(beforeRewrite)
   })
 
+  it("MarkStuck_OnActiveEntry_IsNoOpAndDoesNotPersist", async () => {
+    const now = vi.fn(() => new Date("2026-06-01T00:00:00.000Z"))
+    const registry = new WorkspaceRegistry(root, { now })
+    await registry.load()
+
+    await registry.register({
+      issueNumber: 1,
+      workflowRunId: "wr-1",
+      workspacePath: join(root, "workspaces/issue-1"),
+    })
+
+    const beforeRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+
+    const result = await registry.markStuck("wr-1")
+
+    // Only an `eligible` entry transitions to `stuck`; an `active` entry
+    // (not yet terminal) is returned unchanged and the file is not rewritten.
+    expect(result).toMatchObject({ phase: "active" })
+
+    const afterRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(afterRewrite).toEqual(beforeRewrite)
+  })
+
   it("MarkStuck_OnUnknownRunId_ReturnsNull", async () => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
