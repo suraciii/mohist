@@ -106,9 +106,9 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     expect(Number(probeState.dataVersion)).toBe(Number(probeState.probeVersion))
   })
 
-  it("ProbeTimeoutWithOpencodeProviderError_AppendsProviderDiagnostic", async () => {
+  it("ProbeTimeoutWithRecoverableProviderError_DoesNotAttributeProviderError", async () => {
     useAcpFakeTimers()
-    useAcpProviderDiagnostic(rateLimitDiagnostic())
+    useAcpProviderDiagnostic(contextOverflowDiagnostic())
     const fixture = createFixture("probe-timeout")
 
     const result = await runWithDefaultModelWarning("timeout-session", () => acpAgentAction(fixture.context({
@@ -126,7 +126,7 @@ describe("mohist/acp-agent strategy liveness routing", () => {
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
-    expect(result.message ?? "").toContain("Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded")
+    expect(result.message ?? "").not.toContain("Opencode provider error")
 
     const failed = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -137,9 +137,9 @@ describe("mohist/acp-agent strategy liveness routing", () => {
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
 
-    expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(429)
-    expect((failed?.providerError as Record<string, unknown>)?.errorType).toBe("rate_limit_error")
-    expect(String(terminal?.failureReason)).toContain("Opencode provider error: 429 rate_limit_error")
+    expect(failed?.providerError).toBeUndefined()
+    expect(failed?.failureReason).toBe("probe_timeout")
+    expect(String(terminal?.failureReason)).not.toContain("Opencode provider error")
   })
 
   it("ProbePromptSendRejects_LivenessFailsAsProbeSendFailed_InsteadOfTimingOut", async () => {
@@ -231,17 +231,14 @@ async function runWithDefaultModelWarning<T>(
   }
 }
 
-function rateLimitDiagnostic(): OpencodeProviderErrorDiagnostic {
+function contextOverflowDiagnostic(): OpencodeProviderErrorDiagnostic {
   return {
     sessionId: "fake-session-1",
-    summary: "Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded",
-    providerId: "minimax-coding-plan",
-    modelId: "MiniMax-M3",
-    statusCode: 429,
+    summary: "Opencode provider error: AI_APICallError on openai/gpt-5.6-terra - Your input exceeds the context window of this model. Please adjust your input and try again.",
+    providerId: "openai",
+    modelId: "gpt-5.6-terra",
     errorName: "AI_APICallError",
-    errorType: "rate_limit_error",
-    message: "usage limit exceeded",
-    retryable: true,
-    occurredAt: "2026-06-03T16:49:06.000Z",
+    message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+    occurredAt: "2026-06-30T00:00:00.500Z",
   }
 }
