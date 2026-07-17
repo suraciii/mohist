@@ -1,0 +1,91 @@
+{
+  "project": "mohist-local",
+  "description": "Rewrite the session transcript from a chat-bubble + card-wall UI into a flat single-column timeline with full-width turn dividers, default-collapsed tool-call rows, and merged exploratory-tool group rows (issue #427).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Shared duration derivation + context-group projection guard",
+      "spec": "specs/transcript-context-grouping/spec.md#Consecutive exploratory tool calls collapse into one grouped row",
+      "description": "Add a shared `format-duration.ts` util (`formatElapsed(startedAt, completedAt)` returning null while completedAt is unset, plus `formatDuration(ms)`) that both tool rows and turn dividers will derive from. Fix `projectTurn` (`model/session-transcript-display.ts`) so its context-group flush only wraps runs of >=2 consecutive exploratory calls — a lone exploratory call is pushed as a plain `tool` part — and rename the group summary prefix from \"Gathering context\" to \"Explored\". Delete the duplicate `formatDuration` copies in `ToolCallCard.tsx` and `SessionDetailShell.tsx`, pointing them at the shared util. This is the narrow projection/utility foundation the rendering tasks build on; the data model and event protocol stay unchanged.",
+      "acceptanceCriteria": [
+        "`formatElapsed(startedAt, completedAt)` returns null when completedAt is unset/missing and a formatted duration string otherwise — never NaN or `0s` for missing data (unit test covers both cases).",
+        "Projecting a turn with a single exploratory tool call yields a `tool` part, NOT a `context-group`; >=2 consecutive exploratory calls still yield one `context-group` part (projection unit test covers lone-call, multi-call, and interruption-by-non-exploratory cases).",
+        "The context-group summary prefix is \"Explored\" (e.g. \"Explored · 5 reads · 3 searches · 2 globs\").",
+        "`ToolCallCard.tsx` and `SessionDetailShell.tsx` no longer define their own `formatDuration`; both import the shared util.",
+        "No fields added to `ToolPart`, `SessionTurn`, or any event/protocol type (data model unchanged).",
+        "`npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes with the projection/util unit tests updated (context-grouping + new format-duration tests green)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/widgets/session-transcript/model/format-duration.ts; ≥2-guard + \"Explored\" prefix in projectTurn; deduped duration usage; green unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the change confined to the projection (`session-transcript-display.ts`) and the new util — do not touch rendering components here. The `≥2` guard belongs in the projection because whether something is a group is a property of the part sequence, not of rendering (design Decision 8)."
+    },
+    {
+      "id": "T-002",
+      "title": "Flat single-column timeline container and turn-level structure",
+      "spec": "specs/session-transcript-timeline/spec.md#Transcript renders as a flat single-column timeline",
+      "description": "Rewrite `SessionTranscriptLayout` into a single full-width column: drop the `lg:max-w-4xl` two-column TOC grid, the desktop `TurnTocRail`, and the mobile `TranscriptToolbar` \"Turns\" dropdown (navigation is deferred to #429); retain `CopyFullTextButton`, `useTurnKeyboardNav`, the `turnRefs` map, and the `data-turn-id`/`data-turn-ref` attributes on each turn. Replace `TurnList`'s right-aligned `TurnHeader` with a full-width turn divider bar showing `Turn {ordinal} · {PromptKind label} · {start time}` plus the derived duration when the turn has completed. Rewrite `PromptBlock` from a right-aligned `rounded-2xl` bubble into a full-width collapsed block (blockquote-style; long text stays collapsed by default with its existing expand affordance). Remove the `max-w-[80%]` cap on `AssistantTextPartView` so assistant markdown fills the column. Consolidate the duplicate `KIND_LABELS` maps into one shared map and delete now-unused `TurnToc.tsx`/`TranscriptToolbar.tsx`.",
+      "acceptanceCriteria": [
+        "No `max-width` cap narrows turns, assistant text, or prompts into a centered band; assistant text renders as borderless markdown filling the column with no bubble background/border (spec: session-transcript-timeline, flat-column scenarios).",
+        "Every turn is preceded by a divider bar spanning the full column width, showing the turn ordinal, the prompt-type label, and the start time; a completed turn additionally shows the derived duration, a running turn does not show a finalized duration.",
+        "The user prompt renders aligned to the shared left margin as a full-width block, not right-aligned and not wrapped in a rounded bubble; a long prompt is collapsed by default and expandable to full text.",
+        "`useTurnKeyboardNav`, the `turnRefs` map, and `data-turn-id`/`data-turn-ref` are preserved on each turn; the copy-full-text affordance is retained.",
+        "`SessionDetailShell`'s hosting contract is unchanged — page header, usage summary, recovery bar, follow-up composer, and scroll behavior render unchanged.",
+        "Existing `ui/*.test.tsx` that assert the bubble/centered DOM (e.g. states-and-turns, sticky) are migrated to the timeline DOM; new specs assert the full-width invariant and divider-bar content; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Rewritten SessionTranscriptLayout/TurnList/TurnHeader(→divider)/PromptBlock/AssistantParts; consolidated KIND_LABELS; removed TOC rail+dropdown; migrated + new web tests green.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the shared `formatElapsed` from T-001 for the divider duration. Preserve keyboard nav + turn refs even though the visible TOC is removed — these are the turn-level anchors #429 mounts on (design Decision 2)."
+    },
+    {
+      "id": "T-003",
+      "title": "Default-collapsed tool-call rows with verb-led titles, inline edit stats, whole-row failure, and stable anchors",
+      "spec": "specs/transcript-tool-rows/spec.md#Each tool call renders as a single default-collapsed row",
+      "description": "Rework `ToolRowView` (`ui/tool-views/index.tsx`) into a default-collapsed single row composed of: the existing `ToolStatusDot`, a verb-led title built from status + normalizedName per the design's verb table (Editing/Edited/Failed-to-edit {file}; $ {cmd}; Reading/Read {path}; Searching/Searched {query}; fallback to toolName), key param badges (existing `getToolDisplayArgs`), inline edit file + +N/−M stats, and the derived duration at the right. Typed detail (`BashContentView`/`DiffContentView`/`ReadContentView`/`SearchContentView`/`TodoContentView`/`DelegationContentView`) stays hidden behind the expand chevron. A failed call renders the WHOLE row in a danger style; a running/pending call renders a one-line in-progress state with no live timer. Add `data-tool-call-id` and `data-tool-state` to each row root. Align the older `ToolCallCard.tsx` and the typed content views to the expand-on-demand model and reuse the shared duration util.",
+      "acceptanceCriteria": [
+        "A completed tool call renders on one collapsed line showing a status symbol, a verb-led title, key parameters, and the derived duration; its full input/output detail is hidden until the row is expanded.",
+        "Expanding a row reveals typed detail appropriate to the kind (terminal/command output for bash, inline diff for edit, result summary otherwise).",
+        "An edit tool call shows the changed file path + `+N`/`−M` inline on the collapsed row for a single file; for multiple files it summarizes the count inline with the list available on expand.",
+        "A failed tool call renders its entire row with danger (red) styling recognizable without expanding; a completed call does not receive whole-row danger styling.",
+        "A running/pending tool call renders a single-line in-progress state and does NOT show a continuously updating timer.",
+        "Each tool row carries stable `data-tool-call-id` (tied to its tool call id) and `data-tool-state` attributes that remain unchanged when a call transitions running→completed.",
+        "Tool rows fill the column width with no centered-card `max-width` cap.",
+        "Existing tool specs (tool-labels, file-tools, raw-tool-payload, todo-tools, accessibility, shared-tool-semantics) are migrated to the row DOM; new specs cover the verb-led title, inline +N/−M, whole-row red, and stable identity; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reworked ToolRowView + typed content views + aligned ToolCallCard; verb-title table; data-tool-call-id/data-tool-state anchors; migrated + new web tests green.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Verb-led title is a new small mapping table in the row layer only — leave the noun-based `DISPLAY_TITLES` used by detail views untouched (design Decision 5). Reuse existing extractors (`getToolLabel`, `getFilePathFromInput`, `parseEditWriteChanges`, `parsePatchOperations`) for the recognizable target and inline stats."
+    },
+    {
+      "id": "T-004",
+      "title": "Merged exploratory-tool group rows",
+      "spec": "specs/transcript-context-grouping/spec.md#The grouped row summarizes the batch on its collapsed line",
+      "description": "Rework `ContextGroupView` (`ui/tool-views/index.tsx`) into a one-line collapsed grouped row whose summary reuses the projection-built title (per-type counts with the \"Explored\" prefix from T-001). Expanding the group reveals the individual exploratory tool calls, each rendered as a `ToolRowView` (from T-003) with the same status/title/param/duration/expand-to-detail behavior. A group containing at least one failed call signals the failure on its collapsed summary line (danger tone / failed label) without requiring expansion. This relies on the T-001 `≥2` projection guard so a lone exploratory call already renders as a standard row and only true runs are grouped.",
+      "acceptanceCriteria": [
+        "A run of >=2 consecutive exploratory tool calls (read/grep/glob/search) renders as a single expandable grouped row, not one row per call; a run interrupted by a non-exploratory call forms separate grouped rows with the interrupting call on its own standard row.",
+        "The collapsed grouped-row summary shows per-type counts of the merged calls (e.g. \"Explored · 5 reads · 3 searches · 2 globs\").",
+        "Expanding a grouped row reveals each individual exploratory call as a tool row that behaves the same as a standalone tool row, including expand-to-detail.",
+        "A grouped row containing a failed call signals the failure on the collapsed summary line (danger treatment or failed label) without requiring expansion.",
+        "Existing context-tools specs are migrated to the grouped-row DOM; new specs cover the collapsed summary counts and the failure-on-summary behavior; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reworked ContextGroupView as a one-line grouped row; migrated + new web tests green.",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Do not re-implement grouping logic in the view — the part shape (group vs lone tool) is already correct from T-001's projection guard; this task only changes how a `context-group` part renders (design Decisions 8)."
+    }
+  ]
+}
