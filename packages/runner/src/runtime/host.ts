@@ -354,9 +354,9 @@ export class RunnerHost {
     try {
       const policy = await this.connection.fetchConfig(signal)
       const result = await this.cleanupLoop.runOnce(policy, signal)
-      if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0) {
+      if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0 || result.stuckResolved > 0) {
         console.log(
-          `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} usage=${result.workspaceUsageBytes ?? "unknown"}`,
+          `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? "unknown"}`,
         )
       }
     } catch (error) {
