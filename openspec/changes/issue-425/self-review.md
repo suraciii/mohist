@@ -4,7 +4,7 @@
 
 ## Repaired Items
 
-None. All artifacts were reviewed against the issue and each other; no safe in-place repairs were required.
+None. The built candidate was reviewed against the issue, the spec, the design, and the task graph; no safe in-place repairs were required.
 
 ## Blocking Items
 
@@ -35,8 +35,9 @@ None.
 
 ## Notes
 
-- Cross-document consistency confirmed: the capability name `web-hosting-fallback` is identical across `proposal.md` (Capabilities), `specs/web-hosting-fallback/spec.md`, `design.md`, and `tasks.json`.
-- Design Decision 1 (`app.MapFallback("{*path}", handler)` dropping the implicit `:nonfile` constraint) was verified against ASP.NET Core's documented behavior; it matches the issue's "Fix Shape" and Non-Goals (no session-naming change, no frontend-route change, no API change).
-- All referenced existing test methods (`WebRoot_WhenConfigured_ServesIndexAndSpaFallback`, `ApiFallback_WhenUnknownApiPath_ReturnsNotFound`, `AgentStatus_OnLegacyRoute_ReturnsNotFound`, `OtlpRoutesIntegrationSpecs`, `OtelPortIsolationMiddlewareSpecs`) exist in the repo and the change site (`MohistWebRegistration.cs`) matches the design's single-line claim.
+- Implementation verified against the built candidate, not just the plan artifacts. `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistWebRegistration.cs:26` registers `app.MapFallback("{*path:notstaticfile}", async context => …)`. This drops the implicit `:nonfile` constraint (so dotted session names reach the handler) but adds a `notstaticfile` constraint so paths that resolve to a real static file never match the fallback — letting `UseStaticFiles` keep serving real assets unchanged. The handler body is unchanged: the `/api` and `/otel/v1` 404 carve-outs and the `index.html` dispatch are intact.
+- Deviation from design Decision 1, with reason. The design proposed a plain `app.MapFallback("{*path}", handler)`. Verified empirically (pipeline probing in the integration fixture) that a blanket catch-all is insufficient: in this hosting pipeline `UseStaticFiles` defers when the fallback endpoint is selected, so a catch-all would swallow real static assets (e.g. `/assets/app.css` returns `index.html` instead of `text/css`), breaking the issue's "real static assets unchanged" criterion. The `:nonfile` default is what currently lets assets reach `UseStaticFiles`. The constraint approach achieves the design's stated goal — "every request that does not resolve to a real static file is served the entry page, regardless of dots" — generally (any dotted frontend route, not just the session route the design's rejected per-route mapping would cover) while preserving full `UseStaticFiles` behavior (content types, range, etag) for assets. The constraint (`NotStaticFileConstraint`, `Infrastructure/Hosting/NotStaticFileConstraint.cs`) consults the same `IWebContentProvider.Files` used by `UseStaticFiles`, so the two agree on what is a real file; it is registered via `AddRouting` in `ConfigureMohistServices`.
+- Spec coverage verified. `WebRoot_WhenConfigured_ServesIndexAndSpaFallback` now also asserts the dotted session name `/issues/12/workflow/sessions/T-001.1` serves the entry page. Sibling facts assert `/otel/v1/traces` 404s, a real static asset (`/assets/app.css`) is served with `text/css` ahead of the fallback, and a missing file-like path (`/assets/missing.js`) falls back to the entry page. The unknown-`/api` 404 stays covered by `ApiFallback_WhenUnknownApiPath_ReturnsNotFound`. `InMemoryWebContentProvider` seeds the `assets/app.css` sample asset.
+- Cross-document consistency confirmed: the capability name `web-hosting-fallback` is identical across `proposal.md` (Capabilities), `specs/web-hosting-fallback/spec.md`, `design.md`, and `tasks.json`. The spec's requirements are satisfied by the built behavior; the design's mechanism (Decision 1) is superseded by the constraint mechanism described above, which the design's own goal ("not resolve to a real static file") implies.
 
 <promise>PASS</promise>
