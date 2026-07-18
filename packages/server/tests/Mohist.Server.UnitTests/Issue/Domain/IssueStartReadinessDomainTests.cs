@@ -138,14 +138,30 @@ public class IssueStartReadinessDomainTests
     }
 
     [Fact]
-    public void StartBlocker_ReadyParent_ReturnsParentHasChildrenBeforePrerequisites()
+    public void StartBlocker_ReadyParent_ReturnsWaitingFor_WhenPrerequisiteNotDelivered()
     {
+        // issue-419 T-002: starting a parent now triggers composite
+        // advancement instead of returning a ParentHasChildren blocker.
+        // The parent still honors normal start readiness (draft and
+        // prerequisite gates); the parent-only path on the grain
+        // fans out to children after StartBlocker returns null.
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false, repositoryRef: "main");
         issue.AddPrerequisite(7);
 
         var blocker = issue.StartBlocker(new HashSet<int> { 7 }, hasChildren: true);
 
-        Assert.IsType<IssueStartBlocker.ParentHasChildren>(blocker);
+        var waiting = Assert.IsType<IssueStartBlocker.WaitingFor>(blocker);
+        Assert.Equal(7, waiting.PrerequisiteNumber);
+    }
+
+    [Fact]
+    public void StartBlocker_ReadyParent_NoPrereqs_ReturnsNull_EvenWithChildren()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false, repositoryRef: "main");
+
+        var blocker = issue.StartBlocker(new HashSet<int>(), hasChildren: true);
+
+        Assert.Null(blocker);
     }
 
     [Fact]

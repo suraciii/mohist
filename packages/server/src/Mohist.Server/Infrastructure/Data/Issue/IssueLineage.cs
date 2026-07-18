@@ -14,7 +14,8 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 /// stay in sync with <c>design/event-protocol.md</c>. The user-visible
 /// issue number is stamped under the protocol name <c>issue</c>. The current
 /// Epic number is stamped under <c>epic</c>; when it is null, the key is
-/// omitted entirely.
+/// omitted entirely. The parent issue number is stamped under <c>parent</c>;
+/// when the issue has no parent, the key is omitted entirely.
 /// </remarks>
 public static class IssueLineage
 {
@@ -22,8 +23,9 @@ public static class IssueLineage
     /// Build the <c>extensions</c> dictionary for an issue event. Always
     /// stamps <c>projectid</c> and <c>issue</c> (the issue number).
     /// Additionally stamps <c>epic</c> when
-    /// <see cref="DomainIssue.EpicNumber"/> is non-null; absent affiliation
-    /// is omitted, never an empty string.
+    /// <see cref="DomainIssue.EpicNumber"/> is non-null and <c>parent</c>
+    /// when <see cref="DomainIssue.ParentIssueNumber"/> is non-null;
+    /// absent affiliation is omitted, never an empty string.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildExtensions(DomainIssue state)
     {
@@ -37,6 +39,10 @@ public static class IssueLineage
         if (state.EpicNumber is > 0)
         {
             extensions[EventCatalog.Lineage.Epic] = state.EpicNumber.Value.ToString();
+        }
+        if (state.ParentIssueNumber is > 0)
+        {
+            extensions[EventCatalog.Lineage.Parent] = state.ParentIssueNumber.Value.ToString();
         }
 
         return extensions;

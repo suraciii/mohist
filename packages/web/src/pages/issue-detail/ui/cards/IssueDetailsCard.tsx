@@ -42,7 +42,15 @@ export function IssueDetailsCard({ issue, unframed = false }: IssueDetailsCardPr
           <div className="flex min-w-0 justify-between gap-3" data-testid="child-issues-metadata-row">
             <dt className="text-muted-foreground">Parent Issue</dt>
             <dd className="min-w-0 text-foreground font-medium text-right">
-              {issue.childIssuesSummary.count} child issue{issue.childIssuesSummary.count === 1 ? '' : 's'}
+              is a parent ({issue.childIssuesSummary.count} child issue{issue.childIssuesSummary.count === 1 ? '' : 's'})
+            </dd>
+          </div>
+        )}
+        {issue.childIssuesSummary?.hasChildren && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="child-issues-progress-row">
+            <dt className="text-muted-foreground">Children</dt>
+            <dd className="min-w-0 text-foreground font-medium text-right">
+              {issue.childIssuesSummary.doneCount} done / {issue.childIssuesSummary.inProgressCount} in-progress / {issue.childIssuesSummary.cancelledCount} cancelled / {issue.childIssuesSummary.backlogCount} backlog / {issue.childIssuesSummary.count} total
             </dd>
           </div>
         )}

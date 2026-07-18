@@ -179,6 +179,78 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
+    public async Task RenderTable_IssueShow_RendersParentReferenceAndChildProgress()
+    {
+        var data = JsonNode.Parse("""
+            {
+              "number": 200,
+              "title": "Composite parent",
+              "workflowStage": "build",
+              "status": "inProgress",
+              "priority": "p1",
+              "projectName": "mohist-local",
+              "updatedAt": "2026-06-11T08:34:11.158Z",
+              "parentIssueRef": null,
+              "childIssuesSummary": {
+                "hasChildren": true,
+                "count": 4,
+                "backlogCount": 1,
+                "inProgressCount": 1,
+                "doneCount": 2,
+                "cancelledCount": 0
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            RejectingHttpMessageHandler.CreateClient(),
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+
+        var text = output.ToString();
+        Assert.Contains("parent:   is a parent (4 child issues)", text);
+        Assert.Contains("children: 2 done / 1 in-progress / 0 cancelled / 1 backlog / 4 total", text);
+    }
+
+    [Fact]
+    public async Task RenderTable_IssueShow_RendersParentIssueReferenceForChild()
+    {
+        var data = JsonNode.Parse("""
+            {
+              "number": 201,
+              "title": "Child issue",
+              "workflowStage": "plan",
+              "status": "backlog",
+              "priority": "p2",
+              "projectName": "mohist-local",
+              "updatedAt": "2026-06-11T08:34:11.158Z",
+              "parentIssueRef": { "number": 200, "title": "Composite parent" },
+              "childIssuesSummary": null
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            RejectingHttpMessageHandler.CreateClient(),
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.IssueShow);
+
+        var text = output.ToString();
+        Assert.Contains("parent:   #200 Composite parent", text);
+        Assert.DoesNotContain("children:", text);
+        Assert.DoesNotContain("is a parent", text);
+    }
+
+    [Fact]
     public async Task RenderTable_WorkflowStatus_SummarizesCurrentStageTaskStatesAndWaiting()
     {
         var data = JsonNode.Parse("""

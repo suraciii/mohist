@@ -1,0 +1,108 @@
+{
+  "project": "mohist-local",
+  "description": "Make `mo issue start <parent>` drive composite advancement (parallel child fan-out, auto-continuation on child terminal/reopen, parent never owns a workflow run) and derive the parent's status from its children with parent-aware close/reopen/archive cascade — Issue #419.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Parent-only aggregate transitions for composite status + `parent` CloudEvent lineage stamping",
+      "spec": "",
+      "description": "Add the parent-only aggregate transitions and events that the rest of the change will call, and extend CloudEvent lineage with a `parent` routing key. Covers the four-state aggregation machine (MarkCompositeStarted / MarkCompositeDone / MarkCompositeCancelled / ReopenComposite), a pure decision method (RecomputeCompositeStatus), the corresponding events (IssueCompositeStarted, IssueCompositeStatusChanged), and a `parent = <parentIssueNumber>` lineage stamp mirroring the existing `epic` stamp. No grain/API wiring yet; the `ParentHasChildren` blocker stays in place until T-002, so existing behavior is unchanged.",
+      "acceptanceCriteria": [
+        "`Issue.MarkCompositeStarted()` transitions Backlog → InProgress without minting a `WorkflowRunId`, without setting `_hasWorkflowStarted`, without touching `_repositoryBindingRevision`; records `IssueCompositeStarted`; no-ops when the issue is already `InProgress`.",
+        "`Issue.MarkCompositeDone()` and `Issue.MarkCompositeCancelled()` transition per the four-state aggregation table (Done: all children terminal with ≥1 Done; Cancelled: all children Cancelled), set `_completedAt` on Done, and record `IssueCompositeStatusChanged(previous, new)`; each no-ops when already at the target state and throws on an empty children snapshot so a last-detach race cannot leave a non-parent in a composite state.",
+        "`Issue.ReopenComposite()` transitions Cancelled → Backlog bypassing the repository-existence check (the parent has no executable target); records `IssueCompositeStatusChanged`.",
+        "`Issue.RecomputeCompositeStatus(childrenSnapshot)` is a pure decision method returning the target `IssueStatus`; throws on an empty snapshot; the four spec scenarios (all-Backlog→Backlog, any-running→InProgress, all-terminal-with-≥1-Done→Done, all-Cancelled→Cancelled, mixed-Done/Cancelled→Done) are covered by unit tests.",
+        "`IssueEvent` union includes `IssueCompositeStarted` and `IssueCompositeStatusChanged`; both are serialized via `IssueEventSerializer`, listed in `EventCatalog.ReverseDns`, and projected by `ProjectEventFeedAssembler`.",
+        "`IssueLineage.BuildExtensions` stamps `parent = <parentIssueNumber>` whenever `state.ParentIssueNumber` is non-null, mirroring how `epic` is stamped; existing keys (`projectid`, `issue`, `epic`) are unchanged.",
+        "`CloudEventLineage.TryReadParent(extensions, out int parentNumber)` returns true when the key is present and parses to a positive int; false otherwise; handlers that ignore unknown extension keys are unaffected.",
+        "Domain unit tests cover every transition (success, idempotent no-op, empty-snapshot throw, wrong-source-state throw) and the decision method's full four-state table; lineage unit tests verify the `parent` key round-trips; a regression test confirms existing issue events still serialize/deserialize.",
+        "`npm test` (server, `dotnet test Mohist.sln`) is green; no production code path outside the Issue domain and lineage helpers is modified.",
+        "Existing behavior is unchanged: `mo issue start <parent>` still returns the `is_parent` blocker (the blocker is removed in T-002)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New parent-only transitions on the Issue aggregate (`Issue.Transitions.cs`), new events on `IssueEvent` + serializer/catalog entries, extended `IssueLineage.BuildExtensions` + `CloudEventLineage.TryReadParent`; domain + lineage unit tests green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the foundational vocabulary task — purely additive, no caller yet, no behavior change. The empty-snapshot throw is the guard against a last-detach race leaving a non-parent in a composite state (design D3). The `parent` lineage stamp avoids a per-event DB lookup in the recompute handlers (design D4). Do NOT add `Close(childrenSnapshot, reason)` or `ArchiveForced` here — those belong to T-003 with the lifecycle grain/API wiring that calls them. `ReopenComposite` is added here because the same four-state machine needs it; the grain entry that calls it is T-003."
+    },
+    {
+      "id": "T-002",
+      "title": "Composite advancement end-to-end: start parent, fan out children, recompute status, durable handlers",
+      "spec": "specs/compound-advancement/spec.md#requirement-starting-a-parent-issue-shall-trigger-composite-advancement",
+      "description": "Wire the parent-only transitions from T-001 into a working composite-advancement pipeline. Removes the `ParentHasChildren` start blocker; branches inside `IssueGrain.StartWorkAsync` to a `StartCompositeAsync` path that fans out startable children in parallel and marks the parent InProgress without a workflow run. Adds `IIssueGrain.RecomputeCompositeStatusAsync` (load fresh children snapshot → decide via `RecomputeCompositeStatus` → apply transition if needed → fan-out startable children) and four durable handlers that dispatch recompute on child-started, child-terminal (completed+cancelled), child-reopened, and parent-changed events. Satisfies the full compound-advancement capability and the bulk of parent-status-aggregation (status derivation table, idempotent recompute, detach recompute, child-reopen → parent-back-to-in-progress).",
+      "acceptanceCriteria": [
+        "`mo issue start <parent>` succeeds where it previously returned the `is_parent` blocker; the `IssueStartBlocker.ParentHasChildren` variant is removed; `IssueRoutes.Lifecycle.cs:36-41` no longer maps an `is_parent` code; `GetStartReadinessAsync` and `IssueQuerier.ComputeBlockerForReadModel` stop returning the variant.",
+        "Starting a parent with three startable children (Backlog, not draft, prerequisites Done, repository declared) starts each child's workflow run in parallel via `Task.WhenAll(childGrain.StartWorkAsync())`; the parent's `WorkflowRunId` remains null at every observation; the parent's status becomes InProgress via `MarkCompositeStarted`.",
+        "Starting a parent with zero currently-startable children still succeeds: parent enters InProgress via aggregation, no child starts, no error is surfaced; the next recompute (when a blocker clears) picks up the now-startable children.",
+        "Starting an issue that has zero children runs the existing per-issue start path unchanged and composite advancement does not engage.",
+        "Composite advancement skips children that are draft, have undelivered prerequisites, or whose target repository is no longer declared — without aborting sibling starts; the failed/skipped child remains Backlog and the parent start still succeeds.",
+        "Per-child runner-dispatch capacity is not bypassed: with one free runner slot and three startable children, exactly one child starts, the other two remain Backlog, and the parent still enters InProgress; the next recompute retries the waiting children.",
+        "`IIssueGrain.RecomputeCompositeStatusAsync()` is idempotent: redelivery converges the parent to the same status, emits no duplicate `IssueCompositeStatusChanged` events for the same transition, and mutates no children.",
+        "Durable handlers are wired for `com.mohist.issue.work-started`, `com.mohist.issue.completed`, `com.mohist.issue.cancelled`, `com.mohist.issue.reopened`, and `com.mohist.issue.parent-changed`. Each reads the `parent` lineage extension (T-001) and dispatches `RecomputeCompositeStatusAsync` to the parent grain (or both previous and new parent on `parent-changed`). Handlers without a `parent` extension no-op.",
+        "Auto-continuation: when a child completes/cancels, the parent re-evaluates and starts any newly-unlocked children (e.g. a sibling whose prerequisite was the now-completed child). When a child is reopened, a Done parent auto-flips back to InProgress. When a child is attached or detached, both the previous and new parent recompute.",
+        "Status aggregation matches the four-state table: parent stays Backlog when no child has begun work; flips to InProgress when any child starts; flips to Done when all children are terminal with ≥1 Done; flips to Cancelled when all children are Cancelled; mixed Done/Cancelled produces Done, not Cancelled.",
+        "A Done parent returns to InProgress when any child is reopened (Done or Cancelled child); a Cancelled parent is NOT affected by a child reopen (the user must explicitly reopen the parent).",
+        "Detaching the last child reverts the parent to a normal issue: `mo issue start` on it starts its own workflow run, and subsequent aggregate transitions throw on the now-empty snapshot.",
+        "Epic compatibility is verified (not implemented): a parent linked to a running Epic is advanced by the Epic's existing `TryStartFromEpicAsync`, which triggers composite advancement; the parent's aggregated Done counts toward Epic auto-mark-done. No Epic domain/grain/handler code is modified.",
+        "Manual single-child start continues to work before, during, and after composite advancement without conflict.",
+        "Domain unit tests (T-001) + grain spec tests (start fan-out, recompute idempotency, fan-out failure isolation, restart recompute) + handler spec tests (each of the five event types dispatches recompute to the right parent, no-op without `parent` extension) + API spec tests (start succeeds where it previously returned `is_parent`) are all green.",
+        "`npm test` (server) is green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Removed `IssueStartBlocker.ParentHasChildren`; new `StartCompositeAsync` branch in `IssueGrain.StartWorkAsync`; new `IIssueGrain.RecomputeCompositeStatusAsync`; new `IssueQuerier.ListChildrenForCompositeAsync`; new durable handlers in `Events/Subscriptions/` (child-started, child-terminal, child-reopened, parent-changed); updated API start route; grain + handler + API spec tests green.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1 (recompute on IssueGrain, not a new process manager), D2 (branch inside StartWorkAsync, drop the blocker), D5 (one handler per triggering event), D6 (load-fresh-decide-apply idempotent recompute). The recompute method orders save-before-fan-out so an activation loss between status change and fan-out is recovered by the next recompute (design risk note). The fan-out reuses each child's existing `StartWorkAsync`, which already goes through runner capacity admission — this satisfies the 'do not bypass concurrency' acceptance without introducing a new project-wide cap (design D10). Spec coverage: full compound-advancement spec + parent-status-aggregation requirements 1, 5, 6, 7. T-003 owns parent-status-aggregation requirements 2, 3, 4 (close/reopen/archive lifecycle)."
+    },
+    {
+      "id": "T-003",
+      "title": "Parent lifecycle rules: close requires all-terminal, reopen bypasses coordinator, archive cascade",
+      "spec": "specs/parent-status-aggregation/spec.md#requirement-closing-a-parent-shall-require-all-children-to-be-terminal",
+      "description": "Close the parent-aware lifecycle holes. Adds `Issue.Close(childrenSnapshot, reason)` that throws a typed `IssueParentHasNonTerminalChildrenException` when any child is non-terminal (no cascade). Adds `Issue.ArchiveForced()` (bypasses the Done-only archive guard, callable only from a new `ArchiveForParentCascadeAsync` grain entry) so Cancelled children can be archived by the cascade. Wires parent-aware `/close` and `/reopen` API routes that bypass `IIssueRepositoryCoordinatorGrain` (the parent has no repository binding at stake) and a parent-aware `/archive` route that synchronously cascades to every non-archived child.",
+      "acceptanceCriteria": [
+        "`mo issue close <parent>` is rejected with typed error code `parent_has_non_terminal_children` when any child is non-terminal (Backlog/InProgress); the rejection originates from `Issue.Close(childrenSnapshot, reason)` throwing `IssueParentHasNonTerminalChildrenException`; no child is cancelled as a side effect (no cascade).",
+        "`mo issue close <parent>` is accepted by the parent-aware guard when all children are terminal (subject to the normal 'cannot close Done or archived' rule applied to the parent's current aggregated status).",
+        "`mo issue reopen <parent>` on a Cancelled parent transitions it to Backlog via `Issue.ReopenComposite()` (added in T-001); the operation does NOT flow through `IIssueRepositoryCoordinatorGrain` and does NOT mutate any child.",
+        "After reopening, the user can attach new children and re-invoke composite advancement.",
+        "`mo issue archive <parent>` archives the parent and synchronously cascades to every non-archived child via `childGrain.ArchiveForParentCascadeAsync()`, regardless of whether the child is Done or Cancelled; a child that is already archived remains archived (idempotent).",
+        "`Issue.ArchiveForced()` is callable only from `ArchiveForParentCascadeAsync` (validated by test); direct `mo issue archive <non-parent>` still requires Done.",
+        "API routes for `/close`, `/reopen`, `/archive` detect parent state via the read model and branch to the parent-aware grain entries (`CloseCompositeAsync`, `ReopenCompositeAsync`, cascade-aware `ArchiveAsync`); non-parent issues continue to use the existing paths (including coordinator-routed reopen) unchanged.",
+        "Detach recompute (covered by T-002's `IssueCompositeParentChangedHandler`) is verified end-to-end here: detaching a child from a Done parent keeps the parent Done if remaining children still satisfy the aggregation rule; detaching the last child reverts the parent to a normal issue.",
+        "Domain unit tests cover `Close(childrenSnapshot, reason)` accept/reject paths, `ArchiveForced()` setting `_archivedAt` from any state, and the lifecycle branches; grain spec tests cover the parent-aware close/reopen/archive grain entries and the cascade order; API spec tests cover the typed `parent_has_non_terminal_children` rejection and the cascade success path.",
+        "`npm test` (server) is green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `Issue.Close(childrenSnapshot, reason)` overload + `IssueParentHasNonTerminalChildrenException`; new `Issue.ArchiveForced()` transition; new `IIssueGrain.CloseCompositeAsync` / `ReopenCompositeAsync` / cascade-aware `ArchiveAsync` / `ArchiveForParentCascadeAsync` entries; parent-aware branching in `IssueRoutes.Lifecycle.cs`; domain + grain + API spec tests green.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Design D7 (archive cascade is synchronous parent-grain loop; `ArchiveForced` is the narrow escape hatch around the Done-only guard needed for Cancelled children) and D8 (parent close/reopen bypass the coordinator because no repository binding is at stake). The dependency on T-002 is for file overlap in `IssueRoutes.Lifecycle.cs` and `IssueGrain.cs`, and because the detach-recompute path is owned by T-002's `IssueCompositeParentChangedHandler` — this task verifies it end-to-end. Spec coverage: parent-status-aggregation requirements 2 (close), 3 (reopen), 4 (archive cascade), 5 (detach recompute, verification only)."
+    },
+    {
+      "id": "T-004",
+      "title": "Project aggregated status and child progress on CLI and Web detail surfaces",
+      "spec": "",
+      "description": "Extend `ChildIssuesSummary` with per-status counts (Backlog/InProgress/Done/Cancelled + total) so the parent's detail page can render 'X/Y done, Z blocked'. Update `IssueQuerier.EnrichAsync` to compute the per-status breakdown alongside the existing child-count query. Render the aggregated status (already stored on `IssueRow.Status` via T-002's transitions) and the child progress summary on `mo issue show <parent>` and on the Web issue detail page. No board-card progress badges or composite-status UI polish (out of scope per design).",
+      "acceptanceCriteria": [
+        "`ChildIssuesSummary` carries per-status counts (Backlog, InProgress, Done, Cancelled) plus the existing total; `IssueQuerier.EnrichAsync` computes them in the same `GroupBy` pass that today produces the count, with no additional DB round-trip per parent.",
+        "Reading a parent issue's detail returns the aggregated `Status` (Backlog/InProgress/Done/Cancelled, set by T-002's transitions and persisted on `IssueRow.Status`) and the extended child summary; reading a child issue's detail returns its parent reference unchanged.",
+        "`mo issue show <parent>` renders the aggregated status and a child progress line (e.g. 'children: 2 done / 1 in-progress / 0 cancelled / 3 total'); the existing 'is a parent' indicator from #418 is preserved.",
+        "The Web issue detail page renders the aggregated status and the child progress summary; no board-card progress badge, blocked indicator, or composite-status UI is added (deferred per design).",
+        "Querier spec tests assert the per-status breakdown for a parent with children in mixed states; CLI tests assert the rendered output; Web tests assert the detail rendering.",
+        "`npm test` (server) is green; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended `ChildIssuesSummary` with per-status counts; updated `IssueQuerier.EnrichAsync`; CLI detail rendering on `mo issue show`; minimal Web detail rendering; querier + CLI + Web tests green.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Design D9. Independent of T-003 — the aggregated status is already meaningful after T-002 lands; the lifecycle rules in T-003 are about how the user interacts with the parent, not about what the read model projects. Open question 4 from the design (per-status counts vs done/total/blocked) is resolved as per-status counts — cheap in the existing query and future-proof for any Web badge. The Hermes notification dispatcher's handling of `IssueCompositeStatusChanged` (open question 2) is NOT in this task — it is a Web UX decision deferred to the integrate stage."
+    }
+  ]
+}

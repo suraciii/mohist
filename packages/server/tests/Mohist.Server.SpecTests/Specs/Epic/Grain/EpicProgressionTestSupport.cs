@@ -204,13 +204,18 @@ public abstract class EpicProgressionTestSupport
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();
+        public Task CloseCompositeAsync() => throw new NotSupportedException();
+        public Task ReopenCompositeAsync() => throw new NotSupportedException();
         public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task ArchiveForParentCascadeAsync() => throw new NotSupportedException();
         public Task UnarchiveAsync() => throw new NotSupportedException();
         public Task ReopenAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
         public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
+        public Task StartCompositeAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();

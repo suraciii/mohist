@@ -71,6 +71,10 @@ export interface IssueParentRef {
 export interface ChildIssuesSummary {
   hasChildren: boolean
   count: number
+  backlogCount: number
+  inProgressCount: number
+  doneCount: number
+  cancelledCount: number
 }
 
 export type IssueStartBlocker =

@@ -51,8 +51,32 @@ describe('IssueDetailPage parent-child relationship display', () => {
   })
 
   it('renders the parent indicator and child count in the details rail', async () => {
-    mockIssue(makeIssue({ childIssuesSummary: { hasChildren: true, count: 3 } }))
+    mockIssue(makeIssue({
+      childIssuesSummary: {
+        hasChildren: true,
+        count: 3,
+        backlogCount: 0,
+        inProgressCount: 1,
+        doneCount: 2,
+        cancelledCount: 0,
+      },
+    }))
     renderPage()
-    expect(await waitFor(() => screen.getByTestId('child-issues-metadata-row'))).toHaveTextContent('3 child issues')
+    expect(await waitFor(() => screen.getByTestId('child-issues-metadata-row'))).toHaveTextContent('is a parent (3 child issues)')
+  })
+
+  it('renders the child progress summary in the details rail', async () => {
+    mockIssue(makeIssue({
+      childIssuesSummary: {
+        hasChildren: true,
+        count: 4,
+        backlogCount: 1,
+        inProgressCount: 1,
+        doneCount: 2,
+        cancelledCount: 0,
+      },
+    }))
+    renderPage()
+    expect(await waitFor(() => screen.getByTestId('child-issues-progress-row'))).toHaveTextContent('2 done / 1 in-progress / 0 cancelled / 1 backlog / 4 total')
   })
 })

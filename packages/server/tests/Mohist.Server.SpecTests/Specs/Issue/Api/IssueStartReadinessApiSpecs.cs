@@ -261,8 +261,11 @@ public class IssueStartReadinessApiSpecs
     }
 
     [Fact]
-    public async Task StartIssue_OnParentWithChildren_ReturnsParentBlockerCode()
+    public async Task StartIssue_OnParentWithChildren_TriggersCompositeAdvancement()
     {
+        // issue-419 T-002: starting a parent no longer returns the
+        // "is_parent" blocker. Instead the start succeeds; the parent's
+        // aggregated status is recomputed from its children.
         var project = await CreateProjectAsync();
         var parent = await CreateIssueAsync(project.Id, "Parent", isDraft: false);
         var child = await CreateIssueAsync(project.Id, "Child", isDraft: false);
@@ -273,15 +276,11 @@ public class IssueStartReadinessApiSpecs
             JsonOptions);
         Assert.Equal(HttpStatusCode.OK, attachResponse.StatusCode);
 
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope>(JsonOptions);
-        Assert.NotNull(envelope);
-        Assert.False(envelope!.Success);
-        Assert.Equal("is_parent", envelope.Code);
-        var details = (JsonElement)envelope.Details!;
-        Assert.Equal("parent-has-children", details.GetProperty("blocker").GetProperty("kind").GetString());
+        using var startResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
+        Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
 
+        // Detaching the child reverts the parent to a normal issue;
+        // starting it again starts its own workflow run.
         using var detachResponse = await _client.PatchAsync(
             $"/api/projects/{project.Id}/issues/{child.Number}",
             JsonContent.Create(
@@ -289,8 +288,8 @@ public class IssueStartReadinessApiSpecs
                 options: new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Assert.Equal(HttpStatusCode.OK, detachResponse.StatusCode);
 
-        using var startResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
-        Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
+        using var startAgainResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
+        Assert.Equal(HttpStatusCode.OK, startAgainResponse.StatusCode);
     }
 
     private async Task<ProjectResponse> CreateProjectAsync()

@@ -72,6 +72,29 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"profile:  {workflowProfileId}");
         if (!string.IsNullOrEmpty(body))
             _out.WriteLine($"body:     {Truncate(body, BodySoftCap)}");
+        var parentRef = data["parentIssueRef"] as JsonObject;
+        if (parentRef is not null)
+        {
+            var parentNumber = NumberOf(parentRef, "number");
+            var parentTitle = StringOf(parentRef, "title");
+            _out.WriteLine($"parent:   #{parentNumber} {parentTitle}");
+        }
+        var childSummary = data["childIssuesSummary"] as JsonObject;
+        if (childSummary is not null)
+        {
+            var hasChildren = BoolOf(childSummary, "hasChildren");
+            if (hasChildren)
+            {
+                var countText = NumberOf(childSummary, "count");
+                var count = int.TryParse(countText, out var parsedCount) ? parsedCount : 0;
+                _out.WriteLine($"parent:   is a parent ({count} child issue{(count == 1 ? "" : "s")})");
+                var backlog = NumberOf(childSummary, "backlogCount");
+                var inProgress = NumberOf(childSummary, "inProgressCount");
+                var done = NumberOf(childSummary, "doneCount");
+                var cancelled = NumberOf(childSummary, "cancelledCount");
+                _out.WriteLine($"children: {done} done / {inProgress} in-progress / {cancelled} cancelled / {backlog} backlog / {count} total");
+            }
+        }
         _out.WriteLine($"state:    {FormatIssueState(data)}");
     }
 

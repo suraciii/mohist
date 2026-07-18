@@ -16,7 +16,9 @@ public union IssueEvent(
     IssueArchived,
     IssueUnarchived,
     IssueReopened,
-    IssueRepositoryChanged);
+    IssueRepositoryChanged,
+    IssueCompositeStarted,
+    IssueCompositeStatusChanged);
 
 public sealed record IssueCreated(
     string Title,
@@ -96,3 +98,22 @@ public sealed record IssueArchived;
 public sealed record IssueUnarchived;
 
 public sealed record IssueReopened;
+
+/// <summary>
+/// Emitted when a parent issue transitions from Backlog to InProgress via
+/// composite advancement (start of its children). The parent never owns a
+/// workflow run of its own; this event marks the parent's aggregated
+/// in-progress state without a <c>WorkflowRunId</c>.
+/// </summary>
+public sealed record IssueCompositeStarted;
+
+/// <summary>
+/// Emitted when a parent issue's aggregated status changes due to a child
+/// state transition (terminal reached, child reopened, all-children-detached
+/// recompute, etc.). Covers the four legal uses: InProgress→Done,
+/// InProgress→Cancelled, Done→InProgress (child reopen), and
+/// Backlog→Cancelled (direct cancel).
+/// </summary>
+public sealed record IssueCompositeStatusChanged(
+    string PreviousStatus,
+    string NewStatus);

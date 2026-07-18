@@ -162,7 +162,7 @@ function SettingsSearch() {
       console.warn(`[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`)
       focusTargetAfterNavigation.current = null
     }
-    tryFocus()
+    requestAnimationFrame(tryFocus)
   }
 
   const handleSelect = useCallback(

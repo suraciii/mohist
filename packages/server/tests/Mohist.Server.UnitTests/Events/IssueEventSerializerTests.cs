@@ -97,11 +97,61 @@ public class IssueEventSerializerTests
             (new IssueUnarchived(), "com.mohist.issue.unarchived"),
             (new IssueReopened(), "com.mohist.issue.reopened"),
             (new IssueRepositoryChanged("main", "web", "cmd-1", 1L, 2L), "com.mohist.issue.repository-changed"),
+            (new IssueCompositeStarted(), "com.mohist.issue.composite-started"),
+            (new IssueCompositeStatusChanged("inProgress", "done"), "com.mohist.issue.composite-status-changed"),
         };
 
         foreach (var (evt, expected) in cases)
         {
             Assert.Equal(expected, IssueEventSerializer.BusType(evt));
         }
+    }
+
+    [Fact]
+    public void BusType_IssueCompositeStarted_IsRegisteredInCatalog()
+    {
+        Assert.Equal("com.mohist.issue.composite-started", EventCatalog.ReverseDns.IssueCompositeStarted);
+        Assert.Contains(EventCatalog.ReverseDns.IssueCompositeStarted, EventCatalog.All);
+    }
+
+    [Fact]
+    public void BusType_IssueCompositeStatusChanged_IsRegisteredInCatalog()
+    {
+        Assert.Equal("com.mohist.issue.composite-status-changed", EventCatalog.ReverseDns.IssueCompositeStatusChanged);
+        Assert.Contains(EventCatalog.ReverseDns.IssueCompositeStatusChanged, EventCatalog.All);
+    }
+
+    [Fact]
+    public void ToData_IssueCompositeStarted_EmitsEmptyPayloadObject()
+    {
+        var data = IssueEventSerializer.ToData(new IssueCompositeStarted());
+
+        Assert.Equal(JsonValueKind.Object, data.ValueKind);
+        Assert.False(data.EnumerateObject().Any());
+    }
+
+    [Fact]
+    public void ToData_IssueCompositeStatusChanged_RoundTripsPreviousAndNewStatus()
+    {
+        var payload = new IssueCompositeStatusChanged(
+            PreviousStatus: "inProgress",
+            NewStatus: "done");
+
+        var data = IssueEventSerializer.ToData(payload);
+
+        Assert.Equal(JsonValueKind.Object, data.ValueKind);
+        Assert.Equal("inProgress", data.GetProperty("previousStatus").GetString());
+        Assert.Equal("done", data.GetProperty("newStatus").GetString());
+    }
+
+    [Fact]
+    public void ToData_IssueCompositeStatusChanged_DoesNotIntroduceExtraFields()
+    {
+        var data = IssueEventSerializer.ToData(new IssueCompositeStatusChanged("backlog", "cancelled"));
+
+        var propertyNames = data.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(
+            new HashSet<string>(StringComparer.Ordinal) { "previousStatus", "newStatus" },
+            propertyNames);
     }
 }
