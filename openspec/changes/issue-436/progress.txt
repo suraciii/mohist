@@ -13,3 +13,14 @@
   - `context.with.task.with.options` deep-equals the resolved agent object
 - Typecheck (`npm run typecheck -w packages/runner`) passes.
 - Full test suite (`npx vitest run`): 101 files, 1185 tests pass, including the new test and all existing executor/openspec-tasks tests.
+
+## T-002: Switch openspec-tasks to rawWith and verify dispatch/retry re-resolves placeholders end-to-end
+
+- Switched `openspecTasksAction` (packages/runner/src/actions/openspec.ts:104) to read `task` defaults from `context.rawWith ?? context.with`. `path`, `items`, and other action-own scalars remain from `context.with`.
+- Updated test context helper in packages/runner/tests/openspec-tasks.spec.ts to populate both `with` and `rawWith` from the same input so existing tests remain green.
+- Added `OpenSpecTaskWithExecutorStyleSplitContext_UsesRawWithTaskSubtreePlaceholders` test: sets `rawWith.task.with.options = "${{ vars.agent }}"` (placeholder) and `with.task.with.options = { type: "opencode", model: "model-a" }` (resolved), then asserts `loadedWith.options === "${{ vars.agent }}"` (literal placeholder preserved).
+- Added `RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue` server spec: creates runtime task with `WithInput["options"] = "${{ vars.agent }}"`, dispatches with `agent = { model: "model-a" }`, fails it, patches issue variables to `model-b`, retries, asserts new dispatch has `model-b`.
+- Added `RuntimeTaskWithBakedLiteral_Retry_UsesBakedValue` server spec: creates runtime task with baked literal `WithInput["options"] = { type: "opencode", model: "model-a" }`, fails it, retries, asserts retried dispatch still uses `model-a` (legacy baked value not rewritten).
+- Updated spec-file-size-baseline.json to allow DispatchAndLoadingSpecs.cs at 27,215 bytes.
+- Runner: `npm run typecheck -w packages/runner` passes. `npm test -w packages/runner` — 101 files, 1186 tests pass.
+- Full build: `npm run build` passes. `npm test` — Arch 30 pass, Unit 1172 pass, Spec 2825 pass, Cli 1396 pass (0 failures).
