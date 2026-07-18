@@ -15,7 +15,7 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 | Subdomain | Problem | Ubiquitous language |
 |---|---|---|
 | Issue | what work is, how organized, what progress | issue, epic, sub-issue, parent issue, status, prerequisite, priority, risk, draft, done |
-| Project Space | environment, isolation, config | project, repository (named resource, default), variable, base branch, prompt |
+| Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), variable, prompt |
 | Agent | reusable named intelligence and its execution jobs | Mohist Agent, AgentJob, AgentJobInput, WorkResult |
 | Session | logical execution conversation, compression, query, audit | AgentSession, Runtime Binding, Transcript, Context, Usage, Lineage |
 | Runner | execution resource availability and capacity | resource, presence, registration, capacity |
@@ -28,6 +28,11 @@ Issue 与 Epic 是同一限界上下文中的两个聚合。Issue 持有自己�
 Sub-issue/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`issue-breakdown.md`](issue-breakdown.md).
 Prompt belongs to Project Space (Project is the only configurable scope). Builtin `.prompt` is
 loader fallback, not another Prompt resource.
+
+Repository belongs to Project Space. Issue stores only the target Repository name; WorkflowRun
+stores only the Project/Issue identity needed to resolve that resource. An unfinished Issue prevents
+changes to its Repository execution attributes, so Workflow does not need a Repository snapshot.
+See [`repositories.md`](repositories.md).
 
 ### Agent and Session terms
 

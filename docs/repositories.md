@@ -25,12 +25,13 @@ mo repo delete web
 - 创建 project 时用 `--path` 指定的代码库，会注册为该 project 的 default 仓库——单仓库场景一条命令起步，和过去完全一样。
 - default 仓库不能直接删除：先 `set-default` 到别的仓库。
 - 非 default 仓库只有在没有未完成 Issue 绑定时可以删除。backlog 和 in_progress Issue 会阻止删除；done 和 cancelled Issue 保留历史目标仓库名但不阻止删除。
+- 有 backlog 或 in_progress Issue 使用仓库时，不能修改它的 git 地址或 base branch。切换 default 不影响已经绑定的 Issue。
 
 ## Issue 与仓库
 
 每个 Issue 在创建时绑定一个目标仓库。`mo issue create "Web change" --repo web` 显式选择；省略 `--repo` 时绑定创建时的 default 仓库，之后切换 default 不会改写已有 Issue。未启动的 Issue 可用 `mo issue update <编号> --repo <资源名>` 重指派；首次启动后绑定永久锁定。`mo issue list --repo <资源名>` 根据已存储的绑定筛选，`mo issue show` 显示目标仓库。
 
-工作流的 workspace、分支、diff、rebase、本地集成和 GitHub Pull Request 都使用该 Issue 的目标仓库与启动时解析的 base branch。Runner 必须能访问 Project 声明的每个仓库。
+工作流的 workspace、分支、diff、rebase、本地集成和 GitHub Pull Request 都使用该 Issue 的目标仓库。Issue 运行期间，目标仓库的 git 地址和 base branch 保持不变；Runner 必须能访问 Project 声明的每个仓库。
 
 ## Runner 约束
 

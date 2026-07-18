@@ -57,5 +57,6 @@ Runtime context、Workflow Variables 与 Project Prompts 是三个独立命名�
 dispatch/report 流程见 [`../runner.md`](../runner.md)。
 
 Repository 不进入 WorkflowRun snapshot 或 Run Variables。Issue 只保存目标仓库的资源名；
-dispatch 使用该引用读取当时的 Project Repository resource。Project 更新 git 地址或 base
-branch 后，尚未 dispatch 的 task 使用更新后的资源值。
+dispatch 使用该引用读取 Project Repository resource。未完成 Issue 会阻止目标 Repository
+的 git 地址或 base branch 被修改，因此同一个 WorkflowRun 的各次 dispatch 读取稳定的
+执行属性，而 WorkflowRun 不需要复制它们。完整规则见 [`../repositories.md`](../repositories.md)。

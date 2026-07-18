@@ -67,18 +67,20 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 每个 task 来了，Runner 会：
 
-1. **准备 worktree**：克隆 base branch 到 `mo/issue-<n>` 分支
+1. **准备 workspace**：为 WorkflowRun 创建独立分支和工作目录
 2. **渲染 prompt**：用 issue body、artifacts、模板拼出 prompt
 3. **执行 Action**：`mohist/opencode` 把这次 turn 交给已安装的 OpenCode
 4. **流式接收**：实时把 Action 执行事实回传 Server（更新 UI）
 5. **验证产出**：检查 expect.files 是否存在
-6. **回收 workspace**：task 完成后清理（或保留供 debug）
+6. **回收 workspace**：WorkflowRun 结束后清理（或暂时保留供 debug）
 
-## Worktree 在哪
+## Workspace 在哪
 
-默认在 `<repo>/.mohist/worktrees/issue-<n>/`。
+默认在 Runner 数据目录的 `workspaces/<workflow-run-id>/`。路径和分支都由
+WorkflowRun ID 决定，不包含 Issue 标题或仓库名。
 
-这是临时工作区，可以删（重启 task 会重建）。但**别在 task 运行时删**，会让 task 失败。
+这是可重建的执行状态。WorkflowRun 结束后 Runner 会回收；需要保留的代码应先提交到
+对应远端分支。不要在 task 运行时手工删除或修改 workspace 的 branch、marker 或 origin。
 
 ## Runner 挂了怎么办
 
@@ -124,7 +126,7 @@ mo issue sessions <number>   # AgentSession 记录
 | 看板显示 "No runner is connected" | Runner 没起 | `npm run dev:runner` |
 | Issue 启动后一直等待 | 没有可用 Runner | 启动 Runner；Workflow 会自动继续 |
 | Task 长时间无输出 | opencode 卡了 | `mo issue force-stop`，查 logs |
-| Worktree 已存在错误 | 上次没清理 | 删 `<repo>/.mohist/worktrees/issue-<n>/` |
+| Workspace identity 错误 | marker、branch 或 origin 被手工修改 | 保留需要的提交后移除该 workspace，再 retry |
 | Git push 失败 | 远程仓库权限 | 配 SSH key 或 token |
 
 ## Runner 配置
