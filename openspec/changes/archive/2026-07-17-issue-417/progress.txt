@@ -1,0 +1,377 @@
+# issue-417 progress
+
+## Codebase Patterns
+
+- 既有 `design/architecture.md` 的「聚合与事务」节已经把跨聚合推进固化为「本聚合提交
+  → durable handler → 目标聚合幂等命令」。T-001 在该节下追加 `### 持久化应用协调者`
+  子节，明确协调者 grain 是该模式的窄化特例而不是新权威。
+- 既有上下文映射表（`design/domain-analysis.md`）使用 DDD 关系代号（`C/S`、`C`、
+  `OHS+PL`、`SK`、`PL`），并对每个 leaf domain 给出唯一约束。T-001 在表尾追加两行
+  `Conformist` 关系（#14、#15），并在「Dependency invariants」加一条说明协调者不是
+  独立限界上下文、且不能被参与者反向引用。
+- 设计 spec 用中文写正文，保留英文术语（aggregate、handler、participant interface 等），
+  协调者 grain 的命名沿用设计 D2 的 `IssueRepositoryCoordinator` / `IIssueRepositoryCoordinatorGrain`。
+- 设计文档与 OpenSpec `design.md`/`tasks.json` 同步指代：两者都引用同一个
+  `IssueRepositoryCoordinatorGrain` 名称，未来 T-005 的实现与命名要继续保持一致。
+- T-005 落地：协调者 grain 跑 Orleans `[PersistentState("coordinator")]`
+  + 自定义 `RepositoryCoordinatorState` 记录，fence 是一个
+  `PendingRepositoryCommand(CommandId, Kind, RepositoryName, ExpectedRevision, PayloadJson)`
+  字段；participant 走 `IIssueBindingParticipant` /
+  `IProjectBindingParticipant` 这两个 narrow 接口，arch test
+  `BindingParticipantInterfaces_OnlyConsumedByCoordinator` 拒绝
+  其他任何生产代码直接依赖它们。
+- T-005 测试约定：两个 `static` 探针
+  (`CoordinatorProbe.AfterFencePersistedAsync` /
+  `BindingParticipantProbe.BeforeParticipantAsync`)，生产代码
+  不调用、保持 zero-overhead；测试用
+  `Install((kind, pid, cmd) => ...)` 注入回调。
+  `SignalAndBlockAsync` 一边 `TrySetResult` 一边 `await release`
+  是「race 起点 + 等测试释放」的标准写法——避免再用
+  `Task.Delay` / `Task.Yield`（被 BannedApiAnalyzer 禁）。
+
+## Notes
+
+- 协调者 grain 在 architecture 文档里被定位为「Project-scoped 应用层 process manager」，
+  不加入「Subdomains」表（它不是业务问题域），只在「Bounded contexts and relationships」
+  与「Dependency invariants」两处出现；这样读文档的人能从模型层面理解它不是新领域。
+- 适用范围一节明确写「当前唯一」是 issue 417 的绑定协调者，避免之后被泛化滥用；「不
+  适用范围」一节把已有交互（参与者内部校验、UI 推送、session 绑定）排除出去。
+- T-001 没有改任何生产代码、没有跑测试（设计阶段任务）。后续 T-002 起的迁移 / 编码
+  任务如果要把协调者 grain 真正落出来，需要遵守本节五条约束，并由 T-005 的 ArchTest
+  兜底「仅协调者依赖窄 participant 接口」。
+
+## T-002 notes (AddIssueRepositoryProjection migration)
+
+- 走的还是 `AddAgentLaunchLabelComputedColumns` 既有的 SQLite stored
+  generated column 套路：`AddColumn` 先把列加出来（plain nullable
+  string），再 `AlterColumn` 把同一列改成 STORED computed 定义，触发
+  EF 的自动 `CREATE TABLE ... AS (...) STORED` table rebuild。
+  比 `AddIssueIsArchivedComputedColumn` 多走两步是因为后者本来就在建表
+  时直接生成。
+- ProjectRow 新加的 `RepositoryRevision` (long) 和
+  `LastRepositoryCommandJson` (string?) 是普通列，迁移里给前者显式
+  `defaultValue: 0L`，协调者真正落地前不会被任何业务读写；后者 null
+  即可。`Design.md` D2 把这两个字段定位为「协调者进程的 receipt 与
+  revision 载体」，T-005 实现时才把读写连起来。
+- EF Core 11 的 `HasDefaultValue(0L)` 并不会让 INSERT 省略列——
+  测过两遍都是同一结果：EF 仍然把列加进 INSERT 语句。所以测试侧
+  想在「老 schema + 新 model」组合下不踩到缺失列，唯一干净的做法是
+  把 schema 升级到当前 model（`EnsureCreated()`），而不是把列
+  排除在 INSERT 之外。这条规律对后续 T-005 写新 spec 时同样适用。
+- `MigratedSqliteTemplate.CopyTo(connection, "...")` 把 schema 钉
+  在某个历史 migration 上，本任务里只对「专门验证该 migration 行为」
+  的测试安全；任何走「用当前 model 写一行」的测试都得切到完整模板
+  或 `EnsureCreated`，否则会撞上新加列——`InboxSubscriptionsMigrationSpecs
+  .Up_StoresAndReadsSubscriptionRow` 因此改成用 `EnsureCreated()`。
+- 跨任务命名统一：`IssueRow.RepositoryName`（camelCase JSON
+  path `$.repositoryRef`）+ `IX_Issues_ProjectId_RepositoryName_Status`
+  索引名沿用 D3 的规范；T-004 的 blocker 查询可以直接消费。
+- `dotnet test` 全跑过：911 CLI + 1372 unit + 27 arch + 2789 spec
+  + 1016 runner，`dotnet build Mohist.sln -p:SkipWebBuild=true`
+  在 warnings-as-errors 下 0 warning 0 error。
+
+## T-003 notes (Issue repository binding)
+
+- Issue 聚合的「目标仓库」现在有两条解析路径：
+  - 创建（`Issue.Create`）接受「显式名称」或「留空走 Project default」，
+    留空由 grain 层在调用聚合前解析成 canonical 名称再传入；
+  - 重分配（`ChangeRepository`）只接受 non-empty canonical 名称，永远
+    不回退到 default——这一点对协调者（`IssueRepositoryCoordinatorGrain`）
+    的失败语义很关键：重分配校验失败时不应 fallback 到任何隐含仓库。
+- `HasWorkflowStarted` 与 `_workflowRunId` 不同：前者是「开始事实」
+  且原子地在 `Issue.Start`/`StartWorkflow` 内与第一次 WorkflowRunId
+  一同置位、并跟着 issue 走完 `Done`/`Cancelled`/`Reopen`/`ClearStoppedWorkflow`
+  全程不被清掉；后者只是「最近一次执行的引用」，可能被
+  `ClearStoppedWorkflow` 清空。spec 要求「target lock 通过
+  `HasWorkflowStarted` 而非 `_workflowRunId` 或 status」就是为了
+  区分这两层语义。
+- `ChangeRepository` 的「失败必须在写入其他字段之前」在 grain 层
+  用「先调用 `_issue.ChangeRepository`，再调用 `_issue.Update` /
+  `_issue.SetDraft` / …」的顺序来保证。一旦 lock / unknown /
+  stale-revision 任何一种 throw，aggregate 状态零改动、其他字段
+  不会被部分应用；T-005 的协调者会在它外面再包一层 fencing。
+- `Issue.Reopen(targetExists)` 把「目标仓库是否还存在」的事实推
+  进了聚合——grain 层提供一个 `ReopenWithTargetCheckAsync`（调用
+  `GrainFactory.GetGrain<IProjectGrain>` 解析后传入），还有一个
+  纯桩子 `ReopenAsync(targetExists: true)`，给不需要走 target 校验
+  的内部 / 测试代码使用。这样既不破坏现有 fault-isolation 测试
+  （`IssueGrainEventSaveFailureSpecs`）的语义，也保证了 API 路由
+  的 `/reopen` 走真实校验路径返回 `repository_missing_on_reopen`。
+- `IssueRepositoryBindingReceipt` 的「即使 no-op 也记录 receipt」
+  是设计 D2 关键不变量——lost response 之后重放不能从「未提交」
+  跳过「post-start lock」分支。T-003 在聚合层就把它落下来：成功的
+  `_issue.RecordRepositoryCommandReceipt` 也会推一个 `revision`
+  增长 + 写 receipt，但不产生 `IssueRepositoryChanged` 事件。
+- `IssueEvent` 是个 C# 14 union，加新 case 必须同时改：
+  - 联合声明（`IssueEvent.cs`）
+  - `IssueEventSerializer.BusType` 与 `Unwrap` 的 switch
+  - `EventCatalog.ReverseDns` 常量与 `EventCatalog.All` 列表
+  - `ProjectEventFilter.IssueTypes` 数组（让事件能进入 feed）
+  T-003 这五处全部更新并加了对应单元 / spec 测试。
+- 共享的 Git URL normalizer (`GitRemoteUrlNormalizer`) 几个
+  不能省的细节：
+  - SCP-like `git@host:path` 与 `ssh://git@host/path` 必须等价
+    （前者第一个 `:` 当 host/path 分隔符）；
+  - `https://example.com:443/...` 必须 strip 默认端口（`8443` 等
+    非默认端口保留），host 之后才 lowercase；
+  - userinfo（user:pw@...）整段丢弃，fingerprint 永不包含凭证；
+  - 路径大小写保留（Git 远端大小写敏感性跟操作系统相关，仓库策略
+    需要保留声明时的大小写）——这条对 `RepositoryPolicy` 的 alias
+    检测至关重要，否则 `Owner/Repo` vs `owner/repo` 会被错判成
+    同一个远端。
+  `GitRemoteUrlNormalizer.NormalizationVersion` 钉在 `git-remote-url/v1`，
+  任何字段变更视为 breaking change，server 与 runner 必须同步。
+- IssueGrain 既有 `CreateAsync` 现在有 `commandId` /
+  `expectedRevision` 两个新可选参数——调用者（API 路由、协调者）必须
+  决定要不要生成 receipt；domain 测试里绝大多数旧测试只关心
+  状态机行为而不是 receipt，所以一律不传 `commandId`。
+- API 路由上「PATCH 必须先做 repository 校验再处理其他字段」是
+  spec 明确要求——`IssueRoutes.Crud.cs` 的 `UpdateFullAsync` 在
+  `_issue.Update(title, body, ...)` 之前就先把 `_issue.ChangeRepository`
+  走完，确保任何 throw 都让 issue 状态零改动。
+- IssueGrain 接口扩展的连锁影响：所有 `: IIssueGrain` 的 test fake
+  （Epic recovery / Epic progression / Issue workflow completion
+  handler 的 RecordingIssueGrain 等）都要补 `ChangeRepositoryAsync`、
+  `RecordRepositoryCommandReceiptAsync`、`ReopenWithTargetCheckAsync`
+  三个方法和 `CreateAsync` 的两个新可选参数。我用了一个一次性
+  Python 脚本扫描 + 注入，避免手工漏改。
+- 修复 `IssueGrainEventSaveFailureSpecs` 时遇到的「grains 不挂
+  Orleans runtime 就 NRE」问题——其 grain 直接 `new IssueGrain(...)`，
+  而 `ReopenAsync` 又调用 `GrainFactory.GetGrain<IProjectGrain>`，
+  GrainFactory 是 `null`。这暴露了「grain 的子方法不能默认调用
+  Orleans runtime」。我最终拆成 `ReopenAsync(targetExists: true)`
+  + `ReopenWithTargetCheckAsync()` 两个方法：前者给 fault-isolation
+  测试用，后者给真实 API 路径用。
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1423 unit + 27 arch + 2802 spec（其中包含我新加的
+  30 个 issue binding / normalizer / event serializer / api spec
+  case）+ 1016 runner，0 warning 0 error。
+## T-004 notes (Repository deletion protection)
+
+- `RepositoryPolicy` 多了 `TryFindAlias` 工具方法：拿候选
+  `(name, gitUrl)` 算 fingerprint，再去 `current` 列表里比对。
+  fingerprint 复用 T-003 的 `GitRemoteUrlNormalizer`，所以
+  scp-like / ssh:// / default-port / case 折叠全部继承：
+  - `BuildAdd`：候选 fingerprint 命中 `current` 里另一个名字就报
+    `repository_alias_conflict`（错误码与"name already exists"区分，
+    后者保持 409 + `repository_name_conflict`）；
+  - `BuildUpdate`：只有当 `gitUrl` 真正发生变化时才走 alias 检查
+    （`hasGitUrl && !string.Equals(...)`），base-branch-only 修改
+    不会无意义触发；自己 fingerprint 等于自己的情况也会跳过。
+- `RepositoryInUseException` 故意 `继承 InvalidOperationException`
+  而非 `Exception`——这样既能在 grain 内沿用 `throw new InvalidOperationException`
+  路径（保持原有 `repository_default_deletion_conflict` 的 envelope
+  分发），又能在 route catch 里用 `if (ex is RepositoryInUseException)`
+  单独映射出 `repository_in_use` 409。
+- Blocker query 写在 `RepositoryDeletionBlockerQuery : IScopedService`，
+  依赖 `IDbContextFactory<MohistDbContext>` 直接读 `Issues` 表
+  (`AsNoTracking` + Index 命中)，跟 `IssueQuerier` / Issue read model
+  解耦——刻意不消费 enriched read model，避免 workflow health / 投影
+  staleness 影响删除保护判定。状态过滤使用 VIRTUAL computed column
+  的实际值 (`backlog` / `inProgress`)，因为该 column 直接
+  `json_extract(State, '$.status')`，共享 `JsonStringEnumConverter`
+  + CamelCase 的序列化结果。
+- LINQ Where 里 `BlockingStatuses.Contains(r.Status)` 这种闭包
+  在 EF SQLite provider 下翻译可疑，所以最终展开为显式 OR。另一处
+  教训：`BlockingStatuses` 用 `IReadOnlyCollection<string>` 静态字段
+  在 Scoped 服务上没问题，但 `Contains` 真的会被 SQL 翻译成
+  `WHERE Status IN (@__BlockingStatuses_0, @__BlockingStatuses_1)`
+  而不是预期的 `OR`，加上后面要兼容 `in_progress` fallback 时
+  显式 OR 才是真正的"两个分支"。
+- `ProjectGrain.RemoveRepositoryWithReceiptAsync` 排序很关键：
+  receipt 匹配必须在 `BuildRemove` 之前。原因：D2 设计文档强调
+  "even a successful no-op reassignment records a receipt"，所以
+  同一 commandId 重放必须返回 `AlreadyApplied` 而不能再走
+  not-found/default 检查。`spec` 里的 `DuplicateReplay_...` 测试
+  就是盯这个不变量的。
+- 既有 `RemoveRepositoryAsync` (non-idempotent path) 行为严格
+  保留：not-found → null；default → `InvalidOperationException`
+  + 默认消息；其它 → 检查 blocker → RepositoryInUseException。
+  Coordinator (T-005) 调用 idempotent 路径，API 路由直接调用
+  既有路径，两条互不干扰。
+- 测试 fixture 必须显式注册 `RepositoryDeletionBlockerQuery`：
+  `WorkflowGrainFixture` 走 `GrainTestConfig.ConfigureSilo`，
+  `MohistIntegrationFixture` 走 `ConfigureMohistServices` 的
+  `AddMohistConventionalServices` 扫 `IScopedService` 自动注册。
+  `RepositoryDeletionProtectionSpecs` 切到 `MohistIntegrationFixture`
+  是因为它需要 `IIssueStore` / `WorkflowQuerier` 等 IssueGrain 启动
+  全套服务（`StartWorkAsync`），`WorkflowGrainFixture` 走的是轻量
+  Project grain silo。
+- 既有 spec 测试 (`IssueRepositoryApiSpecs` / `IssueWorkspaceRepositoryResolutionSpecs`
+  / `IssueRepositoryBindingApiSpecs`) 隐式假设「移除仓库时被绑定 issue
+  不会阻拦」。T-004 把这条不变成 false，于是这些"测试 read side after
+  repo swap"的测试需要先把 issue 推到 terminal：HTTP `/close` 对
+  backlog issue 直接 OK，对 in_progress issue 必须先 `/stop` 再
+  `/close`。补了一个 `DriveIssueToTerminalAsync` helper。
+- HTTP envelope 改动：`ProjectRoutes` 的 `MapPost /repositories`
+  catch 多了 `repository_alias_conflict` 分支（与既有
+  `repository_name_conflict` 并列），`MapDelete /repositories/{name}`
+  多了 `repository_in_use` 分支。
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1431 unit（含 8 个新增 RepositoryPolicy alias 用例）
+  + 27 arch + 2823 spec（含 18 个新增 RepositoryDeletionProtectionSpecs
+  + 3 个新增 ProjectApiSpecs alias / in-use case）+ 1016 runner，
+  0 warning 0 error。
+
+## T-005 notes (IssueRepositoryCoordinator)
+
+- 协调者 grain 走 Orleans `[PersistentState]`：key 用 `coordinator`，
+  state 类型是 `RepositoryCoordinatorState { Pending? }`。一个
+  Project 一个 coordinator（grain key = ProjectId），非 reentrant
+  是 Orleans 默认行为，所以同一 Project 的四个 sensitive 命令
+  串行执行。
+- T-003 已经在 `Issue` aggregate 落了 `RepositoryBindingRevision` +
+  `IssueRepositoryBindingReceipt`、在 `ProjectRow` 落了
+  `RepositoryRevision` + `LastRepositoryCommandJson`；T-004 已经
+  在 `ProjectGrain` 落了 `RemoveRepositoryWithReceiptAsync`。
+  T-005 只需要把它们连起来，所以 `IssueGrain` 只补 4 个方法
+  （`CreateWithReceiptAsync` / `ChangeRepositoryWithReceiptAsync` /
+  `ReopenWithReceiptAsync` / `GetRepositoryBindingRevisionAsync`），
+  `ProjectGrain` 只补一个 `GetRepositoryBindingRevisionAsync`。
+  补完以后 `IssueCounterGrain` 那套接口的 `commandId` / `expectedRevision`
+  才真正派上用场。
+- `IssueBindingParticipantProxy` 早就存在，T-005 直接复用；
+  coordinator 通过 `IGrainFactory.GetGrain<IIssueBindingParticipant>(issueId)`
+  拿到它，再让 proxy 去调 `IIssueGrain` 的 `*WithReceiptAsync`。
+  这样 coordinator 永远不直接 `GetGrain<IIssueGrain>`，arch test
+  才能强制"只 coordinator 依赖窄 participant 接口"。
+- fence 写入走 `_state.WriteStateAsync()`（Orleans ADO.NET
+  grain storage），配合 projector 已经有的 `Issues` 走 DB 完全
+  解耦——fence 只关心"有命令在飞"，不关心是 create / change /
+  reopen / remove 哪一种。
+- 协调者使用 `RepositoryCommandPayload`（`[GenerateSerializer]` 标
+  的 union record），序列化走项目内 `JSON.Options`，由
+  `RepositoryCommandPayloadCodec.Serialize` 把 `{kind, data}` 包成
+  envelope，反序列化再按 kind 选 record 类型。这样 fence 落库
+  的 JSON 对每个 kind 是自描述的，replay 时不需要外部
+  schema 知识。
+- 测试钩子：T-005 引入两个 test-only 静态探针
+  (`CoordinatorProbe` / `BindingParticipantProbe`)，调用路径
+  上 `Install(...)` 注入回调。生产代码完全不走这两个钩子，
+  `_hook == null` 时是 zero-overhead 路径；测试代码靠它们
+  await 任意一点（fence 写完后 / participant 调用前），不用
+  任何 `Task.Delay` 也能控制 race。
+- ArchTest：`BindingParticipantInterfaces_OnlyConsumedByCoordinator`
+  规则既排除 `Mohist.Server.*.Grains.Coordinator` 命名空间外
+  的生产类，又排除 proxy 本身（proxy 依赖 participant 接口是
+  by design），任何新代码想直接拿 participant 接口都被这一条
+  拒掉。
+- 几个测试期间踩到的坑：
+  - `Task.Delay` / `Task.Yield` / `CancellationTokenSource(TimeSpan)`
+    在 server 测试里被 BannedApiAnalyzer 禁了，TestWait 的
+    `ForAsync(condition: ...)` 也不支持 `Task` 探针（纯
+    `bool` 轮询）。T-005 改用 `Task` 直接 await + `TestWait`
+    自带的 budget；探针 `SignalAndBlockAsync` 一边
+    `TrySetResult` 一边 `await release`，所以挂起点本身就
+    不会 spin。
+  - 在 probe 测试里，先 `SetResult(release)` 再 `await
+    reopenTask` 容易死锁：silo 线程在 await release，
+    test 线程在 await reopenTask，谁也推不动谁。改成
+    「先 release、再 await」就 OK。Create / Reopen 两个 race
+    测试都按这个顺序写。
+  - Orleans 缺 `[GenerateSerializer]` 时第一次走 grain
+    call 会抛 `Could not find a copier for type
+    RepositoryCommandPayload+Create`。T-003 没补这个是因为
+    那时 `RepositoryCommandPayload` 还没被 coordinator 用
+    上；T-005 给 abstract record + 4 个 sealed record 全
+    加上了 attribute。
+- T-005 的 6 个新 spec 全部跑过：
+  - `Create_RaceDelete_FirstWins_DeleteWaits_AndBlocksBecauseBindingExists`
+  - `Reassign_RaceDelete_ReassignBlockedByPostStart_LeavesBindingUnchanged`
+  - `Reopen_RaceDelete_DeleteBlocks_BecauseReopenRestoresBinding`
+  - `LostResponse_SameCommandReplay_ReturnsAlreadyAppliedWithoutReMutation`
+  - `DeactivationAfterParticipantCommit_ReplayReturnsAlreadyApplied`
+  - `RepositoryRemoval_WithNonTerminalIssue_ReturnsRepositoryInUseWithoutFence`
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1431 unit + 28 arch（+1 BindingParticipantInterfaces_OnlyConsumedByCoordinator）
+  + 2829 spec（+6 IssueRepositoryCoordinatorSpecs）+ 1016 runner，
+  0 warning 0 error。
+
+## T-006 notes (WorkflowRun repository context)
+
+- `IssueWorkStarted` now carries typed `IssueWorkStartedRepository`,
+  `IssueWorkStartedWorkspace`, and `IssueWorkStartedContext` records. The
+  durable `IssueWorkStartedHandler` rereads the Issue grain's active run id,
+  drops stale events, and converts the committed snapshot into an
+  input-idempotent `EnsureStartedAsync` command. Events with incomplete
+  snapshots are ignored so old synthetic test events cannot create a run.
+- Startup computes the repository fingerprint, workspace, and typed event
+  input before calling `Issue.Start`; the Issue save therefore owns the first
+  committed start fact. The same `EnsureStartedAsync` command is also issued
+  immediately after that commit as a latency optimization, while the durable
+  event remains the recovery path. A pre-commit save failure creates no run or
+  lock; a post-commit run-start failure leaves the Issue locked for event retry.
+- `WorkflowRun.Repository` has a private setter with JSON inclusion and is
+  assigned only by `EnsureStarted`. Replay compares repository, workspace, and
+  Issue identity annotations; identical input is a no-op and conflicting input
+  throws corruption. The repository snapshot round-trips through the existing
+  JSON run store without a relational migration.
+- `AuthoritativeRoutingOverlay.Apply` is applied after stage variables and
+  replaces complete `repository` and `workspace` roots, then resets run,
+  Project, and Issue identity fields. `WorkflowItemTranslator` now uses the
+  same effective bundle as API variable reads for task `with` expansion and
+  artifact binding, so configurable variables cannot redirect execution.
+- Workspace/review/cleanup and rebase routes resolve base/repository facts from
+  the run snapshot. They no longer reject a terminal Issue solely because its
+  live Project repository declaration was removed; omitted rebase base is the
+  snapshot, while an explicit base remains task-local.
+- The repository test changed from asserting live metadata after a Project
+  replacement to asserting the run snapshot, and terminal cleanup coverage now
+  starts a run before removing its declaration. `npm test -w packages/server`
+  cannot run in this repository because `packages/server` is not listed in the
+  root npm workspaces; equivalent server verification uses the three dotnet
+  server test projects with `-p:SkipWebBuild=true`.
+- Full `npm test` initially exposed the corrupted-run API theory's
+  nondeterministic `DeactivateOnIdle` assumption. Its test helper now forces
+  activation collection on each convergence probe; the final run passed 911
+  CLI + 1444 unit + 28 arch + 2829 spec + 4681 web + 1016 runner tests.
+
+## T-007 notes (run-unique Runner workspace identity and delivery)
+
+- Issue-backed workspace identity is now derived only from the dispatch
+  `workflowRunId`: both Server and Runner use
+  `<runnerRoot>/workspaces/run-<sha256(runId)>`. The Runner ignores a
+  variable-supplied workspace path and rejects a variable run ID that differs
+  from the dispatch envelope.
+- Runner bootstrap uses a deterministic sibling `.preparing` directory,
+  verifies the configured base branch and normalized `origin`, writes a
+  version-2 marker, validates it again, then publishes with same-parent
+  `rename`. A final workspace is never replaced when its marker/origin is
+  missing or mismatched; retry after a registry write failure validates the
+  published directory and rebuilds the registry entry.
+- Marker and registry identity fields are intentionally credential-free:
+  project ID, issue number, repository resource, base branch, run branch,
+  remote fingerprint, and normalizer version. The Runner normalizer mirrors
+  Server `git-remote-url/v1` vectors, including SCP-like remotes, default
+  ports, credentials, and query/fragment removal.
+- SignalR workspace queries now carry the full expected run identity. Runner
+  review, status, cleanup, and removal paths validate path containment,
+  symlink-free managed parents, marker, and actual origin before Git or disk
+  mutation. The registry remains versioned and generic legacy entries retain
+  the existing cleanup shape.
+- Built-in Issue delivery rejects missing authoritative base branches rather
+  than falling back to Project defaults or `main`. The Server's
+  `project-integration` lock uses a length-prefixed typed key containing
+  Project ID, repository resource, and resource name; generic/custom locks
+  retain Project/resource scope.
+- Verification after implementation: Runner typecheck + test typecheck and
+  tests pass (1027 tests); Server UnitTests pass (1445) and Server SpecTests
+  pass (2829). Server build passes with warnings-as-errors.
+
+## T-008 notes (Issue and repository CLI alignment)
+
+- Issue repository selection is now exposed only as `--repo`: create and update
+  send `repositoryName` in their JSON bodies, while list sends the existing
+  server query key `repository` because the Issue route binds that query to its
+  stored-target filter. No Issue command retains a `--repository` option, so
+  System.CommandLine rejects it before any request is sent.
+- Issue table output reads `repositoryName` directly from list/detail payloads;
+  it does not depend on resolved repository metadata, so terminal historical
+  targets remain visible after their declaration is removed. Update output
+  remains the server response, which preserves the canonical repository casing.
+- Repository delete already uses the shared envelope renderer for both JSON and
+  table modes. The CLI therefore prints server `repository_in_use`, default,
+  and not-found failures to stderr with non-zero status and does not emit a
+  success result; focused specs now pin those behaviors with `RecordingHttpHandler`
+  and `FakeFileSystem`.
+- The repository-native verification was `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore -p:TreatWarningsAsErrors=true` (0 warnings/errors) plus 920 CLI tests. `npm run typecheck -w packages/cli` cannot run because the root npm workspace does not include the .NET `packages/cli` directory.

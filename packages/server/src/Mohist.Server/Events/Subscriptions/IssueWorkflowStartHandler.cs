@@ -3,6 +3,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Events.Subscriptions;
@@ -39,9 +40,31 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
         }
 
         var workflow = _grains.GetGrain<IWorkflowGrain>(evt.Data.WorkflowRunId);
-        await workflow.EnsureStartedAsync(new WorkflowIssueContext(
-            issue.ProjectId,
-            issue.Number,
-            issue.EpicNumber));
+        var issueContext = new WorkflowIssueContext(issue.ProjectId, issue.Number, issue.EpicNumber);
+
+        // issue-417 T-006 (D4): when the Issue transaction captured an
+        // immutable repository/workspace snapshot, replay it verbatim into
+        // the run so dispatch/review/rebase read run-owned facts rather than
+        // live Project metadata. A null snapshot (older producer or a path
+        // that could not resolve a fingerprint) falls back to the
+        // context-only startup.
+        if (evt.Data.Repository is { } repository)
+        {
+            var snapshot = new WorkflowStartSnapshot(
+                Repository: new WorkflowRepositoryContext(
+                    repository.Name,
+                    repository.GitUrl,
+                    repository.BaseBranch,
+                    repository.RemoteFingerprint,
+                    repository.RemoteIdentityVersion),
+                Workspace: evt.Data.Workspace is { } workspace
+                    ? new WorkspaceIdentity(workspace.Path, workspace.Branch, workspace.ChangeDir)
+                    : null);
+            await workflow.EnsureStartedAsync(issueContext, snapshot);
+        }
+        else
+        {
+            await workflow.EnsureStartedAsync(issueContext);
+        }
     }
 }

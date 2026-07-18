@@ -1,4 +1,5 @@
 {
+  "Mohist.Server.ArchTests/ArchitectureRules.cs": 26461,
   "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 24516,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 33599,
@@ -16,13 +17,13 @@
   "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 37840,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsQualitySpecs.cs": 51363,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsStageDurationsSpecs.cs": 45941,
-  "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 26545,
+  "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 30791,
   "Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs": 30462,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionTranscriptAxisSpecs.cs": 31206,
-  "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 30549,
+  "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 31304,
   "Mohist.Server.SpecTests/Specs/Workflow/Artifacts/WorkflowArtifactUploadServiceSpecs.cs": 34116,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 25955,
-  "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 30805,
+  "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 33846,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 27944,
   "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 41204
 }

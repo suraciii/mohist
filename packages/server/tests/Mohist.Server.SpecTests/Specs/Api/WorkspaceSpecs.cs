@@ -280,8 +280,8 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Cleanup issue", projectId = project.Id });
-        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        var expectedPath = MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project.Name, issue.Number);
+        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        var expectedPath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(_fixture.RunnerRoot, runId);
         _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(true, "removed", expectedPath, null, "Workspace removed").ToDomain();
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
 

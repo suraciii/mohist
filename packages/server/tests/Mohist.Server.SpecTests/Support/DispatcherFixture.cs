@@ -472,6 +472,17 @@ public sealed class DispatcherFixture : IAsyncLifetime
     private readonly Dictionary<string, TaskCompletionSource> _specificDeliverySignals = new(StringComparer.Ordinal);
     private readonly object _specificDeliverySignalsGate = new();
 
+    // Count-gated delivery signals: a waiter registers a target invocation
+    // count for a handler list; each handler invocation bumps the count and
+    // resolves the waiter once the target is reached. Deterministic — no
+    // wall-clock timeout, the signal fires exactly when the dispatcher has
+    // delivered the awaited event.
+    private int _catchAllTarget;
+    private TaskCompletionSource? _catchAllSignal;
+    private int _specificTarget;
+    private TaskCompletionSource? _specificSignal;
+    private readonly object _countSignalGate = new();
+
     private SqliteConnection _keeper = null!;
 
     public DispatcherFixture()
@@ -518,6 +529,13 @@ public sealed class DispatcherFixture : IAsyncLifetime
             SpecificInvocations.Clear();
         lock (_specificDeliverySignalsGate)
             _specificDeliverySignals.Clear();
+        lock (_countSignalGate)
+        {
+            _catchAllTarget = 0;
+            _catchAllSignal = null;
+            _specificTarget = 0;
+            _specificSignal = null;
+        }
     }
 
     public Task WaitForSpecificInvocationAsync(string eventId)
@@ -528,12 +546,70 @@ public sealed class DispatcherFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Returns a task that completes once the catch-all handler has been
+    /// invoked enough times to exceed <paramref name="baseline"/>. The
+    /// baseline is captured before the producer commits, so the awaited
+    /// signal corresponds to the new event's delivery rather than any
+    /// earlier one. Deterministic: resolves from the handler's own
+    /// invocation, never from a wall-clock timeout.
+    /// </summary>
+    public Task WaitForCatchAllBeyondAsync(int baseline)
+    {
+        lock (_countSignalGate)
+        {
+            _catchAllTarget = baseline + 1;
+            _catchAllSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (CatchAllInvocations.Count >= _catchAllTarget)
+                _catchAllSignal.TrySetResult();
+            return _catchAllSignal.Task;
+        }
+    }
+
+    /// <summary>
+    /// Count-gated counterpart of <see cref="WaitForCatchAllBeyondAsync"/>
+    /// for the specific (WorkflowRunCompleted) handler. Used by the poke
+    /// specs in place of the per-eventId signal when the producer mints a
+    /// fresh envelope id the test cannot predict.
+    /// </summary>
+    public Task WaitForSpecificBeyondAsync(int baseline)
+    {
+        lock (_countSignalGate)
+        {
+            _specificTarget = baseline + 1;
+            _specificSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (SpecificInvocations.Count >= _specificTarget)
+                _specificSignal.TrySetResult();
+            return _specificSignal.Task;
+        }
+    }
+
     public void RecordSpecificInvocation(string eventId)
     {
         lock (SpecificInvocations)
             SpecificInvocations.Add(eventId);
         lock (_specificDeliverySignalsGate)
             GetSpecificDeliverySignal(eventId).TrySetResult();
+        lock (_countSignalGate)
+        {
+            if (_specificSignal is not null && SpecificInvocations.Count >= _specificTarget)
+                _specificSignal.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Bumps the catch-all count and resolves any
+    /// <see cref="WaitForCatchAllBeyondAsync"/> waiter that has reached its
+    /// target. Called by <see cref="DispatcherCatchAllHandler"/> on every
+    /// delivered event.
+    /// </summary>
+    public void RecordCatchAllInvocation()
+    {
+        lock (_countSignalGate)
+        {
+            if (_catchAllSignal is not null && CatchAllInvocations.Count >= _catchAllTarget)
+                _catchAllSignal.TrySetResult();
+        }
     }
 
     public Task DisposeAsync()
@@ -729,6 +805,7 @@ public sealed class DispatcherCatchAllHandler : ICloudEventHandler
         {
             _fixture.CatchAllInvocations.Add(evt.Id);
         }
+        _fixture.RecordCatchAllInvocation();
         return Task.CompletedTask;
     }
 }

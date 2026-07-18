@@ -347,6 +347,12 @@ public abstract class EpicAutoDoneHandlerTestSupport
                 ? Task.FromException<bool>(new InvalidOperationException("selected issue start failure"))
                 : Task.FromResult(true);
         }
+
+        public Task<string?> GetActiveWorkflowRunIdAsync() => throw new NotImplementedException();
+        public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, string commandId, long? expectedRevision) => throw new NotImplementedException();
+        public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(Mohist.Server.Issue.Grains.IssueChangeRepositoryCommand command, string commandId, long? expectedRevision) => throw new NotImplementedException();
+        public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(string commandId, long? expectedRevision) => throw new NotImplementedException();
+        public Task<long> GetRepositoryBindingRevisionAsync() => throw new NotImplementedException();
     }
 
     public sealed record RecordedGrainCall(string GrainKey);

@@ -120,6 +120,44 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await CommitAsync(events);
     }
 
+    /// <summary>
+    /// issue-417 T-006 (D4): durable-event startup carrying an immutable
+    /// repository/workspace snapshot captured at Issue transaction commit.
+    /// The snapshot lands on the run via <see cref="WorkflowRun.Lifecycle"/>'s
+    /// <c>EnsureStarted</c>, which is idempotent on identical replay and
+    /// refuses conflicting context. When the run is already started with a
+    /// matching snapshot this is a no-op; a null snapshot falls back to the
+    /// context-only path.
+    /// </summary>
+    public async Task EnsureStartedAsync(WorkflowIssueContext context, WorkflowStartSnapshot? snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RejectIfRunReloadRequired();
+        if (snapshot is null)
+        {
+            await EnsureStartedAsync(context);
+            return;
+        }
+        if (_run is null)
+        {
+            await EnsureCreatedRunAsync(context);
+        }
+
+        var metadata = _run!.Metadata;
+        var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
+        if (events.Count > 0)
+        {
+            _log.LogInformation(
+                "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
+                GrainKey, _run.CurrentStageId);
+            await CommitAsync(events);
+        }
+        else
+        {
+            await SaveRunAsync();
+        }
+    }
+
     public async Task RefreshIssueContextAsync(WorkflowIssueContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -439,7 +477,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public Task<bool> IsStoppedOrTerminalAsync()
     {
         RejectIfRunReloadRequired();
-        if (_run is null) return Task.FromResult(true);
+        if (_run is null) return Task.FromResult(false);
         return Task.FromResult(_run.IsTerminal());
     }
 

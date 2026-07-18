@@ -31,17 +31,24 @@ describe("WorkspaceRegistry", () => {
       issueNumber: 42,
       workflowRunId: "wr-123",
       workspacePath: join(root, "mohist-local/workspaces/issue-42"),
+      projectId: "project-1",
+      repositoryName: "web",
+      baseBranch: "develop",
+      runBranch: "mohist/run-wr-123",
+      remoteFingerprint: "fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
     })
 
     expect(entry.issueNumber).toBe(42)
     expect(entry.workflowRunId).toBe("wr-123")
     expect(entry.workspacePath).toBe(join(root, "mohist-local/workspaces/issue-42"))
+    expect(entry).toMatchObject({ projectId: "project-1", repositoryName: "web", baseBranch: "develop", runBranch: "mohist/run-wr-123", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1" })
     expect(entry.phase).toBe("active")
     expect(entry.materializedAt).toBe(now.toISOString())
     expect(entry.terminalAt).toBeNull()
 
     const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.entries["wr-123"]).toMatchObject({
       issueNumber: 42,
       workflowRunId: "wr-123",
@@ -51,7 +58,7 @@ describe("WorkspaceRegistry", () => {
     })
   })
 
-  it("Load_FromExistingFile_RestoresEntriesAndPreservesActivePhase", async () => {
+  it("Load_LegacyFile_RejectsEntries", async () => {
     const persistedAt = "2026-06-20T08:00:00.000Z"
     const filePath = defaultWorkspaceRegistryFilePath(root)
     await mkdir(join(root, ".mohist", "runner-state"), { recursive: true })
@@ -81,11 +88,9 @@ describe("WorkspaceRegistry", () => {
     await registry.load()
 
     const list = registry.list()
-    expect(list).toHaveLength(2)
-    const active = registry.get("wr-existing")
-    expect(active).toMatchObject({ phase: "active", materializedAt: persistedAt, terminalAt: null })
-    const eligible = registry.get("wr-done")
-    expect(eligible).toMatchObject({ phase: "eligible", terminalAt: "2026-06-24T00:00:00.000Z" })
+    expect(list).toEqual([])
+    expect(registry.get("wr-existing")).toBeNull()
+    expect(registry.get("wr-done")).toBeNull()
   })
 
   it("Load_MissingFile_TreatsAsEmpty", async () => {
@@ -113,7 +118,7 @@ describe("WorkspaceRegistry", () => {
     })
 
     const persisted = JSON.parse(await readFile(filePath, "utf8"))
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.entries["wr-1"]).toMatchObject({ phase: "active" })
   })
 
@@ -365,7 +370,7 @@ describe("WorkspaceRegistry", () => {
     const staleAt = "2026-06-20T08:00:00.000Z"
     const materialisedAt = "2026-06-15T08:00:00.000Z"
     await writeFile(filePath, JSON.stringify({
-      version: 1,
+      version: 2,
       entries: {
         "wr-stuck": {
           issueNumber: 33,

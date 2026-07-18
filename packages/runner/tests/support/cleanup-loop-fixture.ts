@@ -11,9 +11,14 @@ export class StubCleanupRunner implements CleanupRunner {
   public markerRunIds = new Map<string, string | null | undefined>()
   public outOfRootPaths = new Set<string>()
   public sizes = new Map<string, number>()
+  public missingPaths = new Set<string>()
 
   isUnderRunnerRoot(_root: string, candidate: string): boolean {
     return !this.outOfRootPaths.has(candidate)
+  }
+
+  pathExists(path: string): boolean {
+    return !this.missingPaths.has(path)
   }
 
   async readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
@@ -109,12 +114,18 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     await writeFile(
       registry.getFilePath(),
       JSON.stringify({
-        version: 1,
+          version: 2,
         entries: {
           [workflowRunId]: {
             issueNumber,
             workflowRunId,
             workspacePath: path,
+            projectId: "project-1",
+            repositoryName: "main",
+            baseBranch: "main",
+            runBranch: `mohist/run-${workflowRunId}`,
+            remoteFingerprint: "fingerprint",
+            remoteIdentityVersion: "git-remote-url/v1",
             phase: "eligible",
             materializedAt: now.toISOString(),
           },

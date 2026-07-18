@@ -48,6 +48,7 @@ public class IssueReadModel
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
     public IssueStartBlockerDto? Blocker { get; set; }
+    public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }

@@ -101,6 +101,30 @@ public class WorkflowQuerier : IScopedService
         return run?.Workspace;
     }
 
+    /// <summary>
+    /// issue-417 T-006 (D4): returns the immutable repository context
+    /// the run captured at start time, or <c>null</c> when the run
+    /// has none (generic / non-Issue-backed runs) or when the run
+    /// state cannot be loaded. The rebase / review / cleanup routes
+    /// load this and never recurse into the live Project metadata,
+    /// so a terminal Issue whose repository declaration is later
+    /// removed can still drive cleanup against its original
+    /// snapshot.
+    /// </summary>
+    public async Task<WorkflowRepositoryContext?> GetRepositoryContextAsync(string workflowRunId)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+
+        var runJson = await db.WorkflowRuns.AsNoTracking()
+            .Where(e => e.WorkflowRunId == workflowRunId)
+            .Select(e => e.State)
+            .FirstOrDefaultAsync();
+        if (runJson is null) return null;
+
+        var run = DeserializeWorkflowRun(runJson);
+        return run?.Repository;
+    }
+
     public async Task<JsonElement> GetEffectiveVariablesAsync(string workflowRunId, string? stage = null)
     {
         return await _profileManager.ResolveEffectiveVariablesAsync(workflowRunId, stage);

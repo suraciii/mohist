@@ -127,5 +127,115 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Stopped;
             return [new WorkflowRunStopped()];
         }
+
+        /// <summary>
+        /// issue-417 T-006 (D4): input-idempotent start called by the
+        /// durable <c>IssueWorkStarted</c> handler. Idempotency rules:
+        /// <list type="bullet">
+        ///   <item>A run with no <see cref="WorkflowRun.Repository"/>
+        ///     context yet assigns the supplied context and emits
+        ///     <c>WorkflowRunStarted</c> + <c>StageStarted</c> exactly
+        ///     once.</item>
+        ///   <item>A run already started with the same repository
+        ///     context (matches <see cref="WorkflowRepositoryContext.Name"/>,
+        ///     <see cref="WorkflowRepositoryContext.GitUrl"/>,
+        ///     <see cref="WorkflowRepositoryContext.BaseBranch"/>,
+        ///     <see cref="WorkflowRepositoryContext.RemoteFingerprint"/>,
+        ///     and <see cref="WorkflowRepositoryContext.RemoteIdentityVersion"/>)
+        ///     succeeds as a duplicate-replay no-op (no events).</item>
+        ///   <item>A different context on the same run id, OR a
+        ///     different workspace path/branch, throws
+        ///     <see cref="InvalidOperationException"/> — the run is
+        ///     corrupted by the caller and must not auto-correct.</item>
+        ///   <item>Generic (non-Issue-backed) starts may pass
+        ///     <c>repository: null</c>; the assignment is then omitted
+        ///     entirely.</item>
+        ///   <item>The supplied <see cref="WorkspaceIdentity"/>
+        ///     also participates in the input check; a different
+        ///     workspace path from the one already persisted indicates
+        ///     corruption too.</item>
+        /// </list>
+        /// </summary>
+        public IReadOnlyList<WorkflowEvent> EnsureStarted(
+            WorkflowRepositoryContext? repository,
+            WorkspaceIdentity? workspace,
+            DateTimeOffset now,
+            WorkflowRunMetadata? metadata = null)
+        {
+            if (run.Status != WorkflowRunStatus.Created)
+            {
+                // Replay path: refuse to mutate state but be quiet
+                // when input matches what we already recorded.
+                if (repository is null && workspace is null)
+                {
+                    if (run.Repository is null && run.Workspace is null)
+                        return [];
+                    throw new InvalidOperationException(
+                        $"WorkflowRun '{run.Id}' already started but replay passed null context");
+                }
+                if (run.Repository is null && run.Workspace is null
+                    && repository is null && workspace is null)
+                    return [];
+
+                if (!WorkflowRepositoryContextEquals(run.Repository, repository))
+                    throw new InvalidOperationException(
+                        $"WorkflowRun '{run.Id}' already started with conflicting repository context");
+                if (!WorkspaceIdentityEquals(run.Workspace, workspace))
+                    throw new InvalidOperationException(
+                        $"WorkflowRun '{run.Id}' already started with conflicting workspace identity");
+                if (!WorkflowMetadataIdentityEquals(run.Metadata, metadata))
+                    throw new InvalidOperationException(
+                        $"WorkflowRun '{run.Id}' already started with conflicting Issue context");
+
+                return [];
+            }
+
+            // Fresh start: persist the snapshot and emit events once.
+            run.AssignRepositoryContext(repository);
+            run.Workspace = workspace;
+
+            var current = run.CurrentStage();
+            if (current.Status == StageRunStatus.Pending)
+                current.Status = StageRunStatus.Running;
+
+            SetStatusAndTrackReadySince(run, WorkflowRunStatus.Pending, now);
+            run.StartedAt = now;
+            return [new WorkflowRunStarted(), new StageStarted(current.Id)];
+        }
+
+        private static bool WorkflowRepositoryContextEquals(
+            WorkflowRepositoryContext? a,
+            WorkflowRepositoryContext? b)
+        {
+            if (a is null && b is null) return true;
+            if (a is null || b is null) return false;
+            return string.Equals(a.Name, b.Name, StringComparison.Ordinal)
+                && string.Equals(a.GitUrl, b.GitUrl, StringComparison.Ordinal)
+                && string.Equals(a.BaseBranch, b.BaseBranch, StringComparison.Ordinal)
+                && string.Equals(a.RemoteFingerprint, b.RemoteFingerprint, StringComparison.Ordinal)
+                && string.Equals(a.RemoteIdentityVersion, b.RemoteIdentityVersion, StringComparison.Ordinal);
+        }
+
+        private static bool WorkspaceIdentityEquals(WorkspaceIdentity? a, WorkspaceIdentity? b)
+        {
+            if (a is null && b is null) return true;
+            if (a is null || b is null) return false;
+            return string.Equals(a.Path, b.Path, StringComparison.Ordinal)
+                && string.Equals(a.Branch ?? string.Empty, b.Branch ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(a.ChangeDir ?? string.Empty, b.ChangeDir ?? string.Empty, StringComparison.Ordinal);
+        }
+
+        private static bool WorkflowMetadataIdentityEquals(WorkflowRunMetadata? a, WorkflowRunMetadata? b)
+        {
+            if (a is null || b is null) return true;
+            foreach (var key in new[] { "projectId", "issueId", "issueNumber" })
+            {
+                var aValue = a.Annotations?.GetValueOrDefault(key);
+                var bValue = b.Annotations?.GetValueOrDefault(key);
+                if (!string.Equals(aValue, bValue, StringComparison.Ordinal))
+                    return false;
+            }
+            return true;
+        }
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Events;
@@ -168,6 +169,8 @@ public static class ProjectRoutes
             {
                 if (TryGetRepositoryNameError(ex, req.Name, out var conflictMessage))
                     return ApiResults.Conflict(conflictMessage!, "repository_name_conflict");
+                if (TryGetRepositoryAliasError(ex, out var aliasMessage))
+                    return ApiResults.Conflict(aliasMessage!, "repository_alias_conflict");
                 return ApiResults.BadRequest(ex.Message);
             }
         });
@@ -240,6 +243,8 @@ public static class ProjectRoutes
             }
             catch (ArgumentException ex)
             {
+                if (TryGetRepositoryAliasError(ex, out var aliasMessage))
+                    return ApiResults.Conflict(aliasMessage!, "repository_alias_conflict");
                 return ApiResults.BadRequest(ex.Message);
             }
         });
@@ -247,21 +252,48 @@ public static class ProjectRoutes
         byRef.MapDelete("/repositories/{repoName}", async (HttpContext context, string repoName, IGrainFactory grains) =>
         {
             var project = context.GetResolvedProject();
-            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
-            try
+
+            // issue-417 T-005: deletion enters through the
+            // Project-scoped coordinator. The coordinator performs the
+            // committed-state blocker check before fencing; the
+            // Project participant still owns the existence / default
+            // precedence check so the existing not-found / default
+            // envelope semantics are preserved.
+            var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+            var coordinatorResult = await coordinator.RemoveRepositoryAsync(
+                new RepositoryCommandPayload.Remove(
+                    ProjectId: project.Id,
+                    RepositoryName: repoName),
+                commandId: $"remove:{project.Id}:{repoName}:{Guid.NewGuid():N}",
+                expectedRevision: null);
+
+            switch (coordinatorResult.Code)
             {
-                var updated = await projectGrain.RemoveRepositoryAsync(repoName);
-                return updated is not null
-                    ? ApiResults.Ok(updated)
-                    : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "repository_default_deletion_conflict");
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
+                case IssueRepositoryBindingResultCode.Applied:
+                case IssueRepositoryBindingResultCode.AlreadyApplied:
+                {
+                    var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
+                    var updated = await projectGrain.GetAsync();
+                    return updated is not null
+                        ? ApiResults.Ok(updated)
+                        : ApiResults.NotFound($"Project '{project.Id}' not found");
+                }
+                case IssueRepositoryBindingResultCode.RepositoryInUse:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? $"Repository '{repoName}' is referenced by one or more non-terminal issues",
+                        "repository_in_use");
+                case IssueRepositoryBindingResultCode.RepositoryNotFound:
+                    return ApiResults.NotFound(coordinatorResult.Message ?? $"Repository '{repoName}' not found in project '{project.Id}'");
+                case IssueRepositoryBindingResultCode.RepositoryDefault:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? "Cannot delete the default repository",
+                        "repository_default_deletion_conflict");
+                case IssueRepositoryBindingResultCode.RepositoryStaleRevision:
+                    return ApiResults.Conflict(
+                        coordinatorResult.Message ?? "Repository revision is stale",
+                        "repository_stale_revision");
+                default:
+                    return ApiResults.Conflict(coordinatorResult.Message ?? "Repository deletion rejected");
             }
         });
 
@@ -559,6 +591,14 @@ public static class ProjectRoutes
     {
         message = exception.Message;
         return message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetRepositoryAliasError(
+        ArgumentException exception,
+        out string? message)
+    {
+        message = exception.Message;
+        return message.Contains("shares its Git remote", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsSupplied(JsonElement value) =>

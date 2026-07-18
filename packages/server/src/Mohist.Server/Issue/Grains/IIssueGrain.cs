@@ -14,8 +14,17 @@ public interface IIssueGrain : IGrainWithStringKey
     Task UpdateFullAsync(UpdateIssueData data);
     Task ArchiveAsync();
     Task UnarchiveAsync();
-    Task ReopenAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
+
+    /// <summary>
+    /// issue-417 T-006 (D4): returns the Issue's currently-bound
+    /// workflow run id, or <c>null</c> when the issue has no
+    /// <c>workflowRunId</c>. Used by the durable
+    /// <c>IssueWorkStartedHandler</c> to detect and discard stale
+    /// events whose run id no longer matches the Issue's active
+    /// run.
+    /// </summary>
+    Task<string?> GetActiveWorkflowRunIdAsync();
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartReadiness> GetStartReadinessAsync();
@@ -25,7 +34,79 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<bool> AssignEpicAsync(int epicNumber);
     Task<bool> RemoveEpicAsync(int expectedEpicNumber);
     Task<bool> TryStartFromEpicAsync(int expectedEpicNumber);
+
+    /// <summary>
+    /// issue-417 T-005: receipt-bearing create invoked from the
+    /// <c>IIssueBindingParticipant</c> proxy under the coordinator
+    /// fence. Receipt match, stale-revision rejection, and unknown-target
+    /// rejection all behave as documented on
+    /// <see cref="Mohist.Server.Issue.Grains.Coordinator.IIssueBindingParticipant"/>.
+    /// </summary>
+    Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(
+        string projectId,
+        int number,
+        string title,
+        string? body,
+        IReadOnlyDictionary<string, string>? labels,
+        string? priority,
+        string repositoryRef,
+        string? risk,
+        bool isDraft,
+        string[]? attachmentIds,
+        string? workflowProfileId,
+        int[]? prerequisiteNumbers,
+        string commandId,
+        long? expectedRevision);
+
+    /// <summary>
+    /// issue-417 T-005: receipt-bearing reassignment that atomically
+    /// applies the repository change plus every present PATCH field in
+    /// a single Issue transaction, so an ambiguous result cannot commit
+    /// only the repository reassignment while dropping sibling Issue
+    /// fields.
+    /// </summary>
+    Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(
+        IssueChangeRepositoryCommand command,
+        string commandId,
+        long? expectedRevision);
+
+    /// <summary>
+    /// issue-417 T-005: receipt-bearing reopen that re-validates the
+    /// retained target declaration and writes a receipt. The
+    /// coordinator is the only caller (route-level callers must enter
+    /// through the coordinator).
+    /// </summary>
+    Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(
+        string commandId,
+        long? expectedRevision);
+
+    /// <summary>
+    /// issue-417 T-005: returns the current coordination revision so
+    /// the coordinator can capture an <c>expectedRevision</c> snapshot
+    /// before fencing. Returns <c>0</c> for an unloaded issue slot.
+    /// </summary>
+    Task<long> GetRepositoryBindingRevisionAsync();
 }
+
+/// <summary>
+/// issue-417 T-005: complete aggregate PATCH bundled with a repository
+/// reassignment so an ambiguous coordinator outcome cannot commit only
+/// the repository change and drop sibling Issue fields. Every field
+/// honors its own three-state (absent / present-and-null /
+/// present-and-value) semantics, but the participant applies them
+/// atomically with the reassignment.
+/// </summary>
+[GenerateSerializer]
+public sealed record IssueChangeRepositoryCommand(
+    [property: Id(0)] string RepositoryName,
+    [property: Id(1)] string? Title,
+    [property: Id(2)] string? Body,
+    [property: Id(3)] IReadOnlyDictionary<string, string>? Labels,
+    [property: Id(4)] string? Priority,
+    [property: Id(5)] bool? IsDraft,
+    [property: Id(6)] string[]? AttachmentIds,
+    [property: Id(7)] string? WorkflowProfileId,
+    [property: Id(8)] IReadOnlySet<string>? PresentFields);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(

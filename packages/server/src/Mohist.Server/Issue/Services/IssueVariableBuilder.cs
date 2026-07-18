@@ -89,7 +89,7 @@ public static class IssueVariableBuilder
     {
         var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
         return new WorkspaceIdentity(
-            Path: Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(runnerRoot, project.Name, issue.Number),
+            Path: Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, workflowRunId),
             Branch: WorkflowRunBranch.For(workflowRunId),
             ChangeDir: changeDir);
     }

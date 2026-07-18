@@ -142,7 +142,7 @@ export class RunnerHost {
     )
     this.cleanupLoop = new CleanupLoop(
       this.workspaceRegistry,
-      new DefaultCleanupRunner(),
+      new DefaultCleanupRunner(options.runnerRoot),
       options.runnerRoot,
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)

@@ -20,6 +20,9 @@ public sealed partial class Issue
     private IssueRepositoryRef? _repositoryRef;
     private bool _isDraft;
     private string? _workflowProfileId;
+    private bool _hasWorkflowStarted;
+    private long _repositoryBindingRevision;
+    private IssueRepositoryBindingReceipt? _lastRepositoryCommand;
     private readonly List<IssueEvent> _pendingEvents = new();
 
     public required string ProjectId { get; init; }
@@ -135,6 +138,43 @@ public sealed partial class Issue
     {
         get => _repositoryRef?.Value;
         init => _repositoryRef = IssueRepositoryRef.From(value);
+    }
+
+    /// <summary>
+    /// Set atomically with the first successful workflow start. Survives
+    /// <c>Done</c>, <c>Cancel</c>/<c>Close</c>, <c>Archive</c>,
+    /// <c>Reopen</c>, and any cleared/stopped-run reference. Repository
+    /// reassignment and start serialization both rely on this fact
+    /// rather than the workflow-run id or current status.
+    /// </summary>
+    public bool HasWorkflowStarted
+    {
+        get => _hasWorkflowStarted;
+        init => _hasWorkflowStarted = value;
+    }
+
+    /// <summary>
+    /// Coordination revision incremented on every create, repository
+    /// reassignment, first start, completion, cancellation, and reopen.
+    /// The coordinator (T-005) compares incoming <c>expectedRevision</c>
+    /// against this value to detect stale PATCH/POST payloads.
+    /// </summary>
+    public long RepositoryBindingRevision
+    {
+        get => _repositoryBindingRevision;
+        init => _repositoryBindingRevision = value;
+    }
+
+    /// <summary>
+    /// Last applied repository-binding receipt. A successful no-op
+    /// reassignment still records a receipt so a lost response cannot
+    /// replay as a post-start lock failure on the next coordinator
+    /// activation.
+    /// </summary>
+    public IssueRepositoryBindingReceipt? LastRepositoryCommand
+    {
+        get => _lastRepositoryCommand;
+        init => _lastRepositoryCommand = value;
     }
 
     private static string RequireTitle(string title)

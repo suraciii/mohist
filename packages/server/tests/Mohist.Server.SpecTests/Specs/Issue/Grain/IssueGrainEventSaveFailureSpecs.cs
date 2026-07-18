@@ -69,12 +69,12 @@ public class IssueGrainEventSaveFailureSpecs
         // First save fails on the event-aware path. The store's transaction
         // rolls back; the activation is marked reload-required.
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => grain.ReopenAsync());
+            () => grain.UpdateAsync("Changed", null));
 
         // The dirty in-memory aggregate must not be salvageable through a
         // later command on this activation. EnsureIssue() must reject it.
         var second = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => grain.ReopenAsync());
+            () => grain.UpdateAsync("Changed again", null));
         Assert.Contains("must reload", second.Message);
 
         // The persisted row is untouched: the store rolled back, and the
@@ -118,7 +118,7 @@ public class IssueGrainEventSaveFailureSpecs
 
         // Quarantine the activation via a failing save.
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => grain.ReopenAsync());
+            () => grain.UpdateAsync("Changed", null));
 
         // The delivery path must not mutate/persist on the dirty activation.
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -146,7 +146,13 @@ public class IssueGrainEventSaveFailureSpecs
             await grain.OnActivateAsync(CancellationToken.None);
         }
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ReopenAsync());
+        // issue-417: reopen now runs under the coordinator fence via
+        // ReopenWithReceiptAsync (which resolves the target through the
+        // project grain and so cannot be exercised from this isolated
+        // IssueGrain instance). The quarantine-under-test is the save path
+        // itself, so trigger the event-aware save via UpdateAsync instead —
+        // the same path the sibling 902 spec uses.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.UpdateAsync("Changed", null));
         var eventAwareSaves = failingStore.EventAwareSaveAttempts;
         var stateOnlySaves = failingStore.StateOnlySaveAttempts;
 
@@ -193,6 +199,7 @@ public class IssueGrainEventSaveFailureSpecs
             Title = $"Issue {issueNumber}",
             Status = status,
             WorkflowRunId = null,
+            RepositoryRef = "main",
         };
         db.Issues.Add(new IssueRow
         {

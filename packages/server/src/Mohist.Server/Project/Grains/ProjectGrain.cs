@@ -18,16 +18,19 @@ public class ProjectGrain : Grain, IProjectGrain
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ProjectGrain> _log;
+    private readonly RepositoryDeletionBlockerQuery _blockerQuery;
     private ProjectInfo? _project;
 
     public ProjectGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         TimeProvider timeProvider,
-        ILogger<ProjectGrain> log)
+        ILogger<ProjectGrain> log,
+        RepositoryDeletionBlockerQuery blockerQuery)
     {
         _dbFactory = dbFactory;
         _timeProvider = timeProvider;
         _log = log;
+        _blockerQuery = blockerQuery;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -84,6 +87,7 @@ public class ProjectGrain : Grain, IProjectGrain
             Id = GrainKey,
             Name = name,
             RepositoriesJson = serialized,
+            RepositoryRevision = 1,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -238,6 +242,9 @@ public class ProjectGrain : Grain, IProjectGrain
             throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
         }
 
+        if (await _blockerQuery.HasBlockerAsync(GrainKey, repoName))
+            throw new RepositoryInUseException(repoName);
+
         var next = current
             .Where(r => !string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -253,6 +260,110 @@ public class ProjectGrain : Grain, IProjectGrain
         _project.Repositories = repositories;
         _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
+    }
+
+    public async Task<ProjectRepositoryRemovalOutcome> RemoveRepositoryWithReceiptAsync(
+        string repoName,
+        string commandId,
+        long? expectedRevision)
+    {
+        if (_project is null) return ProjectRepositoryRemovalOutcome.ProjectNotFound;
+
+        // Receipt match is checked before the existence / default guard
+        // so a successful replay does not re-report "not found" / "is
+        // the default" — the prior call already advanced state past
+        // those checks.
+        var (alreadyApplied, storedRevision, storedReceipt) = await ReadReceiptAsync();
+        if (alreadyApplied
+            && storedReceipt is not null
+            && string.Equals(storedReceipt.CommandId, commandId, StringComparison.Ordinal)
+            && storedReceipt.Kind == "remove"
+            && string.Equals(storedReceipt.RepositoryName, repoName, StringComparison.Ordinal))
+        {
+            return ProjectRepositoryRemovalOutcome.AlreadyApplied;
+        }
+
+        if (expectedRevision.HasValue && storedRevision != expectedRevision.Value)
+            throw new ProjectRepositoryStaleRevisionException(commandId, expectedRevision.Value, storedRevision);
+
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildRemove(repoName, current);
+
+        if (!build.IsSuccess)
+        {
+            if (build.Errors.Any(e => e.Code == "repository_default_deletion_conflict"))
+                throw new InvalidOperationException(build.Errors.First().Message);
+            if (build.Errors.Any(e => e.Code == "name" && e.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)))
+                throw new ProjectRepositoryNotFoundException(repoName);
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
+        }
+
+        if (await _blockerQuery.HasBlockerAsync(GrainKey, repoName))
+            throw new RepositoryInUseException(repoName);
+
+        var next = current
+            .Where(r => !string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var validation = RepositoryPolicy.Validate(next);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesWithReceiptAsync(
+                repositories, updatedAt, commandId, repoName, storedRevision))
+            return ProjectRepositoryRemovalOutcome.ProjectNotFound;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
+        return ProjectRepositoryRemovalOutcome.Removed;
+    }
+
+    private async Task<(bool HasRow, long Revision, ProjectRepositoryCommandReceipt? Receipt)> ReadReceiptAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.Projects.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == GrainKey);
+        if (row is null) return (false, 0L, null);
+        var receipt = string.IsNullOrEmpty(row.LastRepositoryCommandJson)
+            ? null
+            : JSON.Deserialize<ProjectRepositoryCommandReceipt>(row.LastRepositoryCommandJson);
+        return (true, row.RepositoryRevision, receipt);
+    }
+
+    public async Task<long> GetRepositoryBindingRevisionAsync()
+    {
+        if (_project is null) return 0L;
+        var (hasRow, revision, _) = await ReadReceiptAsync();
+        return hasRow ? revision : 0L;
+    }
+
+    private async Task<bool> PersistRepositoriesWithReceiptAsync(
+        IReadOnlyList<RepositoryInfo> repositories,
+        DateTimeOffset updatedAt,
+        string commandId,
+        string repositoryName,
+        long currentRevision)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return false;
+
+        var nextRevision = currentRevision + 1;
+        var appliedAt = updatedAt.UtcDateTime;
+        var receipt = new ProjectRepositoryCommandReceipt(
+            CommandId: commandId,
+            Kind: "remove",
+            RepositoryName: repositoryName,
+            AppliedRevision: nextRevision,
+            AppliedAt: appliedAt);
+
+        entry.RepositoriesJson = JSON.Serialize(repositories);
+        entry.UpdatedAt = updatedAt;
+        entry.RepositoryRevision = nextRevision;
+        entry.LastRepositoryCommandJson = JSON.Serialize(receipt);
+        await db.SaveChangesAsync();
+        return true;
     }
 
     public async Task<ProjectInfo?> SetDefaultRepositoryAsync(string repoName)
@@ -308,6 +419,7 @@ public class ProjectGrain : Grain, IProjectGrain
 
         entry.RepositoriesJson = JSON.Serialize(repositories);
         entry.UpdatedAt = updatedAt;
+        entry.RepositoryRevision += 1;
         await db.SaveChangesAsync();
         return true;
     }

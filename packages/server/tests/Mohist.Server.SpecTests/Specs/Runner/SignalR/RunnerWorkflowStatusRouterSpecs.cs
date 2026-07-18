@@ -124,6 +124,7 @@ public class RunnerWorkflowStatusRouterSpecs
 
         public Task StartAsync(WorkflowStartInput? input = null) => Task.CompletedTask;
         public Task EnsureStartedAsync(WorkflowIssueContext context) => Task.CompletedTask;
+        public Task EnsureStartedAsync(WorkflowIssueContext context, WorkflowStartSnapshot? snapshot) => throw new NotImplementedException();
         public Task RefreshIssueContextAsync(WorkflowIssueContext context) => Task.CompletedTask;
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;

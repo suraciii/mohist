@@ -48,9 +48,13 @@ public class DropEpicMembershipTablesMigrationSpecs
         Assert.False(await TableExistsAsync(verify, "EpicActiveIssues"));
         Assert.Contains(TargetMigration, await verify.Database.GetAppliedMigrationsAsync());
 
-        var row = await verify.Issues.SingleAsync();
-        Assert.Equal(7, row.EpicNumber);
-        var materialized = IssueStore.Deserialize(row.State);
+        // Read via raw SQL: the RepositoryName projection column is added by
+        // a later migration (AddIssueRepositoryProjection), so IssueRow's
+        // mapping is not usable at this migration point.
+        var rowState = Assert.Single(await ReadStringsAsync(
+            verify,
+            "SELECT \"State\" AS \"Value\" FROM \"Issues\""));
+        var materialized = IssueStore.Deserialize(rowState);
         Assert.NotNull(materialized);
         Assert.Equal(7, materialized!.EpicNumber);
     }
@@ -76,10 +80,11 @@ public class DropEpicMembershipTablesMigrationSpecs
         }
 
         await using var verify = database.CreateDbContext();
-        var row = Assert.Single(await verify.Issues.AsNoTracking().ToListAsync());
-        Assert.Null(row.EpicNumber);
-        Assert.Null(IssueStore.Deserialize(row.State)!.EpicNumber);
-        Assert.DoesNotContain("epicNumber", row.State, StringComparison.OrdinalIgnoreCase);
+        var rowState = Assert.Single(await ReadStringsAsync(
+            verify,
+            "SELECT \"State\" AS \"Value\" FROM \"Issues\""));
+        Assert.Null(IssueStore.Deserialize(rowState)!.EpicNumber);
+        Assert.DoesNotContain("epicNumber", rowState, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -116,15 +121,19 @@ public class DropEpicMembershipTablesMigrationSpecs
         Assert.False(await TableExistsAsync(verify, "EpicIssues"));
         Assert.False(await TableExistsAsync(verify, "EpicActiveIssues"));
 
-        var rows = await verify.Issues.AsNoTracking().OrderBy(row => row.ProjectId).ThenBy(row => row.Number).ToListAsync();
+        var identities = await ReadStringsAsync(
+            verify,
+            "SELECT \"ProjectId\" || ':' || \"Number\" AS \"Value\" FROM \"Issues\" ORDER BY \"ProjectId\", \"Number\"");
+        var states = await ReadStringsAsync(
+            verify,
+            "SELECT \"State\" AS \"Value\" FROM \"Issues\" ORDER BY \"ProjectId\", \"Number\"");
         Assert.Equal(
             ["proj_alpha:42:9", "proj_alpha:43:7", "proj_beta:42:7"],
-            rows.Select(row => $"{row.ProjectId}:{row.Number}:{row.EpicNumber}").ToArray());
-
-        Assert.Equal(9, IssueStore.Deserialize(rows[0].State)!.EpicNumber);
-        Assert.Equal(7, IssueStore.Deserialize(rows[1].State)!.EpicNumber);
-        Assert.Equal(7, IssueStore.Deserialize(rows[2].State)!.EpicNumber);
+            identities.Zip(states).Select(pair => $"{pair.First}:{IssueStore.Deserialize(pair.Second)!.EpicNumber}").ToArray());
     }
+
+    private static async Task<string[]> ReadStringsAsync(MohistDbContext context, string sql) =>
+        await context.Database.SqlQueryRaw<string>(sql).ToArrayAsync();
 
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
     {
