@@ -162,7 +162,6 @@ public sealed partial class Issue
         bool hasChildren = false)
     {
         if (_isDraft) return new IssueStartBlocker.Draft();
-        if (hasChildren) return new IssueStartBlocker.ParentHasChildren();
         if (undeliveredPrerequisites is { Count: > 0 })
         {
             foreach (var number in _prerequisiteNumbers)
@@ -198,8 +197,6 @@ public sealed partial class Issue
             throw new IssueStartBlockedException(blocker, $"Issue #{Number} is still a draft and cannot be started");
         if (blocker is IssueStartBlocker.WaitingFor waiting)
             throw new IssueStartBlockedException(blocker, $"Issue #{Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
-        if (blocker is IssueStartBlocker.ParentHasChildren)
-            throw new IssueStartBlockedException(blocker, $"Issue #{Number} has children and cannot be started directly");
 
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
@@ -276,6 +273,157 @@ public sealed partial class Issue
         return true;
     }
 
+    /// <summary>
+    /// Transition a parent issue from Backlog to InProgress via composite
+    /// advancement. The parent never owns a workflow run: <c>WorkflowRunId</c>,
+    /// <c>HasWorkflowStarted</c>, and <c>RepositoryBindingRevision</c> are
+    /// deliberately untouched. Records <see cref="IssueCompositeStarted"/>; a
+    /// no-op when the issue is already <see cref="IssueStatus.InProgress"/>.
+    /// Throws when the caller passes an empty children snapshot, so a
+    /// last-detach race cannot leave a non-parent in a composite state.
+    /// </summary>
+    public bool MarkCompositeStarted(IReadOnlyCollection<ChildSnapshot> childrenSnapshot, DateTime? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+        if (_status == IssueStatus.InProgress) return false;
+        if (_status != IssueStatus.Backlog)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only Backlog can start composite");
+        var at = now ?? DateTime.UtcNow;
+        _status = IssueStatus.InProgress;
+        Touch(at);
+        RecordEvent(new IssueCompositeStarted());
+        return true;
+    }
+
+    /// <summary>
+    /// Transition a parent issue from InProgress to Done via aggregation
+    /// (all children terminal with at least one Done). Sets <c>CompletedAt</c>;
+    /// no <c>WorkflowRunId</c> match (the parent has none). No-op when already
+    /// <see cref="IssueStatus.Done"/>. Throws on an empty children snapshot.
+    /// </summary>
+    public bool MarkCompositeDone(IReadOnlyCollection<ChildSnapshot> childrenSnapshot, DateTime? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+        if (_status == IssueStatus.Done) return false;
+        if (_status != IssueStatus.InProgress)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete composite");
+        if (RecomputeCompositeStatus(childrenSnapshot) != IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} children snapshot does not yield aggregated Done");
+        var at = now ?? DateTime.UtcNow;
+        _completedAt = at;
+        _status = IssueStatus.Done;
+        Touch(at);
+        RecordEvent(new IssueCompositeStatusChanged(
+            PreviousStatus: StatusToWire(IssueStatus.InProgress),
+            NewStatus: StatusToWire(IssueStatus.Done)));
+        return true;
+    }
+
+    /// <summary>
+    /// Transition a parent issue to Cancelled via aggregation (all children
+    /// Cancelled). Does not set <c>CompletedAt</c> — the parent never had a
+    /// workflow run to complete. No-op when already
+    /// <see cref="IssueStatus.Cancelled"/>. Throws on an empty children
+    /// snapshot.
+    /// </summary>
+    public bool MarkCompositeCancelled(IReadOnlyCollection<ChildSnapshot> childrenSnapshot, DateTime? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+        if (_status == IssueStatus.Cancelled) return false;
+        if (RecomputeCompositeStatus(childrenSnapshot) != IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} children snapshot does not yield aggregated Cancelled");
+        var previous = _status;
+        var at = now ?? DateTime.UtcNow;
+        _status = IssueStatus.Cancelled;
+        Touch(at);
+        RecordEvent(new IssueCompositeStatusChanged(
+            PreviousStatus: StatusToWire(previous),
+            NewStatus: StatusToWire(IssueStatus.Cancelled)));
+        return true;
+    }
+
+    /// <summary>
+    /// Reopen a cancelled parent issue back to Backlog without consulting
+    /// the repository coordinator: the parent has no executable target.
+    /// No-op when not <see cref="IssueStatus.Cancelled"/>.
+    /// </summary>
+    public bool ReopenComposite(DateTime? now = null)
+    {
+        if (_status != IssueStatus.Cancelled) return false;
+        var at = now ?? DateTime.UtcNow;
+        _status = IssueStatus.Backlog;
+        Touch(at);
+        RecordEvent(new IssueCompositeStatusChanged(
+            PreviousStatus: StatusToWire(IssueStatus.Cancelled),
+            NewStatus: StatusToWire(IssueStatus.Backlog)));
+        return true;
+    }
+
+    private static string StatusToWire(IssueStatus status) => status switch
+    {
+        IssueStatus.Backlog => "backlog",
+        IssueStatus.InProgress => "inProgress",
+        IssueStatus.Done => "done",
+        IssueStatus.Cancelled => "cancelled",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
+    };
+
+    /// <summary>
+    /// Pure decision method: given a children snapshot, return the parent
+    /// status the aggregate would transition to. Throws when the snapshot is
+    /// empty (a non-parent has no children to aggregate over). Does not
+    /// mutate the aggregate; the caller compares to <see cref="Status"/> and
+    /// applies the matching transition when they differ.
+    /// </summary>
+    public IssueStatus RecomputeCompositeStatus(IReadOnlyCollection<ChildSnapshot> childrenSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+
+        var inProgressCount = 0;
+        var doneCount = 0;
+        var cancelledCount = 0;
+        var backlogCount = 0;
+        foreach (var child in childrenSnapshot)
+        {
+            ArgumentNullException.ThrowIfNull(child);
+            switch (child.Status)
+            {
+                case IssueStatus.Backlog:
+                    backlogCount++;
+                    break;
+                case IssueStatus.InProgress:
+                    inProgressCount++;
+                    break;
+                case IssueStatus.Done:
+                    doneCount++;
+                    break;
+                case IssueStatus.Cancelled:
+                    cancelledCount++;
+                    break;
+            }
+        }
+
+        // Any running child flips the parent to InProgress (covers
+        // "any-running → InProgress" and the Backlog-only case below).
+        if (inProgressCount > 0) return IssueStatus.InProgress;
+        // All children still Backlog — the parent is Backlog.
+        if (backlogCount == childrenSnapshot.Count) return IssueStatus.Backlog;
+        // Mixed terminal + Backlog (e.g. some children Done, some still
+        // Backlog) means a child is still scheduled to start; treat as
+        // InProgress so the next child event redrives completion.
+        if (backlogCount > 0) return IssueStatus.InProgress;
+        if (cancelledCount == childrenSnapshot.Count) return IssueStatus.Cancelled;
+        return IssueStatus.Done;
+    }
+
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
         if (_workflowRunId != workflowRunId) return false;
@@ -295,6 +443,12 @@ public sealed partial class Issue
     {
         if (_status != IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
+        ArchiveForced(now);
+    }
+
+    public void ArchiveForced(DateTime? now = null)
+    {
+        if (_archivedAt is not null) return;
         var archivedAt = now ?? DateTime.UtcNow;
         _archivedAt = archivedAt;
         Touch(archivedAt);
@@ -307,6 +461,24 @@ public sealed partial class Issue
         _archivedAt = null;
         Touch(now);
         if (wasArchived) RecordEvent(new IssueUnarchived());
+    }
+
+    public void Close(
+        IReadOnlyCollection<ChildSnapshot> childrenSnapshot,
+        string? reason = null,
+        DateTime? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+        var nonTerminalChildNumbers = childrenSnapshot
+            .Where(child => child.Status is IssueStatus.Backlog or IssueStatus.InProgress)
+            .Select(child => child.Number)
+            .Order()
+            .ToArray();
+        if (nonTerminalChildNumbers.Length > 0)
+            throw new IssueParentHasNonTerminalChildrenException(Number, nonTerminalChildNumbers);
+        Close(reason, now);
     }
 
     public void Close(string? reason = null, DateTime? now = null)

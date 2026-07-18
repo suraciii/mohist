@@ -57,6 +57,8 @@ public static class EventCatalog
         ReverseDns.IssueUnarchived,
         ReverseDns.IssueReopened,
         ReverseDns.IssueRepositoryChanged,
+        ReverseDns.IssueCompositeStarted,
+        ReverseDns.IssueCompositeStatusChanged,
         ReverseDns.InboxItemPersisted,
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
@@ -107,6 +109,7 @@ public static class EventCatalog
         public const string WorkflowRunId = "workflowrunid";
         public const string Issue = "issue";
         public const string Epic = "epic";
+        public const string Parent = "parent";
         public const string Stage = "stage";
         public const string AgentId = "agentid";
         public const string SessionId = "sessionid";
@@ -171,6 +174,8 @@ public static class EventCatalog
         public const string IssueUnarchived = "com.mohist.issue.unarchived";
         public const string IssueReopened = "com.mohist.issue.reopened";
         public const string IssueRepositoryChanged = "com.mohist.issue.repository-changed";
+        public const string IssueCompositeStarted = "com.mohist.issue.composite-started";
+        public const string IssueCompositeStatusChanged = "com.mohist.issue.composite-status-changed";
 
         public const string EpicCreated = "com.mohist.epic.created";
         public const string EpicUpdated = "com.mohist.epic.updated";

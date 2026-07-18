@@ -329,13 +329,18 @@ public abstract class EpicAutoDoneHandlerTestSupport
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();
+        public Task CloseCompositeAsync() => throw new NotSupportedException();
+        public Task ReopenCompositeAsync() => throw new NotSupportedException();
         public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task ArchiveForParentCascadeAsync() => throw new NotSupportedException();
         public Task UnarchiveAsync() => throw new NotSupportedException();
         public Task ReopenAsync() => throw new NotSupportedException();
         public Task<IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
         public Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
         public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
+        public Task StartCompositeAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => Task.FromResult(true);

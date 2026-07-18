@@ -1,0 +1,72 @@
+## Codebase Patterns
+
+- Issue affiliations (Epic, Parent) are stored on the child aggregate via init-only `EpicNumber` / `ParentIssueNumber` properties and projected to `IssueRow`. Affinities are guard-constrained at the aggregate layer (e.g. child cannot join Epic).
+- The C# 14 `union` syntax compiles to a base class + per-case records. The base class name shadows the union's case name at the type level: `IsType<UnionCase>(unionValue)` and `OfType<UnionCase>(unionSequence)` both fail at runtime — the analyzer's CA2021 actually flags this statically. Use the `is UnionCase` pattern (or iterate and switch) instead. Existing tests already follow this pattern (`IssueStartReadinessDomainTests.SingleDraftEvent`).
+- `IssueLineage.BuildExtensions` and the related event serializers are pure helpers that read only the producing aggregate's state — no DB calls. The `parent` lineage key mirrors `epic`: stamped conditionally on the producing issue, omitted entirely when the affiliation is null.
+- `IssueStatus` JSON serialization uses `JsonStringEnumConverter` with `CamelCase` policy: `Backlog → "backlog"`, `InProgress → "inProgress"`, `Done → "done"`, `Cancelled → "cancelled"`. The new `IssueCompositeStatusChanged` event payload uses the same wire strings.
+- `dotnet test Mohist.sln` runs four test projects: UnitTests (1,217), SpecTests (2,827), ArchTests (30), CLI.Tests (1,397). All currently green.
+
+## T-001
+
+- Added `IssueCompositeStarted` and `IssueCompositeStatusChanged(PreviousStatus, NewStatus)` to the `IssueEvent` union; wired serializer map + `BusType` switch + `Unwrap` switch.
+- Added `com.mohist.issue.composite-started` and `com.mohist.issue.composite-status-changed` to `EventCatalog.ReverseDns` and `EventCatalog.All`; added `parent` to `EventCatalog.Lineage`.
+- Extended `IssueLineage.BuildExtensions` to stamp `parent = <n>` whenever `state.ParentIssueNumber is > 0`; mirrors the `epic` branch.
+- Added `CloudEventLineage.TryReadParent` (positive-int parser; returns false on missing/invalid values).
+- Added `ChildSnapshot(Number, Status)` record + `IssueEmptyCompositeSnapshotException` in a new `IssueCompositeSnapshot.cs` file.
+- Added four aggregate transitions on `Issue.Transitions.cs`:
+  - `MarkCompositeStarted(snapshot)` — Backlog → InProgress; no `WorkflowRunId`, no `HasWorkflowStarted`, no `RepositoryBindingRevision` bump; no-op if already InProgress; throws on empty snapshot.
+  - `MarkCompositeDone(snapshot)` — InProgress → Done; sets `CompletedAt`; verifies snapshot yields Done; no-op if already Done; throws on empty snapshot.
+  - `MarkCompositeCancelled(snapshot)` — Backlog/InProgress → Cancelled; verifies snapshot yields Cancelled; no-op if already Cancelled; throws on empty snapshot.
+  - `ReopenComposite()` — Cancelled → Backlog, bypasses the repository-existence check (no snapshot argument, no target gate).
+  - `RecomputeCompositeStatus(snapshot)` — pure decision method returning the aggregated target status; throws on empty snapshot. Aggregation order: any InProgress child → InProgress; all Backlog → Backlog; any Backlog + terminal mix → InProgress (some work still pending); all Cancelled → Cancelled; mixed terminal with ≥1 Done → Done.
+- Updated `ProjectEventFeedAssembler.IssueTypes` so the two new event types are returned by `/events` filtered feeds.
+- Wrote `IssueCompositeStatusTransitionTests` (16 tests covering all transitions + the four-state table + empty-snapshot throws + wrong-source-state throws + revision-untouched invariant); `IssueLineageTests` (5 tests covering parent stamping + omission + key-set invariance); extended `CloudEventLineageTests` with `TryReadParent` cases; extended `IssueEventSerializerTests` with both new event bus types + payload round-trips.
+- Did NOT touch `IssueStartBlocker.ParentHasChildren` — T-002 removes it. `mo issue start <parent>` still returns the `is_parent` blocker (regression-free).
+- Did NOT add `Close(snapshot, reason)` or `ArchiveForced` — those belong to T-003 with the lifecycle grain/API wiring.
+- Full `dotnet test Mohist.sln` (5,471 tests) green; full `npm test` (server, CLI, runner, web — 8,900+ tests) green.
+
+## T-002
+
+- Removed `IssueStartBlocker.ParentHasChildren` (domain + read-model + DTO `IssueStartBlockerDto.ParentHasChildrenBlocker`); updated `IssueRoutes.Lifecycle.cs` so `POST /start` on a parent no longer maps the `is_parent` code.
+- `IssueGrain.StartWorkAsync` now branches inside the existing entry point: when `hasChildren` is true, calls `StartCompositeAsync` (loads children snapshot → `MarkCompositeStarted` → fan-out via `Task.WhenAll` of per-child `StartWorkAsync`); otherwise runs the unchanged per-issue start path.
+- Added `IssueGrain.StartCompositeAsync` (Backlog → InProgress without workflow run, fan-out to every currently-startable child in parallel; per-child failures swallowed + logged so siblings still start).
+- Added `IssueGrain.RecomputeCompositeStatusAsync` (load fresh children snapshot → `RecomputeCompositeStatus` → apply matching transition if needed → fan-out only when `target == InProgress`). Fan-out is gated on InProgress per design D6 step 4: attaching a child to a still-Backlog parent must NOT pre-empt the user's explicit `mo issue start`. The fan-out was originally unconditional; an early test failure in `IssueCompositeAdvancementApiSpecs.StartIssue_OnParentWithAllChildrenBlocked_StillAggregatesToInProgress` (attaching then adding prereq — recompute fired before prereq landed) surfaced this and the fix was to gate on the target status.
+- Added `IssueQuerier.ListChildrenForCompositeAsync` (projectId + parent → list of `(Number, Status, IsDraft, PrerequisiteNumbers, WorkflowRunId, RepositoryRef)` for each non-archived child, ordered by number).
+- Added `IssueChildCompositeInfo` record at the bottom of `IssueQuerier.cs` (mirrors what the parent grain needs for startability + status aggregation).
+- New durable handlers in `packages/server/src/Mohist.Server/Events/Subscriptions/IssueCompositeHandlers.cs`:
+  - `IssueCompositeChildStartedHandler` on `com.mohist.issue.work-started` → recompute parent.
+  - `IssueCompositeChildCompletedHandler` on `com.mohist.issue.completed` → recompute parent.
+  - `IssueCompositeChildCancelledHandler` on `com.mohist.issue.cancelled` → recompute parent.
+  - `IssueCompositeChildReopenedHandler` on `com.mohist.issue.reopened` → recompute parent (Done → InProgress flip on a Done parent).
+  - `IssueCompositeParentChangedHandler` on `com.mohist.issue.parent-changed` → recompute both previous + new parent (one will be null on attach/detach).
+  - Shared `ParentCompositeRecomputeDispatcher` for the four child-event handlers; the parent-changed handler dispatches both ends itself.
+- Exposed `StartCompositeAsync` on `IIssueGrain` for direct grain-level tests.
+- All `IIssueGrain` test fakes (in Epic + IssueCompositeHandlersSpecs + IssueWorkflowCompletionHandlerTestSupport) extended with `StartCompositeAsync` to keep them compiling.
+- New `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCompositeAdvancementGrainSpecs.cs` (15 tests: start fan-out, draft parent throws, zero children no-op, prereq-blocked skip, draft-child skip, parent never owns workflow run, recompute idempotency across redeliveries, all-terminal-Done aggregates Done, mixed-Done/Cancelled aggregates Done, no fan-out on Backlog parent, recompute on zero-children no-op, normal-issue start path unchanged, parent start routes into composite, restart after activation loss recovers, fan-out failure isolation).
+- Updated `packages/server/tests/Mohist.Server.SpecTests/spec-file-size-baseline.json` to whitelist the two new over-24K files (IssueCompositeHandlersSpecs.cs and IssueCompositeAdvancementGrainSpecs.cs).
+- Removed a debug `LogInformation` line that was left over from investigating the test failure noted above (`IsStartableForComposite` no longer logs the full child decision).
+- Full `dotnet test Mohist.sln` (5,512 tests) green; full `npm test` (server, CLI, runner, web — 11,479 tests) green.
+- `mo issue start <parent>` now succeeds and fans out startable children in parallel; the parent never acquires a workflow run; the parent's `WorkflowRunId` remains null at every observation.
+- The acceptance criterion "Per-child runner-dispatch capacity is not bypassed" is satisfied trivially because `Task.WhenAll(childGrain.StartWorkAsync())` reuses each child's existing per-issue start path, which already goes through runner capacity admission (no new project-wide cap introduced).
+- Did NOT wire the parent-aware `/close`, `/reopen`, `/archive` routes — those belong to T-003 alongside `Issue.Close(snapshot, reason)`, `Issue.ArchiveForced()`, and the synchronous archive cascade.
+
+## T-003
+
+- Added `Issue.Close(childrenSnapshot, reason)` with `IssueParentHasNonTerminalChildrenException`; it rejects Backlog/InProgress child numbers before invoking the existing close transition, so there is no child mutation or cascade.
+- Added idempotent `Issue.ArchiveForced()`. Normal `Archive()` retains the Done-only guard and delegates to the forced transition only after validation.
+- Added `IIssueGrain.CloseCompositeAsync`, `ReopenCompositeAsync`, and `ArchiveForParentCascadeAsync`; updated the existing `IIssueGrain` test fakes with explicit unsupported/no-op implementations.
+- `IssueGrain.ArchiveAsync` now validates and saves the parent first, then synchronously archives every non-archived child in issue-number order. Its lifecycle snapshot includes archived children so they are skipped explicitly rather than omitted.
+- Lifecycle routes branch from `IssueReadModel.ChildIssuesSummary.HasChildren`: parent close/reopen bypass the repository coordinator, while non-parent reopen remains coordinator-routed. Parent archive bypasses the executable-repository precheck because a composite parent has no workflow target.
+- Domain tests cover composite close guards and force archive from every status. Grain/API specs cover typed close rejection, reopen without child mutation, attach/start after reopen, Done+Cancelled archive cascade, already-archived idempotency, and detach recompute with remaining Done children.
+- The first full `npm test` exposed the C# 24KB test-file ratchet after lifecycle grain specs were appended to `IssueCompositeAdvancementGrainSpecs`; moved them into `IssueCompositeLifecycleGrainSpecs` instead of raising that baseline. Updating the required `IIssueGrain` fake in the already-baselined `IssueCompositeHandlersSpecs` added 205 bytes, so its existing allowance was updated from 26,361 to 26,566.
+- Focused lifecycle tests and full `npm test` are green: UnitTests 1,223; SpecTests 2,875; ArchTests 30; CLI 1,397; Web 4,820; Runner 1,147.
+
+## T-004
+
+- Extended `ChildIssuesSummary` (`packages/server/src/Mohist.Server/Issue/Services/IssueInfo.cs`) with `BacklogCount`, `InProgressCount`, `DoneCount`, `CancelledCount` alongside the existing `HasChildren` and `Count`. The matching Web type `ChildIssuesSummary` (`packages/web/src/entities/issue/model/issue.ts`) gained the same four camelCase fields. Backwards compatible — the only existing consumer of `HasChildren` is `IssueRoutes.Lifecycle.cs` (parent close/reopen/archive detection), which still keys off `HasChildren`.
+- Updated `IssueQuerier.EnrichAsync` (`packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs`) to compute the per-status breakdown in the same pass as the existing child-count query. The single `GroupBy` projects `(Parent, Status, Count)` and a follow-up in-memory `GroupBy(parent)` rolls the rows into `ChildIssuesSummary`. No additional DB round-trip per parent — the index used by the existing `(ProjectId, ParentIssueNumber, Number)` covers the grouping. `IssueRow.Status` is the computed column `COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))`, so the comparison accepts both `"inProgress"` (current `JsonStringEnumConverter.CamelCase` output) and `"in_progress"` defensively while leaving the lowercase statuses unchanged.
+- `mo issue show <parent>` (`packages/cli/Mohist.Cli/TableRenderer.Issues.cs`) renders `parent: #N <title>` when a child detail carries `parentIssueRef`, and for a parent the detail now reads `parent: is a parent (N child issues)` followed by `children: <done> done / <inProgress> in-progress / <cancelled> cancelled / <backlog> backlog / <N> total`. The aggregated `Status` field is already on the existing `status:` line (persisted via T-002's transitions onto `IssueRow.Status`).
+- Web `IssueDetailsCard` (`packages/web/src/pages/issue-detail/ui/cards/IssueDetailsCard.tsx`) renders the existing `'N child issue(s)'` row as `'is a parent (N child issues)'` and adds a separate `Children` row with the same progress breakdown. The existing parent/child detail rail element ids are preserved (`child-issues-metadata-row`, new `child-issues-progress-row`).
+- Test additions: `IssueQuerierSpecs.ChildIssuesSummary_ComputesPerStatusBreakdownFromSameGroupBy` (parent with mixed states, unrelated parent to confirm scope, child issue carrying only the parent ref unchanged), `RenderTable_IssueShow_RendersParentReferenceAndChildProgress` (parent rendering), `RenderTable_IssueShow_RendersParentIssueReferenceForChild` (child rendering), `IssueDetailPage.relationships.test.tsx` extended with the per-status progress row assertion. The pre-existing relationships tests for the parent-issue-metadata-row and the child-issues-metadata-row label shape were updated to match the new "is a parent" wording.
+- Full `npm test` green: UnitTests 1,223; SpecTests 2,876 (was 2,875; new querier test); ArchTests 30; CLI 1,399 (was 1,397; two new renderer tests); Web 4,821 (was 4,820; new progress row assertion); Runner 1,147.
+- Did NOT add board-card progress badges, blocked indicators, or any composite-status UI polish — those remain deferred per design D9 / open question 4. The Hermes notification dispatcher's handling of `IssueCompositeStatusChanged` (open question 2) stays in the integrate stage.

@@ -148,24 +148,27 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var reusedRunId = await TryReuseActiveWorkflowAsync();
         if (reusedRunId is not null)
             return reusedRunId;
-        var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
-        var repo = resolution.Repository!;
         var undeliveredPrerequisites = await LoadUndeliveredPrerequisiteNumbersAsync();
         var hasChildren = await HasChildrenAsync(_issue!.Number);
-        ThrowIfStartBlocked(undeliveredPrerequisites, hasChildren);
+        ThrowIfStartBlocked(undeliveredPrerequisites);
+        if (hasChildren)
+        {
+            await StartCompositeAsync();
+            return string.Empty;
+        }
+        var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
+        var repo = resolution.Repository!;
         var wrId = $"wr_{Guid.NewGuid():N}";
-        return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites, hasChildren);
+        return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites, hasChildren: false);
     }
 
-    private void ThrowIfStartBlocked(IReadOnlySet<int>? undeliveredPrerequisites, bool hasChildren)
+    private void ThrowIfStartBlocked(IReadOnlySet<int>? undeliveredPrerequisites)
     {
-        var blocker = _issue!.StartBlocker(undeliveredPrerequisites, hasChildren);
+        var blocker = _issue!.StartBlocker(undeliveredPrerequisites);
         if (blocker is IssueStartBlocker.Draft)
             throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is still a draft and cannot be started");
         if (blocker is IssueStartBlocker.WaitingFor waiting)
             throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
-        if (blocker is IssueStartBlocker.ParentHasChildren)
-            throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} has children and cannot be started directly");
     }
 
     private async Task<string> StartWorkflowAsync(
@@ -365,6 +368,209 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
     }
 
+    /// <summary>
+    /// issue-419 T-002 (D2): composite advancement entry. Loads a fresh
+    /// children snapshot, marks the parent <c>Backlog → InProgress</c>
+    /// without minting a workflow run (no-op when already past Backlog),
+    /// then fans out <c>StartWorkAsync</c> to every currently-startable
+    /// child in parallel. Per-child failures are logged and left for the
+    /// next <see cref="RecomputeCompositeStatusAsync"/>; siblings are
+    /// unaffected.
+    /// </summary>
+    public async Task StartCompositeAsync()
+    {
+        EnsureIssue();
+        if (_issue.IsDraft)
+            throw new IssueStartBlockedException(new IssueStartBlocker.Draft(),
+                $"Issue #{_issue.Number} is still a draft and cannot be started");
+
+        var children = await LoadCompositeChildrenAsync();
+        if (children.Count == 0)
+        {
+            _log.LogWarning(
+                "Parent {IssueKey} branch engaged but children vanished mid-call; recompute on next detach event",
+                GrainKey);
+            return;
+        }
+
+        var snapshot = ChildSnapshotFromComposite(children);
+        var changed = _issue.MarkCompositeStarted(snapshot);
+        if (changed) await SaveIssueAsync();
+
+        await TryStartChildrenAsync(children);
+    }
+
+    /// <summary>
+    /// issue-419 T-002 (D1, D6): idempotent recompute of the parent's
+    /// aggregated status. Loads a fresh children snapshot, decides the
+    /// target status via <see cref="Domain.Issue.RecomputeCompositeStatus"/>,
+    /// applies the matching transition (no-op when already at target),
+    /// then — only when the parent is in its aggregated InProgress state —
+    /// fans out start for any newly-startable children. No-ops when
+    /// the issue has zero remaining children — it has reverted to a normal
+    /// issue and composite advancement no longer applies.
+    /// <para>
+    /// Fan-out is gated on <c>target == InProgress</c> per design D6 step 4:
+    /// attaching a child to a still-Backlog parent must NOT pre-empt the
+    /// user's explicit <c>mo issue start</c>. Redelivery is safe: the
+    /// aggregate transition is a no-op when the status already matches,
+    /// and <c>TryStartChildrenAsync</c> skips any child whose state
+    /// changed since the snapshot was loaded.
+    /// </para>
+    /// </summary>
+    public async Task RecomputeCompositeStatusAsync()
+    {
+        EnsureIssue();
+        var children = await LoadCompositeChildrenAsync();
+        if (children.Count == 0)
+        {
+            _log.LogDebug(
+                "Parent {IssueKey} recompute no-op: no children remain",
+                GrainKey);
+            return;
+        }
+
+        var snapshot = ChildSnapshotFromComposite(children);
+        var target = _issue.RecomputeCompositeStatus(snapshot);
+        var applied = ApplyCompositeTransition(target, snapshot);
+        if (applied) await SaveIssueAsync();
+
+        if (target == Domain.IssueStatus.InProgress)
+        {
+            await TryStartChildrenAsync(children);
+        }
+    }
+
+    private async Task<IReadOnlyList<IssueChildCompositeInfo>> LoadCompositeChildrenAsync(bool includeArchived = false)
+    {
+        var projectId = _issue!.ProjectId;
+        var parentNumber = _issue.Number;
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Issues.AsNoTracking()
+            .Where(r => r.ProjectId == projectId
+                && r.ParentIssueNumber == parentNumber
+                && (includeArchived || r.IsArchived != true))
+            .OrderBy(r => r.Number)
+            .Select(r => new { r.State })
+            .ToListAsync();
+
+        var children = new List<IssueChildCompositeInfo>(rows.Count);
+        foreach (var row in rows)
+        {
+            var issue = string.IsNullOrEmpty(row.State) ? null : IssueStore.Deserialize(row.State);
+            if (issue is null) continue;
+            children.Add(new IssueChildCompositeInfo(
+                Number: issue.Number,
+                Status: issue.Status,
+                IsDraft: issue.IsDraft,
+                PrerequisiteNumbers: issue.PrerequisiteNumbers,
+                WorkflowRunId: issue.WorkflowRunId,
+                RepositoryRef: issue.RepositoryRef,
+                IsArchived: issue.ArchivedAt is not null));
+        }
+        return children;
+    }
+
+    private async Task TryStartChildrenAsync(IReadOnlyList<IssueChildCompositeInfo> children)
+    {
+        if (children.Count == 0) return;
+
+        var startableChildren = new List<IssueChildCompositeInfo>();
+        var allDoneNumbers = new HashSet<int>();
+        foreach (var child in children)
+        {
+            if (child.Status == Domain.IssueStatus.Done) allDoneNumbers.Add(child.Number);
+        }
+        foreach (var child in children)
+        {
+            if (IsStartableForComposite(child, allDoneNumbers))
+            {
+                startableChildren.Add(child);
+            }
+            else
+            {
+                _log.LogDebug(
+                    "Parent {ParentKey} child {ChildNumber} not startable (status={Status} draft={IsDraft} prereqs=[{Prereqs}])",
+                    GrainKey, child.Number, child.Status, child.IsDraft,
+                    string.Join(",", child.PrerequisiteNumbers));
+            }
+        }
+
+        if (startableChildren.Count == 0) return;
+
+        var tasks = new List<Task>(startableChildren.Count);
+        foreach (var child in startableChildren)
+        {
+            tasks.Add(StartChildIssueAsync(child));
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    private bool IsStartableForComposite(
+        IssueChildCompositeInfo child,
+        IReadOnlySet<int> allDoneNumbers)
+    {
+        if (child.IsDraft) return false;
+        if (child.WorkflowRunId is not null) return false;
+        if (child.Status != Domain.IssueStatus.Backlog) return false;
+        if (string.IsNullOrWhiteSpace(child.RepositoryRef)) return false;
+        foreach (var prereq in child.PrerequisiteNumbers)
+        {
+            if (!allDoneNumbers.Contains(prereq)) return false;
+        }
+        return true;
+    }
+
+    private async Task StartChildIssueAsync(IssueChildCompositeInfo child)
+    {
+        try
+        {
+            var childGrain = GrainFactory.GetGrain<IIssueGrain>(
+                new IssueKey(_issue!.ProjectId, child.Number).ToGrainKeyString());
+            await childGrain.StartWorkAsync();
+            _log.LogInformation(
+                "Composite advancement: parent {ParentKey} started child {ChildNumber}",
+                GrainKey, child.Number);
+        }
+        catch (Exception ex)
+        {
+            // Per-child failures must not abort sibling starts. The
+            // failure is logged and retried by the next recompute
+            // triggered by the durable child-event handlers.
+            _log.LogWarning(ex,
+                "Composite advancement: parent {ParentKey} could not start child {ChildNumber}",
+                GrainKey, child.Number);
+        }
+    }
+
+    private bool ApplyCompositeTransition(Domain.IssueStatus target, IReadOnlyCollection<ChildSnapshot> snapshot)
+    {
+        if (_issue!.Status == target) return false;
+
+        // Status-to-transition mapping — the four legal uses of the
+        // parent-only transitions on the Issue aggregate. Done/Cancelled
+        // paths require the aggregate's own invariant check to pass.
+        return target switch
+        {
+            Domain.IssueStatus.InProgress => _issue.MarkCompositeStarted(snapshot),
+            Domain.IssueStatus.Done => _issue.MarkCompositeDone(snapshot),
+            Domain.IssueStatus.Cancelled => _issue.MarkCompositeCancelled(snapshot),
+            Domain.IssueStatus.Backlog => false,
+            _ => false,
+        };
+    }
+
+    private static IReadOnlyCollection<ChildSnapshot> ChildSnapshotFromComposite(
+        IReadOnlyList<IssueChildCompositeInfo> children)
+    {
+        var snapshot = new List<ChildSnapshot>(children.Count);
+        foreach (var child in children)
+        {
+            snapshot.Add(new ChildSnapshot(Number: child.Number, Status: child.Status));
+        }
+        return snapshot;
+    }
+
     private static bool IsWorkflowRunStateCorruption(Exception ex)
     {
         for (var current = ex; current is not null; current = current.InnerException)
@@ -470,10 +676,43 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         await SaveIssueAsync();
     }
 
+    public async Task CloseCompositeAsync()
+    {
+        EnsureIssue();
+        var children = await LoadCompositeChildrenAsync(includeArchived: true);
+        var snapshot = ChildSnapshotFromComposite(children);
+        _issue!.Close(snapshot, "user-cancelled");
+        await SaveIssueAsync();
+    }
+
+    public async Task ReopenCompositeAsync()
+    {
+        EnsureIssue();
+        if (!_issue!.ReopenComposite()) return;
+        await SaveIssueAsync();
+    }
+
     public async Task ArchiveAsync()
     {
         EnsureIssue();
+        var children = await LoadCompositeChildrenAsync(includeArchived: true);
         _issue!.Archive();
+        await SaveIssueAsync();
+
+        foreach (var child in children)
+        {
+            if (child.IsArchived) continue;
+            var childGrain = GrainFactory.GetGrain<IIssueGrain>(
+                new IssueKey(_issue.ProjectId, child.Number).ToGrainKeyString());
+            await childGrain.ArchiveForParentCascadeAsync();
+        }
+    }
+
+    public async Task ArchiveForParentCascadeAsync()
+    {
+        EnsureIssue();
+        if (_issue!.ArchivedAt is not null) return;
+        _issue.ArchiveForced();
         await SaveIssueAsync();
     }
 

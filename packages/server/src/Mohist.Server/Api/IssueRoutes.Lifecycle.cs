@@ -36,7 +36,6 @@ public static partial class IssueRoutes
                 var code = ex.Blocker switch
                 {
                     IssueStartBlocker.Draft => "draft",
-                    IssueStartBlocker.ParentHasChildren => "is_parent",
                     IssueStartBlocker.WaitingFor => "waiting_for_prerequisite",
                     _ => "start_blocked",
                 };
@@ -97,10 +96,28 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
-            if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            await grain.CancelAsync();
-            return ApiResults.Ok();
+            var issue = await issuesQuery.GetAsync(project.Id, number);
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
+            try
+            {
+                if (issue.ChildIssuesSummary?.HasChildren == true)
+                    await grain.CloseCompositeAsync();
+                else
+                    await grain.CancelAsync();
+                return ApiResults.Ok();
+            }
+            catch (IssueParentHasNonTerminalChildrenException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "parent_has_non_terminal_children", new
+                {
+                    nonTerminalChildNumbers = ex.NonTerminalChildNumbers,
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
         });
 
         group.MapPost("/{number:int}/reopen", async (
@@ -114,6 +131,20 @@ public static partial class IssueRoutes
 
             var issue = await issuesQuery.GetAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            if (issue.ChildIssuesSummary?.HasChildren == true)
+            {
+                var parentGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
+                try
+                {
+                    await parentGrain.ReopenCompositeAsync();
+                    return ApiResults.Ok();
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return ApiResults.Conflict(ex.Message);
+                }
+            }
 
             // issue-417 T-005: reopen enters through the Project-scoped
             // coordinator so repository removal cannot race into an
@@ -168,10 +199,11 @@ public static partial class IssueRoutes
 
             var issue = await issuesQuery.GetAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
+            if (issue.ChildIssuesSummary?.HasChildren != true
+                && IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError)
+                return repoError;
 
-            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
-            if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
             try
             {
                 await grain.ArchiveAsync();
