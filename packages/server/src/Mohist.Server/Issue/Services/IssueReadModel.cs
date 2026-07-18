@@ -54,6 +54,7 @@ public class IssueReadModel
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
+    public IssueChildRef[] Children { get; set; } = [];
     public IssueFeedbackDto[] Feedback { get; set; } = [];
 }
 

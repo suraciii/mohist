@@ -95,6 +95,22 @@ public class IssueReadModelLoader : IScopedService
     }
 
     /// <summary>
+    /// Apply workflow projection only, in batch, to a list of read
+    /// models. Used by the compact child projection in
+    /// <see cref="IssueQuerier"/> so the per-child canonical Health can
+    /// reflect the bound workflow state without paying N workflow
+    /// queries. Feedback projection is intentionally skipped: the
+    /// compact child row does not surface <c>feedback</c>.
+    /// </summary>
+    public async Task ApplyWorkflowProjectionsBatchAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<IssueReadModel> models)
+    {
+        if (models.Count == 0) return;
+        ApplyWorkflowProjections(models, await LoadWorkflowStatesAsync(db, models));
+    }
+
+    /// <summary>
     /// Single field-by-field mapping body. Static
     /// <see cref="ToInfo(Domain.Issue, ProjectInfo?)"/> callers hardcode
     /// <see cref="IssueWorkflowProfiles.LocalId"/> to preserve the

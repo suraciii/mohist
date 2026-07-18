@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -149,6 +150,197 @@ public class IssueQuerierSpecs
         Assert.Equal((project.Id, 17, "Workflow issue"), (issue!.ProjectId, issue.Number, issue.Title));
     }
 
+    [Fact]
+    public async Task Children_ReturnsCurrentChildrenInAscendingIssueNumberOrder_WithTitleStatusHealthAndRepository()
+    {
+        var project = NewProject("children-order");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Backlog child", status: "backlog", parentIssueNumber: 1, repositoryRef: "server");
+        await SeedIssueAsync(db, project.Id, 3, "Done child", status: "done", parentIssueNumber: 1, repositoryRef: "web");
+        await SeedIssueAsync(db, project.Id, 4, "In-progress child", status: "inProgress", parentIssueNumber: 1, repositoryRef: "server");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parent = await querier.GetAsync(project.Id, 1, project);
+
+        Assert.NotNull(parent);
+        Assert.Equal(new[] { 2, 3, 4 }, parent!.Children.Select(c => c.Number).ToArray());
+        var backlogChild = parent.Children[0];
+        Assert.Equal((2, "Backlog child", "backlog", "active", "server"),
+            (backlogChild.Number, backlogChild.Title, backlogChild.Status, backlogChild.Health, backlogChild.RepositoryName));
+        var doneChild = parent.Children[1];
+        Assert.Equal((3, "Done child", "done", "done", "web"),
+            (doneChild.Number, doneChild.Title, doneChild.Status, doneChild.Health, doneChild.RepositoryName));
+        var inProgressChild = parent.Children[2];
+        Assert.Equal((4, "In-progress child", "in_progress", "active", "server"),
+            (inProgressChild.Number, inProgressChild.Title, inProgressChild.Status, inProgressChild.Health, inProgressChild.RepositoryName));
+    }
+
+    [Fact]
+    public async Task ChildIssuesSummary_DerivesTotalsAndBlockedCount_FromSameBatchedChildQuery()
+    {
+        var project = NewProject("summary-derived");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Done one", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 3, "Done two", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 4, "In-progress blocked", status: "inProgress", parentIssueNumber: 1, workflowRunId: "wr_child_blocked_4");
+        await SeedIssueAsync(db, project.Id, 5, "In-progress active", status: "inProgress", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 6, "Cancelled", status: "cancelled", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 7, "Backlog", status: "backlog", parentIssueNumber: 1);
+        await SeedFailedWorkflowRunAsync(db, "wr_child_blocked_4");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parent = await querier.GetAsync(project.Id, 1, project);
+
+        Assert.NotNull(parent!.ChildIssuesSummary);
+        var summary = parent.ChildIssuesSummary!;
+        Assert.True(summary.HasChildren);
+        Assert.Equal(6, summary.Count);
+        Assert.Equal(2, summary.DoneCount);
+        Assert.Equal(1, summary.CancelledCount);
+        Assert.Equal(2, summary.InProgressCount);
+        Assert.Equal(1, summary.BacklogCount);
+        Assert.Equal(1, summary.BlockedCount);
+    }
+
+    [Fact]
+    public async Task Children_ExcludesArchivedChildrenFromRowsAndTotals()
+    {
+        var project = NewProject("archived-children");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Active child", status: "inProgress", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 3, "Archived child", status: "done", parentIssueNumber: 1, archived: true);
+        await SeedIssueAsync(db, project.Id, 4, "Archived blocked child", status: "inProgress", parentIssueNumber: 1, workflowRunId: "wr_archived_blocked_4", archived: true);
+        await SeedFailedWorkflowRunAsync(db, "wr_archived_blocked_4");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parent = await querier.GetAsync(project.Id, 1, project);
+
+        Assert.Equal(new[] { 2 }, parent!.Children.Select(c => c.Number).ToArray());
+        Assert.Equal(1, parent.ChildIssuesSummary!.Count);
+        Assert.Equal(1, parent.ChildIssuesSummary.InProgressCount);
+        Assert.Equal(0, parent.ChildIssuesSummary.BlockedCount);
+    }
+
+    [Fact]
+    public async Task Children_DetachingChild_RemovesFromFormerParentRowsAndTotalsOnNextRead()
+    {
+        var project = NewProject("detach-child");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Kept child", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 3, "Detaching child", status: "inProgress", parentIssueNumber: 1);
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var beforeDetach = await querier.GetAsync(project.Id, 1, project);
+        Assert.Equal(new[] { 2, 3 }, beforeDetach!.Children.Select(c => c.Number).ToArray());
+        Assert.Equal(2, beforeDetach.ChildIssuesSummary!.Count);
+
+        await DetachChildAsync(db, project.Id, 3);
+
+        var afterDetach = await querier.GetAsync(project.Id, 1, project);
+        Assert.Equal(new[] { 2 }, afterDetach!.Children.Select(c => c.Number).ToArray());
+        Assert.Equal(1, afterDetach.ChildIssuesSummary!.Count);
+        Assert.Equal(1, afterDetach.ChildIssuesSummary.DoneCount);
+
+        var detached = await querier.GetAsync(project.Id, 3, project);
+        Assert.Null(detached!.ParentIssueRef);
+        Assert.Empty(detached.Children);
+    }
+
+    [Fact]
+    public async Task Children_HealthChanges_UpdateBlockedCountWithoutRewritingParentState()
+    {
+        var project = NewProject("health-changes");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Toggling child", status: "inProgress", parentIssueNumber: 1, workflowRunId: "wr_toggle_2");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        await SeedFailedWorkflowRunAsync(db, "wr_toggle_2");
+        var blocked = await querier.GetAsync(project.Id, 1, project);
+        Assert.Equal(1, blocked!.ChildIssuesSummary!.BlockedCount);
+        Assert.Equal("blocked", blocked.Children[0].Health);
+
+        var completedState =
+            "{\"Id\":\"wr_toggle_2\",\"Metadata\":{\"CreatedAt\":\"2026-07-19T00:00:00Z\",\"Name\":\"test\"},\"Status\":\"Completed\",\"CurrentStageId\":\"build\",\"Stages\":[{\"Id\":\"build\",\"Attempt\":1,\"RequiresApproval\":false,\"Initialized\":true,\"Status\":\"Completed\",\"Tasks\":[],\"Checks\":[]}],\"Assignment\":null,\"Feedback\":[]}";
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE WorkflowRuns SET State = {0} WHERE WorkflowRunId = {1}",
+            completedState,
+            "wr_toggle_2");
+
+        var active = await querier.GetAsync(project.Id, 1, project);
+        Assert.Equal(0, active!.ChildIssuesSummary!.BlockedCount);
+        Assert.Equal("active", active.Children[0].Health);
+    }
+
+    [Fact]
+    public async Task Children_DoesNotLeakAcrossProjects()
+    {
+        var projectA = NewProject("isolation-a");
+        var projectB = NewProject("isolation-b");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, projectA.Id, 1, "Parent A");
+        await SeedIssueAsync(db, projectA.Id, 2, "Child A", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, projectB.Id, 1, "Parent B");
+        await SeedIssueAsync(db, projectB.Id, 2, "Child B", status: "backlog", parentIssueNumber: 1);
+        await SeedIssueAsync(db, projectB.Id, 3, "Child B2", status: "inProgress", parentIssueNumber: 1);
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parentA = await querier.GetAsync(projectA.Id, 1, projectA);
+        var parentB = await querier.GetAsync(projectB.Id, 1, projectB);
+
+        Assert.Equal(new[] { 2 }, parentA!.Children.Select(c => c.Number).ToArray());
+        Assert.Equal(1, parentA.ChildIssuesSummary!.Count);
+        Assert.Equal(new[] { 2, 3 }, parentB!.Children.Select(c => c.Number).ToArray());
+        Assert.Equal(2, parentB.ChildIssuesSummary!.Count);
+    }
+
+    [Fact]
+    public async Task ListAsync_AddsChildrenRowsForEveryParentInResultSet()
+    {
+        var project = NewProject("list-with-children");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent one");
+        await SeedIssueAsync(db, project.Id, 2, "Parent two");
+        await SeedIssueAsync(db, project.Id, 3, "Child of one", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 4, "Child of two", status: "inProgress", parentIssueNumber: 2);
+        await SeedIssueAsync(db, project.Id, 5, "Orphan");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var list = await querier.ListAsync(project.Id, project);
+        var byNumber = list.ToDictionary(i => i.Number);
+
+        Assert.Equal(new[] { 3 }, byNumber[1].Children.Select(c => c.Number).ToArray());
+        Assert.Equal(new[] { 4 }, byNumber[2].Children.Select(c => c.Number).ToArray());
+        Assert.Empty(byNumber[5].Children);
+        Assert.Null(byNumber[5].ChildIssuesSummary);
+    }
+
+    [Fact]
+    public async Task Children_OrdinaryIssueReturnsNoChildRows()
+    {
+        var project = NewProject("ordinary");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Standalone");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var issue = await querier.GetAsync(project.Id, 1, project);
+
+        Assert.Empty(issue!.Children);
+        Assert.Null(issue.ChildIssuesSummary);
+    }
+
     private static ProjectInfo NewProject(string name) => new()
     {
         Id = $"proj-query-{name}-{Guid.NewGuid():N}",
@@ -164,7 +356,9 @@ public class IssueQuerierSpecs
         string priority = "p2",
         string[]? label = null,
         string? workflowRunId = null,
-        int? parentIssueNumber = null)
+        int? parentIssueNumber = null,
+        string? repositoryRef = null,
+        bool archived = false)
     {
         var issue = new DomainIssue
         {
@@ -175,15 +369,64 @@ public class IssueQuerierSpecs
             Priority = priority,
             WorkflowRunId = workflowRunId,
             ParentIssueNumber = parentIssueNumber,
+            RepositoryRef = repositoryRef,
+            ArchivedAt = archived ? TestTime.UtcDateTime : null,
             Labels = label is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : new Dictionary<string, string>(StringComparer.Ordinal) { [label[0]] = label[1] },
         };
         db.Issues.Add(new IssueRow
         {
+            ProjectId = issue.ProjectId,
+            Number = issue.Number,
             State = IssueStore.Serialize(issue),
             ParentIssueNumber = issue.ParentIssueNumber,
         });
         await db.SaveChangesAsync();
+    }
+
+    private static async Task DetachChildAsync(
+        MohistDbContext db,
+        string projectId,
+        int childNumber)
+    {
+        var tracked = db.Issues.First(r => r.ProjectId == projectId && r.Number == childNumber);
+        var state = IssueStore.Deserialize(tracked.State)
+            ?? throw new InvalidOperationException($"Issue #{childNumber} state could not be deserialized");
+        var detached = new DomainIssue
+        {
+            ProjectId = state.ProjectId,
+            Number = state.Number,
+            Title = state.Title,
+            Body = state.Body,
+            Status = state.Status,
+            Priority = state.Priority,
+            Risk = state.Risk,
+            CreatedAt = state.CreatedAt,
+            UpdatedAt = TestTime.UtcDateTime,
+            ArchivedAt = state.ArchivedAt,
+            CompletedAt = state.CompletedAt,
+            WorkflowRunId = state.WorkflowRunId,
+            ParentIssueNumber = null,
+            PrerequisiteNumbers = state.PrerequisiteNumbers,
+            IsDraft = state.IsDraft,
+            RepositoryRef = state.RepositoryRef,
+            Labels = new Dictionary<string, string>(state.Labels, StringComparer.Ordinal),
+        };
+        tracked.State = IssueStore.Serialize(detached);
+        tracked.ParentIssueNumber = null;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedFailedWorkflowRunAsync(
+        MohistDbContext db,
+        string workflowRunId)
+    {
+        var state =
+            "{\"Id\":\"" + workflowRunId + "\",\"Metadata\":{\"CreatedAt\":\"2026-07-19T00:00:00Z\",\"Name\":\"test\"},\"Status\":\"Failed\",\"CurrentStageId\":\"build\",\"Stages\":[{\"Id\":\"build\",\"Attempt\":1,\"RequiresApproval\":false,\"Initialized\":true,\"Status\":\"Failed\",\"Tasks\":[],\"Checks\":[],\"Failure\":{\"Reason\":\"TaskFailed\",\"Stage\":\"build\",\"Message\":\"blocked\"}}],\"Failure\":{\"Reason\":\"TaskFailed\",\"Stage\":\"build\",\"Message\":\"blocked\"},\"Assignment\":null,\"Feedback\":[]}";
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId,
+            state);
     }
 }

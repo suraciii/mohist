@@ -1,0 +1,41 @@
+## Codebase Patterns
+
+- `TestTime` (in `eng/TestTime.cs`) is the project-wide frozen clock. Use `TestTime.UtcDateTime`/`TestTime.UtcNow` for any `DateTime`/`DateTimeOffset` instead of `DateTime.UtcNow`; the build fails otherwise (BannedSymbols).
+- `IssueReadModelLoader.ApplyProjectionsToSingleAsync(db, model)` is the canonical "wire up workflow + feedback projection for one read model" entry point; it does N workflow queries. The companion `ApplyWorkflowProjectionsBatchAsync(db, models)` (added in T-001) batches workflow projection for a list (no feedback).
+- `IssueRow` has STORED computed columns for `Status`, `Title`, `RepositoryName`, `IsArchived`, etc. — all derived from `json_extract(State, ...)`. Filter `IsArchived != true` directly in the WHERE clause.
+- `BuildInfo(issue, project, resolvedProfileId)` is the canonical `Domain.Issue → IssueInfo` mapper; pass `project: null` when only the persisted `RepositoryName` is needed and the resolved `RepositoryInfo` is intentionally absent.
+- For the `IIssueGrain` create flow, the helper is `CreateAsync(projectId, number, title, body, labels, repositoryName, isDraft)`. Patch parent via `PATCH /api/projects/{p}/issues/{n}` with `{ "parentIssueNumber": N }`. Detach via `{ "parentIssueNumber": null }`.
+- `WorkflowRunState` JSON status `"Failed"` (Pascal) becomes the projection's `Health == "blocked"` for child rows.
+
+## T-001: Project current child rows and blocked progress in issue reads
+
+### Decisions
+
+- Refactored `IssueQuerier.EnrichAsync` to replace the old `childCounts` group-by query with `ApplyCompositeChildProjectionAsync`. One project-scoped query against `IssueRow` filters by parent numbers in the current result set, `IsArchived != true`, ordered by `Number` ascending.
+- For each child row, deserialize state → `Domain.Issue` → `IssueInfo` via `IssueReadModelLoader.BuildInfo(issue, project: null, resolvedProfileId)`. `RepositoryName` is preserved as the persisted `issue.RepositoryRef`; resolved `Repository`/`RepositoryProblem` are intentionally left null because the compact row doesn't carry them.
+- Workflow projection is applied in batch via the new `IssueReadModelLoader.ApplyWorkflowProjectionsBatchAsync` so `Health` reflects the bound workflow state (e.g. workflow `Failed` → child `Health = "blocked"`).
+- Group child rows by parent number; both `IssueReadModel.Children` (compact `IssueChildRef[]`) and `ChildIssuesSummary` (with new `BlockedCount`) are derived from the same set in `SummarizeChildren` so they cannot drift.
+- Non-parent issues get `Children = []` and `ChildIssuesSummary = null` so the Web UI can treat an empty array as "no children" and a null summary as "not a parent".
+- `ChildIssuesSummary.Count` now excludes archived children (was previously the union of all children). This is the behavioral change explicitly required by the spec's "Detaching or archiving a child removes it from the former parent's child rows and totals on the next read" scenario.
+
+### Gotchas
+
+- The existing `Reads_ProjectParentAndChildSummary_AndParentFilter` test happened to seed only non-archived children, so it still passes after the archived-exclusion change. New `Children_ExcludesArchivedChildrenFromRowsAndTotals` pins the new semantics.
+- `BlockedCount` uses canonical `Health == "blocked"`, not status — so a child in `inProgress` with a failed workflow run increments `BlockedCount`, matching the spec scenario "parent has four children, two done, one blocked in_progress, one cancelled → 2/4 done, 1 blocked".
+- `IssueChildRef.FromReadModel(IssueReadModel)` is the projection helper; downstream code (Web T-002/T-003) should depend on `IssueChildRef`, not on the full `IssueReadModel` for child lists.
+- JSON property name on `IssueChildRef.Health` is `health` (matches `IssueReadModel.Health`); other fields use camelCase by default.
+- The `$$"""..."""` raw string interpolation conflicts with `}}` literals in JSON; build raw strings via plain concatenation when the JSON contains closing braces.
+
+### Files Touched
+
+- `packages/server/src/Mohist.Server/Issue/Services/IssueInfo.cs` — added `IssueChildRef`, `ChildIssuesSummary.BlockedCount`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModel.cs` — added `IssueReadModel.Children`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModelLoader.cs` — added `ApplyWorkflowProjectionsBatchAsync`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` — removed old `childCounts` group-by; added `ApplyCompositeChildProjectionAsync` + `SummarizeChildren`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Querier/IssueQuerierSpecs.cs` — 7 new specs.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Api/IssueCompositeChildProjectionApiSpecs.cs` — new API spec for additive list/detail JSON shape.
+
+### Verification
+
+- `dotnet test Mohist.sln -p:SkipWebBuild=true`: 5462 tests pass (1384 Cli + 1215 Server.Unit + 30 Server.Arch + 2833 Server.Spec).
+- `npm test`: server + 4876 web + 1192 runner tests all pass.

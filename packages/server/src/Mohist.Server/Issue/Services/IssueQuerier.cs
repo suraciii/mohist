@@ -344,29 +344,7 @@ public class IssueQuerier : IScopedService
                 issue.ParentIssueRef = new IssueParentRef { Number = link.ParentNumber, Title = link.ParentTitle ?? "" };
         }
 
-        var childCounts = await db.Issues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.ParentIssueNumber != null)
-            .GroupBy(row => new { Parent = row.ParentIssueNumber!.Value, Status = row.Status ?? string.Empty })
-            .Select(group => new { group.Key.Parent, group.Key.Status, Count = group.Count() })
-            .ToListAsync();
-        var childCountsByParent = childCounts
-            .GroupBy(row => row.Parent)
-            .ToDictionary(
-                group => group.Key,
-                group => new ChildIssuesSummary
-                {
-                    HasChildren = true,
-                    Count = group.Sum(row => row.Count),
-                    BacklogCount = group.Where(row => string.Equals(row.Status, "backlog", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
-                    InProgressCount = group.Where(row => string.Equals(row.Status, "in_progress", StringComparison.OrdinalIgnoreCase) || string.Equals(row.Status, "inProgress", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
-                    DoneCount = group.Where(row => string.Equals(row.Status, "done", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
-                    CancelledCount = group.Where(row => string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
-                });
-        foreach (var issue in issues)
-        {
-            if (childCountsByParent.TryGetValue(issue.Number, out var summary))
-                issue.ChildIssuesSummary = summary;
-        }
+        await ApplyCompositeChildProjectionAsync(db, issues);
 
         var comments = await db.IssueComments.AsNoTracking()
             .Where(c => c.ProjectId == projectId && numbers.Contains(c.IssueNumber))
@@ -625,6 +603,111 @@ public class IssueQuerier : IScopedService
                 return new IssueStartBlocker.WaitingFor(number);
         }
         return null;
+    }
+
+    /// <summary>
+    /// Composite-child projection for issue-420. Loads every current
+    /// (non-archived) child of every parent present in <paramref name="issues"/>
+    /// in one project-scoped query, applies the same workflow projection
+    /// the full read model uses so canonical child health reflects the
+    /// bound workflow state, and derives both the additive
+    /// <see cref="IssueReadModel.Children"/> array and the existing
+    /// <see cref="ChildIssuesSummary"/> (now including
+    /// <see cref="ChildIssuesSummary.BlockedCount"/>) from the same row
+    /// set so the two cannot drift.
+    /// </summary>
+    private async Task ApplyCompositeChildProjectionAsync(
+        MohistDbContext db,
+        List<IssueReadModel> issues)
+    {
+        if (issues.Count == 0) return;
+
+        var projectId = issues[0].ProjectId;
+        var parentNumbers = issues.Select(i => i.Number).Distinct().ToArray();
+
+        var childRows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.ParentIssueNumber != null
+                && parentNumbers.Contains(row.ParentIssueNumber.Value)
+                && row.IsArchived != true)
+            .OrderBy(row => row.Number)
+            .ToListAsync();
+
+        if (childRows.Count == 0)
+        {
+            foreach (var issue in issues)
+                issue.Children = [];
+            return;
+        }
+
+        var childModels = new List<IssueReadModel>(childRows.Count);
+        var projectDefaultTemplateId = await _loader.LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        foreach (var row in childRows)
+        {
+            var domain = IssueStore.Deserialize(row.State);
+            if (domain is null) continue;
+            var resolvedProfileId = _effectiveProfileResolver.Resolve(
+                domain.WorkflowProfileId,
+                projectDefaultTemplateId,
+                disabledIds);
+            var info = IssueReadModelLoader.BuildInfo(domain, project: null, resolvedProfileId);
+            childModels.Add(IssueReadModelLoader.ToReadModel(info));
+        }
+
+        await _loader.ApplyWorkflowProjectionsBatchAsync(db, childModels);
+
+        var childrenByParent = new Dictionary<int, List<IssueChildRef>>();
+        foreach (var child in childModels)
+        {
+            var parent = childRows.First(r => r.Number == child.Number).ParentIssueNumber!.Value;
+            if (!childrenByParent.TryGetValue(parent, out var list))
+            {
+                list = [];
+                childrenByParent[parent] = list;
+            }
+            list.Add(IssueChildRef.FromReadModel(child));
+        }
+
+        var issueByNumber = issues.ToDictionary(i => i.Number);
+        foreach (var issue in issues)
+        {
+            if (childrenByParent.TryGetValue(issue.Number, out var list))
+            {
+                issue.Children = list.ToArray();
+                issue.ChildIssuesSummary = SummarizeChildren(list);
+            }
+            else
+            {
+                issue.Children = [];
+                issue.ChildIssuesSummary = null;
+            }
+        }
+    }
+
+    private static ChildIssuesSummary SummarizeChildren(IReadOnlyList<IssueChildRef> children)
+    {
+        var summary = new ChildIssuesSummary
+        {
+            HasChildren = children.Count > 0,
+            Count = children.Count,
+        };
+        foreach (var child in children)
+        {
+            if (string.Equals(child.Status, "backlog", StringComparison.OrdinalIgnoreCase))
+                summary.BacklogCount++;
+            else if (string.Equals(child.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(child.Status, "inProgress", StringComparison.OrdinalIgnoreCase))
+                summary.InProgressCount++;
+            else if (string.Equals(child.Status, "done", StringComparison.OrdinalIgnoreCase))
+                summary.DoneCount++;
+            else if (string.Equals(child.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                summary.CancelledCount++;
+
+            if (string.Equals(child.Health, "blocked", StringComparison.OrdinalIgnoreCase))
+                summary.BlockedCount++;
+        }
+        return summary;
     }
 
 }
