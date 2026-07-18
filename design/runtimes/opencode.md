@@ -175,16 +175,48 @@ executor 在 Action 返回后应用 `expect`、artifacts、`failIf`、Action Out
 语义；AgentJob executor 通过由 Agent 拥有的契约校验和报告自己的结果。
 
 SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的 Prompt 响应决定回合
-是否结束。现有调用方 abort signal 是唯一执行期限：Workflow task executor 与 AgentJob
-executor 拥有工作回合的执行期限；未显式指定时，单个 Prompt 的默认期限为 60 分钟，
-显式期限可以覆盖该默认值。期限到达时 abort 回合并让工作失败。移除 ACP liveness probe
-后，`OpenCodeRuntime` 不做静默/空闲检测；悬挂回合由 executor 期限兜底，而 provider 错误可在到达期限前按 `session.status` retry 事实提前失败（见「Provider 错误失败策略」）。收到 abort 时调用
-`client.session.abort()`，向调用者返回 interrupted result。
+是否结束。工作回合的执行期限由 Workflow task executor 与 AgentJob executor 各自
+声明：未显式指定时，单个 Prompt 的默认期限为 60 分钟，显式期限可以覆盖该默认值。
+期限的收尾与终止按「回合期限与两段式收尾」执行。移除 ACP liveness probe
+后，`OpenCodeRuntime` 不做静默/空闲检测；悬挂回合由 executor 期限兜底，而 provider 错误可在到达期限前按 `session.status` retry 事实提前失败（见「Provider 错误失败策略」）。
 
 Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
 接收状态不确定的响应都不能盲目 retry。保留现有 in-process dispatch deduplication；
 redelivery 在 crash window 内可能造成重复回合，这是已接受限制，不增加 deterministic
 Prompt ID 或 replay reconstruction。
+
+## 回合期限与两段式收尾
+
+期限值由 executor 声明，`OpenCodeRuntime` 对每个声明了期限的 Prompt 执行两段式
+收尾协议。时钟粒度是单次 Prompt 执行，不是 TaskRun 或 Stage。
+
+1. 期限前 5 分钟，对当前物理 Session 调用 `client.session.promptAsync()` 注入一条
+   收尾警告后立即返回，不等待其完成。期限不足 5 分钟时，警告在回合开始即注入。
+2. 期限到达时调用 `client.session.abort()` 终止回合，向调用者返回 interrupted
+   result。
+
+警告文案任务无关，大意固定、措辞由实现维护：你将在约 5 分钟后被中断——立即停止
+新工作，提交当前改动，在本任务的进度渠道留下记录，然后结束。警告不引用具体
+marker 或文件名；`unfinished`、progress.txt 等收尾契约由各任务自己的 prompt
+定义，警告不复述。
+
+注入的消息作为 user Follow-up 写入 Session 消息流，由运行中的回合在迭代边界
+（当前模型调用及其工具调用完成后）拾取处理——这与用户 Follow-up 的接收路径相同
+（见「Session 命令 / Follow-up」）。正在执行的长工具调用会延迟拾取；期限到达仍
+abort，最坏情况退化为无警告的直接终止。警告与终止都投影进 transcript，在 UI
+可见。
+
+每个 Prompt 执行只警告一次。agent 被警告后提前正常结束回合的，不再 abort；其
+结果按各任务自己的完成契约评估（如报 `unfinished` 则任务失败、按现有 retry
+语义处理），但现场是已提交、有记录的。
+
+不做的事：
+
+- 不把期限值暴露给 prompt：agent 没有可靠时钟，静态数字不可执行；可执行的
+  「即将终止」信号由警告在需要时送达。
+- 不在终止后自动提交或回滚残留现场；现场处理维持现状。
+- 不为 housekeeping prompt（如 worktree cleanup follow-up）引入「回合角色」
+  概念：警告文案与其指令（提交或还原）语义相容，统一适用。
 
 ## 事件与状态核对
 
@@ -307,7 +339,9 @@ variant catalog，Server 与 Web 将它用于配置辅助，但它不是最终�
 - Prompt completion、interruption、uncertain admission 与 no-replay 行为；
 - async Follow-up、原生 summarize、Reset、restart routing 与 stale-binding rejection；
 - permission、missing Session、compatibility 与 process-loss failure；
-- 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义。
+- 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
+- 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时回合
+  开始即警告、期限到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动。
 
 ## 完整替换
 
@@ -371,3 +405,6 @@ Runtime adapter 替换仍由 issue-409 负责。当前 Runner 仍使用
 parsing 和 private compaction metadata；正文中的 OpenCode SDK Session 调用尚未接入。
 Workflow schema 也仍把 `expect` 放在 `with` 内，内置 profile 中写在 task 顶层的
 `expect` 被当前解析器静默丢弃，从未生效。
+
+「回合期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
+到达直接终止回合，agent 没有收尾机会。

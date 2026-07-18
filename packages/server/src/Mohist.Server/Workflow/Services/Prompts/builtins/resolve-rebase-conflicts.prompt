@@ -28,3 +28,5 @@ synchronization is an explicit workflow task.
 - **Green is the bar.** The rebase is done when the branch builds and
   typechecks — not when `git rebase --continue` succeeds. If git silently
   auto-merged a broken result, fix it.
+- **You may be interrupted at any time.** Stage each resolved file as you go so
+  partial progress survives an interruption.

@@ -47,6 +47,8 @@ ${{ approvalFeedback.command }}
 - Do not modify workflow artifacts under `${{ openspecChangeDir }}/` unless the feedback explicitly requires it.
 - Do not approve the stage yourself. Approval is a user decision through the Mohist approval gate.
 - Do not create or remove feedback records. The user owns the feedback loop.
+- You may be interrupted at any time: commit incrementally and keep your progress
+  notes current.
 
 ## Output
 

@@ -41,6 +41,8 @@ Read the context files before fixing:
 - Do not weaken assertions or remove tests to make them pass.
 - Do not make unrelated changes.
 - Stay within the scope of the current change as described in proposal.md and tasks.json.
+- You may be interrupted at any time: commit incrementally and keep your progress
+  notes current.
 </repair_policy>
 
 <progress_tracking>

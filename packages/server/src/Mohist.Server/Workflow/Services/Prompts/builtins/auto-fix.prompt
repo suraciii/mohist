@@ -7,4 +7,7 @@ stage: check
 `${{ openspecChangeDir }}/review.md` lists the problems found by the review.
 Fix every one of them, then verify with the relevant build and test commands.
 
+You may be interrupted at any time: commit incrementally and keep your progress
+notes current.
+
 Do not edit `review.md` — the next review task regenerates it.
