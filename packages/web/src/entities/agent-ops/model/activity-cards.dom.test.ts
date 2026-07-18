@@ -1,12 +1,22 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { http, HttpResponse } from 'msw'
 import { sessionToCard, useActivityCards } from './activity-cards'
 import type { AgentActivity, AgentActivitySession } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
 import { useMswServer } from '../../../../tests/support/msw'
+
+// react-query resolves via notifyManager's scheduled timers; advance the clock
+// ourselves under fake timers instead of polling wall-clock time (waitFor's
+// default 1000ms is too tight on slow CI — design/testing.md: advance fake
+// time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 const PROJECT_ID = 'project-1'
 const ACTIVITY_PATH = '*/api/projects/:projectId/agent/activity'
@@ -74,6 +84,14 @@ function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivi
     ...overrides,
   }
 }
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('sessionToCard', () => {
   it('maps the activity DTO usage into the SessionCard snapshot fields unchanged', () => {
@@ -209,10 +227,9 @@ describe('useActivityCards — activeCardByIssueNumber', () => {
 
     const { result } = renderActivityCards()
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-      expect(result.current.isError).toBe(true)
-    })
+    await flush()
+    expect(result.current.isLoading).toBe(false)
+    expect(result.current.isError).toBe(true)
   })
 
   it('keeps only one active session per issue number when duplicates exist', () => {

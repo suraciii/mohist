@@ -1,10 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { request } from '../../../shared/api/client'
 import { getWorkflowProfile } from './client'
 import { useWorkflowProfile, type WorkflowProfileFetcher } from './queries'
+
+// react-query resolves via notifyManager's scheduled timers; advance the clock
+// ourselves under fake timers instead of polling wall-clock time (waitFor's
+// default 1000ms is too tight on slow CI — design/testing.md: advance fake
+// time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 interface CapturedRequest {
   path: string
@@ -51,7 +61,12 @@ const requester: typeof request = async <T,>(path: string, init?: RequestInit) =
 
 const workflowProfileFetcher: WorkflowProfileFetcher = (id) => getWorkflowProfile(id, requester)
 
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
 afterEach(() => {
+  vi.useRealTimers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
   requests = []
@@ -61,9 +76,8 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
   it('issues a request to the literal path with the slash left unencoded', async () => {
     const { result } = renderUseWorkflowProfile('mohist/local')
 
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
-    })
+    await flush()
+    expect(result.current.isSuccess).toBe(true)
 
     expect(requests).toHaveLength(1)
     expect(requests[0].init).toBeUndefined()
@@ -75,9 +89,8 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
   it('returns the profile detail payload', async () => {
     const { result } = renderUseWorkflowProfile('mohist/local')
 
-    await waitFor(() => {
-      expect(result.current.data).toEqual(PROFILE_DETAIL)
-    })
+    await flush()
+    expect(result.current.data).toEqual(PROFILE_DETAIL)
 
     expect(result.current.data?.id).toBe('mohist/local')
     expect(result.current.data?.yaml).toBe(PROFILE_DETAIL.yaml)

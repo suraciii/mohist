@@ -1,0 +1,102 @@
+T-001 (Live-ticking duration on running tool rows) — completed 2026-07-18
+
+
+## Codebase Patterns
+
+- Tool row duration rendering lives at `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx:129` (`formatElapsed(part.startedAt, part.completedAt ?? undefined)`), and the JSX block was historically gated on `!isRunning` (line 294 originally).
+- ActivityPage (`packages/web/src/pages/activity/ui/ActivityPage.tsx:133-161`) is the existing precedent for injectable clock: `now?: number` prop, `setInterval(1000)` otherwise.
+- `DisplayToolPart.status` ∈ `pending | running | completed | failed | cancelled`; `isRunning` is derived as `status === 'running' || status === 'pending'` — used in many places, do not redefine.
+- `TurnList`/`TurnItem`/`AssistantParts` chain forms the rendering pipeline; new props must thread through the chain (TurnList→TurnItem→AssistantParts→ToolRowView, plus ContextGroupView for grouped tools).
+- Vitest config uses `isolate: false`, project `jsdom` for `*.spec.tsx`; setup file restores `vi.useRealTimers()` in `afterEach`. So each test file/suite must call `vi.useFakeTimers()` itself and `vi.useRealTimers()` in afterEach.
+- Test pattern for fake timers + React renderHook: `act(() => { vi.advanceTimersByTime(N) })`. Existing examples: `CopyFullTextButton.test.tsx:248`, `useSessionTimeline.dom.test.ts:330`.
+- The existing `tool-row-view.spec.tsx` has a hard assertion that running rows render no duration when `now` is omitted — that contract is preserved because `liveDuration` only renders when `now !== undefined`.
+- Tool rows already carry a stable `data-tool-call-id` anchor (set by `ToolRowView` in `ui/tool-views/index.tsx:233`). New consumers (e.g. the current-activity bar) locate the row by querying `[data-tool-call-id="..."]`; no parallel ref registry needed.
+- The transcript scroll container is the `scrollContainerRef` div in `SessionDetailShell.tsx:366` (`data-testid="session-transcript-scroll-container"`); `SessionTranscriptLayout` receives it as `scrollContainerRef?: RefObject<HTMLElement | null>` and threads it to keyboard-nav. The same ref is the natural lookup scope for the bar's `[data-tool-call-id]` query.
+- Existing "sticky" elements in the transcript region use `position: sticky` (e.g. the recovery bar in `SessionDetailShell.tsx:379` uses `sticky top-9 z-20`). The new bar mirrors that with `sticky bottom-0 z-10` so it pins inside the same scroll container without consuming layout space outside the scroll region.
+
+## Implementation notes
+
+- Added `widgets/session-transcript/model/use-now.ts` with `{ intervalMs, now?, enabled? }` API. `enabled` (default true) controls whether the interval runs; passing `enabled: false` returns `undefined` and skips the interval — this lets the layout gate ticking on `isRunning`. When `now` is provided, no interval is started (matches ActivityPage convention).
+- Added `formatElapsedNow(startedAt, nowMs)` next to `formatElapsed` in `model/format-duration.ts`. Returns null for missing/unparseable/negative/non-finite inputs (same defensive shape as `formatElapsed`). Unit-tested with fixed timestamps.
+- `ToolRowView` now takes optional `now?: number`. Computes `liveDuration = isRunning && now !== undefined ? formatElapsedNow(...) : null`; `duration = liveDuration ?? finalizedDuration`. JSX now renders duration when `(!isRunning || liveDuration)`, tagged `data-duration-mode="live"` vs `"frozen"` so tests can distinguish without polluting the testid.
+- `SessionTranscriptLayout` calls `useNow({ intervalMs: 1000, enabled: isRunning, now: providedNow })` and threads the resulting `now` to `TurnList`. Only in-progress tool rows (status pending/running) receive the `now` prop in `AssistantParts` and `ContextGroupView`; terminal rows are passed `undefined` so `React.memo(ToolRowView)` stays effective (D2).
+- When `isRunning` flips false, `useNow`'s effect dependency cleanup tears the interval down and the layout starts passing `now = undefined` to all rows; in-progress rows drop the live duration (matches spec scenario "Ticking stops when the session ends mid-tool" → row reverts to no duration).
+- Layout exposes `now?: number` prop so tests can inject a fixed timestamp; the ActivityPage precedent (`pages/activity/ui/ActivityPage.tsx:139`) calls this `now`.
+- Added `widgets/session-transcript/model/select-active-tool-call.ts`: pure `selectActiveToolCall(turns)` walks `assistantParts` in order (including tools nested inside `context-group` parts) and returns the last tool with status `pending`/`running`, or `null`. Last-match tiebreak is deterministic. Unit-tested with 9 cases (empty, no tools, all terminal, single in-progress, pending vs running, deterministic last-match, skip-over-terminal, nested-in-context-group, mixed top-level + nested).
+- Added `widgets/session-transcript/ui/CurrentActivityBar.tsx`: `position: sticky; bottom: 0` bar rendered as the last child inside the layout's scroll content. Shows a `RunningIndicator` dot, the active tool's `deriveVerbLedTitle(...)` result, and the live duration via `formatElapsedNow`. Activation (button click or Enter/Space keydown) queries `scrollContainerRef.current` for `[data-tool-call-id="<id>"]` (CSS-escaped) and calls `scrollIntoView({ block: 'center' })`. Bar is `data-testid="transcript-current-activity-bar"` with `data-active-tool-call-id` for tests; the jump button is a separate testid; the duration is tagged `data-duration-mode="live"`.
+- `SessionTranscriptLayout` now also reads `activeTool = isRunning ? selectActiveToolCall(turns) : null` and mounts `<CurrentActivityBar>` as the last sibling inside the column when `activeTool`, the layout's resolved `now`, and `scrollContainerRef` are all present. The selector is gated on `isRunning` so the bar disappears when the session ends even mid-tool.
+- Tool-call-id lookup uses `CSS.escape(toolCallId)` because the id is a free-form server-supplied string that may contain `.`/`:`/`[` (e.g. `tc.with:weird[chars]`). The selector's data attribute is set by `ToolRowView` as-is, so the bar must escape on the consumer side.
+
+## Gotchas
+
+- `vi.advanceTimersByTime(N)` only fires intervals if the fake timers are configured. Setup file's afterEach runs `vi.useRealTimers()`, so each test must opt back into fake timers (typically via `beforeEach`).
+- Initial render of a running tool row at `now === startedAt` produces `"0ms"` (sub-second), not `"0.0s"` — `formatDuration` switches at 1000ms. Tests for the layout use `vi.advanceTimersByTime(1000+)` to reach the seconds tier.
+- For the test `does not start any interval when there are no turns`: the layout's `useNow` call is unconditional (rules-of-hooks), so the interval still starts. Rewrote the test to assert the interval is torn down on unmount instead.
+- `enabled` was added to the hook signature even though the spec doesn't list it — needed to satisfy D1 ("the interval only runs while isRunning is true"). Layout passes `enabled: isRunning`.
+- `jsdom` has no layout engine, so `position: sticky` cannot be asserted in jsdom. Current-activity bar tests assert the `sticky bottom-0` Tailwind classes are present in `className`, plus presence/absence/data attributes, and call `scrollIntoView` on the target row. True sticky behavior is deferred to the browser track (per the design note in D5).
+- `deriveVerbLedTitle(...)` for a `read` tool without a `filePath`/`input` target produces `"Reading…"` (trailing-ellipsis mode for in-progress without a target). Tests for the bar use a JSON `input` like `{ filePath: 'src/foo.ts' }` to assert a target-form verb-led title. The verb family strips the path to its basename, so a `filePath` of `'src/foo.ts'` renders as `'Reading foo.ts'`.
+- The bar's `aria-label` includes the verb and target so screen readers announce "Jump to <verb> <target>". The button itself is `<Button>` (the project's `variant="ghost"` shadcn-style primitive) with `type="button"` to avoid form-submit semantics.
+- The bar is intentionally a child of the same flex column that hosts the `TurnList`, not a sibling of the scroll container. This keeps it inside the `data-scrollable` subtree so `position: sticky; bottom: 0` resolves against the scroll container (the nearest scrolling ancestor), matching the layout in D5.
+- The re-targeting test verifies that swapping which tool call is the "active" one (different `toolCallId`) causes the next click to scroll the new row — this exercises both the selector's last-match tiebreak and the `data-tool-call-id` anchor lookup.
+
+T-003 (Block cursor on streaming assistant text) — completed 2026-07-18
+
+## Implementation notes
+
+- Replaced the trailing streaming dot glyph (`assistant-text-streaming-glyph`, `h-1.5 w-1.5 rounded-full bg-info animate-pulse`) inside `AssistantTextPartView`'s Copy-button row with a block cursor rendered as an `inline-block` span directly after the `<TranscriptMarkdown>` output. The cursor's `data-testid` is `assistant-text-streaming-cursor`; gating remains `isRunning === true && (isIncomplete || isStreaming === true)` (same boolean the old dot used, so the existing #426 liveness gate keeps working unchanged).
+- Cursor visual: `className="ml-0.5 inline-block h-[1em] w-[0.5em] -mb-[0.15em] align-baseline bg-foreground animate-pulse"`. Size expressed in `em` so the cursor scales with surrounding text and stays baseline-aligned; the small `ml-0.5` adds a hair of horizontal spacing off the preceding glyph. No new CSS keyframes — Tailwind's `animate-pulse` already drives the existing dot, the current-activity bar dot, and the transcript-empty-state dot.
+- The Copy button row is preserved below the cursor (its `<Button variant="link">` content unchanged). The cursor is positioned *before* that row, not inside it, so it visually attaches to the streamed text rather than to the action row — matching the spec wording "appended after the TranscriptMarkdown output".
+- Accessibility: cursor is `aria-hidden="true"`, has no `role`, no `tabindex` — it is a decorative visual cue and not exposed to assistive tech. Tests assert all three absences.
+- Removed `showStreamingGlyph`-as-flex-row layout: the dot's previous home (a sibling of the Copy button inside a `flex items-center gap-2` row) is no longer the cursor's home. The flex row is now a one-button row with the same `mt-1` spacing; the Copy button remains unchanged.
+- `data-tone` is still carried on the cursor (`info` when `isStreaming`, `warning` when merely `isIncomplete`) so future styling/tests can branch on the streaming-vs-waiting distinction without needing a new attribute.
+- No new prop wiring: `AssistantTextPartView`'s existing `isRunning`, `completedAt`, `isStreaming` inputs already carry every signal the cursor needs. No `useNow` dependency for T-003 — the cursor blinks via CSS, not a JS tick.
+
+## Gotchas
+
+- The Copy button text matches `/copy/i` (case-insensitive), so the PromptBlock's own Copy button collides with an unscoped `getByRole('button', { name: /copy/i })`. Cursor tests scope the Copy check to `cursor.parentElement.querySelector('button')` so the PromptBlock button does not match.
+- The cursor's flex-row history: the previous dot lived inside the Copy-button flex row (`flex items-center gap-2`) and inherited the row's alignment. Moving the cursor out of that row and onto its own line breaks `aria-described-by`/screen-reader announcement assumptions — the cursor's `aria-hidden="true"` plus no role is what satisfies the spec's "hidden from assistive technology" requirement, despite the visual relocation.
+
+## Files changed (T-003)
+
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (AssistantTextPartView: dot glyph replaced by block cursor span; Copy button row preserved)
+- `packages/web/tests/SessionTranscriptStreamingCursor.spec.tsx` (new, 10 spec tests covering render gating, completion transition, session-end transition, accessibility attributes, layout order, Copy-button coexistence, regression check on the old glyph testid)
+- `packages/web/tests/SessionTranscriptActivityIndicators.spec.tsx` (three existing assertions migrated from `assistant-text-streaming-glyph` to `assistant-text-streaming-cursor`; test descriptions updated from "glyph" to "cursor")
+
+## Files changed
+
+- `packages/web/src/widgets/session-transcript/model/use-now.ts` (new)
+- `packages/web/src/widgets/session-transcript/model/use-now.test.tsx` (new)
+- `packages/web/src/widgets/session-transcript/model/format-duration.ts` (added formatElapsedNow)
+- `packages/web/src/widgets/session-transcript/model/format-duration.test.ts` (added formatElapsedNow tests)
+- `packages/web/src/widgets/session-transcript/model/select-active-tool-call.ts` (new, pure selector)
+- `packages/web/src/widgets/session-transcript/model/select-active-tool-call.test.ts` (new, 9 unit tests)
+- `packages/web/src/widgets/session-transcript/ui/CurrentActivityBar.tsx` (new component, sticky bar)
+- `packages/web/src/widgets/session-transcript/ui/CurrentActivityBar.spec.tsx` (new, 15 spec tests)
+- `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.tsx` (useNow wiring; T-002 also adds selector + bar mounting as last sibling inside the column)
+- `packages/web/src/widgets/session-transcript/ui/TurnList.tsx` (threaded `now`)
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (selective `now` for in-progress rows; T-003 replaces the trailing dot glyph with a block cursor span)
+- `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx` (ToolRowView + ContextGroupView accept `now`, ToolRowView renders live duration)
+- `packages/web/src/widgets/session-transcript/ui/tool-views/tool-row-view-live-duration.spec.tsx` (new, 15 spec tests)
+- `packages/web/tests/SessionTranscriptStreamingCursor.spec.tsx` (new, 10 spec tests, T-003)
+
+T-004 (Thinking-elapsed timer on the thinking indicator) — completed 2026-07-18
+
+## Implementation notes
+
+- `SessionTranscriptLayout` now owns a `thinkingStartedAt` (`useState<number | null>`) and a `wasThinkingRef` (`useRef<boolean>`); the layout effect on `[isThinking, providedNow]` calls `setThinkingStartedAt(providedNow ?? Date.now())` on false→true and clears to `null` on true→false. A second effect on `[isRunning]` clears both pieces of state when the session ends so a stale thinking flag never re-arms.
+- The thinking indicator gating condition in the layout is `isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null` — five gates so the elapsed display can NEVER render in a non-running session, in an empty transcript, or before the false→true transition has been committed by the layout effect.
+- `ThinkingPlaceholder` accepts `now` and `thinkingStartedAt: number | null`. `elapsedMs = now - thinkingStartedAt`; `elapsedText` is `formatDuration(elapsedMs)` when finite and >= 0, else `null`. The display span has `data-testid="transcript-thinking-elapsed"` and `data-elapsed-mode="live"` so tests can branch on it without coupling to format details.
+- The thinking-elapsed span sits at the far right (`ml-auto tabular-nums`) of the same flex row that already hosts the indicator dot and the "Thinking..." label. No new CSS — the same `text-muted-foreground/70 text-xs` palette as the other muted timestamps in the transcript.
+- Used `useState` rather than `useRef` for `thinkingStartedAt` so the value is read consistently during render. Refs would have worked via mutation-during-render, but `useState` is the idiomatic pattern and avoids coupling the capture timing to commit ordering in concurrent React.
+
+## Gotchas
+
+- The pre-existing gotcha that `vi.advanceTimersByTime(N)` only fires the interval on its strict boundary (e.g. `advanceTimersByTime(59_400)` lands the last fired tick at `t=59000`) carries forward. Sub-second granularity cannot be asserted in the "seconds tier" formatter test because `useNow`'s interval is 1000ms; the test asserts `59.0s` after `advanceTimersByTime(59_000)` instead.
+- A captured thinking start equals `providedNow` when the layout-level transition fires (i.e. `isThinking` first becomes true). When tests mount the layout with `isThinking=true` already and an injected `now`, the captured start = `now` → elapsed = 0. This is intentional — it preserves the design's invariant that the start is captured at the false→true moment — but means we cannot ask "the elapsed time is N seconds" via `now` injection alone; the ticking tests drive that value through `vi.advanceTimersByTime(N)` against the auto-ticking path.
+- The transition-handler effect depends on `isThinking` only; `providedNow` is read from the closure at the moment of the transition. Since `now` ticks independently after the transition, the captured start reflects the moment thinking began (not the latest `now`), matching the spec's "thinking began" semantic.
+- `data-elapsed-mode="live"` mirrors the convention already established by the bar's `data-duration-mode="live"`; future tests can distinguish the "rendered by elapsed-time path" without scraping text.
+
+## Files changed (T-004)
+
+- `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.tsx` (added `thinkingStartedAt` useState + `wasThinkingRef`, two transition-handling effects, gate the indicator on `thinkingStartedAt !== null`; ThinkingPlaceholder now takes `now` + `thinkingStartedAt` and renders the elapsed span with `data-testid="transcript-thinking-elapsed"`)
+- `packages/web/tests/SessionTranscriptThinkingElapsed.spec.tsx` (new, 16 spec tests covering rendering, ticking, gating, removal on session end, removal on transition out, and ref-capture semantics)

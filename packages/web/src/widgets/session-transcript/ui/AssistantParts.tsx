@@ -30,15 +30,15 @@ export function AssistantTextPartView({ text, completedAt, isStreaming, isRunnin
   return (
     <div className="min-w-0">
       <TranscriptMarkdown content={text} />
+      {showStreamingGlyph && (
+        <span
+          data-testid="assistant-text-streaming-cursor"
+          data-tone={isStreaming ? 'info' : 'warning'}
+          aria-hidden="true"
+          className="ml-0.5 inline-block h-[1em] w-[0.5em] -mb-[0.15em] align-baseline bg-foreground animate-pulse"
+        />
+      )}
       <div className="mt-1 flex items-center gap-2">
-        {showStreamingGlyph && (
-          <span
-            data-testid="assistant-text-streaming-glyph"
-            data-tone={isStreaming ? 'info' : 'warning'}
-            aria-hidden="true"
-            className="inline-block h-1.5 w-1.5 rounded-full bg-info animate-pulse"
-          />
-        )}
         <Button
           variant="link"
           onClick={handleCopy}
@@ -121,9 +121,10 @@ export function DividerPartView({ label }: DividerPartViewProps) {
 interface AssistantPartsProps {
   parts: DisplayAssistantPart[]
   isRunning?: boolean
+  now?: number
 }
 
-export function AssistantParts({ parts, isRunning }: AssistantPartsProps) {
+export function AssistantParts({ parts, isRunning, now }: AssistantPartsProps) {
   return (
     <div className="space-y-2">
       {parts.map((part) => {
@@ -132,10 +133,12 @@ export function AssistantParts({ parts, isRunning }: AssistantPartsProps) {
             return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} isRunning={isRunning} />
           case 'reasoning':
             return <ReasoningPartView key={part.id} text={part.text} startedAt={part.startedAt} />
-          case 'tool':
-            return <ToolRowView key={part.id} part={part} />
+          case 'tool': {
+            const isInProgress = part.status === 'running' || part.status === 'pending'
+            return <ToolRowView key={part.id} part={part} now={isInProgress ? now : undefined} />
+          }
           case 'context-group':
-            return <ContextGroupView key={part.id} title={part.title} tools={part.tools} hasError={part.hasError} />
+            return <ContextGroupView key={part.id} title={part.title} tools={part.tools} hasError={part.hasError} now={now} />
           case 'error':
             return <ErrorPartView key={part.id} message={part.message} kind={part.kind} at={part.at} />
           case 'divider':

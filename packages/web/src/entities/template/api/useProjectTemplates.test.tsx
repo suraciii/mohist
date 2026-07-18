@@ -1,8 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useProjectTemplates, type ProjectTemplate, type ProjectTemplatesFetcher } from '..'
+
+// react-query resolves via notifyManager's scheduled timers; advance the clock
+// ourselves under fake timers instead of polling wall-clock time (waitFor's
+// default 1000ms is too tight on slow CI — design/testing.md: advance fake
+// time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 const PROJECT_ID = 'test-project'
 const OTHER_PROJECT_ID = 'other-project'
@@ -61,9 +71,11 @@ function renderUseProjectTemplates(projectId: string | undefined) {
 beforeEach(() => {
   templatesResponse = BASE_TEMPLATES
   fetchCalls.length = 0
+  vi.useFakeTimers()
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
 })
@@ -72,9 +84,8 @@ describe('useProjectTemplates hook', () => {
   it('calls the project templates client and returns the effective templates', async () => {
     const { result } = renderUseProjectTemplates(PROJECT_ID)
 
-    await waitFor(() => {
-      expect(result.current.data).toEqual(BASE_TEMPLATES)
-    })
+    await flush()
+    expect(result.current.data).toEqual(BASE_TEMPLATES)
 
     expect(fetchCalls).toEqual([PROJECT_ID])
   })
@@ -97,9 +108,8 @@ describe('useProjectTemplates hook', () => {
 
     const { result } = renderUseProjectTemplates(PROJECT_ID)
 
-    await waitFor(() => {
-      expect(result.current.data).toHaveLength(3)
-    })
+    await flush()
+    expect(result.current.data).toHaveLength(3)
 
     const byKey = Object.fromEntries(
       result.current.data!.map((t: { key: string; source: string }) => [t.key, t]),
@@ -122,9 +132,8 @@ describe('useProjectTemplates hook', () => {
 
     const { result } = renderUseProjectTemplates(OTHER_PROJECT_ID)
 
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
-    })
+    await flush()
+    expect(result.current.isSuccess).toBe(true)
 
     expect(fetchCalls).toEqual([OTHER_PROJECT_ID])
   })

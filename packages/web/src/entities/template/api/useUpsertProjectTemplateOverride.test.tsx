@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
@@ -8,6 +8,14 @@ import {
   useUpsertProjectTemplateOverride,
   type ProjectTemplateOverridePayload,
 } from '..'
+
+// react-query mutations (MSW-backed) resolve through notifyManager's scheduled
+// timers and fetch microtasks; advance the clock ourselves under fake timers
+// instead of polling wall-clock time (waitFor's default 1000ms is too tight on
+// slow CI — design/testing.md: advance fake time, don't poll harder).
+async function flush() {
+  await vi.advanceTimersByTimeAsync(1000)
+}
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
@@ -57,7 +65,12 @@ function renderUseUpsert(projectId: string | undefined) {
 
 useMswServer(...defaultHandlers)
 
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
 afterEach(() => {
+  vi.useRealTimers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
 })
@@ -80,11 +93,10 @@ describe('useUpsertProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY, payload: PAYLOAD })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(putRequests).toHaveLength(1)
     expect(putRequests[0].method).toBe('PUT')
@@ -99,11 +111,10 @@ describe('useUpsertProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY, payload: PAYLOAD })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(result.result.current.data).toEqual(STORED_ROW)
   })
@@ -119,11 +130,10 @@ describe('useUpsertProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY, payload: PAYLOAD })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey)
     const hasList = calls.some(
@@ -154,11 +164,10 @@ describe('useUpsertProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY, payload: PAYLOAD })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isError).toBe(true)
-    })
+    expect(result.result.current.isError).toBe(true)
 
     expect(result.result.current.error).toBeInstanceOf(Error)
     expect((result.result.current.error as Error).message).toBe('Body is required')
