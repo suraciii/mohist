@@ -160,7 +160,9 @@ describe('AiSettingsSection', () => {
     expect(searchInput).toHaveFocus()
 
     await user.keyboard('[ArrowDown]')
-    expect(screen.getByRole('button', { name: /gemini-2/i })).toHaveClass('bg-blue-50')
+    const geminiOption = document.querySelector('[data-model-id="google/gemini-2"]')
+    expect(geminiOption).toBeTruthy()
+    expect(geminiOption!.getAttribute('data-selected')).toBe('true')
 
     await user.keyboard('[Escape]')
     expect(screen.queryByPlaceholderText('Search models...')).not.toBeInTheDocument()
@@ -494,7 +496,7 @@ describe('AiSettingsSection default-model row click', () => {
     const claudeRow = await waitFor(
       () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
     )
-    fireEvent.pointerDown(claudeRow)
+    fireEvent.click(claudeRow)
 
     await waitFor(() => {
       expect(patchCaptures.length).toBe(1)
@@ -521,7 +523,7 @@ describe('AiSettingsSection default-model row click', () => {
     const claudeRow = await waitFor(
       () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
     )
-    fireEvent.pointerDown(claudeRow)
+    fireEvent.click(claudeRow)
 
     await waitFor(() => {
       expect(patchCaptures.length).toBe(1)
@@ -548,7 +550,7 @@ describe('AiSettingsSection default-model row click', () => {
     const claudeRow = await waitFor(
       () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
     )
-    fireEvent.pointerDown(claudeRow)
+    fireEvent.click(claudeRow)
 
     await waitFor(() => {
       expect(patchCaptures.length).toBe(1)

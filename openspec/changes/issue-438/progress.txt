@@ -1,0 +1,31 @@
+## Codebase Patterns
+
+### T-001: ModelOptionList + ModelSelect port to cmdk
+
+**Pattern: cmdk context issue with useCommandState**
+- `useCommandState` (aka `useCmdk`) must be called from within the `Command` component's React context tree
+- Cannot call it at the same component level where `<Command>` is rendered (parent level)
+- Fixed by using DOM-based query for `[data-selected="true"][data-model-id]` instead
+
+**Pattern: cmdk onKeyDown interaction**
+- cmdk internally calls `props.onKeyDown` for unhandled keys (verified in cmdk 1.1.1 source: `(s=O.onKeyDown)==null||s.call(O,...)`)
+- This means `onKeyDown` on `CommandRoot` IS forwarded for non-cmdk keys (ArrowRight, Tab)
+- Must guard against chip-initiated events: skip when `event.target.closest('[data-variant-chip]')` exists
+- This prevents double-focus bug where CommandRoot handler re-focuses chip[0] after chip keydown advances to chip[1]
+
+**Pattern: Tailwind `**` variant on cmdk elements**
+- `**:[[cmdk-group-heading]]:sticky` applies CSS to the heading via descendant selector
+- The class is on the group container DOM element, NOT the heading element itself
+- Tests should query `[data-slot="command-group"]` for these className assertions
+
+**Pattern: Consumer test fixes**
+- `AiSettingsSection.test.tsx`: changed `fireEvent.pointerDown(row)` → `fireEvent.click(row)` (3 places)
+- `AiSettingsSection.test.tsx`: changed `screen.getByRole('button', { name: /gemini-2/i })` → DOM query with `data-selected` check
+- `IssueModelSelector.test.tsx`: changed `fireEvent.pointerDown(row)` → `fireEvent.click(row)` (2 per-stage places)
+- Default-model popover `pointerDown` tests in IssueModelSelector left for T-002
+
+**Gotchas:**
+- cmdk's `CommandList` has `no-scrollbar` in the wrapped version; used raw `CommandRoot.List` with custom className including `overscroll-y-contain`
+- cmdk's `CommandItem` wrapper has built-in CheckIcon; used raw `CommandRoot.Item` to avoid it
+- cmdk's `CommandInput` wrapper has custom InputGroup styling; used raw `CommandRoot.Input` with Tailwind classes
+- The `ModelSelectProps` contract preserved exactly; zero prop changes needed at all 4 consumer sites

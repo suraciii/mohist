@@ -115,7 +115,34 @@ describe('ModelSelect popover selection', () => {
     fireEvent.click(trigger)
   }
 
-  it('calls onChange when a model option receives a native pointerdown (mouse click)', async () => {
+  it('calls onChange on click and closes popover', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-model-id="opencode-go/minimax-m3"]')
+      if (!el) throw new Error('option not rendered yet')
+      return el as HTMLElement
+    })
+
+    fireEvent.click(option)
+
+    expect(onChange).toHaveBeenCalledWith('opencode-go/minimax-m3')
+    await waitFor(() => {
+      expect(document.querySelector('[data-model-id]')).toBeNull()
+    })
+  })
+
+  it('does NOT select on pointerdown alone', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -136,10 +163,36 @@ describe('ModelSelect popover selection', () => {
 
     fireEvent.pointerDown(option)
 
-    expect(onChange).toHaveBeenCalledWith('opencode-go/minimax-m3')
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('updates the trigger to show the selected model name and full id after a pointerdown selection', async () => {
+  it('does NOT invoke onChange on press-move-release (no-select scenario)', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-model-id="opencode-go/minimax-m3"]')
+      if (!el) throw new Error('option not rendered yet')
+      return el as HTMLElement
+    })
+
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(document.body)
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-model-id]')).toBeTruthy()
+  })
+
+  it('updates the trigger to show the selected model name and full id after a click selection', async () => {
     const onChange = vi.fn()
     const Wrapper = ({ value }: { value: string | null }) => (
       <ModelSelect
@@ -159,7 +212,7 @@ describe('ModelSelect popover selection', () => {
       return el as HTMLElement
     })
 
-    fireEvent.pointerDown(option)
+    fireEvent.click(option)
 
     expect(onChange).toHaveBeenCalledWith('opencode/minimax-m3-free')
 
@@ -171,7 +224,7 @@ describe('ModelSelect popover selection', () => {
     })
   })
 
-  it('uses event delegation: pointerdown on a child span of a model option still triggers onChange', async () => {
+  it('selects by clicking a child element of the option via cmd event bubbling', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -193,12 +246,12 @@ describe('ModelSelect popover selection', () => {
     const childSpan = option.querySelector('span') as HTMLElement
     expect(childSpan).toBeTruthy()
 
-    fireEvent.pointerDown(childSpan)
+    fireEvent.click(childSpan)
 
     expect(onChange).toHaveBeenCalledWith('minimax-coding-plan/minimax-m3')
   })
 
-  it('still triggers onChange via keyboard Enter on the highlighted model option', async () => {
+  it('selects the first highlighted model via keyboard Enter', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -212,13 +265,14 @@ describe('ModelSelect popover selection', () => {
     openPopover()
 
     const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    expect(search).toBeTruthy()
 
     fireEvent.keyDown(search, { key: 'Enter' })
 
     expect(onChange).toHaveBeenCalledWith('minimax-coding-plan/minimax-m3')
   })
 
-  it('still filters the model list when typing in the search input', async () => {
+  it('filters the model list when typing in the search input', async () => {
     render(
       <ModelSelect
         value={null}
@@ -241,7 +295,7 @@ describe('ModelSelect popover selection', () => {
     })
   })
 
-  it('still calls onClear when the X clear button is clicked', () => {
+  it('calls onClear when the X clear button is clicked', () => {
     const onChange = vi.fn()
     const onClear = vi.fn()
     render(
@@ -260,6 +314,182 @@ describe('ModelSelect popover selection', () => {
 
     expect(onClear).toHaveBeenCalledTimes(1)
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('closes without selecting when Escape is pressed', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    fireEvent.keyDown(search, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Search models...')).toBeNull()
+    })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('keyboard Home/End jump to first/last filtered option', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />,
+    )
+
+    openPopover()
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+
+    fireEvent.keyDown(search, { key: 'End' })
+
+    await waitFor(() => {
+      const items = document.querySelectorAll('[cmdk-item]')
+      expect(items.length).toBe(3)
+      const lastItem = items[items.length - 1]
+      expect(lastItem.getAttribute('aria-selected')).toBe('true')
+      expect(lastItem.getAttribute('data-model-id')).toBe('opencode/minimax-m3-free')
+    })
+
+    fireEvent.keyDown(search, { key: 'Home' })
+
+    await waitFor(() => {
+      const items = document.querySelectorAll('[cmdk-item]')
+      const firstItem = items[0]
+      expect(firstItem.getAttribute('aria-selected')).toBe('true')
+      expect(firstItem.getAttribute('data-model-id')).toBe('minimax-coding-plan/minimax-m3')
+    })
+  })
+})
+
+describe('ModelSelect accessibility', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  const models = ['anthropic/claude', 'openai/gpt-4']
+
+  it('option list exposes listbox role and options expose option role', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
+
+    await waitFor(() => {
+      const listbox = document.querySelector('[role="listbox"]')
+      expect(listbox).toBeTruthy()
+    })
+
+    const options = document.querySelectorAll('[role="option"]')
+    expect(options.length).toBe(2)
+  })
+
+  it('selected option has aria-selected true and others have false', async () => {
+    render(
+      <ModelSelect
+        value="anthropic/claude"
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /claude/i }))
+
+    await waitFor(() => {
+      const claudeOption = document.querySelector('[data-model-id="anthropic/claude"]')
+      expect(claudeOption?.getAttribute('aria-selected')).toBe('true')
+    })
+
+    const gptOption = document.querySelector('[data-model-id="openai/gpt-4"]')
+    expect(gptOption?.getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('combobox input has aria-controls and aria-expanded', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    expect(search.getAttribute('aria-expanded')).toBe('true')
+    expect(search.getAttribute('aria-controls')).toBeTruthy()
+  })
+
+  it('aria-activedescendant updates when active option changes', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+
+    const input = search
+    const initialDescendant = input.getAttribute('aria-activedescendant')
+
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+
+    await waitFor(() => {
+      const updatedDescendant = input.getAttribute('aria-activedescendant')
+      expect(updatedDescendant).toBeTruthy()
+      expect(updatedDescendant).not.toBe(initialDescendant)
+    })
+  })
+
+  it('CommandList has overscroll-y-contain and CommandGroup heading has sticky classes', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={['anthropic/claude', 'openai/gpt-4']}
+        onChange={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
+
+    await waitFor(() => {
+      const list = document.querySelector('[role="listbox"]')
+      expect(list).toBeTruthy()
+      expect(list!.className).toContain('overscroll-y-contain')
+
+      const group = document.querySelector('[data-slot="command-group"]')
+      expect(group).toBeTruthy()
+      expect(group!.className).toContain('[[cmdk-group-heading]]:sticky')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:top-0')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:z-10')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:bg-muted')
+    })
   })
 })
 
@@ -292,7 +522,7 @@ describe('ModelSelect inline variant chips', () => {
   }
 
   async function openVariantSelect() {
-    fireEvent.click(screen.getByRole('button', { name: /Opencode default|claude/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Opencode default|claude|gpt/i }))
     return await waitFor(() => screen.getByPlaceholderText('Search models...'))
   }
 
@@ -320,7 +550,7 @@ describe('ModelSelect inline variant chips', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /claude/i }))
     const row = await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
-    fireEvent.pointerDown(row)
+    fireEvent.click(row)
     expect(onChangeVariant).toHaveBeenCalledWith(null)
   })
 
@@ -408,5 +638,29 @@ describe('ModelSelect inline variant chips', () => {
 
     fireEvent.keyDown(lowChip, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByPlaceholderText('Search models...')).toBeNull())
+  })
+
+  it('chip click stopPropagation prevents item body from also selecting', async () => {
+    const onChange = vi.fn()
+    const onChangeVariant = vi.fn()
+    render(
+      <ModelSelect
+        id="test-model"
+        value="openai/gpt-4"
+        placeholder="Opencode default"
+        models={models}
+        modelVariants={modelVariants}
+        onChange={onChange}
+        onChangeVariant={onChangeVariant}
+      />,
+    )
+    await openVariantSelect()
+
+    fireEvent.click(screen.getByTestId('test-model-row-anthropic/claude-variant-low'))
+
+    expect(onChange).toHaveBeenCalledWith('anthropic/claude')
+    expect(onChangeVariant).toHaveBeenCalledWith('low')
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChangeVariant).toHaveBeenCalledTimes(1)
   })
 })

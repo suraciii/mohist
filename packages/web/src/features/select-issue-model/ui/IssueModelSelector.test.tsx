@@ -455,7 +455,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const claudeRow = await waitFor(() =>
       document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement,
     )
-    fireEvent.pointerDown(claudeRow)
+    fireEvent.click(claudeRow)
 
     await waitFor(() => {
       expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledTimes(1)
@@ -498,7 +498,7 @@ describe('IssueModelSelector per-stage variant chips', () => {
     const claudeRow = await waitFor(() =>
       document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement,
     )
-    fireEvent.pointerDown(claudeRow)
+    fireEvent.click(claudeRow)
 
     await waitFor(() => {
       expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledTimes(1)
