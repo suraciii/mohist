@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon } from 'lucide-react'
-import { SessionTranscriptLayout as DefaultSessionTranscriptLayout } from '../../../widgets/session-transcript'
+import {
+  SessionTranscriptLayout as DefaultSessionTranscriptLayout,
+  formatDuration,
+  selectFailedToolCalls,
+  selectToolCallGroupIds,
+  useTranscriptLocate,
+} from '../../../widgets/session-transcript'
+import type { DisplayToolPart } from '../../../widgets/session-transcript'
 import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecoveryActions as DefaultSessionRecoveryActions } from '../../../widgets/coder-session'
 import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as DefaultCompactionLineageLink } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
-import type { DisplayToolPart } from '../../../widgets/session-transcript/model/session-transcript-display'
-import { formatDuration } from '../../../widgets/session-transcript'
-import { selectFailedToolCalls, selectToolCallGroupIds } from '../../../widgets/session-transcript/model/select-failed-tool-calls'
-import { useTranscriptLocate } from '../../../widgets/session-transcript/model/use-transcript-locate'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
