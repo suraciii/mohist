@@ -1,0 +1,47 @@
+{
+  "project": "mohist-local",
+  "description": "Stop baking resolved workflow variables into runtime-generated task inputs: expose the server-expanded with as ActionContext.rawWith, switch mohist/openspec-tasks to read its task sub-tree from rawWith, and verify end-to-end that retry/rerun re-resolve ${{ vars.* }} placeholders against then-current variables.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose server-expanded with to actions as ActionContext.rawWith",
+      "spec": "specs/runtime-task-late-expansion/spec.md#Runtime-generated task inputs preserve whole-string variable references",
+      "description": "Add an optional `rawWith?: JsonObject | null` field to `ActionContext` in packages/runner/src/core/types.ts. In packages/runner/src/runtime/executor.ts `executeOne`, populate `rawWith: work.with` on the context handed to the action — this is the server-top-level-expanded form (placeholders inside nested sub-trees preserved), distinct from the existing `with: renderedWith` which is the recursively-rendered form. Do NOT change how `renderTemplate` works, do NOT change any action's reading of `with`, and do NOT add `rawWith` to the `executeChecks` path (checks already read raw `work.with.checks` directly). Add an executor-level unit test in packages/runner/tests/ that constructs a `RenderedWorkItem` whose `with.task.with.options` is the literal `${{ vars.agent }}` string and whose `variables.vars.agent` resolves to an object, invokes the executor with a stub action that captures its `ActionContext`, and asserts (a) `context.rawWith.task.with.options` equals the literal placeholder string and (b) `context.with.task.with.options` equals the resolved agent object. Use the existing executor-test pattern (no real network, no real workspace; fake actions resolver and server connection as in executor-recovery.spec.ts). Include a brief JSDoc on the new field naming the rule: actions that propagate a sub-tree of their `with` to follow-up tasks (e.g. openspec-tasks) MUST read that sub-tree from `rawWith`, never from `with`.",
+      "acceptanceCriteria": [
+        "`ActionContext` in packages/runner/src/core/types.ts declares `rawWith?: JsonObject | null` with a JSDoc comment stating the rule that actions propagating a sub-tree to follow-up tasks MUST read from `rawWith`, not `with`.",
+        "`WorkExecutor.executeOne` (packages/runner/src/runtime/executor.ts) passes `rawWith: work.with` into the action context alongside the existing `with: renderedWith`; `executeChecks` is unchanged.",
+        "An executor-level unit test asserts that for a work item whose `with.task.with.options` is `${{ vars.agent }}` and whose variables resolve `vars.agent` to an object, the action receives `context.rawWith.task.with.options === \"${{ vars.agent }}\"` (literal placeholder) AND `context.with.task.with.options` deep-equal to the resolved agent object.",
+        "The new executor test uses the existing fake-actions / fake-connection pattern (no real network, no real workspace, no wall-clock); `npm run typecheck -w packages/runner` passes; `npm test -w packages/runner` passes with the new test green and existing executor / openspec-tasks tests still green.",
+        "No existing action changes which form it reads; `openspec-tasks` continues to read `task` from `context.with` until T-002 (the existing `OpenSpecTaskWithOptionsTemplate_LoadsTaskWithTemplatePreservedForLateExpansion` test still passes unchanged)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/core/types.ts gains `rawWith` on ActionContext; packages/runner/src/runtime/executor.ts populates it in executeOne; new executor unit test in packages/runner/tests/; green runner typecheck + tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Infrastructure-only delivery: after this task `rawWith` exists and is populated, but no action consumes it yet. That is intentional — it keeps the contract visible for code review before the consumer switch. Do NOT change `renderTemplate`, `TaskWithExpander`, server-side dispatch, or any action's `with`-reading behavior in this task."
+    },
+    {
+      "id": "T-002",
+      "title": "Switch openspec-tasks to rawWith and verify dispatch/retry re-resolves placeholders end-to-end",
+      "spec": "specs/runtime-task-late-expansion/spec.md#Dispatch-time resolution applies current Effective Stage Variables to runtime-generated tasks",
+      "description": "Switch `openspecTasksAction` (packages/runner/src/actions/openspec.ts) to read its `task` defaults sub-tree from `context.rawWith ?? context.with` (fallback per design D3 for hand-built test contexts). Specifically, `taskDefaults = objectInput(context.rawWith ?? context.with, \"task\")` at openspec.ts:104; `path`, `items`, and other action-own scalars continue to come from `context.with` (rendered). Everything under the `task` sub-tree — `uses`, `with.*`, future propagated fields — then flows verbatim into `addTasks` payloads with `${{ vars.* }}` placeholders intact. Update the test context helper in packages/runner/tests/openspec-tasks.spec.ts to populate both `with` and `rawWith` from the same input (so existing tests remain green). Add a runner unit scenario in openspec-tasks.spec.ts that drives the action through an executor-style context: `rawWith.task.with.options = \"${{ vars.agent }}\"` and `with.task.with.options = { model: \"model-a\" }` (the resolved form), then asserts the generated subtask's `with.options === \"${{ vars.agent }}\"` (literal placeholder, not the baked object). Add a server-side spec in packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/DispatchAndLoadingSpecs.cs (extending the existing precedent at lines 220-354) that: (a) records a runtime-added `TaskRun` whose `WithInput[\"options\"]` is the literal `${{ vars.agent }}` string; (b) asserts the first dispatch renders `with.options` against `vars.agent = { model: \"model-a\" }`; (c) mutates Project or Issue Variables so `vars.agent.model = \"model-b\"`; (d) triggers the retry path (`RetryFailedTask` → `TaskRun.MakeTask(stage.Tasks, failedTask.ToDefinition())`) and asserts the new dispatch carries `with.options.model = \"model-b\"`. Both tests use fakes per design/testing.md hard constraints — no real network, no real DB, no wall-clock.",
+      "acceptanceCriteria": [
+        "`openspecTasksAction` reads `task` from `context.rawWith ?? context.with`; `path`, `items`, and other non-propagated scalars still come from `context.with`.",
+        "The runner unit test `OpenSpecTaskWithOptionsTemplate_LoadsTaskWithTemplatePreservedForLateExpansion` (packages/runner/tests/openspec-tasks.spec.ts:81-108) still passes; a new scenario in the same file drives the action with an executor-style split context (`rawWith.task.with.options` = placeholder, `with.task.with.options` = resolved object) and asserts the generated subtask's `with.options` equals the literal `${{ vars.agent }}` string.",
+        "A new server spec in packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/Grain/DispatchAndLoadingSpecs.cs asserts: a runtime-added task with `WithInput[\"options\"] = \"${{ vars.agent }}\"` dispatches with `with.options.model = \"model-a\"` when `vars.agent.model = \"model-a\"`; after the variable is mutated to `model-b` and `RetryFailedTask` reconstructs the attempt from `ToDefinition()`, the new dispatch carries `with.options.model = \"model-b\"` (proving the spec's \"Retry after variable change uses the new value\" scenario).",
+        "Server spec uses existing WorkflowGrain fakes (no real network, no real DB, no wall-clock); follows the DispatchAndLoadingSpecs setup pattern.",
+        "Pre-existing baked `TaskRun.WithInput` rows (resolved literal object, not placeholder) are NOT rewritten by any code path in this change — verified by the legacy-baked-task scenario in the spec (\"Legacy baked task on retry still uses baked value\").",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass; `npm run build` and `npm test` pass with the new server spec green and existing DispatchAndLoadingSpecs / recovery / approval / rebase specs still green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/openspec.ts reads `task` from `rawWith ?? with`; updated packages/runner/tests/openspec-tasks.spec.ts with executor-style context + new placeholder-preservation scenario; new server spec scenario in DispatchAndLoadingSpecs.cs proving retry re-resolves; green runner + server typecheck/tests.",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "This task delivers the user-visible fix and closes the spec's parity guarantee. Do NOT remove the `rawWith ?? with` fallback in this task — design Open Question 1 leaves it for a follow-up. Do NOT touch `applyRequestedModel` (out of scope per proposal Non-Goals). Do NOT migrate pre-existing baked TaskRun rows (out of scope per proposal Non-Goals and spec requirement 4). The server-side change is purely a new spec test — no server production code change is required (design D2 confirms TaskWithExpander.Expand already handles every dispatch path)."
+    }
+  ]
+}
