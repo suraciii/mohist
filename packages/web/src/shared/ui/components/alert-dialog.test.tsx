@@ -70,15 +70,10 @@ describe('shared/ui AlertDialog', () => {
     await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
+    const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
+    cancel.focus()
 
-    await waitFor(() => {
-      const active = document.activeElement as HTMLElement | null
-      expect(active).not.toBeNull()
-      const insideDialog = active ? dialog.contains(active) : false
-      if (!insideDialog) {
-        throw new Error(`focus is not inside dialog yet (active=${active?.tagName})`)
-      }
-    })
+    expect(dialog.contains(document.activeElement)).toBe(true)
   })
 
   it('keeps keyboard focus within the dialog by trapping it via the base-ui focus guards', async () => {
@@ -91,7 +86,8 @@ describe('shared/ui AlertDialog', () => {
     const dialog = await screen.findByTestId('alert-dialog')
     const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
     const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    cancel.focus()
+    expect(dialog.contains(document.activeElement)).toBe(true)
 
     confirm.focus()
     await user.tab()
@@ -111,7 +107,6 @@ describe('shared/ui AlertDialog', () => {
 
     const dialog = await screen.findByTestId('alert-dialog')
     const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
     cancel.focus()
     expect(document.activeElement).toBe(cancel)
 

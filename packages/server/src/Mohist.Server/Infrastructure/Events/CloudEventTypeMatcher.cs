@@ -3,7 +3,6 @@ namespace Mohist.Server.Infrastructure.Events;
 /// <summary>
 /// Reusable type-pattern matcher shared by subscription registration and
 /// the subscription dispatch handler's
-/// <see cref="Mohist.Server.Events.Subscriptions.SubscriptionFilter"/>.
 /// Encodes the simple extension defined in
 /// <c>design/agent-subscriptions.md</c>:
 /// <list type="bullet">

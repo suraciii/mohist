@@ -35,7 +35,7 @@ public sealed class MohistServiceGraphRegistrationTests
         AssertSingleRegistration<IDeadLetterStore>(services);
         AssertSingleRegistration<EventDispatcherService>(services);
         AssertSingleRegistration<IEnumerable<Subscription>>(services);
-        AssertSingleRegistration<AgentSubscriptionDispatchHandler>(services);
+        AssertSingleRegistration<RoutingDispatchHandler>(services);
         AssertSingleRegistration<HermesIssueNotificationRenderer>(services);
         AssertSingleRegistration<IHermesIssueNotificationDispatcher>(services);
         AssertSingleRegistration<IAgentJobDispatchObserver>(services);

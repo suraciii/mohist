@@ -164,7 +164,7 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
         // issue-391 T-003: trigger correlation columns exist but are null when
         // the State JSON carries no trigger labels.
         Assert.Null(row.LabelTriggerEventId);
-        Assert.Null(row.LabelTriggerSubscriptionId);
+        Assert.Null(row.LabelTriggerRuleId);
     }
 
     private static async Task<ISet<string>> ReadColumnNamesAsync(

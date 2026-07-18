@@ -136,7 +136,10 @@ public class CanonicalIssueReferenceMigrationSpecs : CanonicalIssueReferenceMigr
             row => Assert.Equal(("proj_alpha", 42), (row.ProjectId, row.IssueNumber)),
             row => Assert.Equal(("proj_beta", 42), (row.ProjectId, row.IssueNumber)));
 
-        var sessions = await verify.AgentSessions.AsNoTracking().OrderBy(row => row.Id).ToListAsync();
+        var sessions = await verify.AgentSessions.AsNoTracking()
+            .OrderBy(row => row.Id)
+            .Select(row => new { row.LabelProjectId, row.LabelAgentLaunchIssueNumber, row.LabelIssueNumber })
+            .ToListAsync();
         Assert.Collection(
             sessions,
             row => Assert.Equal(("proj_beta", "42"), (row.LabelProjectId, row.LabelAgentLaunchIssueNumber)),

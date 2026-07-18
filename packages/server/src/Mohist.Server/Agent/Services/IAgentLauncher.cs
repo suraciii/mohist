@@ -5,7 +5,7 @@ namespace Mohist.Server.Agent.Services;
 /// <summary>
 /// Shared entry point for starting a generic AgentSession for an Agent
 /// profile. The HTTP manual launch path (<c>POST /api/projects/{...}/agents/{...}/sessions</c>)
-/// and the subscription dispatch handler (<c>AgentSubscriptionDispatchHandler</c>,
+/// and the routing dispatch handler (<c>RoutingDispatchHandler</c>,
 /// issue-391 T-003) both go through this service so the mint-session → open →
 /// build-input → submit-to-grain chain and the resulting <see cref="GenericAgentSessionContext"/>
 /// metadata are composed exactly once and identically. Without this

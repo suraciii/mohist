@@ -1,0 +1,32 @@
+## Why
+
+Operators want a Mohist Agent to watch an issue and step in when the workflow fails or awaits approval, and they want this to be one mechanism for every entity's key events — not a per-Agent subscription path. The current subscription model arbitrates a single winner by a priority number, so "who responds" requires mental arithmetic, fallback/overtake ordering is unintuitive, and there is no way to verify a configuration before a real event arrives. The project now has canonical event lineage (issue-412) and a single envelope matching language (issue-413); replacing priority arbitration with an ordered, expression-driven table makes "who responds" read top-to-bottom, and a dry-run lets operators prove the table behaves before trusting it live.
+
+## What Changes
+
+- Replace the project-level Agent subscription model (three-field Filter + Priority arbitration, single-winner dispatch) with a project-level **routing table**: an ordered list of rules, each declaring a match expression, response Agent, response prompt template, and a `continue` flag. One table per project; rules reference Agents but Agents do not own rules — cross-Agent fallback/overtake ordering is table-level and cannot hang off a single Agent.
+- Evaluation is mail-filter style: an event carrying a project id is matched against that project's active rules in order; a hit triggers the rule's Agent and stops, unless the rule is marked `continue` (fanout). A targeted rule placed above a global fallback wins by position — no priority numbers, no arbitration. Events without a project id enter no table (unchanged).
+- Write-time validation on create/update rejects rules whose match expression does not compile, whose Agent does not exist or is not active, or whose response prompt is empty, with an error naming the cause.
+- Response prompts render `{{event.<attr>}}` from the same envelope namespace as the match expression; unmatched placeholders are left verbatim. Existing tokens `{{workflow_run_id}}`, `{{stage}}`, `{{event_type}}` remain as aliases.
+- A hit that cannot execute (Agent archived after the rule was saved, or rendered prompt empty) or whose expression raises a runtime error is treated as a non-match with a structured log record; table evaluation continues.
+- Each hit creates an AgentJob and AgentSession as today; the launcher's idempotency key moves from subscription-id to (project, event, rule), so the same event×rule never starts a duplicate job. Trigger labels carry event-id and rule-id, giving bidirectional event↔rule↔AgentJob lookup.
+- New command surface: `mo routing rule create/list/show/update/archive/move`, with reordering via `--before`/`--after`.
+- New read-only dry-run: `mo routing test [--last N]` replays the project's last N real events through the table and shows, per event, which rules were compared, which hit, whether evaluation continued, and which Agent would trigger — without launching any Agent or creating any job. Dry-run and real dispatch share one evaluation path, so conclusions match.
+- Empty table or empty event replay produces a clear message, not silent empty output.
+- **BREAKING**: the old subscription model and command surface are removed entirely with no data migration. `AgentSubscription`, its three-field Filter, the `Arbitrate` path in `AgentSubscriptionDispatchHandler`, the `/agents/{agentRef}/subscriptions` API, and `mo agent subscription create/list/delete` no longer exist. Operators re-author existing subscriptions mechanically as rules (`event.type == "..." && event.source == "..."`; Priority descending → table order). No compatibility layer is kept.
+
+## Capabilities
+
+- `routing-rules`: the project-level ordered routing rule resource — fields, one-table-per-project scoping, Position ordering and `--before`/`--after` reorder semantics, active/archived lifecycle, write-time validation (expression compiles, Agent exists and is active, prompt non-empty), and the `mo routing rule create/list/show/update/archive/move` surface.
+- `routing-dispatch`: the single ordered evaluation contract shared by real dispatch and the dry-run — first-match-stops, `continue` fanout, project-scoped entry, hit-but-not-executable and runtime-error rules as logged non-matches, `{{event.*}}` response-prompt rendering with legacy-token aliases and verbatim unmatched placeholders, idempotent launch keyed by (project, event, rule), trigger labels, and bidirectional event↔rule↔AgentJob visibility.
+- `routing-dry-run`: the read-only `mo routing test [--last N]` replay — project-scoped recent-event selection, per-event comparison/hit/continue/would-trigger trace output, no AgentJob or Session side effects, guaranteed shared semantics with real dispatch, and explicit empty-state messaging.
+
+## Impact
+
+- **Server** (`packages/server`): deleted — `Agent/Domain/AgentSubscription`, `Agent/Services/AgentSubscriptionStore|Querier|Dto`, and the `Arbitrate` path in `Events/Subscriptions/AgentSubscriptionDispatchHandler`; added — `RoutingRule` domain/store/querier plus a dispatch handler whose evaluation is shared with the dry-run, all under the Agent context (no Workflow/Issue domain reverse-queries). `AgentLauncher` idempotency key and `GenericAgentSessionMetadata` trigger labels move from subscription-id to rule-id. `ResponsePromptRenderer` gains `{{event.*}}` (legacy tokens retained). A project-scoped recent-events read is added for dry-run replay.
+- **CLI** (`packages/cli`): `mo agent subscription ...` removed; new top-level `mo routing rule ...` and `mo routing test` added.
+- **API/protocol**: `/api/projects/{project}/agents/{agent}/subscriptions` removed; new `/api/projects/{project}/routing/rules` (CRUD + reorder) and `/api/projects/{project}/routing/test` (replay) endpoints added. The CloudEvent envelope contract is unchanged.
+- **Persistence**: subscription rows/tables removed; `RoutingRule` rows ordered by Position added. No data migration.
+- **Web** (`packages/web`): any subscription views removed; rule management UI follows separately.
+- **Tests**: existing subscription specs deleted; new specs cover rule CRUD/validation, ordered dispatch (exclusive/fanout/fallback-overtake), rendering, idempotency, bidirectional visibility, dry-run replay semantics, empty-state messaging, and removal of the old surface.
+- **Risk**: medium — replaces the live dispatch path; mitigated by sharing one evaluator between real dispatch and dry-run and by focused specs before suite-wide runs.

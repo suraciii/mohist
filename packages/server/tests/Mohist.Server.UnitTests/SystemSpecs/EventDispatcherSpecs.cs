@@ -215,7 +215,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_AgentSubscriptionFailure_PropagatesToDispatcher_RetriesUntilDeadLetter()
+    public async Task DispatchAsync_RoutingFailure_PropagatesToDispatcher_RetriesUntilDeadLetter()
     {
         // issue-363 T-002: subscription dispatch no longer swallows exceptions
         // locally. A launch failure must reach the dispatcher's retry/DLQ
@@ -224,9 +224,9 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var handler = new AgentSubscriptionDispatchHandler(
+        var handler = new RoutingDispatchHandler(
             new ThrowingScopeFactory(),
-            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+            NullLogger<RoutingDispatchHandler>.Instance);
         var dispatcher = BuildDispatcher(
             events,
             dlq,
@@ -264,7 +264,7 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_AgentSubscriptionFailure_RangeEnvelopeIsStillNoOp()
+    public async Task DispatchAsync_RoutingFailure_RangeEnvelopeIsStillNoOp()
     {
         // The dispatcher-scoped retry/DLQ path runs only when an envelope
         // proceeds into the launch pipeline. An envelope that lacks the
@@ -274,9 +274,9 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var handler = new AgentSubscriptionDispatchHandler(
+        var handler = new RoutingDispatchHandler(
             new ThrowingScopeFactory(),
-            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+            NullLogger<RoutingDispatchHandler>.Instance);
         var dispatcher = BuildDispatcher(
             events,
             dlq,

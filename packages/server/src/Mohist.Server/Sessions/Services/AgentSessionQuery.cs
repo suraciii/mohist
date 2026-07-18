@@ -127,7 +127,7 @@ public sealed class AgentSessionQuery : IScopedService
 
                 // issue-391 T-003: subscription trigger correlation labels.
                 GenericAgentSessionMetadata.TriggerEventId => query.Where(s => s.LabelTriggerEventId == value),
-                GenericAgentSessionMetadata.TriggerSubscriptionId => query.Where(s => s.LabelTriggerSubscriptionId == value),
+                GenericAgentSessionMetadata.TriggerRuleId => query.Where(s => s.LabelTriggerRuleId == value),
 
                 _ => query.Where(_ => false),
             };
