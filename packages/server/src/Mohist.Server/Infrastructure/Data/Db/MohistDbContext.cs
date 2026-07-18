@@ -47,7 +47,6 @@ public class MohistDbContext : DbContext
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
-    public DbSet<AgentSubscriptionRow> AgentSubscriptions { get; set; } = null!;
     public DbSet<RoutingRuleRow> RoutingRules { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
@@ -338,30 +337,6 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.Status });
-        });
-
-        modelBuilder.Entity<AgentSubscriptionRow>(entity =>
-        {
-            entity.ToTable("AgentSubscriptions");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(256);
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.AgentId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.FilterType).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.FilterSource).HasMaxLength(512);
-            entity.Property(e => e.FilterSubject).HasMaxLength(256);
-            entity.Property(e => e.ResponsePrompt).IsRequired();
-            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
-            entity.Property(e => e.CreatedAt).IsRequired();
-            entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.AgentId })
-                .HasDatabaseName("IX_AgentSubscriptions_ProjectId_AgentId");
-            entity.HasIndex(e => e.ProjectId)
-                .HasDatabaseName("IX_AgentSubscriptions_ProjectId");
-            entity.HasIndex(e => new { e.AgentId, e.Name })
-                .IsUnique()
-                .HasDatabaseName("UX_AgentSubscriptions_AgentId_Name");
         });
 
         modelBuilder.Entity<RoutingRuleRow>(entity =>

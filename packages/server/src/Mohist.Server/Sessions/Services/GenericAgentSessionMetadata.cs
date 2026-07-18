@@ -75,7 +75,6 @@ public static class GenericAgentSessionMetadata
     public const string TriggerEventId = "mohist.io/trigger/event-id";
 
     /// <summary>
-    /// Label key identifying the AgentSubscription that won the event-level
     /// arbitration and triggered this Agent launch. Recorded alongside
     /// <see cref="TriggerEventId"/> by <see cref="Mohist.Server.Agent.Services.IAgentLauncher"/>;
     /// absent on manually launched sessions. Together with

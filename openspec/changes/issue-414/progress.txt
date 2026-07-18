@@ -38,3 +38,10 @@
 - Rule create supports `--continue` and explicit `--before`/`--after`; move sends the target rule and before/after selector to the routing API. Rule list/show/update/archive support JSON and table output, with table order preserved.
 - Dry-run defaults to the server's fixed default when `--last` is omitted and renders event/outcome/Agent trace in table mode; JSON mode preserves the response document.
 - Added CLI specs for create positioning, list ordering, move-after payload, trace rendering, and local no-project failure. CLI test project passes 1401 tests.
+
+## T-006
+
+- Removed the legacy Agent subscription domain, store, querier, DTO, row, API routes, DbSet/mapping, CLI subtree/renderers, and their obsolete specs/support.
+- Removed the old subscription filter unit coverage and the remaining launcher test that provisioned a subscription; routing dispatch registration and coverage remain the replacement path.
+- Removed `AgentSubscriptionRow` from the current EF model snapshot and added `20260718090000_DropAgentSubscriptions`, whose `Up` operation drops `AgentSubscriptions` without data migration. A focused migration operation spec verifies the drop operation.
+- Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore` passes with 0 warnings/errors; CLI tests pass (1381); server unit tests pass (1164); the focused drop migration spec passes. Full `npm test` still reports the pre-existing T-003 migration snapshot/fixture failures (`PendingModelChangesWarning` and missing `LabelTriggerRuleId` in older test schemas), as recorded during T-004.

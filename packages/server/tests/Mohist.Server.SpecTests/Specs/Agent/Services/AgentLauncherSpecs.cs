@@ -231,56 +231,6 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
-    public async Task DispatcherDelivery_ResolvesSiloScopedAgentLaunchServices()
-    {
-        var projectId = await CreateProjectAsync("launcher-dispatcher-scope");
-        var agent = await CreateAgentAsync(projectId, "dispatcher-scope-agent");
-        var eventId = $"evt_dispatcher_scope_{Guid.NewGuid():N}";
-        var subscriptionId = $"sub_dispatcher_scope_{Guid.NewGuid():N}";
-
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var subscriptions = scope.ServiceProvider.GetRequiredService<AgentSubscriptionStore>();
-            await subscriptions.CreateAsync(new AgentSubscription
-            {
-                Id = subscriptionId,
-                ProjectId = projectId,
-                AgentId = agent.Id,
-                Name = subscriptionId,
-                Filter = new SubscriptionFilter { Type = "test.agent.launch" },
-                ResponsePrompt = "handle the event",
-                Status = SubscriptionStatus.Active,
-            });
-        }
-
-        await _fixture.Services.GetRequiredService<IEventStore>().AppendAsync(new CloudEvent(
-            id: eventId,
-            source: new Uri($"/mohist/issues/issue_{Guid.NewGuid():N}", UriKind.Relative),
-            type: "test.agent.launch",
-            time: new DateTimeOffset(2026, 7, 11, 0, 0, 0, TimeSpan.Zero),
-            data: null,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectid"] = projectId,
-            }));
-
-        await _fixture.Grains
-            .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global)
-            .DispatchNowAsync();
-
-        await using var readScope = _fixture.Services.CreateAsyncScope();
-        var sessions = await readScope.ServiceProvider
-            .GetRequiredService<AgentSessionQuery>()
-            .ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-                [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
-            });
-        var session = Assert.Single(sessions);
-        Assert.Equal(agent.Id, session.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
-    }
-
-    [Fact]
     public async Task Launch_WithoutTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
         var projectId = await CreateProjectAsync("launcher-no-trigger");

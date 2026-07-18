@@ -141,12 +141,6 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSessionTranscript:
                 RenderAgentSessionTranscript(data);
                 break;
-            case MohistCliApi.TableShape.AgentSubscriptionList:
-                RenderAgentSubscriptionList(data);
-                break;
-            case MohistCliApi.TableShape.AgentSubscriptionShow:
-                RenderAgentSubscriptionShow(data);
-                break;
             case MohistCliApi.TableShape.RoutingRuleList:
                 RenderRoutingRuleList(data);
                 break;

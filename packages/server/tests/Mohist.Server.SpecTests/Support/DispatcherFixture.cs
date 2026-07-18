@@ -787,7 +787,6 @@ public sealed class DispatcherClosedGenericHandler : ICloudEventHandler<IssueCom
 /// <summary>
 /// Catch-all subscription used to assert the wildcard type matcher
 /// ("*") still receives every event the dispatcher pulls. The
-/// production <c>AgentSubscriptionDispatchHandler</c> uses the same
 /// pattern; this test handler is its pure-DI stand-in.
 /// </summary>
 [Subscription(Type = "*")]
