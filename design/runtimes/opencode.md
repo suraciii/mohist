@@ -142,6 +142,11 @@ Session 目标，不能创建或改变其来源。
 由 Workflow 拥有的工作从 WorkflowRun 与 session name 解析目标；省略 name 时使用
 Work ID。由 AgentJob 拥有的工作直接接收 dispatch 时创建的 AgentSession ID。
 
+逻辑 AgentSession 尚无物理绑定时，adapter 先请求 `OpenCodeRuntime` 创建物理 Session，
+把返回的 Session ID 持久化为当前绑定，再用该绑定执行首个 Prompt。持久化失败时不得
+提交 Prompt；否则一次已执行但未绑定的回合会让后续 task 无法证明应复用哪个上下文。
+重复持久化同一个 Session ID 必须幂等，不得形成新的 lineage。
+
 物理 Session 的复用只由逻辑 AgentSession 的当前绑定、Runtime 和工作目录决定。同一
 WorkflowRun 中的同名 session 跨 task、retry 和 Runner 重启都必须解析到当前绑定。
 Runtime 变化、工作目录变化与 Reset 会创建新物理绑定并追加 lineage，不迁移上下文；
@@ -152,6 +157,11 @@ Model 与 variant 是回合执行参数，不能进入 Session cache key，不�
 时，Runtime 在原物理 Session 上应用本次 model / variant 后执行 Prompt。持久绑定存在但
 Runtime 无法恢复该物理 Session 时，本次工作失败并提示 Reset；不得隐式调用 create
 伪造连续上下文。
+
+worktree cleanup follow-up 是原 task 的后续回合。executor 必须再次调用原 task 已解析的
+Action，并保留相同 WorkflowRun、session name、Work ID 与工作目录，让它走同一 Runtime
+和物理 Session；不得把 cleanup 硬编码到另一种 Action 或 ACP fallback。cleanup 不是
+Reset，也不能以 housekeeping 为理由替换绑定。
 
 每个逻辑 AgentSession 同时最多运行一个由工作发起的 Prompt，无论工作所有者是 TaskRun
 还是 AgentJob。不同逻辑 Session 可以并行。用户 Follow-up 是 Session 命令，可以在

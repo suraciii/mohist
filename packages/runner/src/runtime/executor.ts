@@ -21,7 +21,7 @@ import {
 } from "./branch-stability.js"
 import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
 import { tryRecovery } from "./recovery.js"
-import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
+import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
 import {
   evaluateCompletion,
@@ -188,7 +188,7 @@ export class WorkExecutor {
         renderedWith,
         variables,
         signal,
-        cleanupAgentAction,
+        resolveCleanupAgentAction(action),
         { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime) },
         log,
       )

@@ -103,6 +103,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
           title: context.title,
           issueNumber: context.issueNumber,
           epicNumber: context.epicNumber,
+          workDir: context.workDir,
         },
         context.signal,
       )
@@ -119,6 +120,68 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   }
   if (!binding) {
     binding = { runtimeSessionId: null, workDir: context.workDir }
+  }
+
+  if (binding.runtimeSessionId === null && sessionName && context.serverConnection && context.projectId) {
+    const created = await runtime.createSession({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+      model: runtimeModel(options),
+    })
+    if (!created.ok) {
+      return {
+        status: "failure",
+        message: created.error.message,
+        output: JSON.stringify({
+          kind: "opencode",
+          status: "failure",
+          runtimeSessionId: null,
+          model: options?.model ?? null,
+          variant: options?.variant ?? null,
+          text: null,
+          error: created.error.message,
+          diagnostics: created.error.diagnostics.map((d) => ({ code: d.code, message: d.message })),
+        }),
+        exitCode: 1,
+        turnFact: { finalAssistantText: null },
+      }
+    }
+    try {
+      await context.serverConnection.attachWorkflowAgentSession(
+        context.projectId,
+        context.workflowRunId,
+        sessionName,
+        {
+          runtimeSessionId: created.value.runtimeSessionId,
+          workDir: created.value.workDir,
+          processPid: null,
+          model: options?.model ?? null,
+          workId: context.workId,
+        },
+        context.signal,
+      )
+    } catch (error) {
+      const message = `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`
+      return {
+        status: "failure",
+        message,
+        output: JSON.stringify({
+          kind: "opencode",
+          status: "failure",
+          runtimeSessionId: null,
+          model: options?.model ?? null,
+          variant: options?.variant ?? null,
+          text: null,
+          error: message,
+          diagnostics: [],
+        }),
+        exitCode: 1,
+        turnFact: { finalAssistantText: null },
+      }
+    }
+    binding = {
+      runtimeSessionId: created.value.runtimeSessionId,
+      workDir: created.value.workDir,
+    }
   }
 
   const turnRequest = buildTurnRequest(binding, prompt, options, resolveTurnDeadlineMs(context))
@@ -247,8 +310,6 @@ export function buildTurnRequest(
   options: OpencodeOptions | undefined,
   deadlineMs: number,
 ): Parameters<OpenCodeRuntime["runTurn"]>[0] {
-  const model = options?.model ? parseModelIdentifier(options.model) : undefined
-  const modelDto = model?.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null
   const rawOptions = options as Record<string, unknown> | undefined
   return {
     target: {
@@ -259,11 +320,16 @@ export function buildTurnRequest(
     prompt,
     deadlineMs,
     options: {
-      model: modelDto,
+      model: runtimeModel(options),
       variant: options?.variant ?? null,
       unknownKeys: collectUnknownKeys(rawOptions),
     },
   }
+}
+
+function runtimeModel(options: OpencodeOptions | undefined): { providerID: string; modelID: string } | null {
+  const model = options?.model ? parseModelIdentifier(options.model) : undefined
+  return model?.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null
 }
 
 function collectUnknownKeys(raw: Record<string, unknown> | undefined): readonly string[] | undefined {

@@ -89,6 +89,10 @@ AgentSession 当前绑定的同一个物理 OpenCode Session。task 变化、tas
 如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
 新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而合并。
 
+如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
+物理 OpenCode Session 中继续这个收尾回合。这个收尾不会替换会话，也不要求用户先
+Reset；完成后，后续使用同名 `session` 的 task 继续沿用原对话上下文。
+
 同一 AgentSession 同时只执行一个由 Workflow 发起的回合。不同 AgentSession 可以并行。
 用户在 Session 页面提交的 follow-up 是例外：当前回合仍在执行时，它会进入当前
 回合；Session 空闲时，它会开始下一回合。
