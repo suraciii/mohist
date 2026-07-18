@@ -174,3 +174,15 @@ public class IssuePrimaryEpic
     [Id(2)] public string Status { get; set; } = null!;
     [Id(3)] public string Priority { get; set; } = null!;
 }
+
+public sealed class IssueParentRef
+{
+    public int Number { get; set; }
+    public string Title { get; set; } = null!;
+}
+
+public sealed class ChildIssuesSummary
+{
+    public bool HasChildren { get; set; }
+    public int Count { get; set; }
+}

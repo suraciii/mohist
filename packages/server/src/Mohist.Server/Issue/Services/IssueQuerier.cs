@@ -150,8 +150,9 @@ public class IssueQuerier : IScopedService
         string? priority = null,
         bool? archived = null,
         bool? all = null,
-        string? repositoryName = null) =>
-        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName);
+        string? repositoryName = null,
+        int? parentIssueNumber = null) =>
+        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
 
     public async Task<List<IssueReadModel>> ListWithLabelFiltersAsync(
         string projectId,
@@ -161,7 +162,8 @@ public class IssueQuerier : IScopedService
         string? priority,
         bool? archived,
         bool? all,
-        string? repositoryName = null)
+        string? repositoryName = null,
+        int? parentIssueNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var list = await _loader.LoadProjectedAsync(db, projectId, project);
@@ -200,6 +202,9 @@ public class IssueQuerier : IScopedService
             query = query.Where(i => i.RepositoryName is not null
                 && string.Equals(i.RepositoryName, requested, StringComparison.OrdinalIgnoreCase));
         }
+
+        if (parentIssueNumber is not null)
+            query = query.Where(i => i.ParentIssueRef?.Number == parentIssueNumber);
 
         return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }
@@ -269,6 +274,34 @@ public class IssueQuerier : IScopedService
         var projectId = issues[0].ProjectId;
         var numbers = issues.Select(i => i.Number).ToArray();
         var byNumber = issues.ToDictionary(i => i.Number);
+
+        var parentLinks = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && numbers.Contains(row.Number.Value)
+                && row.ParentIssueNumber != null)
+            .Join(
+                db.Issues.AsNoTracking().Where(row => row.ProjectId == projectId && row.Number != null),
+                child => new { child.ProjectId, Number = child.ParentIssueNumber!.Value },
+                parent => new { parent.ProjectId, Number = parent.Number!.Value },
+                (child, parent) => new { ChildNumber = child.Number!.Value, ParentNumber = parent.Number!.Value, ParentTitle = parent.Title })
+            .ToListAsync();
+        foreach (var link in parentLinks)
+        {
+            if (byNumber.TryGetValue(link.ChildNumber, out var issue))
+                issue.ParentIssueRef = new IssueParentRef { Number = link.ParentNumber, Title = link.ParentTitle ?? "" };
+        }
+
+        var childCounts = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.ParentIssueNumber != null)
+            .GroupBy(row => row.ParentIssueNumber!.Value)
+            .Select(group => new { ParentNumber = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.ParentNumber, x => x.Count);
+        foreach (var issue in issues)
+        {
+            if (childCounts.TryGetValue(issue.Number, out var count))
+                issue.ChildIssuesSummary = new ChildIssuesSummary { HasChildren = true, Count = count };
+        }
 
         var comments = await db.IssueComments.AsNoTracking()
             .Where(c => c.ProjectId == projectId && numbers.Contains(c.IssueNumber))

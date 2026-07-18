@@ -45,6 +45,19 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueList_ParentFilter_SendsParentQuery()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "list", "--parent", "42"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_test/issues?parent=42", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
     public async Task IssueList_Table_RendersStoredRepositoryWithoutMetadata()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

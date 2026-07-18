@@ -17,3 +17,10 @@
 - `IssueGrain` checks `IssueRow.ParentIssueNumber` through its projection query before both `StartWorkAsync` and `GetStartReadinessAsync`; no parent-role flag is persisted.
 - The API maps the new blocker to `is_parent` and serializes it as `parent-has-children`; detaching the last child removes the derived blocker and permits normal start checks.
 - Focused domain tests pass and the server builds. API/full spec execution is currently blocked by the existing T-001 SQLite migration/template mismatch: `ParentIssueNumber` is absent from the migrated test schema, causing initialization failures before these specs run.
+
+## T-003
+
+- Added `ParentIssueRef` and `ChildIssuesSummary` to `IssueReadModel`; both are projected from `IssueRow.ParentIssueNumber` during read enrichment. Parent details carry only `hasChildren` and `count`, with no stored child collection.
+- Added the server `parent` list query and CLI `mo issue list --parent <number>` plumbing. The CLI sends `parent=N` and the server filters only direct child rows.
+- Added minimal Web issue-detail metadata rows for a child parent reference and a parent child count; board cards and composite status remain untouched.
+- Focused pre-change checks passed: 1,147 server unit tests, 15 CLI issue-command tests, and 32 Web issue-detail tests. Post-change server build, Web typecheck, and 16 CLI issue-command tests pass; Web relationship tests are included in the full Web run.

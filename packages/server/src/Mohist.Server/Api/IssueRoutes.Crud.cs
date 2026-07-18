@@ -27,13 +27,14 @@ public static partial class IssueRoutes
             bool? archived,
             bool? all,
             string? repository,
+            int? parent,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             if (TryValidateLabelFilters(label, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
 
-            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository);
+            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository, parent);
             return ApiResults.Ok(list);
         });
 

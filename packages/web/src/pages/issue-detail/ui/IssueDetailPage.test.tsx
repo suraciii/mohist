@@ -147,6 +147,30 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   })
 })
 
+describe('IssueDetailPage parent-child relationship display', () => {
+  it('renders a child parent reference in the details rail', async () => {
+    mockIssue(makeIssue({
+      parentIssueRef: { number: 42, title: 'Parent issue' },
+    }))
+
+    renderPage()
+
+    const row = await waitFor(() => screen.getByTestId('parent-issue-metadata-row'))
+    expect(row).toHaveTextContent('#42 Parent issue')
+  })
+
+  it('renders the parent indicator and child count in the details rail', async () => {
+    mockIssue(makeIssue({
+      childIssuesSummary: { hasChildren: true, count: 3 },
+    }))
+
+    renderPage()
+
+    const row = await waitFor(() => screen.getByTestId('child-issues-metadata-row'))
+    expect(row).toHaveTextContent('3 child issues')
+  })
+})
+
 describe('IssueDetailPage runtime decision surface', () => {
   it('mounts the runtime decision surface above the workflow stage bar', async () => {
     mockIssue(makeIssue({
