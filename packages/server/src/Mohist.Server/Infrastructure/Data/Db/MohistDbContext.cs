@@ -48,6 +48,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<AgentSubscriptionRow> AgentSubscriptions { get; set; } = null!;
+    public DbSet<RoutingRuleRow> RoutingRules { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
@@ -361,6 +362,30 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.AgentId, e.Name })
                 .IsUnique()
                 .HasDatabaseName("UX_AgentSubscriptions_AgentId_Name");
+        });
+
+        modelBuilder.Entity<RoutingRuleRow>(entity =>
+        {
+            entity.ToTable("RoutingRules");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Position).IsRequired();
+            entity.Property(e => e.Match).IsRequired();
+            entity.Property(e => e.AgentId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ResponsePrompt).IsRequired();
+            entity.Property(e => e.Continue).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.Name })
+                .IsUnique()
+                .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
+            entity.HasIndex(e => new { e.ProjectId, e.Position })
+                .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
+            entity.HasIndex(e => e.ProjectId)
+                .HasDatabaseName("IX_RoutingRules_ProjectId");
         });
 
         modelBuilder.Entity<IssueEventRow>(entity =>

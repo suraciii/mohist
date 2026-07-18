@@ -121,6 +121,26 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentSubscriptions", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.RoutingRuleRow", b =>
+                {
+                    b.Property<string>("Id").HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("ProjectId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("Name").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<int>("Position").HasColumnType("INTEGER");
+                    b.Property<string>("Match").IsRequired().HasColumnType("TEXT");
+                    b.Property<string>("AgentId").IsRequired().HasMaxLength(256).HasColumnType("TEXT");
+                    b.Property<string>("ResponsePrompt").IsRequired().HasColumnType("TEXT");
+                    b.Property<bool>("Continue").HasColumnType("INTEGER");
+                    b.Property<string>("Status").IsRequired().HasMaxLength(32).HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
+                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
+                    b.HasKey("Id");
+                    b.HasIndex("ProjectId").HasDatabaseName("IX_RoutingRules_ProjectId");
+                    b.HasIndex("ProjectId", "Position").HasDatabaseName("IX_RoutingRules_ProjectId_Position");
+                    b.HasIndex("ProjectId", "Name").IsUnique().HasDatabaseName("UX_RoutingRules_ProjectId_Name");
+                    b.ToTable("RoutingRules", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")

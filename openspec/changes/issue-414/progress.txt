@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- Server persistence uses `MohistDbContext` with explicit row mappings and migration-chain SQLite templates in SpecTests.
+- Project-scoped API groups resolve the project through `ProjectResolutionEndpointFilter`; API errors use `ApiResults` and stable `Code` values.
+- Agent state is stored as JSON in `AgentRow`; `AgentQuerier.GetByIdAsync` is the existing project/status lookup used for routing-rule validation.
+- Event match validation uses `EventMatchExpression.Compile`, whose `MatchDiagnostic` contains offset, line, and column. The API reuses the `invalid_match_expression` code and exposes these fields.
+
+## T-001
+
+- Added `RoutingRule`/`RoutingRuleRow`, project-scoped `RoutingRuleStore`, EF model mapping, migration, and `/api/projects/{projectRef}/routing/rules` CRUD/archive/move endpoints.
+- Store validation runs before row mutation, checks expression compilation, active project Agent, prompt, and project-unique name. Create and move renumber all project rows to dense positions inside a transaction; archive is non-destructive and idempotent.
+- `dotnet ef` was unavailable, so the migration and model snapshot were authored in the repository's existing EF migration format.
+- Focused `RoutingRuleStoreSpecs` covers dense ordering, archive idempotency, invalid create matrix, and rejected update immutability.
+- Verification: `npm test` passed all .NET, Web, and Runner suites.
