@@ -1,12 +1,15 @@
 import '@testing-library/jest-dom'
 import { fireEvent, screen, waitFor } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   arrangeLoaded,
   patchCaptures,
   renderSection,
+  resetAiSettingsSectionTestState,
 } from './AiSettingsSectionTestSupport'
+
+beforeEach(resetAiSettingsSectionTestState)
 
 describe('AiSettingsSection default-model row click', () => {
   it('re-clicking the already-selected default model row fires the mutation with variant: null to clear any stale default variant', async () => {

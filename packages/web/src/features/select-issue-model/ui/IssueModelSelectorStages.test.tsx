@@ -1,11 +1,17 @@
 import '@testing-library/jest-dom'
-import { describe, expect, it } from 'vitest'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import {
   mocks,
   openAdvanced,
   renderSelector,
+  resetIssueModelSelectorTestState,
 } from './IssueModelSelectorTestSupport'
+
+beforeEach(() => {
+  cleanup()
+  resetIssueModelSelectorTestState()
+})
 
 describe('IssueModelSelector per-stage variant chips', () => {
   it('renders compact variant chips for stages whose model has variants', async () => {

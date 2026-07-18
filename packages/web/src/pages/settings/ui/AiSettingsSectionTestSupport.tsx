@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { afterEach, vi } from 'vitest'
+import { vi } from 'vitest'
 import { render } from '../../../../tests/test-utils'
 import { useMswServer } from '../../../../tests/support/msw'
 import { AiSettingsSection } from './AiSettingsSection'
@@ -77,10 +77,10 @@ export function arrangeLoaded(options: ArrangeOptions = {}) {
   }
 }
 
-afterEach(() => {
+export function resetAiSettingsSectionTestState() {
   vi.clearAllMocks()
   patchCaptures.length = 0
   availableModels = { models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'], modelVariants: {} }
   opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
   workflowVariables = { vars: null, stages: null }
-})
+}

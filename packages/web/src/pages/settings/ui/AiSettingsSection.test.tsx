@@ -1,8 +1,10 @@
 import '@testing-library/jest-dom'
 import { fireEvent, screen, waitFor } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
-import { arrangeLoaded, patchCaptures, renderSection } from './AiSettingsSectionTestSupport'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { arrangeLoaded, patchCaptures, renderSection, resetAiSettingsSectionTestState } from './AiSettingsSectionTestSupport'
+
+beforeEach(resetAiSettingsSectionTestState)
 
 describe('AiSettingsSection', () => {
   it('does not render the Runtime/Command/Models summary block', async () => {

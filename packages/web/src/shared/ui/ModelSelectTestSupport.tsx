@@ -1,14 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
 import { ModelSelect } from './ModelSelect'
 
 export const models = ['anthropic/claude', 'openai/gpt-4']
 export const modelVariants = { 'anthropic/claude': ['low', 'medium', 'high', 'max'] }
-
-afterEach(() => {
-  cleanup()
-  vi.clearAllMocks()
-})
 
 export function renderVariantSelect(props: Partial<React.ComponentProps<typeof ModelSelect>> = {}) {
   const onChange = vi.fn()

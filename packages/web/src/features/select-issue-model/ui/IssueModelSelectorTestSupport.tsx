@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import {
@@ -25,18 +25,14 @@ const dependencies = {
   patchIssueWorkflowStageDefinitionVar: mocks.patchIssueWorkflowStageDefinitionVar,
 } as unknown as IssueModelSelectorDependencies
 
-afterEach(() => {
-  cleanup()
+export function resetIssueModelSelectorTestState() {
   vi.clearAllMocks()
-})
-
-beforeEach(() => {
   window.localStorage.clear()
   mocks.useOpencodeModel.mockReturnValue({ data: { model: null, variant: null } })
   mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: {}, stages: {} })
   mocks.patchIssueWorkflowDefinitionVar.mockResolvedValue({ vars: { agent: {} }, stages: {} })
   mocks.patchIssueWorkflowStageDefinitionVar.mockResolvedValue({ vars: {}, stages: {} })
-})
+}
 
 export function renderSelector(props: { currentModel?: string | null; currentStageModels?: Record<string, string> | null } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })

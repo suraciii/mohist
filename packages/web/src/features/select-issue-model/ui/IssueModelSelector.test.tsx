@@ -1,7 +1,12 @@
 import '@testing-library/jest-dom'
-import { describe, expect, it } from 'vitest'
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { mocks, renderSelector } from './IssueModelSelectorTestSupport'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
+
+beforeEach(() => {
+  cleanup()
+  resetIssueModelSelectorTestState()
+})
 
 describe('IssueModelSelector default-model variant chips', () => {
   it('renders no variant chips for a model that has no variants', async () => {
