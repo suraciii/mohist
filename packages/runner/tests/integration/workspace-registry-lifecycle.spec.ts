@@ -7,7 +7,6 @@ import {
   setRunnerSignalRExistsCheckerForTest,
 } from "../../src/server/runner-signalr.js"
 import { WorkspaceManager } from "../../src/runtime/workspace.js"
-import { fingerprintGitRemote } from "../../src/runtime/git-remote-identity.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../../src/runtime/workspace-registry.js"
 import { exists, runCommand } from "../../src/system/process.js"
 import { createTestTempDir } from "../support/temp-dir.js"
@@ -103,7 +102,7 @@ function installGitFake() {
       return commandResult()
     }
 
-    if (gitArgs[0] === "checkout" && gitArgs[1] === "-b" && workDir) {
+    if (gitArgs[0] === "checkout" && (gitArgs[1] === "-b" || gitArgs[1] === "-B") && workDir) {
       workspaceBranches.set(workDir, gitArgs[2]!)
       return commandResult()
     }
@@ -121,7 +120,6 @@ function installGitFake() {
 }
 
 function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
-  const remote = fingerprintGitRemote(gitUrl)!
   return {
     workflowRunId,
     workId: "proposal.1",
@@ -135,8 +133,6 @@ function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
         name: "main",
         gitUrl,
         baseBranch: "main",
-        remoteFingerprint: remote.remoteFingerprint,
-        remoteIdentityVersion: remote.remoteIdentityVersion,
       },
       openspecChangeDir: "openspec/changes/sample-change",
     },
@@ -144,14 +140,9 @@ function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
 }
 
 function removalQuery(workflowRunId: string, issueNumber: number, workspacePath: string) {
-  const remote = fingerprintGitRemote(testGitUrl)!
   return {
     workflowRunId,
-    projectId: "project-1",
-    issueNumber,
-    repositoryName: "main",
-    remoteFingerprint: remote.remoteFingerprint,
-    remoteIdentityVersion: remote.remoteIdentityVersion,
+    gitUrl: testGitUrl,
     workspacePath,
     branch: `mohist/run-${workflowRunId}`,
     baseBranch: "main",
@@ -194,11 +185,7 @@ describe("workspace registry lifecycle", () => {
 
     const marker = JSON.parse(await readFile(join(info.path, ".mohist/workspace.json"), "utf8"))
     expect(marker).toMatchObject({
-      issueNumber: 99,
       workflowRunId: "wr-marker",
-      projectId: "project-1",
-      repositoryName: "main",
-      baseBranch: "main",
       runBranch: "mohist/run-wr-marker",
     })
   })
