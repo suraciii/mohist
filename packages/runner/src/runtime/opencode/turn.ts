@@ -66,6 +66,7 @@ import {
 } from "./errors.js"
 import { parseModelIdentifier } from "./model-string.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "./event-subscription.js"
+import { createTimeoutSignal } from "../../system/timeout-signal.js"
 
 export interface TurnExecutionDeps {
   readonly client: OpencodeClient
@@ -81,6 +82,24 @@ export interface TurnExecutionDeps {
 
 const SYSTEM_VARIANT_PREFIX = "[mohist variant:"
 
+/**
+ * Wrap-up warning text. Task-agnostic, runtime-owned; injected via
+ * `client.session.promptAsync()` exactly once per Prompt execution,
+ * `WARNING_WINDOW_MS` before the declared deadline (or at turn start
+ * when the deadline is shorter than the warning window). Must name
+ * no marker, file, or task identifier — the per-task wrap-up
+ * contract lives in each task's own prompt. Pinned by a spec
+ * scenario; do not edit without updating the spec.
+ */
+export const DEADLINE_WARNING_TEXT = [
+  "You will be interrupted in approximately 5 minutes.",
+  "Stop starting any new work now. Commit your current changes,",
+  "leave a progress record in this task's progress channel,",
+  "and end the turn.",
+].join(" ")
+
+export const WARNING_WINDOW_MS = 5 * 60 * 1000
+
 export async function runTurn(
   request: RuntimeTurnRequest,
   deps: TurnExecutionDeps,
@@ -94,36 +113,51 @@ export async function runTurn(
   }
   const { model, variant } = validated.value
 
-  const sessionId = await resolvePhysicalSession(request.target, model, deps, signal)
-  if (typeof sessionId !== "string") {
-    return sessionId
-  }
+  const deadlineMs = normalizeDeadline(request.deadlineMs)
+  const timeoutHandle = deadlineMs !== undefined ? createTimeoutSignal(signal, deadlineMs) : null
+  const effectiveSignal = timeoutHandle ? timeoutHandle.signal : signal
 
-  const policy = deps.policy ?? DEFAULT_PROVIDER_ERROR_POLICY
-  const promptResult = await executePrompt({
-    client: deps.client,
-    events: deps.events,
-    sessionId,
-    directory: request.target.workDir,
-    prompt: request.prompt,
-    model,
-    variant,
-    policy,
-    signal,
-    onEvent: deps.onEvent,
-  })
-  if (promptResult.kind === "failure") {
-    const errorWithDiagnostics: typeof promptResult.error = {
-      ...promptResult.error,
-      diagnostics: [...promptResult.error.diagnostics, ...promptResult.diagnostics],
+  try {
+    const sessionResult = await resolvePhysicalSession(request.target, model, deps, effectiveSignal)
+    if (typeof sessionResult !== "string") {
+      return sessionResult
     }
-    return { ok: false, error: errorWithDiagnostics, diagnostics: [...diagnostics, ...promptResult.diagnostics] }
+
+    const policy = deps.policy ?? DEFAULT_PROVIDER_ERROR_POLICY
+    const promptResult = await executePrompt({
+      client: deps.client,
+      events: deps.events,
+      sessionId: sessionResult,
+      directory: request.target.workDir,
+      prompt: request.prompt,
+      model,
+      variant,
+      policy,
+      signal: effectiveSignal,
+      deadlineMs,
+      onEvent: deps.onEvent,
+    })
+    if (promptResult.kind === "failure") {
+      const errorWithDiagnostics: typeof promptResult.error = {
+        ...promptResult.error,
+        diagnostics: [...promptResult.error.diagnostics, ...promptResult.diagnostics],
+      }
+      return { ok: false, error: errorWithDiagnostics, diagnostics: [...diagnostics, ...promptResult.diagnostics] }
+    }
+    const value: RuntimeTurnResult = {
+      facts: promptResult.value.facts,
+      diagnostics: [...diagnostics, ...promptResult.value.diagnostics],
+    }
+    return { ok: true, value, diagnostics: value.diagnostics }
+  } finally {
+    timeoutHandle?.dispose()
   }
-  const value: RuntimeTurnResult = {
-    facts: promptResult.value.facts,
-    diagnostics: [...diagnostics, ...promptResult.value.diagnostics],
-  }
-  return { ok: true, value, diagnostics: value.diagnostics }
+}
+
+function normalizeDeadline(value: number | null | undefined): number | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined
+  return value
 }
 
 export function bindTurnInFlightTracker(): {
@@ -235,6 +269,7 @@ interface ExecutePromptArgs {
   readonly variant: string | null
   readonly policy: RuntimeProviderErrorPolicy
   readonly signal: AbortSignal
+  readonly deadlineMs?: number
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
 
@@ -269,6 +304,9 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     abortHandler = () => args.signal.removeEventListener("abort", onAbort)
   }
 
+  const promptDiagnostics: RuntimeDiagnostic[] = []
+  const cancelWarning = scheduleDeadlineWarning(args, promptDiagnostics)
+
   let promptOutcome: { ok: true; response: unknown } | { ok: false; cause: unknown }
   try {
     const promptCall = args.client.session.prompt({
@@ -287,18 +325,19 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       if (nonRecoverable) {
         const verdict = retryTracker.nonRecoverableVerdict()!
         const error = normalizeTurnFailed({ message: verdict.message })
-        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics] as RuntimeDiagnostic[] }
+        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
       }
       if (threshold) {
         const verdict = retryTracker.thresholdVerdict()!
         const error = normalizeTurnFailed({ message: verdict.message })
-        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics] as RuntimeDiagnostic[] }
+        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
       }
       const abortError = normalizeInterrupted()
-      return { kind: "failure", error: abortError, diagnostics: [...abortError.diagnostics] }
+      return { kind: "failure", error: abortError, diagnostics: [...abortError.diagnostics, ...promptDiagnostics] }
     }
     promptOutcome = raced as { ok: true; response: unknown } | { ok: false; cause: unknown }
   } finally {
+    cancelWarning()
     unsubscribe()
     abortHandler?.()
   }
@@ -308,20 +347,20 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       const verdict = retryTracker.nonRecoverableVerdict()!
       await abortSessionSafely(args.client, args.sessionId)
       const error = normalizeTurnFailed({ message: verdict.message })
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics] as RuntimeDiagnostic[] }
+      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
     }
     if (retryTracker.abortedDueToThreshold()) {
       const verdict = retryTracker.thresholdVerdict()!
       await abortSessionSafely(args.client, args.sessionId)
       const error = normalizeTurnFailed({ message: verdict.message })
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics] as RuntimeDiagnostic[] }
+      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
     }
     if (args.signal.aborted) {
       const error = normalizeInterrupted()
-      return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
     }
     const error = toUnavailableOrTurnError(promptOutcome.cause, "OpenCode prompt failed")
-    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+    return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
   }
 
   const finalText = extractFinalAssistantText(promptOutcome.response)
@@ -330,7 +369,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     runtimeSessionId: args.sessionId,
     workDir: args.directory,
   }
-  return { kind: "success", value: { facts, diagnostics: [] } }
+  return { kind: "success", value: { facts, diagnostics: [...promptDiagnostics] } }
 }
 
 interface RetryTracker {
@@ -429,6 +468,56 @@ async function abortSessionSafely(client: OpencodeClient, sessionId: string): Pr
   } catch {
     // Best-effort: the abort call exists to clear the in-flight prompt
     // so subsequent restart/reconnect doesn't see a hanging Session.
+  }
+}
+
+/**
+ * Schedule the deadline wrap-up warning for the duration of a single
+ * Prompt execution. The returned cancel function clears the pending
+ * timer — caller MUST invoke it once the prompt has settled so a
+ * turn that completes before the warning is due never injects it.
+ *
+ * The injection itself is fire-and-forget: rejection from
+ * `client.session.promptAsync()` is swallowed into a single info-level
+ * `deadline-warning-injection-failed` diagnostic; the runtime never
+ * fails or retries the turn on the basis of the warning.
+ *
+ * Returns a no-op cancel function when `args.deadlineMs` is undefined
+ * — keeps the call site uniform.
+ */
+function scheduleDeadlineWarning(args: ExecutePromptArgs, diagnostics: RuntimeDiagnostic[]): () => void {
+  if (args.deadlineMs === undefined) return () => {}
+  const client = args.client
+  const delay = args.deadlineMs > WARNING_WINDOW_MS ? args.deadlineMs - WARNING_WINDOW_MS : 0
+  let fired = false
+  const timer = setTimeout(() => {
+    fired = true
+    void injectDeadlineWarning(client, args, diagnostics)
+  }, delay)
+  return () => {
+    if (!fired) clearTimeout(timer)
+  }
+}
+
+async function injectDeadlineWarning(
+  client: OpencodeClient,
+  args: ExecutePromptArgs,
+  diagnostics: RuntimeDiagnostic[],
+): Promise<void> {
+  try {
+    await (client.session.promptAsync as (parameters: unknown) => Promise<unknown>)({
+      path: { id: args.sessionId },
+      query: { directory: args.directory },
+      body: { parts: [{ type: "text", text: DEADLINE_WARNING_TEXT }] },
+    } as never)
+  } catch (cause) {
+    diagnostics.push({
+      severity: "info",
+      code: "deadline-warning-injection-failed",
+      message: `Failed to inject deadline wrap-up warning; the turn continues without it: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    })
   }
 }
 

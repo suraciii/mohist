@@ -67,6 +67,16 @@ export interface RuntimeSessionCreateResult {
 export interface RuntimeTurnRequest {
   readonly target: RuntimeSessionTarget
   readonly prompt: string
+  /**
+   * Optional per-turn deadline declaration. When set, the runtime
+   * layers a timeout onto the external abort signal and schedules a
+   * single task-agnostic wrap-up warning 5 minutes before the
+   * deadline (or at turn start when the deadline is shorter than 5
+   * minutes). Omitted means no deadline, no warning injection, no
+   * internal timer — the runtime awaits the prompt and honours the
+   * external signal for cancellation only.
+   */
+  readonly deadlineMs?: number | null
   readonly options?: RuntimeTurnOptions | null
 }
 

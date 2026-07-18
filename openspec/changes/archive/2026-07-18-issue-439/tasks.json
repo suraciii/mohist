@@ -1,0 +1,53 @@
+{
+  "project": "mohist-local",
+  "description": "Add the two-stage deadline wrap-up protocol to OpenCodeRuntime: a per-turn deadline declaration on RuntimeTurnRequest (default 60 min, with.timeout override), a single fire-and-forget task-agnostic wrap-up warning injected via client.session.promptAsync() 5 minutes before the deadline (or at turn start when shorter), unchanged abort-on-deadline behaviour, no-abort when the warned turn ends on its own, and a real-OpenCode smoke record evidencing mid-turn promptAsync pickup.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement the two-stage deadline wrap-up protocol in OpenCodeRuntime (deadline declaration, warning scheduler, Action switchover, fake-clock tests)",
+      "spec": "specs/opencode-turn-deadline/spec.md#a-work-turn-carries-a-per-turn-deadline-declaration, specs/opencode-turn-deadline/spec.md#a-single-wrap-up-warning-is-injected-5-minutes-before-the-deadline, specs/opencode-turn-deadline/spec.md#the-wrap-up-warning-text-is-task-agnostic, specs/opencode-turn-deadline/spec.md#the-deadline-terminates-an-still-running-turn-as-interrupted, specs/opencode-turn-deadline/spec.md#a-warned-turn-that-ends-on-its-own-is-not-aborted, specs/opencode-turn-deadline/spec.md#the-warning-is-visible-in-the-transcript-via-the-existing-follow-up-path, specs/opencode-turn-deadline/spec.md#deadline-scheduling-is-driven-by-an-injectable-clock",
+      "description": "Add an optional `deadlineMs?: number` to RuntimeTurnRequest in packages/runner/src/runtime/opencode/types.ts (omitted means no deadline, no warning, no internal timer). In packages/runner/src/runtime/opencode/turn.ts: when deadlineMs is declared, layer a timeout onto the external signal via the existing createTimeoutSignal helper from system/timeout-signal.ts (disposed in finally); export a DEADLINE_WARNING_TEXT constant and a WARNING_WINDOW_MS = 5*60*1000 constant; in executePrompt schedule exactly one setTimeout that fires at deadlineMs - WARNING_WINDOW_MS (or setTimeout(0) when deadlineMs <= WARNING_WINDOW_MS) and calls client.session.promptAsync() on the turn's physical Session with the warning body, fire-and-forget inside try/catch that emits an info-level RuntimeDiagnostic (code deadline-warning-injection-failed) on rejection and never fails/retries the turn; clear the timer in the same finally that disposes the timeout handle so a turn that completes before the warning is due never injects it. The existing abort path is unchanged: deadline reached while prompt is in flight calls client.session.abort() and returns interrupted; a turn whose prompt response arrived is not aborted regardless of whether the warning fired. In packages/runner/src/actions/opencode.ts: resolve the deadline via numberInput(context.with, \"timeout\") with DEFAULT_TURN_DEADLINE_MS = 60*60*1000 fallback, place it on the turn request, and do NOT surface the value in the prompt body, system variant, or any rendered variable.",
+      "acceptanceCriteria": [
+        "RuntimeTurnRequest carries an optional deadlineMs: number field; existing callers that omit it behave exactly as before (no warning, no internal timer, external signal still honoured for cancel)",
+        "When deadlineMs is declared and > WARNING_WINDOW_MS, advancing vi.advanceTimersByTimeAsync(deadlineMs - WARNING_WINDOW_MS) results in client.session.promptAsync being called exactly once on the turn's physical Session with DEADLINE_WARNING_TEXT; advancing further to the deadline does not inject a second warning",
+        "When deadlineMs is declared and <= WARNING_WINDOW_MS, the warning is injected at turn start (setTimeout(0)) and is not injected a second time",
+        "When deadlineMs is undefined, client.session.promptAsync is never called by the runtime for that turn",
+        "When the awaited client.session.prompt() response arrives before the deadline (whether or not the warning fired), client.session.abort is NOT called for that Prompt execution and the normal completion facts are returned",
+        "When the deadline is reached while the prompt response has not arrived, client.session.abort is called once and the result kind is interrupted (unchanged from the pre-existing behaviour)",
+        "A rejected client.session.promptAsync call does NOT fail the turn and does NOT trigger a retry; exactly one info-level RuntimeDiagnostic with code deadline-warning-injection-failed is produced",
+        "DEADLINE_WARNING_TEXT is exported from turn.ts and asserts (via unit test) that it contains no marker names (unfinished, promise), no file names (progress.txt, *.md paths), and no task/profile identifiers",
+        "The mohist/opencode Action resolves deadlineMs from numberInput(context.with, \"timeout\") with a 60-minute default, places it on the turn request, and the prompt body / system variant / rendered variables contain no deadline value or static 'N minutes remaining' phrasing",
+        "All deadline-related tests use vi.useFakeTimers() + vi.advanceTimersByTimeAsync; no test asserts on real elapsed wall-clock time, real setTimeout firing, or sleep/delay boundaries",
+        "The fake SDK client in packages/runner/tests/opencode-runtime-turn.spec.ts gains a sessionPromptAsync mock alongside sessionPrompt/sessionAbort, and the fakes use no internal setTimeout",
+        "npm run typecheck -w packages/runner and npm run test:run -w packages/runner pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended RuntimeTurnRequest (deadlineMs), turn.ts warning scheduler + DEADLINE_WARNING_TEXT + WARNING_WINDOW_MS + layered createTimeoutSignal, opencode.ts Action deadline declaration, and fake-clock-driven unit tests in packages/runner/tests/opencode-runtime-turn.spec.ts (plus opencode-action-turn.spec.ts as needed)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design decisions D1-D6 in openspec/changes/issue-439/design.md. This is one cohesive feature module: the type, scheduler, Action switchover, and tests are intentionally merged per the task-splitting principles (interface + implementation + call-site + tests in one capability). Do NOT introduce a hand-rolled Clock abstraction; vi.useFakeTimers() is the sanctioned TS pattern per AGENTS.md. Reuse createTimeoutSignal from system/timeout-signal.ts — do not write a new timer primitive. The smoke record is a separate task (T-002) because it requires a real OpenCode environment and produces an artifact, not code."
+    },
+    {
+      "id": "T-002",
+      "title": "Capture the real-OpenCode smoke record evidencing mid-turn promptAsync pickup",
+      "spec": "specs/opencode-turn-deadline/spec.md#mid-turn-warning-pickup-is-verified-against-a-real-opencode-server",
+      "description": "Run a one-time smoke against a real OpenCode server (CLI on PATH, pinned @opencode-ai/sdk version from #409) demonstrating that a client.session.promptAsync() message injected while a turn is running is picked up and processed by that turn at its next iteration boundary. Use a simple prompt that invokes a tool (e.g. a shell sleep or file read) so the iteration boundary is observable, inject the DEADLINE_WARNING_TEXT body mid-turn, and capture transcript evidence that the running turn processed the injected message (e.g. an assistant message or tool call referencing the warning). Record the OpenCode CLI/SDK version, the injected body, the session ID, the observed transcript evidence, and the wall-clock pickup latency. Persist the result as openspec/changes/issue-439/deadline-warning-smoke.json mirroring the format of openspec/changes/issue-409/sdk-smoke-verification.json.",
+      "acceptanceCriteria": [
+        "openspec/changes/issue-439/deadline-warning-smoke.json exists and is valid JSON",
+        "The record captures the OpenCode CLI version, the pinned @opencode-ai/sdk version, the injected prompt body (matching DEADLINE_WARNING_TEXT from T-001), the running turn's session ID, and transcript evidence that the running turn processed the injected message",
+        "The record notes the wall-clock latency between promptAsync injection and observed pickup",
+        "The smoke is not wired into the default test suite (npm run test:run -w packages/runner does not invoke real OpenCode)",
+        "If the environment has no real OpenCode CLI available, the task records that fact explicitly in the JSON along with the asserted behaviour to verify, and does not fabricate evidence"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "openspec/changes/issue-439/deadline-warning-smoke.json capturing real-OpenCode mid-turn promptAsync pickup evidence",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design decision D7. The issue body states mid-turn steering is already verified; this task records the evidence in the change's artifact directory so the acceptance criterion '冒烟记录' is satisfied. Requires a real OpenCode CLI in the execution environment; if absent, record the gap honestly rather than skipping or fabricating. The smoke is verification evidence only — never re-run as part of npm test."
+    }
+  ]
+}

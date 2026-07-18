@@ -32,6 +32,7 @@ interface FakeClientHandles {
   health: ReturnType<typeof vi.fn>
   sessionCreate: ReturnType<typeof vi.fn>
   sessionPrompt: ReturnType<typeof vi.fn>
+  sessionPromptAsync: ReturnType<typeof vi.fn>
   sessionAbort: ReturnType<typeof vi.fn>
   sessionMessages: ReturnType<typeof vi.fn>
   sessionGet: ReturnType<typeof vi.fn>
@@ -42,7 +43,9 @@ interface BuildArgs {
   failHealth?: boolean
   failCreate?: boolean
   failPrompt?: boolean
+  failPromptAsync?: boolean
   promptResult?: unknown
+  promptAsyncResult?: unknown
   createId?: (params: { directory?: string }) => string
   policy?: RuntimeProviderErrorPolicy
   rebuildDelayMs?: number
@@ -85,6 +88,12 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     }
   })
 
+  const sessionPromptAsync = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+    if (args.failPromptAsync) throw new Error("promptAsync boom")
+    if (args.promptAsyncResult !== undefined) return args.promptAsyncResult
+    return { data: true }
+  })
+
   const sessionAbort = vi.fn(async (_params: { path: { id: string } }) => ({ data: true }))
 
   const sessionMessages = vi.fn(async () => ({ data: [] }))
@@ -97,6 +106,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     session: {
       create: sessionCreate,
       prompt: sessionPrompt,
+      promptAsync: sessionPromptAsync,
       abort: sessionAbort,
       messages: sessionMessages,
       get: sessionGet,
@@ -115,6 +125,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     health,
     sessionCreate,
     sessionPrompt,
+    sessionPromptAsync,
     sessionAbort,
     sessionMessages,
     sessionGet,
