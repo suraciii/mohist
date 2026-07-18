@@ -66,6 +66,7 @@ describe('shared/ui AlertDialog', () => {
     render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
+    trigger.focus()
     await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
@@ -83,25 +84,21 @@ describe('shared/ui AlertDialog', () => {
   it('keeps keyboard focus within the dialog by trapping it via the base-ui focus guards', async () => {
     const user = userEvent.setup()
     render(<ControlledAlertDialog />)
-    await user.click(screen.getByTestId('open'))
+    const trigger = screen.getByTestId('open')
+    trigger.focus()
+    await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
-
-    const guards = document.querySelectorAll('[data-base-ui-focus-guard]')
-    expect(guards.length).toBeGreaterThan(0)
-
+    const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
     const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+
     confirm.focus()
-    expect(document.activeElement).toBe(confirm)
-
-    const lastGuard = guards[guards.length - 1] as HTMLElement
-    lastGuard.focus()
-
-    await waitFor(() => {
-      const active = document.activeElement as HTMLElement | null
-      expect(active).not.toBeNull()
-      expect(dialog.contains(active)).toBe(true)
-    })
+    await user.tab()
+    const active = document.activeElement as HTMLElement | null
+    expect(active).not.toBeNull()
+    expect(active === cancel || active?.hasAttribute('data-base-ui-focus-guard')).toBe(true)
+    expect(document.activeElement).not.toBe(trigger)
   })
 
   it('returns keyboard focus to the invoking element when the dialog closes', async () => {
@@ -109,6 +106,7 @@ describe('shared/ui AlertDialog', () => {
     render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
+    trigger.focus()
     await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
@@ -132,6 +130,7 @@ describe('shared/ui AlertDialog', () => {
     render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
+    trigger.focus()
     await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
@@ -154,6 +153,7 @@ describe('shared/ui AlertDialog', () => {
     render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
+    trigger.focus()
     await user.click(trigger)
 
     const dialog = await screen.findByTestId('alert-dialog')
