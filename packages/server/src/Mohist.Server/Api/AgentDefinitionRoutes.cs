@@ -5,6 +5,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Services;
 
 namespace Mohist.Server.Api;
 
@@ -19,6 +20,10 @@ public static class AgentDefinitionRoutes
         {
             if (string.IsNullOrWhiteSpace(req.Name)) return ApiResults.BadRequest("name is required");
             if (string.IsNullOrWhiteSpace(req.Instructions)) return ApiResults.BadRequest("instructions is required");
+
+            var agentConfigError = IssueModelMetadata.ValidateAgentConfig(req.AgentConfig);
+            if (agentConfigError is not null)
+                return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
 
             var projectId = context.GetResolvedProject().Id;
             var agentId = $"agent_{Guid.NewGuid():N}";
@@ -59,6 +64,13 @@ public static class AgentDefinitionRoutes
         {
             if (TouchesImmutableField(req.Raw))
                 return ApiResults.BadRequest("id, projectId, and createdAt are immutable", "IMMUTABLE_AGENT_FIELD");
+
+            if (req.Fields.Contains(nameof(AgentUpdateRequest.AgentConfig)))
+            {
+                var agentConfigError = IssueModelMetadata.ValidateAgentConfig(req.AgentConfig);
+                if (agentConfigError is not null)
+                    return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
+            }
 
             var projectId = context.GetResolvedProject().Id;
             var existing = await query.GetByIdAsync(projectId, id);

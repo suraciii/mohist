@@ -198,6 +198,13 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
+        // Per #410 T-002 design D5: the built-in profile's MergeAgentConfig
+        // projects incoming agent config down to the converged whitelist
+        // ({model, variant}) before merging into vars.agent. Legacy
+        // ACP/liveness keys supplied by callers are not preserved on this
+        // write path. The persisted/legacy-keys round-trip is covered
+        // separately by the IssueModelMetadataTests + storage-integrity
+        // defensive-copy unit tests (no data rewrite).
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -214,9 +221,9 @@ public class MohistLocalWorkflowProfileSpecs
 
         using var document = JsonDocument.Parse(variables);
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
-        Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
+        Assert.False(agent.TryGetProperty("probeTimeoutMs", out _));
+        Assert.False(agent.TryGetProperty("type", out _));
     }
 
     [Fact]
@@ -269,6 +276,46 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.NotNull(stageVariables);
         Assert.True(stageVariables.ContainsKey("check"));
+    }
+
+    [Fact]
+    public void BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay()
+    {
+        // Per #410 T-002 design D5: BuildStageVariables merges incoming
+        // stage-level agent config through the converged {model, variant}
+        // whitelist. Legacy ACP/liveness keys supplied on the call do not
+        // enter the stage.vars.agent block.
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Stage filter",
+        };
+
+        var stageVariables = profile.BuildStageVariables(
+            issue,
+            new Dictionary<string, Dictionary<string, object?>>
+            {
+                ["check"] = new()
+                {
+                    ["model"] = "openai/o3",
+                    ["variant"] = "xhigh",
+                    ["type"] = "opencode",
+                    ["compaction"] = new { strategy = "truncate" },
+                },
+            });
+
+        Assert.NotNull(stageVariables);
+        var checkStage = stageVariables!["check"];
+        var varsJson = checkStage["vars"];
+        Assert.NotNull(varsJson);
+        using var doc = JsonDocument.Parse(varsJson!);
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal("openai/o3", agent.GetProperty("model").GetString());
+        Assert.Equal("xhigh", agent.GetProperty("variant").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
+        Assert.False(agent.TryGetProperty("compaction", out _));
     }
 
     [Fact]

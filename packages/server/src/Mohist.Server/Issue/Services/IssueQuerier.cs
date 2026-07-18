@@ -562,7 +562,8 @@ public class IssueQuerier : IScopedService
         if (!vars.Value.TryGetProperty("agent", out var agent) || agent.ValueKind != JsonValueKind.Object)
             return null;
 
-        return JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), JSON.Options);
+        return AgentConfigSchema.Filter(
+            JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), JSON.Options));
     }
 
     private static string? ReadAgentModel(Dictionary<string, object?>? agentConfig)

@@ -237,7 +237,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
                 name = agentName,
                 description = $"description for {agentName}",
                 instructions = $"instructions for {agentName}",
-                agentConfig = new { type = "opencode" },
+                agentConfig = new { model = "openai/gpt-5.6" },
                 skills = new[] { "coding" },
                 maxConcurrentRuns = 1,
             });

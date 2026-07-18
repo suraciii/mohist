@@ -8,6 +8,20 @@ import type { AgentInfo } from '../../../entities/agent'
 import { AgentProfileEditor, type AgentProfileEditorOperationsHook } from './AgentProfileEditor'
 import { useMswServer } from '../../../../tests/support/msw'
 
+const FORBIDDEN_AGENT_CONFIG_KEYS = [
+  'type',
+  'livenessQuietThresholdMs',
+  'probeTimeoutMs',
+  'sessionStartTimeoutMs',
+  'compaction',
+] as const
+
+function AssertNoLegacyKey(agentConfig: Record<string, unknown> | null) {
+  for (const key of FORBIDDEN_AGENT_CONFIG_KEYS) {
+    expect(agentConfig).not.toHaveProperty(key)
+  }
+}
+
 const mocks = {
   createMutation: { mutate: vi.fn(), isPending: false },
   updateMutation: { mutate: vi.fn(), isPending: false },
@@ -193,6 +207,38 @@ describe('AgentProfileEditor', () => {
       await waitFor(() => {
         expect(screen.getByTestId('editor-api-error')).toHaveTextContent('UPDATE_FAILED')
       })
+    })
+
+    it('persists agentConfig carrying only {model, variant} — drops legacy keys from spread', async () => {
+      // Per #410 T-002 design D5: writeAgentModelAndVariant must NOT
+      // preserve legacy ACP/liveness keys via spread. The agent profile
+      // editor (and AgentDefinitionRoutes) only carry the converged shape;
+      // any previous `type` / livenessQuietThresholdMs / probeTimeoutMs
+      // / sessionStartTimeoutMs / compaction keys supplied via the
+      // existing config are dropped before the API request.
+      const legacyAgent: AgentInfo = {
+        ...existingAgent,
+        agentConfig: {
+          type: 'opencode',
+          livenessQuietThresholdMs: 1200000,
+          probeTimeoutMs: 30000,
+          model: 'gpt-4',
+          variant: 'high',
+        } as AgentInfo['agentConfig'],
+      }
+      renderEditor({ agent: legacyAgent })
+      await act(async () => {
+        fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Renamed' } })
+      })
+      await act(async () => {
+        screen.getByTestId('editor-save').click()
+      })
+      expect(mocks.updateMutation.mutate).toHaveBeenCalled()
+      const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      const agentConfig = callArgs.data.agentConfig as Record<string, unknown> | null
+      expect(agentConfig).not.toBeNull()
+      expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'variant'])
+      AssertNoLegacyKey(agentConfig)
     })
   })
 

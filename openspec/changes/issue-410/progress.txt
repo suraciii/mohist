@@ -57,3 +57,158 @@
 
 ### What T-005 will need to thread
 - T-005 closes the design-doc gap sections and aligns `docs/actions/opencode.md` and `docs/agents.md` to the post-ACP state. T-001's flat `with` payload and the unified launch pipeline (manual + subscription) is the new state T-005 must describe; the doc gap sections previously deferred to #410 should be closeable after T-004 lands.
+
+## T-002: Converge the issue-level AgentConfig surface to model and variant across API, CLI, and Web
+
+### Codebase patterns observed
+- `IssueModelMetadata.ApplyModelMetadata` only writes {model, variant} into
+  the inner agent dict. Anything else (type, liveness* keys) already present
+  in persisted `vars.agent` is not stripped by the helper, so the
+  IssueModelMetadata.ApplyModelMetadata path was already "spec-aligned"
+  for the no-rewrite invariant. The filter-vs-preserve distinction held
+  naturally because the helper composes a SET-replace inner agent block.
+- The two write paths that secretly stamped legacy keys were the web
+  `updateOpencodeModel` / `setStageModel` (web `entities/settings/api/client.ts`)
+  and the `BuildStageVariables` -> `MergeStageAgent` helper inside
+  `MohistIssueWorkflowProfileBase`. The web layer passed
+  `{type: 'opencode', model}`, and `MergeStageAgent` serialized the dict
+  verbatim into `stages.<stage>.vars.agent`. Both are now filter-routed.
+- The `Build` overload of `IssueVariableBuilder` that accepts
+  `(globalBundle, projectBundle, workflowRunId, issue, project, workspace)`
+  feeds the live `global` (config.jsonc) and `project` (project workflow
+  variables) layers through `VariableBundle.MergeAll` — which itself does
+  not filter. Legacy keys already in storage would otherwise leak into the
+  merged result. A final-pass `ProjectAgentBlocksToConvergedSurface` walks
+  every `vars.agent` / `stages.<stage>.vars.agent` after the merge and
+  applies `AgentConfigSchema.Filter`. This is the in-band fix that keeps
+  `IssueModelMetadata.ApplyModelMetadata` (storage-side) and
+  `IssueVariableBuilder.Build` (dispatch-side) consistent without a global
+  rework of `VariableBundle.MergeAll`.
+- `CreateIssueRequest` was previously a positional `record(...)`. To
+  inspect the raw request body for an open-shape `agentConfig` validation
+  without re-parsing, the DTO was converted to a class with a `Raw`
+  `JsonElement` populated by a `BindAsync(HttpContext)` overload — the
+  same shape as `UpdateIssueRequest`. The route handler calls
+  `TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", ...)` for
+  both POST and PATCH.
+
+### Implementation notes
+- `Infrastructure/AgentConfigSchema.cs` (new) holds three surfaces:
+  - `AllowedKeys = {model, variant}`
+  - `ForbiddenKeys = {type, livenessQuietThresholdMs, probeTimeoutMs, sessionStartTimeoutMs, compaction}`
+  - `Validate(JsonElement?)` for the JSON-element path used by the
+    route layer (POST/PATCH issue body) — reject any forbidden key, return
+    the first user-facing message.
+  - `Project(JsonElement?)` and `Filter(IDictionary?)` for the
+    write/read-in whitelist projection used by the build paths.
+- `Workflow/Services/ProjectVariablesFilter.cs` (new) sanitises both top
+  and per-stage agent blocks at the project-variables write boundary;
+  `ProjectWorkflowProfileManager.SetVariablesAsync` /
+  `PatchVariablesAsync` route their bundle through this filter so legacy
+  keys supplied by a PATCH never enter the persisted
+  `ProjectWorkflowProfile.Variables` JSON. Same shape filter on read is
+  not needed because `IssueQuerier` reads back via the merged bundle, not
+  from `ProjectWorkflowProfile.Variables` directly.
+- `IssueModelMetadata.ValidateAgentConfig(JsonElement?)` is the single
+  helper used by both `IssueRoutes.Crud` and `AgentDefinitionRoutes` so the
+  error message + the acceptance-criteria wording stay identical across
+  the issue and agent-definition surfaces.
+- `IssueQuerier.ReadAgentConfig` now runs the agent dict through
+  `AgentConfigSchema.Filter` before returning it on the read model. The
+  per-stage read in `ApplyIssueWorkflowVariables` likewise goes through
+  the same filter. The spec scenario "GET /api/projects/{p}/issues/{n}
+  returns agentConfig containing at most {model, variant} even when the
+  persisted vars.agent carries legacy keys" is satisfied by this single
+  chokepoint — older persisted `vars.agent` blocks still carry legacy
+  keys (no rewrite), but the response surface no longer leaks them.
+
+### Gotchas / regressions watched for
+- The web `AiSettingsSection.test.tsx` arrangement helper seeded the
+  project-variables fixture with `type: 'opencode'` and asserted that
+  the persisted bundle echoed `type` back. Per D5, the project write no
+  longer stamps `type`, so the mutated assertion now expects
+  `{model, variant}` only. Same fix applied to `IssueWorkflowProductLoopSpecs`
+  where PATCH asserts the merged `vars.agent` round-trip no longer
+  preserves `type`.
+- `ConfigServiceTests.SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel`
+  seeded `agent` with `type=opencode, model=...`. After the
+  `GetAgentConfigAsync` filter, `type` is dropped, so the surviving
+  sibling assertion became `variant=max` (mirroring the model's atomic
+  clear behaviour on the converged surface).
+- `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable`
+  used `probeTimeoutMs` to assert legacy keys flow through profile merge.
+  After `BuildAgentConfig` / `BuildStageVariables` filter, the surviving
+  agent block has only `model`. New test
+  `BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay` was added to
+  exercise the same scenario on the stage surface.
+- `ProjectWorkflowProfileManagerSpecs.PatchVariables_DeepMerges_WithExisting`
+  called `SetVariablesAsync` directly with a bundle containing `type`.
+  The unit test was updated to use the converged shape; the integration
+  shape is locked to `{model, variant}` so the projection is observable
+  on this test path too.
+- The `VariableBundle.MergeAll` deep merge semantics
+  (project-over-global) are preserved on the converged surface
+  (model/variant only). `ProjectUserVariables_DeepMergedWithGlobal` in
+  IssueVariableBuilderTests was rewritten to assert the merged agent
+  block has only model/variant while non-agent top-level keys still
+  flow through.
+- Anonymous types in C# cannot contain dynamic-key entries
+  (`new { [forbiddenKey] = "value" }` is illegal). The agent-definition
+  and issue spec tests build the request body with a
+  `Dictionary<string, object?>` first so the JSON has the right key.
+- `AgentConfigSchemaTests` (pre-existing from previous partial attempt)
+  covers unit-level Validate / Project / Filter on JSON elements and
+  dictionaries. The new `AgentConfigValidationApiBoundaryTests` covers
+  the route-facing helper `IssueModelMetadata.ValidateAgentConfig` and
+  both create and patch paths.
+
+### Verification
+- `dotnet test packages/server` (Mohist.UnitTests + SpecTests + ArchTests + Cli):
+  1202 + 2849 + 30 + 1396 = 5477 passed, 0 failed.
+- `npm run typecheck -w packages/web && npm run test:run -w packages/web`:
+  340 test files, 4738 tests, 0 failed.
+- `npm run typecheck -w packages/runner && npm run test:run -w packages/runner`:
+  1166 tests, 0 failed.
+- `agent-job-executor.spec.ts` (#409 unknownKeys path) untouched and unchanged;
+  the legacy-key warning diagnostic stays intact.
+- New tests: `IssueAgentConfigValidationApiSpecs` (11 cases) +
+  `AgentDefinitionApiSpecs.CreateAgent_WithForbiddenAgentConfigKey_Returns400`
+  / `PatchAgent_...` (8 cases) +
+  `IssueWorkflowProfileStorageIntegritySpecs.DefensiveCopy_PreservesPersistedLegacyKeys_NoRewrite`
+  / `FoldAgentDataIntoBundle_FiltersLegacyKeysFromIncomingOverlay` /
+  `FoldAgentDataIntoBundle_FiltersLegacyKeysFromIncomingStageOverlay` +
+  `AgentConfigValidationApiBoundaryTests` (14 cases) +
+  `MohistLocalWorkflowProfileSpecs.BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay`
+  (1 case) +
+  `client.test.ts.writeAgentModelAndVariant > writes only model and variant, dropping legacy keys` /
+  `drops the variant when null is passed` / `returns null when model is null regardless of legacy keys`
+  +
+  `AgentProfileEditor.test.ts > persists agentConfig carrying only {model, variant} — drops legacy keys from spread`
+  +
+  `AgentDetailPage.test.ts > does not render an agent-type field` /
+  `surfaces only model and variant in the Agent Config card when the persisted config carries legacy keys`.
+
+### What T-003 will need to thread
+- T-003 promotes Follow-up/Cancel/outbox handlers to runtime-targeted
+  shapes and deletes `ClientSideConnection`. T-002's converged agent
+  config is untouched by those changes — T-003 does not depend on the
+  AgentConfigSchema filter.
+- The Follow-up/Cancel/outbox paths never write `agentConfig` so they
+  do not need a new validation chokepoint.
+
+### What T-004 will need to thread
+- T-004 deletes the `mohist/acp-agent` Action, the entire `actions/acp/`
+  tree, the ACP runtime modules, and `@agentclientprotocol/sdk`. T-002's
+  AgentConfigSchema is orthogonal to the Action registry — T-004 does
+  not need to touch it.
+- T-004 collapses `IsInlineAgentUses` to `mohist/opencode` only and adds
+  an actionable error for `mohist/acp-agent`. T-002's route-layer
+  validation only inspects the `agentConfig` body of `mohist/opencode`
+  tasks; no overlap.
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections. T-002 already removed
+  every `type = "opencode"` stamping in source. The web milestone
+  classifier (`widgets/issue-workflow/ui/milestones.ts`) still uses
+  `isAcpAgentTask` — T-002 did not touch that file, but T-004's class
+  rename (or T-005's spec rename) will.

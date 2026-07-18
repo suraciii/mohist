@@ -126,6 +126,14 @@ public class IssueModelMetadataTests
     [Fact]
     public void ApplyModelMetadata_PreservesExistingAgentKeys()
     {
+        // Per #410 T-002: legacy ACP/liveness keys already persisted on
+        // vars.agent MUST survive IssueModelMetadata.ApplyModelMetadata
+        // without mutation. The helper only writes {model, variant};
+        // already-persisted keys like `type` / `probeTimeoutMs` are
+        // untouched. Storage-level migration is explicitly disallowed
+        // by the spec ("no data rewrite"); the mohist/opencode runtime's
+        // unknownKeys diagnostic path covers legacy keys when they reach
+        // an execution request.
         var existingJson = """
         {
           "vars": { "agent": { "type": "opencode", "probeTimeoutMs": 30000 } },

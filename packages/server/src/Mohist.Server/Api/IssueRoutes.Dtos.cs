@@ -6,23 +6,115 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
 
-public record CreateIssueRequest(
-    string Title,
-    string? Body = null,
-    Dictionary<string, string>? Labels = null,
-    string? Priority = null,
-    string? Model = null,
-    string? ModelVariant = null,
-    Dictionary<string, object?>? AgentConfig = null,
-    Dictionary<string, string>? StageModels = null,
-    Dictionary<string, string>? StageModelVariants = null,
-    string? WorkflowProfileId = null,
-    string? RepositoryName = null,
-    string? Risk = null,
-    bool? IsDraft = null,
-    string[]? AttachmentIds = null,
-    int[]? PrerequisiteNumbers = null,
-    int? ParentIssueNumber = null);
+public record CreateIssueRequest
+{
+    private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
+
+    public string Title { get; init; } = string.Empty;
+    public string? Body { get; init; }
+    public Dictionary<string, string>? Labels { get; init; }
+    public string? Priority { get; init; }
+    public string? Model { get; init; }
+    public string? ModelVariant { get; init; }
+    public Dictionary<string, string>? StageModels { get; init; }
+    public Dictionary<string, string>? StageModelVariants { get; init; }
+    public string? WorkflowProfileId { get; init; }
+    public string? RepositoryName { get; init; }
+    public string? Risk { get; init; }
+    public bool? IsDraft { get; init; }
+    public string[]? AttachmentIds { get; init; }
+    public int[]? PrerequisiteNumbers { get; init; }
+    public int? ParentIssueNumber { get; init; }
+
+    /// <summary>
+    /// Raw JSON body captured at bind time so the route handler can
+    /// inspect fields outside the typed record (e.g. open-shape
+    /// <c>agentConfig</c>) without re-parsing the request body. Required
+    /// to enforce the <c>agentConfig</c> forbidden-key validation at the
+    /// API boundary.
+    /// </summary>
+    public JsonElement Raw { get; init; }
+
+    public static async ValueTask<CreateIssueRequest?> BindAsync(HttpContext context)
+    {
+        JsonElement raw;
+        try
+        {
+            raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (raw.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new CreateIssueRequest
+        {
+            Title = GetString(raw, "title") ?? string.Empty,
+            Body = GetString(raw, "body"),
+            Labels = GetStringMap(raw, "labels"),
+            Priority = GetString(raw, "priority"),
+            Model = GetString(raw, "model"),
+            ModelVariant = GetString(raw, "modelVariant"),
+            StageModels = GetStringMap(raw, "stageModels"),
+            StageModelVariants = GetStringMap(raw, "stageModelVariants"),
+            WorkflowProfileId = GetString(raw, "workflowProfileId"),
+            RepositoryName = GetString(raw, "repositoryName"),
+            Risk = GetString(raw, "risk"),
+            IsDraft = GetNullableBool(raw, "isDraft"),
+            AttachmentIds = GetStringArray(raw, "attachmentIds"),
+            PrerequisiteNumbers = GetNullableIntArray(raw, "prerequisiteNumbers"),
+            ParentIssueNumber = GetNullableInt(raw, "parentIssueNumber"),
+            Raw = raw,
+        };
+    }
+
+    private static string? GetString(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
+            ? el.GetString()
+            : null;
+
+    private static Dictionary<string, string>? GetStringMap(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Object)
+            return null;
+        var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var prop in el.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.String) continue;
+            dict[prop.Name] = prop.Value.GetString()!;
+        }
+        return dict;
+    }
+
+    private static bool? GetNullableBool(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False)
+            ? el.GetBoolean()
+            : null;
+
+    private static string[]? GetStringArray(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Array)
+            return null;
+        return el.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToArray();
+    }
+
+    private static int[]? GetNullableIntArray(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Array)
+            return null;
+        return el.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Number).Select(e => e.GetInt32()).ToArray();
+    }
+
+    private static int? GetNullableInt(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Number
+            ? el.GetInt32()
+            : null;
+}
 
 /// <summary>
 /// PATCH body for issue updates. Includes a <see cref="Raw"/> JsonElement
@@ -51,7 +143,6 @@ public record UpdateIssueRequest
     public string? Priority { get; init; }
     public string? Model { get; init; }
     public string? ModelVariant { get; init; }
-    public Dictionary<string, object?>? AgentConfig { get; init; }
     public Dictionary<string, string>? StageModels { get; init; }
     public Dictionary<string, string>? StageModelVariants { get; init; }
     public Dictionary<string, Dictionary<string, string>>? StageVariables { get; init; }
@@ -118,7 +209,6 @@ public record UpdateIssueRequest
             Priority = GetString(raw, "priority"),
             Model = GetString(raw, "model"),
             ModelVariant = GetString(raw, "modelVariant"),
-            AgentConfig = GetObject(raw, "agentConfig"),
             StageModels = GetStringMap(raw, "stageModels"),
             StageModelVariants = GetStringMap(raw, "stageModelVariants"),
             StageVariables = GetNestedStringMap(raw, "stageVariables"),
@@ -149,11 +239,6 @@ public record UpdateIssueRequest
         }
         return dict;
     }
-
-    private static Dictionary<string, object?>? GetObject(JsonElement raw, string name) =>
-        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Object
-            ? JsonSerializer.Deserialize<Dictionary<string, object?>>(el.GetRawText(), JsonOptions)
-            : null;
 
     private static Dictionary<string, Dictionary<string, string>>? GetNestedStringMap(JsonElement raw, string name)
     {

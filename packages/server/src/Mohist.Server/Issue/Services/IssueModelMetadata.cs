@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 
@@ -162,6 +163,18 @@ public static class IssueModelMetadata
 
         return null;
     }
+
+    /// <summary>
+    /// Validate the open-shape <c>agentConfig</c> body supplied at issue
+    /// create/update. The converged surface accepts only
+    /// <c>{model, variant}</c>; any other key (or any legacy ACP/liveness
+    /// key explicitly named in <see cref="AgentConfigSchema.ForbiddenKeys"/>)
+    /// is rejected at the API boundary so it never reaches persistence.
+    /// Returns <c>null</c> when no offending key is found, otherwise the
+    /// first user-facing error message.
+    /// </summary>
+    public static string? ValidateAgentConfig(JsonElement? agentConfig) =>
+        AgentConfigSchema.Validate(agentConfig);
 
     /// <summary>
     /// Compute the new top-level <c>vars</c> element with a SET-replace
