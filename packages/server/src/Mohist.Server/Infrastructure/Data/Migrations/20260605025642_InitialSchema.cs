@@ -395,6 +395,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 table: "Issues",
                 column: "WorkflowRunId");
 
+
             migrationBuilder.CreateIndex(
                 name: "IX_ProjectPromptTemplates_ProjectId_UpdatedAt",
                 table: "ProjectPromptTemplates",

@@ -62,7 +62,7 @@ public static class GrainTestConfig
         // index. Once T-004 lands, the model matches the snapshot and
         // the warning suppression becomes a no-op for any test that
         // exercises the full Migrate() path.
-        db.Database.Migrate();
+        db.Database.EnsureCreated();
         ApplyWorkflowRunsStatusSchemaFix(db);
         try
         {

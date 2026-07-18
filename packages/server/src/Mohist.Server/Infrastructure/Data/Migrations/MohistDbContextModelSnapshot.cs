@@ -588,7 +588,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
+                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -627,7 +627,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
                 {
                     b.Property<string>("ProjectId")
-                        .IsRequired()
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("ApprovalRequestedEnabled")
@@ -740,7 +740,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Next")
@@ -754,6 +753,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssuePrerequisiteRow", b =>
                 {
                     b.Property<string>("ProjectId")
+                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -794,7 +794,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
 
                     b.Property<int?>("ParentIssueNumber")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("INTEGER")
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.parentIssueNumber'), json_extract(State, '$.ParentIssueNumber'))");
 
                     b.Property<string>("PrerequisiteNumbersJson")
                         .ValueGeneratedOnAddOrUpdate()
@@ -845,8 +847,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "EpicNumber", "Number");
-
-                    b.HasIndex("ProjectId", "ParentIssueNumber", "Number");
 
                     b.HasIndex("ProjectId", "RepositoryName", "Status")
                         .HasDatabaseName("IX_Issues_ProjectId_RepositoryName_Status");
