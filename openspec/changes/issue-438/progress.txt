@@ -29,3 +29,52 @@
 - cmdk's `CommandItem` wrapper has built-in CheckIcon; used raw `CommandRoot.Item` to avoid it
 - cmdk's `CommandInput` wrapper has custom InputGroup styling; used raw `CommandRoot.Input` with Tailwind classes
 - The `ModelSelectProps` contract preserved exactly; zero prop changes needed at all 4 consumer sites
+
+### T-002: IssueModelSelector default-model popover ported to cmdk
+
+**Approach: Direct cmdk composition (not ModelOptionList wrapper)**
+- `IssueModelSelector` has surface-specific extras (loading/error, Override "Use default" row, Recent section, "Override active" note, per-stage overrides) that don't fit the simple ModelOptionList API
+- Used cmdk primitives directly (`CommandRoot`, `CommandRoot.Input`, `CommandRoot.List`, `CommandRoot.Item`, `CommandGroup` from wrapper) composing the same way ModelOptionList does internally
+- This satisfies the "shared primitive" intent without adding props creep to ModelOptionList
+
+**Pattern: cmdk `filter={false}` broken in cmdk 1.1.1**
+- The TS type `CommandFilter` doesn't include `boolean`, and even with a cast, `filter={false}` causes `TypeError: s is not a function` at runtime
+- cmdk's internal `te()` function always calls the filter as a function without checking if it's falsy
+- Workaround: use `filter={() => 1}` — a pass-through filter that returns 1 for every item, effectively disabling cmdk's built-in filter
+- Fuzzysort does the actual filtering externally via `displayedModels`, and those models are rendered as `CommandRoot.Item`s
+
+**Pattern: Controlled `value` on CommandRoot for `aria-selected`**
+- cmdk's `CommandRoot.Item` sets `aria-selected` based on `cmdkValue === itemValue` internal comparison
+- Must pass `value={configuredModel ?? undefined}` to `CommandRoot` so the currently selected model gets `aria-selected="true"`
+- Without this, `aria-selected` is always `false` even when `isSelected` class is applied
+
+**Pattern: "Use default" Override row as CommandGroup+CommandRoot.Item**
+- The Override "Use default" button became a `CommandRoot.Item` inside a `CommandGroup` for keyboard navigability and a11y group labeling
+- Test queries had to change: `screen.getByRole('button', { name: /Use default/i })` → `document.querySelectorAll('[cmdk-item]')` then find by textContent
+- The `CommandRoot.Item` renders as `role="option"`, not `role="button"`
+
+**Deleted:**
+- `ModelListItem` component (bespoke, with inline `onPointerDown` selector)
+- `handleKeyDown` (bespoke, omitting Escape)
+- `highlightedIndex` state
+- `searchInputRef`, `listRef`
+- `useEffect` resetting highlightedIndex on search change
+- `Input` import (replaced by `CommandRoot.Input`)
+
+**Added imports:**
+- `Command as CommandRoot` from 'cmdk'
+- `CommandGroup` from '@/shared/ui/components/command'
+- `cn` from '@/shared/lib/utils'
+- `variantListFor` from '../../../shared/ui/model-variants'
+- `useMemo` from React
+
+**Test changes:**
+- Flipped `fireEvent.pointerDown(row)` → `fireEvent.click(row)` (2 occurrences in default-model variant chips describe block)
+- Added new describe block "IssueModelSelector default-model popover accessibility and keyboard":
+  - click selects and closes
+  - pointerDown alone does NOT select
+  - Escape closes without changing selection
+  - combobox/listbox/option roles
+  - Override/Recent/All-models sections as labeled groups
+  - chip-click persists model+variant through patchIssueWorkflowDefinitionVar
+- Updated "Use default" clear test to query `[cmdk-item]` instead of `role="button"`

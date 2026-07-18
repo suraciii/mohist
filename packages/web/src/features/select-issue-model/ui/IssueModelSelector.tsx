@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
+import { Command as CommandRoot } from 'cmdk'
 import { useAvailableModelIds, useModelVariants, useOpencodeModel } from '../../../entities/settings'
 import { getIssueWorkflowVariables, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
+import { variantListFor } from '../../../shared/ui/model-variants'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
-import { Input } from '@/shared/ui/components/input'
+import { cn } from '@/shared/lib/utils'
+import { CommandGroup } from '@/shared/ui/components/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
@@ -122,61 +125,6 @@ function modelDisplayName(modelId: string): string {
   return describeModel(modelId).name
 }
 
-interface ModelListItemProps {
-  modelId: string
-  isSelected: boolean
-  isHighlighted: boolean
-  modelVariants: Record<string, string[]>
-  activeVariant: string | null
-  variantTestIdBase: string
-  onSelect: () => void
-  onSelectVariant: (variant: string) => void
-  onMouseEnter: () => void
-}
-
-function ModelListItem({
-  modelId,
-  isSelected,
-  isHighlighted,
-  modelVariants,
-  activeVariant,
-  variantTestIdBase,
-  onSelect,
-  onSelectVariant,
-  onMouseEnter,
-}: ModelListItemProps) {
-  return (
-    <div
-      role="button"
-      tabIndex={-1}
-      data-model-id={modelId}
-      onClick={onSelect}
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-      onMouseEnter={onMouseEnter}
-      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-sm cursor-default ${
-        isHighlighted ? 'bg-blue-50 text-blue-700' : isSelected ? 'bg-muted text-foreground' : 'text-foreground hover:bg-muted'
-      }`}
-    >
-      <div className="flex min-w-0 flex-col items-start gap-1">
-        <span className="font-medium">{modelDisplayName(modelId)}</span>
-        <span className="text-xs text-muted-foreground/70">{modelId}</span>
-      </div>
-      <ModelVariantChips
-        modelId={modelId}
-        modelVariants={modelVariants}
-        activeVariant={isSelected ? activeVariant : null}
-        baseTestId={variantTestIdBase}
-        onSelect={(_id, variant) => onSelectVariant(variant ?? '')}
-      />
-    </div>
-  )
-}
-
 export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, dependencies = defaultDependencies }: Props) {
   const {
     useAvailableModelIds,
@@ -192,9 +140,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const { data: opencodeModelData } = useOpencodeModel()
   const modelVariantsMap = useModelVariants()
   const [searchQuery, setSearchQuery] = useState('')
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
+  const chipRefs = useRef<Record<string, Array<HTMLButtonElement | null>>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
   const [localStageVariants, setLocalStageVariants] = useState<Record<string, string>>({})
@@ -364,27 +310,67 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     [issueNumber, projectId, queryClient],
   )
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setHighlightedIndex(i => Math.min(i + 1, displayedModels.length - 1))
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setHighlightedIndex(i => Math.max(i - 1, 0))
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        if (displayedModels[highlightedIndex]) {
-          handleSelect(displayedModels[highlightedIndex])
+  const handleChipKeyDown = useCallback(
+    (event: React.KeyboardEvent, modelId: string, chipIndex: number) => {
+      const variants = variantListFor(modelId, modelVariantsMap)
+      if (variants.length === 0) return
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        if (chipIndex > 0) {
+          chipRefs.current[modelId]?.[chipIndex - 1]?.focus()
+        } else {
+          const input = document.querySelector<HTMLInputElement>('[cmdk-input]')
+          input?.focus()
         }
+      } else if (event.key === 'ArrowRight') {
+        if (chipIndex < variants.length - 1) {
+          event.preventDefault()
+          chipRefs.current[modelId]?.[chipIndex + 1]?.focus()
+        }
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        handleSelectWithVariant(modelId, variants[chipIndex])
       }
     },
-    [displayedModels, highlightedIndex, handleSelect],
+    [modelVariantsMap, handleSelectWithVariant],
   )
 
-  useEffect(() => {
-    setHighlightedIndex(0)
-  }, [searchQuery])
+  const handleCommandKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      const isRightOrTab =
+        event.key === 'ArrowRight' || (event.key === 'Tab' && !event.shiftKey)
+      if (!isRightOrTab) return
+
+      const target = event.target as HTMLElement | null
+      if (target?.closest('[data-variant-chip]')) return
+
+      const activeItem = (event.currentTarget as HTMLElement).querySelector(
+        '[data-selected="true"][data-model-id]',
+      ) as HTMLElement | null
+      if (!activeItem) return
+      const activeModelId = activeItem.getAttribute('data-model-id')
+      if (!activeModelId) return
+
+      const variants = variantListFor(activeModelId, modelVariantsMap)
+      if (variants.length === 0) return
+
+      event.preventDefault()
+      chipRefs.current[activeModelId]?.[0]?.focus()
+    },
+    [modelVariantsMap],
+  )
+
+  const groupedModels = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const id of displayedModels) {
+      const provider = id.split('/')[0] || 'other'
+      const list = map.get(provider)
+      if (list) list.push(id)
+      else map.set(provider, [id])
+    }
+    return map
+  }, [displayedModels])
 
   const defaultModelId = opencodeModelData?.model ?? null
 
@@ -432,118 +418,146 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           <ChevronDownIcon />
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="end">
-          <div className="p-2">
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                <SearchIcon />
+          <CommandRoot filter={() => 1} value={configuredModel ?? undefined} onKeyDown={handleCommandKeyDown}>
+            <div className="p-2">
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                  <SearchIcon />
+                </div>
+                <CommandRoot.Input
+                  value={searchQuery}
+                  onValueChange={setSearchQuery}
+                  placeholder="Search models..."
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent pl-9 py-1 pr-3 text-base shadow-sm transition-colors outline-none placeholder:text-muted-foreground md:text-sm"
+                />
               </div>
-              <Input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Search models..."
-                className="w-full pl-9"
-                autoFocus
-              />
             </div>
-          </div>
 
-          <div ref={listRef} className="max-h-80 overflow-y-auto border-t">
-            {isLoading && (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                Loading models...
-              </div>
-            )}
-
-            {error && !isLoading && (
-              <div className="px-3 py-6 text-center text-sm text-red-500">
-                Failed to load models: {(error as Error).message}
-              </div>
-            )}
-
-            {!isLoading && !error && configuredModel && !searchQuery.trim() && (
-              <div>
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
-                  Override
+            <CommandRoot.List className="max-h-80 scroll-py-1 overflow-x-hidden overflow-y-auto overscroll-y-contain outline-none border-t">
+              {isLoading && (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                  Loading models...
                 </div>
-                <Button
-                  variant="ghost"
-                  onClick={handleClear}
-                  className="w-full justify-start px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 h-auto font-normal"
+              )}
+
+              {error && !isLoading && (
+                <div className="px-3 py-6 text-center text-sm text-red-500">
+                  Failed to load models: {(error as Error).message}
+                </div>
+              )}
+
+              {!isLoading && !error && configuredModel && !searchQuery.trim() && (
+                <CommandGroup
+                  heading="Override"
+                  value="__override__"
+                  className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
                 >
-                  <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
-                </Button>
-                <div className="border-t my-1" />
-              </div>
-            )}
+                  <CommandRoot.Item
+                    value="__clear__"
+                    onSelect={handleClear}
+                    className="px-3 py-2 text-sm text-amber-700 cursor-pointer hover:bg-amber-50 data-selected:bg-amber-50 data-selected:text-amber-700"
+                  >
+                    <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
+                  </CommandRoot.Item>
+                </CommandGroup>
+              )}
 
-            {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
-              <div>
-                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
-                  Recent
+              {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
+                <CommandGroup
+                  heading="Recent"
+                  value="__recent__"
+                  className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
+                >
+                  {recentModels.map((modelId) => {
+                    if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
+                    const variants = variantListFor(modelId, modelVariantsMap)
+                    const isSelected = modelId === configuredModel
+                    return (
+                      <CommandRoot.Item
+                        key={modelId}
+                        value={modelId}
+                        data-model-id={modelId}
+                        onSelect={() => handleSelect(modelId)}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 rounded-none cursor-pointer px-3 py-1.5',
+                          isSelected && 'bg-accent text-accent-foreground',
+                        )}
+                      >
+                        <div className="flex min-w-0 flex-col items-start">
+                          <span className="w-full truncate font-medium text-sm">{modelDisplayName(modelId)}</span>
+                          <span className="w-full truncate text-muted-foreground text-xs">{modelId}</span>
+                        </div>
+                        {variants.length > 0 && (
+                          <ModelVariantChips
+                            modelId={modelId}
+                            modelVariants={modelVariantsMap}
+                            activeVariant={isSelected ? localWorkflowVariant : null}
+                            baseTestId={`issue-coder-model-variant-${modelId}`}
+                            chipRefs={chipRefs.current[modelId]}
+                            onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
+                            onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
+                          />
+                        )}
+                      </CommandRoot.Item>
+                    )
+                  })}
+                </CommandGroup>
+              )}
+
+              {!isLoading && !error && displayedModels.length === 0 && (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                  No models found
                 </div>
-                {recentModels.map((modelId, i) => (
-                  <ModelListItem
-                    key={modelId}
-                    modelId={modelId}
-                    isSelected={modelId === configuredModel}
-                    isHighlighted={i === highlightedIndex}
-                    modelVariants={modelVariantsMap}
-                    activeVariant={localWorkflowVariant}
-                    variantTestIdBase={`issue-coder-model-variant-${modelId}`}
-                    onSelect={() => handleSelect(modelId)}
-                    onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
-                    onMouseEnter={() => setHighlightedIndex(i)}
-                  />
-                ))}
-                <div className="border-t my-1" />
-              </div>
-            )}
+              )}
 
-            {!isLoading && !error && displayedModels.length === 0 && (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                No models found
-              </div>
-            )}
-
-            {!isLoading && !error && !searchQuery.trim() &&
-              allModels.map((modelId, i) => (
-                <ModelListItem
-                  key={modelId}
-                  modelId={modelId}
-                  isSelected={modelId === configuredModel}
-                  isHighlighted={i === highlightedIndex}
-                  modelVariants={modelVariantsMap}
-                  activeVariant={localWorkflowVariant}
-                  variantTestIdBase={`issue-coder-model-variant-${modelId}`}
-                  onSelect={() => handleSelect(modelId)}
-                  onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
-                  onMouseEnter={() => setHighlightedIndex(i)}
-                />
+              {!isLoading && !error && Array.from(groupedModels.entries()).map(([provider, models]) => (
+                <CommandGroup
+                  key={provider}
+                  heading={provider}
+                  value={provider}
+                  className="**:[[cmdk-group-heading]]:sticky **:[[cmdk-group-heading]]:top-0 **:[[cmdk-group-heading]]:z-10 **:[[cmdk-group-heading]]:bg-muted"
+                >
+                  {models.map((modelId) => {
+                    if (!chipRefs.current[modelId]) chipRefs.current[modelId] = []
+                    const variants = variantListFor(modelId, modelVariantsMap)
+                    const isSelected = modelId === configuredModel
+                    return (
+                      <CommandRoot.Item
+                        key={modelId}
+                        value={modelId}
+                        data-model-id={modelId}
+                        onSelect={() => handleSelect(modelId)}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 rounded-none cursor-pointer px-3 py-1.5',
+                          isSelected && 'bg-accent text-accent-foreground',
+                        )}
+                      >
+                        <div className="flex min-w-0 flex-col items-start">
+                          <span className="w-full truncate font-medium text-sm">{modelDisplayName(modelId)}</span>
+                          <span className="w-full truncate text-muted-foreground text-xs">{modelId}</span>
+                        </div>
+                        {variants.length > 0 && (
+                          <ModelVariantChips
+                            modelId={modelId}
+                            modelVariants={modelVariantsMap}
+                            activeVariant={isSelected ? localWorkflowVariant : null}
+                            baseTestId={`issue-coder-model-variant-${modelId}`}
+                            chipRefs={chipRefs.current[modelId]}
+                            onChipKeyDown={(e, idx) => handleChipKeyDown(e, modelId, idx)}
+                            onSelect={(id, variant) => handleSelectWithVariant(id, variant ?? '')}
+                          />
+                        )}
+                      </CommandRoot.Item>
+                    )
+                  })}
+                </CommandGroup>
               ))}
+            </CommandRoot.List>
 
-            {!isLoading && !error && searchQuery.trim() &&
-              displayedModels.map((modelId, i) => (
-                <ModelListItem
-                  key={modelId}
-                  modelId={modelId}
-                  isSelected={modelId === configuredModel}
-                  isHighlighted={i === highlightedIndex}
-                  modelVariants={modelVariantsMap}
-                  activeVariant={localWorkflowVariant}
-                  variantTestIdBase={`issue-coder-model-variant-${modelId}`}
-                  onSelect={() => handleSelect(modelId)}
-                  onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
-                  onMouseEnter={() => setHighlightedIndex(i)}
-                />
-              ))}
-          </div>
-
-          <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
-            Use ↑↓ to navigate, Enter to select, Esc to close
-          </div>
+            <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
+              Use ↑↓ to navigate, Enter to select, Esc to close
+            </div>
+          </CommandRoot>
         </PopoverContent>
       </Popover>
       {configuredModel && (
