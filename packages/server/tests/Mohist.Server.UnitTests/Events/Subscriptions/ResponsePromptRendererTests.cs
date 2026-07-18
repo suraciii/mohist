@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Events.Matching;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Events.Subscriptions;
@@ -14,6 +15,36 @@ namespace Mohist.Server.UnitTests.Events.Subscriptions;
 /// </summary>
 public class ResponsePromptRendererTests
 {
+    [Fact]
+    public void Render_EventAttributesSubstitutePresentEmptyAndLeaveAbsentVerbatim()
+    {
+        var input = new DictionaryInput(
+            new Dictionary<string, string?>
+            {
+                ["issue"] = "42",
+                ["empty"] = string.Empty,
+            });
+
+        var rendered = ResponsePromptRenderer.Render(
+            "{{event.issue}}|{{event.empty}}|{{event.missing}}",
+            input);
+
+        Assert.Equal("42||{{event.missing}}", rendered);
+    }
+
+    [Fact]
+    public void Render_EventInputKeepsLegacyAliases()
+    {
+        var input = new DictionaryInput(new Dictionary<string, string?>
+        {
+            ["workflowrunid"] = "wr-1",
+            ["stage"] = "plan",
+            ["type"] = "event.type",
+        });
+
+        Assert.Equal("wr-1|plan|event.type", ResponsePromptRenderer.Render(
+            "{{workflow_run_id}}|{{stage}}|{{event_type}}", input));
+    }
     [Fact]
     public void Render_WorkflowEventWithSourceAndStageData_SubstitutesAllThreeVariables()
     {
@@ -150,7 +181,7 @@ public class ResponsePromptRendererTests
     {
         var template = "literal text with {{workflow_run_id}}";
 
-        Assert.Equal(template, ResponsePromptRenderer.Render(template, null));
+        Assert.Equal(template, ResponsePromptRenderer.Render(template, (CloudEvent?)null));
     }
 
     [Fact]
@@ -197,5 +228,12 @@ public class ResponsePromptRendererTests
             time: DateTimeOffset.UnixEpoch,
             data: data,
             extensions: extensions);
+    }
+
+    private sealed class DictionaryInput(IReadOnlyDictionary<string, string?> values) : EventMatchInput
+    {
+        public string GetValue(string attribute) => values.GetValueOrDefault(attribute) ?? string.Empty;
+
+        public bool Has(string attribute) => values.ContainsKey(attribute);
     }
 }

@@ -12,3 +12,9 @@
 - `dotnet ef` was unavailable, so the migration and model snapshot were authored in the repository's existing EF migration format.
 - Focused `RoutingRuleStoreSpecs` covers dense ordering, archive idempotency, invalid create matrix, and rejected update immutability.
 - Verification: `npm test` passed all .NET, Web, and Runner suites.
+
+## T-002
+
+- Added transport-independent `RoutingTableEvaluator` with ordered traces, first-match stop, continue fanout, explicit inactive-agent/empty-prompt/runtime-error outcomes, execution probes, and an optional expression cache.
+- Extended `ResponsePromptRenderer` with the canonical `EventMatchInput` API and `{{event.<attr>}}` substitution. Present empty values render as empty; absent attributes remain verbatim; legacy aliases remain supported.
+- Focused evaluator and renderer unit tests pass: 20 tests in 32 ms.
