@@ -1,0 +1,9 @@
+## Codebase Patterns
+
+- `TurnList` keeps every turn and tool row mounted; per-turn `contentVisibility: 'auto'` preserves DOM anchor lookup while deferring browser layout/paint.
+- A `3rem` per-turn `containIntrinsicSize` matches the turn divider's minimum footprint and provides a stable off-screen placeholder.
+- jsdom verification for this strategy is structural: assert styles and `querySelector` anchor/expansion behavior; real off-screen painting remains browser-only.
+
+## T-001
+
+Moved lazy-render styling from the transcript `role="log"` container to every `TurnItem`, added `containIntrinsicSize: '3rem'`, and added structural specs for uniform styling, turn/tool anchor resolvability, and typed terminal detail expansion. Web typecheck and all 346 web test files (4821 tests) pass.

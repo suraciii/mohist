@@ -23,7 +23,6 @@ export function TurnList({ turns, turnRefs, isRunning, now }: TurnListProps) {
     <div
       role="log"
       className="space-y-6 min-w-0"
-      style={{ contentVisibility: 'auto' }}
     >
       {turns.map((turn, index) => (
         <TurnItem
@@ -60,6 +59,7 @@ export function TurnItem({ turn, index, registerRef, isRunning, now }: TurnItemP
       data-turn-id={turn.id}
       data-turn-ref=""
       className="space-y-3 min-w-0"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '3rem' }}
     >
       <TurnDivider
         index={index}
