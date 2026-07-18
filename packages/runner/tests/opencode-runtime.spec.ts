@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   errorKindFor,
   isNonRecoverableProviderMessage,
+  isNonRecoverableProviderRetry,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeMissingSession,
@@ -205,6 +206,19 @@ describe("error normalization", () => {
 
   it("isNonRecoverableProviderMessage matches Chinese wording", () => {
     expect(isNonRecoverableProviderMessage("账户额度已用完")).toBe(true)
+  })
+
+  it("isNonRecoverableProviderMessage matches usage-limit wording without matching rate limits", () => {
+    expect(isNonRecoverableProviderMessage("Token Plan usage limit reached")).toBe(true)
+    expect(isNonRecoverableProviderMessage("您已达到每周/每月使用上限，您的限额将在明天重置")).toBe(true)
+    expect(isNonRecoverableProviderMessage("Rate limit exceeded, retry shortly")).toBe(false)
+  })
+
+  it("isNonRecoverableProviderRetry prefers structured quota reasons", () => {
+    expect(isNonRecoverableProviderRetry({
+      message: "retry later",
+      action: { reason: "free_tier_limit" },
+    })).toBe(true)
   })
 
   it("isNonRecoverableProviderMessage does not match a transient 429", () => {

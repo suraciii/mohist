@@ -57,7 +57,8 @@ import type {
 } from "./types.js"
 import {
   DEFAULT_PROVIDER_ERROR_POLICY,
-  isNonRecoverableProviderMessage,
+  isNonRecoverableProviderRetry,
+  normalizeAbortUnconfirmed,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeMissingSession,
@@ -228,9 +229,9 @@ async function resolvePhysicalSession(
   if (target.runtimeSessionId) {
     try {
       const resolved = await deps.client.session.get({
-        path: { id: target.runtimeSessionId },
-        query: { directory: target.workDir },
-      } as never)
+        sessionID: target.runtimeSessionId,
+        directory: target.workDir,
+      }, { throwOnError: true })
       const resolvedData = (resolved as { data?: { id?: string } } | undefined)?.data
       if (!resolvedData || resolvedData.id !== target.runtimeSessionId) {
         const error = normalizeMissingSession()
@@ -246,7 +247,7 @@ async function resolvePhysicalSession(
     const created = await deps.client.session.create({
       directory: target.workDir,
       ...(model ? { model: { providerID: model.providerID, id: model.modelID } } : {}),
-    })
+    }, { throwOnError: true })
     const data = (created as { data?: { id?: string } } | undefined)?.data
     if (!data || typeof data.id !== "string") {
       const error = normalizeTurnFailed({ message: "session.create returned no id" })
@@ -276,26 +277,69 @@ interface ExecutePromptArgs {
 type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[] } }
 type PromptFailure = {
   kind: "failure"
-  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession>
+  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizeAbortUnconfirmed>
   diagnostics: RuntimeDiagnostic[]
 }
 type PromptResult = PromptSuccess | PromptFailure
 
+type AbortReason = "provider" | "reconciliation-failed" | "signal"
+
+interface ProviderRetryStatus {
+  readonly type?: string
+  readonly attempt?: number
+  readonly message?: string
+  readonly action?: { readonly reason?: string }
+}
+
 async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
-  const retryTracker = createRetryTracker(args.policy)
-  const abortPromise = deferred<"aborted">()
-  const resolveAbort = (reason: "aborted") => abortPromise.resolve(reason)
-  const unsubscribe = args.events.subscribe((event) => {
-    retryTracker.observe(event)
+  const retryTracker = createRetryTracker(args.policy, args.sessionId, args.directory)
+  const abortPromise = deferred<AbortReason>()
+  let requestedAbort: AbortReason | null = null
+  let reconciliationFailure: RuntimeDiagnostic | null = null
+  let reconciliationInFlight: Promise<void> | null = null
+  const resolveAbort = (reason: AbortReason) => {
+    if (requestedAbort !== null) return
+    requestedAbort = reason
+    abortPromise.resolve(reason)
+  }
+  const resolveProviderAbort = () => {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
-      resolveAbort("aborted")
+      resolveAbort("provider")
     }
+  }
+  const reconcileRetryStatus = async () => {
+    const response = await args.client.session.status(
+      { directory: args.directory },
+      { throwOnError: true },
+    )
+    const statuses = response.data
+    if (!statuses || typeof statuses !== "object") {
+      throw new Error("session.status returned no status map")
+    }
+    retryTracker.observeStatus((statuses as Record<string, ProviderRetryStatus>)[args.sessionId])
+    resolveProviderAbort()
+  }
+  const startReconciliation = () => {
+    if (reconciliationInFlight !== null) return
+    const pending = reconcileRetryStatus().catch((cause) => {
+      reconciliationFailure = providerStatusDiagnostic(cause)
+      resolveAbort("reconciliation-failed")
+    })
+    reconciliationInFlight = pending
+    void pending.finally(() => {
+      if (reconciliationInFlight === pending) reconciliationInFlight = null
+    })
+  }
+  const unsubscribe = args.events.subscribe((event) => {
+    if (event.type === "server.connected") startReconciliation()
+    retryTracker.observe(event)
+    resolveProviderAbort()
     args.onEvent?.(event)
   })
 
   let abortHandler: (() => void) | null = null
   const onAbort = () => {
-    resolveAbort("aborted")
+    resolveAbort("signal")
   }
   if (args.signal.aborted) {
     onAbort()
@@ -309,31 +353,34 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
 
   let promptOutcome: { ok: true; response: unknown } | { ok: false; cause: unknown }
   try {
+    const initialStatus = reconcileRetryStatus().then(
+      () => ({ ok: true as const }),
+      (cause: unknown) => ({ ok: false as const, cause }),
+    )
+    const initialRace = await Promise.race([initialStatus, abortPromise.promise])
+    if (typeof initialRace === "string") {
+      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, promptDiagnostics)
+    }
+    if (!initialRace.ok) {
+      const diagnostic = providerStatusDiagnostic(initialRace.cause)
+      const error = normalizeUnavailableRuntime([diagnostic])
+      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
+    }
+    if (requestedAbort !== null) {
+      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, promptDiagnostics)
+    }
+
     const promptCall = args.client.session.prompt({
-      path: { id: args.sessionId },
-      query: { directory: args.directory },
-      body: buildPromptBody(args.prompt, args.model, args.variant),
-    } as never).then(
+      sessionID: args.sessionId,
+      directory: args.directory,
+      ...buildPromptBody(args.prompt, args.model, args.variant),
+    }, { throwOnError: true }).then(
       (response: unknown) => ({ ok: true as const, response }),
       (cause: unknown) => ({ ok: false as const, cause }),
     )
     const raced = await Promise.race([promptCall, abortPromise.promise])
-    if (raced === "aborted") {
-      await abortSessionSafely(args.client, args.sessionId)
-      const nonRecoverable = retryTracker.abortedDueToNonRecoverable()
-      const threshold = retryTracker.abortedDueToThreshold()
-      if (nonRecoverable) {
-        const verdict = retryTracker.nonRecoverableVerdict()!
-        const error = normalizeTurnFailed({ message: verdict.message })
-        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
-      }
-      if (threshold) {
-        const verdict = retryTracker.thresholdVerdict()!
-        const error = normalizeTurnFailed({ message: verdict.message })
-        return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
-      }
-      const abortError = normalizeInterrupted()
-      return { kind: "failure", error: abortError, diagnostics: [...abortError.diagnostics, ...promptDiagnostics] }
+    if (typeof raced === "string") {
+      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, promptDiagnostics)
     }
     promptOutcome = raced as { ok: true; response: unknown } | { ok: false; cause: unknown }
   } finally {
@@ -343,21 +390,14 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
   }
 
   if (!promptOutcome.ok) {
-    if (retryTracker.abortedDueToNonRecoverable()) {
-      const verdict = retryTracker.nonRecoverableVerdict()!
-      await abortSessionSafely(args.client, args.sessionId)
-      const error = normalizeTurnFailed({ message: verdict.message })
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
+    if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
+      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, promptDiagnostics)
     }
-    if (retryTracker.abortedDueToThreshold()) {
-      const verdict = retryTracker.thresholdVerdict()!
-      await abortSessionSafely(args.client, args.sessionId)
-      const error = normalizeTurnFailed({ message: verdict.message })
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...verdict.diagnostics, ...promptDiagnostics] as RuntimeDiagnostic[] }
+    if (reconciliationFailure !== null) {
+      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, promptDiagnostics)
     }
     if (args.signal.aborted) {
-      const error = normalizeInterrupted()
-      return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
+      return finishAbortedTurn(args, retryTracker, "signal", reconciliationFailure, promptDiagnostics)
     }
     const error = toUnavailableOrTurnError(promptOutcome.cause, "OpenCode prompt failed")
     return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
@@ -374,34 +414,34 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
 
 interface RetryTracker {
   observe(event: RuntimeGlobalEvent): void
+  observeStatus(status: ProviderRetryStatus | undefined): void
   abortedDueToNonRecoverable(): boolean
   abortedDueToThreshold(): boolean
   nonRecoverableVerdict(): { message: string; diagnostics: RuntimeDiagnostic[] } | null
   thresholdVerdict(): { message: string; diagnostics: RuntimeDiagnostic[] } | null
 }
 
-function createRetryTracker(policy: RuntimeProviderErrorPolicy): RetryTracker {
+function createRetryTracker(
+  policy: RuntimeProviderErrorPolicy,
+  expectedSessionId: string,
+  expectedDirectory: string,
+): RetryTracker {
   let lastAttempt = 0
-  let lastMessage = ""
   let nonRecoverableHit = false
   let thresholdHit = false
   let nonRecoverableMessage = ""
   let thresholdMessage = ""
+  let nonRecoverableActionReason: string | undefined
 
-  const observe = (event: RuntimeGlobalEvent) => {
-    if (event.type !== "session.status") return
-    const props = event.payload ?? {}
-    const sessionID = (props["sessionID"] as string | undefined) ?? event.sessionID
-    if (sessionID && event.sessionID && sessionID !== event.sessionID) return
-    const status = props["status"] as { type?: string; attempt?: number; message?: string } | undefined
+  const observeStatus = (status: ProviderRetryStatus | undefined) => {
     if (!status || status.type !== "retry") return
     const attempt = typeof status.attempt === "number" ? status.attempt : 0
     const message = typeof status.message === "string" ? status.message : ""
     lastAttempt = attempt
-    lastMessage = message
-    if (!nonRecoverableHit && isNonRecoverableProviderMessage(message, policy.nonRecoverablePatterns)) {
+    if (!nonRecoverableHit && isNonRecoverableProviderRetry({ message, action: status.action }, policy.nonRecoverablePatterns)) {
       nonRecoverableHit = true
       nonRecoverableMessage = message
+      nonRecoverableActionReason = status.action?.reason
     }
     if (!thresholdHit && attempt >= policy.consecutiveRetryThreshold) {
       thresholdHit = true
@@ -409,16 +449,27 @@ function createRetryTracker(policy: RuntimeProviderErrorPolicy): RetryTracker {
     }
   }
 
+  const observe = (event: RuntimeGlobalEvent) => {
+    if (event.type !== "session.status") return
+    const props = event.payload ?? {}
+    const sessionID = (props["sessionID"] as string | undefined) ?? event.sessionID
+    if (sessionID !== expectedSessionId) return
+    if (event.directory !== undefined && event.directory !== expectedDirectory) return
+    observeStatus(props["status"] as ProviderRetryStatus | undefined)
+  }
+
   return {
     observe,
+    observeStatus,
     abortedDueToNonRecoverable: () => nonRecoverableHit,
     abortedDueToThreshold: () => thresholdHit,
     nonRecoverableVerdict: () => nonRecoverableHit ? {
       message: nonRecoverableMessage,
       diagnostics: [{
         severity: "error",
-        code: "provider-non-recoverable",
+        code: "provider-quota-exhausted",
         message: `Provider error judged non-recoverable on retry attempt ${lastAttempt}: ${nonRecoverableMessage}`,
+        ...(nonRecoverableActionReason ? { details: { actionReason: nonRecoverableActionReason } } : {}),
       }],
     } : null,
     thresholdVerdict: () => thresholdHit ? {
@@ -432,12 +483,66 @@ function createRetryTracker(policy: RuntimeProviderErrorPolicy): RetryTracker {
   }
 }
 
+async function finishAbortedTurn(
+  args: ExecutePromptArgs,
+  retryTracker: RetryTracker,
+  reason: AbortReason,
+  reconciliationFailure: RuntimeDiagnostic | null,
+  promptDiagnostics: RuntimeDiagnostic[],
+): Promise<PromptFailure> {
+  const providerVerdict = retryTracker.nonRecoverableVerdict() ?? retryTracker.thresholdVerdict()
+  const contextDiagnostics = [
+    ...(providerVerdict?.diagnostics ?? []),
+    ...(reconciliationFailure ? [reconciliationFailure] : []),
+    ...promptDiagnostics,
+  ]
+  const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
+  if (!abortResult.ok) {
+    const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics)
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+
+  const nonRecoverable = retryTracker.nonRecoverableVerdict()
+  if (nonRecoverable) {
+    const error = normalizeTurnFailed(
+      { message: nonRecoverable.message },
+      [...nonRecoverable.diagnostics, ...promptDiagnostics],
+    )
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+
+  const threshold = retryTracker.thresholdVerdict()
+  if (threshold) {
+    const error = normalizeTurnFailed(
+      { message: threshold.message },
+      [...threshold.diagnostics, ...promptDiagnostics],
+    )
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+
+  if (reason === "reconciliation-failed" && reconciliationFailure) {
+    const error = normalizeUnavailableRuntime([reconciliationFailure, ...promptDiagnostics])
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+
+  const error = normalizeInterrupted(promptDiagnostics)
+  return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+}
+
+function providerStatusDiagnostic(cause: unknown): RuntimeDiagnostic {
+  return {
+    severity: "error",
+    code: "status-reconciliation-failed",
+    message: `Failed to reconcile OpenCode Session status: ${errorMessage(cause, "unknown status error")}`,
+  }
+}
+
 function buildPromptBody(
   prompt: string,
   model: { providerID: string; modelID: string } | null,
   variant: string | null,
 ) {
-  const parts = [{ type: "text", text: prompt }]
+  const parts = [{ type: "text" as const, text: prompt }]
   const system = variant ? `${SYSTEM_VARIANT_PREFIX}${variant}]` : undefined
   return {
     parts,
@@ -462,12 +567,38 @@ function extractFinalAssistantText(response: unknown): string | null {
   return joined.length > 0 ? joined : null
 }
 
-async function abortSessionSafely(client: OpencodeClient, sessionId: string): Promise<void> {
+async function abortAndConfirmSession(
+  client: OpencodeClient,
+  sessionId: string,
+  directory: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await client.session.abort({ path: { id: sessionId } } as never)
-  } catch {
-    // Best-effort: the abort call exists to clear the in-flight prompt
-    // so subsequent restart/reconnect doesn't see a hanging Session.
+    const aborted = await client.session.abort(
+      { sessionID: sessionId, directory },
+      { throwOnError: true },
+    )
+    if (aborted.data !== true) {
+      return { ok: false, message: "OpenCode session.abort did not confirm the turn was stopped" }
+    }
+
+    const statusResponse = await client.session.status(
+      { directory },
+      { throwOnError: true },
+    )
+    const statuses = statusResponse.data
+    if (!statuses || typeof statuses !== "object") {
+      return { ok: false, message: "OpenCode session.status returned no status map after abort" }
+    }
+    const status = (statuses as Record<string, ProviderRetryStatus>)[sessionId]
+    if (status !== undefined && status.type !== "idle") {
+      return { ok: false, message: `OpenCode Session remained ${status.type ?? "active"} after abort` }
+    }
+    return { ok: true }
+  } catch (cause) {
+    return {
+      ok: false,
+      message: `OpenCode turn abort or status confirmation failed: ${errorMessage(cause, "unknown abort error")}`,
+    }
   }
 }
 
@@ -505,11 +636,11 @@ async function injectDeadlineWarning(
   diagnostics: RuntimeDiagnostic[],
 ): Promise<void> {
   try {
-    await (client.session.promptAsync as (parameters: unknown) => Promise<unknown>)({
-      path: { id: args.sessionId },
-      query: { directory: args.directory },
-      body: { parts: [{ type: "text", text: DEADLINE_WARNING_TEXT }] },
-    } as never)
+    await client.session.promptAsync({
+      sessionID: args.sessionId,
+      directory: args.directory,
+      parts: [{ type: "text", text: DEADLINE_WARNING_TEXT }],
+    }, { throwOnError: true })
   } catch (cause) {
     diagnostics.push({
       severity: "info",

@@ -152,7 +152,7 @@ export class OpenCodeRuntime {
       const created = await client.session.create({
         directory: request.target.workDir,
         ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
-      })
+      }, { throwOnError: true })
       const data = created?.data as { id?: string } | undefined
       if (!data || typeof data.id !== "string") {
         const error = normalizeTurnFailed({ message: "session.create returned no id" })

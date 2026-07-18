@@ -66,7 +66,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     if (args.failCreate) throw new Error("create boom")
     return { data: { id: `ses_${(closed.value ? "new" : "default").replace(/[^a-z0-9]+/gi, "_")}` } }
   })
-  const sessionPrompt = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+  const sessionPrompt = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.promptImplementation) return await args.promptImplementation()
     if (args.promptResult !== undefined) return args.promptResult
     return {
@@ -76,16 +76,16 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
       },
     }
   })
-  const sessionAbort = vi.fn(async (_params: { path: { id: string } }) => ({ data: true }))
-  const sessionPromptAsync = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => ({ data: true }))
-  const sessionGet = vi.fn(async (_params: { path: { id: string }; query?: { directory?: string } }) => {
+  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: true }))
+  const sessionPromptAsync = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => ({ data: true }))
+  const sessionGet = vi.fn(async (_params: { sessionID: string; directory?: string }) => {
     if (args.sessionIdForGet) return { data: { id: args.sessionIdForGet } }
-    return { data: { id: _params.path.id } }
+    return { data: { id: _params.sessionID } }
   })
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
     v2: { provider: { list: vi.fn(async () => ({ data: { data: [] } })) }, model: { list: vi.fn(async () => ({ data: { data: catalog.models.map((m) => ({ id: m.modelID, providerID: m.providerID, variants: m.variants.map((id) => ({ id })) })) } })) } },
-    session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, get: sessionGet, messages: vi.fn(), status: vi.fn() },
+    session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, get: sessionGet, messages: vi.fn(), status: vi.fn(async () => ({ data: {} })) },
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -208,8 +208,8 @@ describe("opencodeAction — happy path + turn fact", () => {
     })
     const result = await opencodeAction(context)
     expect(result.status).toBe("success")
-    const arg = client.sessionPrompt.mock.calls[0]?.[0] as { body: { model?: unknown } }
-    expect(arg.body.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
+    const arg = client.sessionPrompt.mock.calls[0]?.[0] as { model?: unknown }
+    expect(arg.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
   })
 
   it("Rejects unknown option keys with a diagnostic in the runtime, not a failure", async () => {
@@ -367,14 +367,15 @@ describe("opencodeAction — deadline declaration", () => {
     const result = await opencodeAction(context)
     expect(result.status).toBe("success")
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
-      body: { parts: Array<{ type: string; text: string }>; system?: string }
+      parts: Array<{ type: string; text: string }>
+      system?: string
     }
-    const flat = JSON.stringify(promptArg.body)
+    const flat = JSON.stringify(promptArg)
     expect(flat).not.toMatch(/300000/)
     expect(flat).not.toMatch(/60 minutes? remaining/i)
     expect(flat).not.toMatch(/5 minutes? remaining/i)
     expect(flat).not.toMatch(/deadline/i)
-    expect(promptArg.body.system).toBeUndefined()
+    expect(promptArg.system).toBeUndefined()
   })
 
   it("Does not surface the deadline value in the prompt body when using the default", async () => {
@@ -384,13 +385,14 @@ describe("opencodeAction — deadline declaration", () => {
     const result = await opencodeAction(context)
     expect(result.status).toBe("success")
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
-      body: { parts: Array<{ type: string; text: string }>; system?: string }
+      parts: Array<{ type: string; text: string }>
+      system?: string
     }
-    const flat = JSON.stringify(promptArg.body)
+    const flat = JSON.stringify(promptArg)
     expect(flat).not.toMatch(/3600000/)
     expect(flat).not.toMatch(/60 minutes? remaining/i)
     expect(flat).not.toMatch(/deadline/i)
-    expect(promptArg.body.system).toBeUndefined()
+    expect(promptArg.system).toBeUndefined()
   })
 
   it("The warning text injected by the runtime never appears in the initial prompt body", async () => {
@@ -403,9 +405,9 @@ describe("opencodeAction — deadline declaration", () => {
     const result = await opencodeAction(context)
     expect(result.status).toBe("success")
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
-      body: { parts: Array<{ type: string; text: string }> }
+      parts: Array<{ type: string; text: string }>
     }
-    const initialText = promptArg.body.parts.map((p) => p.text).join(" ")
+    const initialText = promptArg.parts.map((p) => p.text).join(" ")
     expect(initialText).not.toMatch(/interrupted/i)
     expect(initialText).not.toMatch(/commit/i)
     expect(initialText).not.toMatch(/progress/i)

@@ -127,6 +127,14 @@ Mohist 不自动批准 OpenCode 权限请求。若 OpenCode 的权限配置仍�
 无法完成的交互，本次 task 失败并给出可操作的错误。执行超时会中断当前回合；提交
 结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。
 
+provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 OpenCode
+回合并让本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理
+OpenCode Session 的绑定保持不变；Session 回到空闲后，可以选择其他模型继续，无需
+Reset。只有当前物理 Session 已不存在，或用户明确要求清空上下文时才使用 Reset。
+
+如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的
+回合显示为已经安全停止。
+
 ## OpenCode 责任边界
 
 安装者负责提供可用的 OpenCode CLI，以及配置 provider、插件和权限。Mohist 不安装、

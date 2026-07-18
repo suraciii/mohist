@@ -68,7 +68,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     return { data: { id } }
   })
 
-  const sessionPrompt = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+  const sessionPrompt = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.failPrompt) throw new Error("prompt boom")
     if (args.promptResult !== undefined) return args.promptResult
     return {
@@ -79,13 +79,14 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     }
   })
 
-  const sessionPromptAsync = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+  const sessionPromptAsync = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.failPromptAsync) throw new Error("promptAsync boom")
     return { data: true }
   })
 
-  const sessionAbort = vi.fn(async (_params: { path: { id: string } }) => ({ data: true }))
+  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: true }))
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
+  const sessionStatus = vi.fn(async () => ({ data: {} }))
 
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
@@ -97,7 +98,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
       abort: sessionAbort,
       get: sessionGet,
       messages: vi.fn(),
-      status: vi.fn(),
+      status: sessionStatus,
     },
   }
   const server: OpencodeServerHandle = {
@@ -220,13 +221,13 @@ describe("OpenCodeRuntime.runTurn — warning injection (deadline > warning wind
       await vi.advanceTimersByTimeAsync(1)
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
       const warningArg = client.sessionPromptAsync.mock.calls[0]?.[0] as {
-        path: { id: string }
-        query: { directory: string }
-        body: { parts: Array<{ type: string; text: string }> }
+        sessionID: string
+        directory: string
+        parts: Array<{ type: string; text: string }>
       }
-      expect(warningArg.path.id).toMatch(/^ses_/)
-      expect(warningArg.query.directory).toBe("/tmp/projA")
-      expect(warningArg.body.parts).toEqual([{ type: "text", text: DEADLINE_WARNING_TEXT }])
+      expect(warningArg.sessionID).toMatch(/^ses_/)
+      expect(warningArg.directory).toBe("/tmp/projA")
+      expect(warningArg.parts).toEqual([{ type: "text", text: DEADLINE_WARNING_TEXT }])
 
       await vi.advanceTimersByTimeAsync(WARNING_WINDOW_MS - 1)
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
@@ -265,9 +266,9 @@ describe("OpenCodeRuntime.runTurn — warning injection (deadline <= warning win
       await vi.advanceTimersByTimeAsync(0)
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
       const warningArg = client.sessionPromptAsync.mock.calls[0]?.[0] as {
-        body: { parts: Array<{ type: string; text: string }> }
+        parts: Array<{ type: string; text: string }>
       }
-      expect(warningArg.body.parts).toEqual([{ type: "text", text: DEADLINE_WARNING_TEXT }])
+      expect(warningArg.parts).toEqual([{ type: "text", text: DEADLINE_WARNING_TEXT }])
 
       await vi.advanceTimersByTimeAsync(deadlineMs - 1)
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
@@ -399,7 +400,10 @@ describe("OpenCodeRuntime.runTurn — deadline abort unchanged", () => {
       if (result.ok) return
       expect(result.error.kind).toBe("interrupted")
       expect(client.sessionAbort).toHaveBeenCalledTimes(1)
-      expect(client.sessionAbort.mock.calls[0]?.[0]).toEqual({ path: { id: expect.stringMatching(/^ses_/) } })
+      expect(client.sessionAbort.mock.calls[0]?.[0]).toEqual({
+        sessionID: expect.stringMatching(/^ses_/),
+        directory: "/tmp/projA",
+      })
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
