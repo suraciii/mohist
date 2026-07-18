@@ -37,9 +37,9 @@ import type { RuntimeEventSubscription } from "./event-subscription.js"
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
-  readonly serverFactory: (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
-  readonly catalogFactory: (client: OpencodeClient) => CatalogClient
-  readonly eventSubscriptionFactory: (client: OpencodeClient) => RuntimeEventSubscription
+  readonly serverFactory?: (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
+  readonly catalogFactory?: (client: OpencodeClient) => CatalogClient
+  readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
 }
 
@@ -104,6 +104,25 @@ export class OpenCodeRuntime {
 
   catalog(): RuntimeModelCatalog | null {
     return this.state.catalog
+  }
+
+  async refreshCatalog(
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<RuntimeResult<RuntimeModelCatalog>> {
+    const catalogClient = this.state.catalogClient
+    if (!this.state.ready || catalogClient === null || signal.aborted) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    try {
+      const catalog = await catalogClient.list()
+      this.state.catalog = catalog
+      return { ok: true, value: catalog, diagnostics: [] }
+    } catch (cause) {
+      const diagnostic = toDiagnostic(cause, "catalog-refresh-failed", "Failed to refresh OpenCode model catalog")
+      const error = normalizeUnavailableRuntime([diagnostic])
+      return { ok: false, error, diagnostics: [diagnostic] }
+    }
   }
 
   /**
@@ -178,9 +197,45 @@ export class OpenCodeRuntime {
       await this.shutdown().catch(() => {})
     }
     const diagnostics: RuntimeDiagnostic[] = []
+    const serverFactory = this.deps.serverFactory
+    if (!serverFactory) {
+      const diagnostic: RuntimeDiagnostic = {
+        severity: "error",
+        code: "server-spawn-failed",
+        message: "OpenCode server factory was not provided",
+      }
+      this.state.diagnostic = diagnostic
+      diagnostics.push(diagnostic)
+      const error = normalizeUnavailableRuntime(diagnostics)
+      return { ok: false, error, diagnostics }
+    }
+    const catalogFactory = this.deps.catalogFactory
+    if (!catalogFactory) {
+      const diagnostic: RuntimeDiagnostic = {
+        severity: "error",
+        code: "catalog-load-failed",
+        message: "OpenCode catalog factory was not provided",
+      }
+      this.state.diagnostic = diagnostic
+      diagnostics.push(diagnostic)
+      const error = normalizeUnavailableRuntime(diagnostics)
+      return { ok: false, error, diagnostics }
+    }
+    const eventSubscriptionFactory = this.deps.eventSubscriptionFactory
+    if (!eventSubscriptionFactory) {
+      const diagnostic: RuntimeDiagnostic = {
+        severity: "error",
+        code: "server-spawn-failed",
+        message: "OpenCode event subscription factory was not provided",
+      }
+      this.state.diagnostic = diagnostic
+      diagnostics.push(diagnostic)
+      const error = normalizeUnavailableRuntime(diagnostics)
+      return { ok: false, error, diagnostics }
+    }
     let server: OpencodeServerHandle
     try {
-      server = await this.deps.serverFactory(this.deps.directory, signal)
+      server = await serverFactory(this.deps.directory, signal)
     } catch (cause) {
       const diagnostic = toDiagnostic(cause, "server-spawn-failed", "Failed to start OpenCode server")
       this.state.diagnostic = diagnostic
@@ -213,7 +268,7 @@ export class OpenCodeRuntime {
       return { ok: false, error, diagnostics }
     }
 
-    const catalogClient = this.deps.catalogFactory(server.client)
+    const catalogClient = catalogFactory(server.client)
     this.state.catalogClient = catalogClient
     let catalog: RuntimeModelCatalog
     try {
@@ -230,7 +285,7 @@ export class OpenCodeRuntime {
     }
     this.state.catalog = catalog
 
-    const events = this.deps.eventSubscriptionFactory(server.client)
+    const events = eventSubscriptionFactory(server.client)
     this.state.events = events
     this.watchExit(events, server)
 

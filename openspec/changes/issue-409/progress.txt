@@ -71,3 +71,34 @@
 
 ## T-001 re-dispatch note
 - The runner re-dispatched T-001 after T-002 already landed on the same branch (`mohist/run-wr_631a68e5fd9d4879b3c983d060b7a7c3`). The T-001 implementation (commit `b5d780a65`) is already on the branch — pinned `@opencode-ai/sdk@1.18.3`, retained `@agentclientprotocol/sdk@0.21.0`, smoke-verified call surface in `sdk-smoke-verification.json`, drift reconciled into `design/runtimes/opencode.md`. Re-ran the acceptance verification commands (`npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run test:run -w packages/runner` — 1178/1178 pass) and confirm T-001's AC list is still satisfied. No source change required for T-001 itself; this note is recorded so the workflow runner has the re-dispatch context.
+## T-003 findings
+
+### Host wiring
+- `RunnerHost.initializeSharedConnection` now constructs the shared `OpenCodeRuntime` via `getOpenCodeRuntimeFactory()` **before** the ACP connection (so the first `RunnerRegistration` already carries the runtime-loaded catalog and the readiness gate can fire from the very first poll). The factory seam lets tests inject a fake `OpenCodeRuntime` whose `(directory, signal) => OpencodeServerHandle` / `CatalogClient` / `RuntimeEventSubscription` factories return fakes — no real process, network, fs, or wall clock.
+- `connectRunner` no longer shells out to `opencode models --verbose`; the catalog is sourced from `runtime.catalog()` projected into `coderModels` + `coderModelVariants` on every `registrationState()` (i.e. connect AND every heartbeat). When the runtime is mid-rebuild and the catalog is null, the previous in-memory snapshot is preserved so heartbeats do not regress.
+- `runWorkerPool` now gates `pollOnce` on `runtime.ready()`: not-ready → skip claiming, emit `opencodeReadinessDiagnostic()` (throttled to one re-log per 30 s), and respect the existing poll cadence. `awaitingAck` reports still drain on every loop tick (the gate is checked **after** `retryDueReports`). The transitional AgentJob gating is honoured: one readiness gate pauses AgentJob work too (removed by #410).
+
+### ActionContext surface
+- `ActionContext.openCodeRuntime` (optional, nullable) carries the runtime handle to the Workflow source only. `WorkExecutor.baseContext` does source-keyed dispatch — `ownerKind === "agent-job"` receives `openCodeRuntime: null` and keeps `acpConnection`; Workflow receives the runtime handle alongside `acpConnection`. The AgentJob path's ACP wiring is untouched.
+
+### Removed artifacts
+- `packages/runner/src/runtime/opencode-models.ts` deleted. The CLI `opencode models --verbose` parsing path is gone.
+- `runtime/opencode-log-diagnostics.ts` still exists — its remaining users (`acp/liveness.ts`, `acp/session-strategies.ts`) are ACP liveness code on the AgentJob path. T-004 retires the Workflow-path consumers when the opencodeAction switches off ACP; T-003 keeps the file because AgentJob still uses it.
+
+### Test seam
+- `tests/support/opencode-runtime-factory.ts` mirrors `setAcpProcessFactoryForTest`. `installFakeOpenCodeRuntimeFactory` returns `{ subscription, client, server, lastRuntime }` so tests can drive `subscription.emit({ type: "server.disconnected" })` to simulate a server exit. All existing runner-host `*.spec.ts` files install a ready runtime in `beforeEach` (and clear in `afterEach`) so the new gate never blocks tests that were not designed around it.
+
+### Transitional AgentJob gating test bug found
+- The first cut of `runner-host-opencode-runtime.spec.ts`'s "transitional AgentJob gating" test cast the host's `openCodeRuntime` to `{ subscription: ... }` and emitted on `installed?.subscription`. `OpenCodeRuntime` keeps the subscription as private state, so the cast lied and the emit never fired — gate stayed open and the assertion `poll.mock.calls.length === callsBeforeFlip` failed (7 vs 2). Fixed by emitting on the handles returned from `installFakeOpenCodeRuntimeFactory` (`installedHandles.subscription.emit(...)`) instead. Added an explicit `expect(installedHandles.lastRuntime?.ready()).toBe(false)` right after the emit so a regression that drops the rebuild trigger fails loudly.
+
+### Server-Exit rebuild under fake timers
+- `OpenCodeRuntime.scheduleRebuild` uses `setTimeout(resolve, rebuildDelayMs)` which is fake-timer-aware. The "server-exit-rebuild-resume" test advances by `60 ms` (`POLL_INTERVAL_MS * 4`) for the rebuild window then asserts `poll.mock.calls.length > callsAfterRebuild` — proving the gate closes during the rebuild delay and reopens only after health + catalog re-pass.
+- The "not-ready-skip" test also confirms that the existing `awaitingAck` entry's report drains while the gate is closed — the in-flight work's report resolves while poll is paused, then on the next tick after the rebuild delay the gate reopens and a fresh poll fires.
+
+### Verification commands used
+- `npm run typecheck -w packages/runner` — passes.
+- `npm run typecheck:tests -w packages/runner` — passes (the opencode-runtime spec test file uses `observed as { acpConnection: unknown; openCodeRuntime: unknown } | null` to keep TS happy about the captured mutable closure).
+- `npm run check:test-boundaries -w packages/runner` — passes (fake timers in all new tests; no real network/process/fs/clock).
+- `npm run test:run -w packages/runner` — 1174 tests pass, including 7 new `tests/runner-host-opencode-runtime.spec.ts` cases.
+- `npm test` — full repo passes (4790 tests across server/cli/runner/web).
+- `npm run build -w packages/runner` — compiles cleanly.
