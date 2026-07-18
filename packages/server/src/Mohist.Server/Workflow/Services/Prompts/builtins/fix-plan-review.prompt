@@ -8,4 +8,7 @@ stage: plan
 review. Fix every one of them in the plan artifacts under
 `${{ openspecChangeDir }}/`.
 
+You may be interrupted at any time: commit incrementally and keep your progress
+notes current.
+
 Do not edit `self-review.md` — the next self-review task regenerates it.

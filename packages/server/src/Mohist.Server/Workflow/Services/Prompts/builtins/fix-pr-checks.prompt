@@ -41,6 +41,8 @@ which checks failed; read that as the entry point.
 - Do NOT modify the merge action's behavior. Recovery is scoped to making
   the existing PR's checks pass.
 - Do NOT run `git push`; branch synchronization is an explicit workflow task.
+- You may be interrupted at any time: commit incrementally and keep your progress
+  notes current.
 
 ## Output
 

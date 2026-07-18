@@ -47,6 +47,8 @@ If the task has no spec reference, treat its acceptance criteria as the complete
 - Follow repository conventions.
 - Avoid unrelated refactors.
 - Preserve existing behavior unless the task explicitly changes it.
+- You may be interrupted at any time: commit incrementally and keep your progress
+  notes current.
 - Commit your changes on the workflow's per-run branch (`${{ workspace.branch }}`).
   This branch is prepared by the runner and is the source ref used by
   the Integrate stage. Do not switch to or create a different worktree-style
