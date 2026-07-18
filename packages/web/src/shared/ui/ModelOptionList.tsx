@@ -103,7 +103,7 @@ export function ModelOptionList({
   )
 
   return (
-    <CommandRoot onKeyDown={handleCommandKeyDown} label="Model selector">
+    <CommandRoot onKeyDown={handleCommandKeyDown} value={value ?? undefined} label="Model selector">
       <div className={cn('p-2', isCompact && 'pb-1')}>
         <div className="relative">
           <div className="absolute left-3 top-1/2 -translate-y-1/2">
