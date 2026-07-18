@@ -1130,10 +1130,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/event-id\"')", false);
 
-                    b.Property<string>("LabelTriggerSubscriptionId")
+                    b.Property<string>("LabelTriggerRuleId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/subscription-id\"')", false);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/rule-id\"')", false);
 
                     b.Property<string>("LabelWorkId")
                         .ValueGeneratedOnAddOrUpdate()

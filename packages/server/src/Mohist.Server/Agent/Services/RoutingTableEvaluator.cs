@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events.Matching;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
 
@@ -61,7 +62,7 @@ public sealed class RuleExpressionCache : IRuleExpressionCache
     private static string Key(string ruleId, string match) => $"{ruleId}\n{match}";
 }
 
-public sealed class RoutingTableEvaluator
+public sealed class RoutingTableEvaluator : IScopedService
 {
     public IReadOnlyList<RuleOutcome> Evaluate(
         EventMatchInput input,

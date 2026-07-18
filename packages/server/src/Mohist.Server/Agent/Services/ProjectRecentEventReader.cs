@@ -2,10 +2,11 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events.Matching;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
 
-public sealed class ProjectRecentEventReader
+public sealed class ProjectRecentEventReader : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
@@ -21,11 +22,11 @@ public sealed class ProjectRecentEventReader
         limit = limit <= 0 ? 20 : limit;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = new List<ProjectRecentEventRow>();
-        rows.AddRange((await db.IssueEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventRow.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
-        rows.AddRange((await db.WorkflowRunEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventRow.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
-        rows.AddRange((await db.EpicEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventRow.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
-        rows.AddRange((await db.AgentSessionEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventRow.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
+        var rows = new List<ProjectRecentEventProjection>();
+        rows.AddRange((await db.IssueEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
+        rows.AddRange((await db.WorkflowRunEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
+        rows.AddRange((await db.EpicEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
+        rows.AddRange((await db.AgentSessionEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
 
         return rows
             .Where(row => row.Extensions.TryGetValue("projectid", out var stampedProject)
@@ -42,7 +43,7 @@ public sealed class ProjectRecentEventReader
             .ToList();
     }
 
-    private sealed record ProjectRecentEventRow(
+    private sealed record ProjectRecentEventProjection(
         long Id,
         string EventId,
         string Type,
@@ -51,7 +52,7 @@ public sealed class ProjectRecentEventReader
         DateTimeOffset Time,
         IReadOnlyDictionary<string, string> Extensions)
     {
-        public static ProjectRecentEventRow From(
+        public static ProjectRecentEventProjection From(
             long id,
             string eventId,
             string type,

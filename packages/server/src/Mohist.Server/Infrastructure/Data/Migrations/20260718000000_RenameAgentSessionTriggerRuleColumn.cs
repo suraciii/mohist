@@ -8,7 +8,8 @@ public partial class RenameAgentSessionTriggerRuleColumn : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("ALTER TABLE AgentSessions RENAME COLUMN LabelTriggerSubscriptionId TO LabelTriggerRuleId");
+        migrationBuilder.Sql("ALTER TABLE AgentSessions DROP COLUMN LabelTriggerSubscriptionId");
+        migrationBuilder.Sql("ALTER TABLE AgentSessions ADD COLUMN LabelTriggerRuleId TEXT GENERATED ALWAYS AS (json_extract(State, '$.metadata.labels.\"mohist.io/trigger/rule-id\"')) VIRTUAL");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

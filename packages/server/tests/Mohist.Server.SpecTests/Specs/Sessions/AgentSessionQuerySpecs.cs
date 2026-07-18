@@ -162,14 +162,14 @@ public class AgentSessionQuerySpecs
     }
 
     [Fact]
-    public async Task QueryByTriggerLabels_ResolvesSubscriptionTriggeredSessions()
+    public async Task QueryByTriggerLabels_ResolvesRuleTriggeredSessions()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
         var fixture = new TestDbContextFactory(database.Options);
         SeedMixedSessions(fixture);
 
-        const string eventId = "evt_subscription_42";
-        const string subscriptionId = "subs_abc123";
+        const string eventId = "evt_rule_42";
+        const string ruleId = "rule_abc123";
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
@@ -177,7 +177,7 @@ public class AgentSessionQuerySpecs
             [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
             [GenericAgentSessionMetadata.AgentName] = AgentA1Name,
             [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = ruleId,
         };
         await using (var db = fixture.CreateDbContext())
         {
@@ -193,16 +193,16 @@ public class AgentSessionQuerySpecs
         });
         Assert.Equal(new[] { "s_triggered" }, byEvent.Select(m => m.Row.Id).ToArray());
 
-        var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        var byRule = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = ruleId,
         });
-        Assert.Equal(new[] { "s_triggered" }, bySubscription.Select(m => m.Row.Id).ToArray());
+        Assert.Equal(new[] { "s_triggered" }, byRule.Select(m => m.Row.Id).ToArray());
 
         var byBoth = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = ruleId,
         });
         Assert.Equal(new[] { "s_triggered" }, byBoth.Select(m => m.Row.Id).ToArray());
 
@@ -249,7 +249,7 @@ public class AgentSessionQuerySpecs
             [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             [GenericAgentSessionMetadata.IssueNumber] = "999",
             [GenericAgentSessionMetadata.TriggerEventId] = "evt_runtime",
-            [GenericAgentSessionMetadata.TriggerRuleId] = "subs_runtime",
+            [GenericAgentSessionMetadata.TriggerRuleId] = "rule_runtime",
         };
         var state = JsonSerializer.Serialize(new
         {
@@ -297,11 +297,11 @@ public class AgentSessionQuerySpecs
         });
         Assert.Equal(new[] { "s_runtime" }, byEvent.Select(m => m.Row.Id).ToArray());
 
-        var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        var byRule = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [GenericAgentSessionMetadata.TriggerRuleId] = "subs_runtime",
+            [GenericAgentSessionMetadata.TriggerRuleId] = "rule_runtime",
         });
-        Assert.Equal(new[] { "s_runtime" }, bySubscription.Select(m => m.Row.Id).ToArray());
+        Assert.Equal(new[] { "s_runtime" }, byRule.Select(m => m.Row.Id).ToArray());
 
         // Read back via EF so the populated computed-column values are
         // visible to the test — protects against the (silent) regression
@@ -315,7 +315,7 @@ public class AgentSessionQuerySpecs
             Assert.Equal(ProjectB, row.LabelProjectId);
             Assert.Equal("agent-launch", row.LabelSourceKind);
             Assert.Equal("evt_runtime", row.LabelTriggerEventId);
-            Assert.Equal("subs_runtime", row.LabelTriggerRuleId);
+            Assert.Equal("rule_runtime", row.LabelTriggerRuleId);
         }
     }
 
