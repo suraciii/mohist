@@ -88,6 +88,16 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  // isolate:false shares document.body across files; testing-library's
+  // cleanup() only unmounts containers it tracks. Third-party portals
+  // (e.g. base-ui Dialog) append their own nodes to body and also mutate
+  // body attributes (overflow:hidden while open); both escape cleanup and
+  // leak into the next file. Wipe body after React unmounts so no portal
+  // debris or style side-effects survive between tests.
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.innerHTML = ''
+    document.body.removeAttribute('style')
+  }
   restoreScopedProperties()
   server.resetHandlers()
   _reducedMotionOverride = undefined

@@ -98,6 +98,7 @@ public static class MohistServiceRegistration
         services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
+        services.AddSingleton<IEventTailSource>(sp => sp.GetRequiredService<Mohist.Server.Events.Hub.EventTailSource>());
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();

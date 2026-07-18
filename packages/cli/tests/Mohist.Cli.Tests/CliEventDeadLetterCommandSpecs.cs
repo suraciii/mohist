@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public sealed class CliEventDeadLetterCommandSpecs
+public sealed class CliEventsDeadLetterCommandSpecs
 {
     private static (HttpClient Http, RecordingHttpHandler Handler, StringWriter Output, StringWriter Error, FakeFileSystem FileSystem, FakeCommandExecutor Executor, MockEnvironmentVariableProvider Environment) Setup(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
@@ -47,7 +47,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list", "--handler", "Handler+One", "--limit", "25"],
+            ["events", "dead-letter", "list", "--handler", "Handler+One", "--limit", "25"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -80,7 +80,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list", "-o", "json"],
+            ["events", "dead-letter", "list", "-o", "json"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -100,7 +100,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list", "--limit", "0"],
+            ["events", "dead-letter", "list", "--limit", "0"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -123,7 +123,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "redeliver", "17"],
+            ["events", "dead-letter", "redeliver", "17"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -151,7 +151,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "redeliver", "17"],
+            ["events", "dead-letter", "redeliver", "17"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -171,7 +171,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list"],
+            ["events", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -193,7 +193,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list"],
+            ["events", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -222,7 +222,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list"],
+            ["events", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -263,7 +263,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list"],
+            ["events", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,
@@ -300,7 +300,7 @@ public sealed class CliEventDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["event", "dead-letter", "list"],
+            ["events", "dead-letter", "list"],
             env.Output,
             env.Error,
             env.FileSystem,

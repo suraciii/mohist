@@ -14,6 +14,7 @@ public static class MohistApiRegistration
         app.MapDeadLetterRoutes();
         app.MapProjectRoutes();
         app.MapProjectEventsRoutes();
+        app.MapProjectEventTailRoutes();
         app.MapAttachmentRoutes();
         app.MapIssueRoutes();
         app.MapWorkflowEventRoutes();
