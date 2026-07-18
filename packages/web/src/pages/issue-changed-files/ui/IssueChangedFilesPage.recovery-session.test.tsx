@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { act } from '@testing-library/react'
 import {
   fireEvent,
   screen,
@@ -7,6 +8,12 @@ import {
 } from './IssueChangedFilesPage.fixture'
 
 const { renderPage, state } = useIssueChangedFilesPageFixture()
+
+async function flushQueryNotifications() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 describe('IssueChangedFilesPage related-session recovery', () => {
   it('renders the session link targeting the project-scoped session route when a session is resolved', async () => {
@@ -68,7 +75,13 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     await waitFor(() => expect(state.sessionsRequestCount).toBe(1))
     await state.releaseSessionResponses()
     expect(state.sessionsResponseCount).toBe(1)
-    await waitFor(() => expect(state.getSessionsQueryStatus()).toBe('success'))
+    vi.useFakeTimers()
+    try {
+      await flushQueryNotifications()
+      expect(state.getSessionsQueryStatus()).toBe('success')
+    } finally {
+      vi.useRealTimers()
+    }
     expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()
     expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
     expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
