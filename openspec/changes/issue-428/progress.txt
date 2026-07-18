@@ -38,6 +38,29 @@ T-001 (Live-ticking duration on running tool rows) — completed 2026-07-18
 - The bar is intentionally a child of the same flex column that hosts the `TurnList`, not a sibling of the scroll container. This keeps it inside the `data-scrollable` subtree so `position: sticky; bottom: 0` resolves against the scroll container (the nearest scrolling ancestor), matching the layout in D5.
 - The re-targeting test verifies that swapping which tool call is the "active" one (different `toolCallId`) causes the next click to scroll the new row — this exercises both the selector's last-match tiebreak and the `data-tool-call-id` anchor lookup.
 
+T-003 (Block cursor on streaming assistant text) — completed 2026-07-18
+
+## Implementation notes
+
+- Replaced the trailing streaming dot glyph (`assistant-text-streaming-glyph`, `h-1.5 w-1.5 rounded-full bg-info animate-pulse`) inside `AssistantTextPartView`'s Copy-button row with a block cursor rendered as an `inline-block` span directly after the `<TranscriptMarkdown>` output. The cursor's `data-testid` is `assistant-text-streaming-cursor`; gating remains `isRunning === true && (isIncomplete || isStreaming === true)` (same boolean the old dot used, so the existing #426 liveness gate keeps working unchanged).
+- Cursor visual: `className="ml-0.5 inline-block h-[1em] w-[0.5em] -mb-[0.15em] align-baseline bg-foreground animate-pulse"`. Size expressed in `em` so the cursor scales with surrounding text and stays baseline-aligned; the small `ml-0.5` adds a hair of horizontal spacing off the preceding glyph. No new CSS keyframes — Tailwind's `animate-pulse` already drives the existing dot, the current-activity bar dot, and the transcript-empty-state dot.
+- The Copy button row is preserved below the cursor (its `<Button variant="link">` content unchanged). The cursor is positioned *before* that row, not inside it, so it visually attaches to the streamed text rather than to the action row — matching the spec wording "appended after the TranscriptMarkdown output".
+- Accessibility: cursor is `aria-hidden="true"`, has no `role`, no `tabindex` — it is a decorative visual cue and not exposed to assistive tech. Tests assert all three absences.
+- Removed `showStreamingGlyph`-as-flex-row layout: the dot's previous home (a sibling of the Copy button inside a `flex items-center gap-2` row) is no longer the cursor's home. The flex row is now a one-button row with the same `mt-1` spacing; the Copy button remains unchanged.
+- `data-tone` is still carried on the cursor (`info` when `isStreaming`, `warning` when merely `isIncomplete`) so future styling/tests can branch on the streaming-vs-waiting distinction without needing a new attribute.
+- No new prop wiring: `AssistantTextPartView`'s existing `isRunning`, `completedAt`, `isStreaming` inputs already carry every signal the cursor needs. No `useNow` dependency for T-003 — the cursor blinks via CSS, not a JS tick.
+
+## Gotchas
+
+- The Copy button text matches `/copy/i` (case-insensitive), so the PromptBlock's own Copy button collides with an unscoped `getByRole('button', { name: /copy/i })`. Cursor tests scope the Copy check to `cursor.parentElement.querySelector('button')` so the PromptBlock button does not match.
+- The cursor's flex-row history: the previous dot lived inside the Copy-button flex row (`flex items-center gap-2`) and inherited the row's alignment. Moving the cursor out of that row and onto its own line breaks `aria-described-by`/screen-reader announcement assumptions — the cursor's `aria-hidden="true"` plus no role is what satisfies the spec's "hidden from assistive technology" requirement, despite the visual relocation.
+
+## Files changed (T-003)
+
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (AssistantTextPartView: dot glyph replaced by block cursor span; Copy button row preserved)
+- `packages/web/tests/SessionTranscriptStreamingCursor.spec.tsx` (new, 10 spec tests covering render gating, completion transition, session-end transition, accessibility attributes, layout order, Copy-button coexistence, regression check on the old glyph testid)
+- `packages/web/tests/SessionTranscriptActivityIndicators.spec.tsx` (three existing assertions migrated from `assistant-text-streaming-glyph` to `assistant-text-streaming-cursor`; test descriptions updated from "glyph" to "cursor")
+
 ## Files changed
 
 - `packages/web/src/widgets/session-transcript/model/use-now.ts` (new)
@@ -50,6 +73,7 @@ T-001 (Live-ticking duration on running tool rows) — completed 2026-07-18
 - `packages/web/src/widgets/session-transcript/ui/CurrentActivityBar.spec.tsx` (new, 15 spec tests)
 - `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.tsx` (useNow wiring; T-002 also adds selector + bar mounting as last sibling inside the column)
 - `packages/web/src/widgets/session-transcript/ui/TurnList.tsx` (threaded `now`)
-- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (selective `now` for in-progress rows)
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx` (selective `now` for in-progress rows; T-003 replaces the trailing dot glyph with a block cursor span)
 - `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx` (ToolRowView + ContextGroupView accept `now`, ToolRowView renders live duration)
 - `packages/web/src/widgets/session-transcript/ui/tool-views/tool-row-view-live-duration.spec.tsx` (new, 15 spec tests)
+- `packages/web/tests/SessionTranscriptStreamingCursor.spec.tsx` (new, 10 spec tests, T-003)

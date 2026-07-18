@@ -30,15 +30,15 @@ export function AssistantTextPartView({ text, completedAt, isStreaming, isRunnin
   return (
     <div className="min-w-0">
       <TranscriptMarkdown content={text} />
+      {showStreamingGlyph && (
+        <span
+          data-testid="assistant-text-streaming-cursor"
+          data-tone={isStreaming ? 'info' : 'warning'}
+          aria-hidden="true"
+          className="ml-0.5 inline-block h-[1em] w-[0.5em] -mb-[0.15em] align-baseline bg-foreground animate-pulse"
+        />
+      )}
       <div className="mt-1 flex items-center gap-2">
-        {showStreamingGlyph && (
-          <span
-            data-testid="assistant-text-streaming-glyph"
-            data-tone={isStreaming ? 'info' : 'warning'}
-            aria-hidden="true"
-            className="inline-block h-1.5 w-1.5 rounded-full bg-info animate-pulse"
-          />
-        )}
         <Button
           variant="link"
           onClick={handleCopy}
