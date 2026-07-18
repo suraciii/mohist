@@ -24,7 +24,7 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Grains;
 
-public class IssueGrain : Grain, IIssueGrain
+public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 {
     private Domain.Issue? _issue;
     private bool _issueReloadRequired;
@@ -171,14 +171,56 @@ public class IssueGrain : Grain, IIssueGrain
         RepositoryInfo repo,
         IReadOnlySet<int>? undeliveredPrerequisites)
     {
-        await PrepareWorkflowStartContextAsync(project, wrId, repo);
-        _issue!.Start(wrId, undeliveredPrerequisites);
-        await SaveIssueAsync();
+        var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
+
+        // Synchronously start the workflow run carrying the immutable
+        // repository/workspace snapshot captured at this transaction. The
+        // IssueWorkStarted durable event (emitted by SaveIssueAsync below)
+        // drives the same snapshot-aware EnsureStartedAsync on replay/restart,
+        // so the run reads run-owned repository facts rather than live
+        // Project metadata regardless of which path created it first.
+        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
+        var snapshot = new WorkflowStartSnapshot(repositoryContext, workspace);
+        var startContext = new WorkflowIssueContext(issueContext.ProjectId, issueContext.IssueNumber, null);
+        await wfGrain.EnsureStartedAsync(startContext, snapshot);
+
+        _issue!.Start(
+            wrId,
+            undeliveredPrerequisites,
+            repository: new IssueWorkStartedRepository(
+                repositoryContext.Name,
+                repositoryContext.GitUrl,
+                repositoryContext.BaseBranch,
+                repositoryContext.RemoteFingerprint,
+                repositoryContext.RemoteIdentityVersion),
+            workspace: new IssueWorkStartedWorkspace(
+                workspace.Path,
+                workspace.Branch,
+                workspace.ChangeDir),
+            context: issueContext);
+        try
+        {
+            await SaveIssueAsync();
+        }
+        catch
+        {
+            // The workflow run was already committed, but the issue state/event
+            // transaction rolled back. A retry would mint a new wrId and leave
+            // this run orphaned. Compensate by stopping the run so it does not
+            // linger as active work the issue no longer references.
+            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
+            catch (Exception compEx)
+            {
+                _log.LogWarning(compEx,
+                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
+            }
+            throw;
+        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    private async Task PrepareWorkflowStartContextAsync(
+    private async Task<(Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext Repository, WorkspaceIdentity Workspace, IssueWorkStartedContext Context)> PrepareWorkflowStartContextAsync(
         WorkflowProjectContext? project,
         string wrId,
         RepositoryInfo repo)
@@ -189,6 +231,33 @@ public class IssueGrain : Grain, IIssueGrain
         var projectInfo = await projectGrain.GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
         var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
+
+        // Compute the authoritative repository context BEFORE saving the
+        // Issue transaction (T-006 / D4). Fingerprint normalization lives
+        // in GitRemoteUrlNormalizer; the same fingerprint is shared with
+        // RepositoryPolicy alias-rejection so two Project-local names
+        // that resolve to the same physical remote are forbidden from
+        // the start.
+        var fingerprint = Mohist.Server.Project.Domain.GitRemoteUrlNormalizer.Fingerprint(repo.GitUrl);
+        var repositoryContext = fingerprint is null
+            ? (Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext?)null
+            : new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
+                Name: repo.Name,
+                GitUrl: repo.GitUrl,
+                BaseBranch: repo.BaseBranch,
+                RemoteFingerprint: fingerprint.Fingerprint,
+                RemoteIdentityVersion: fingerprint.Version);
+        if (repositoryContext is null)
+        {
+            // Fail closed: an unparseable Git URL means we cannot prove
+            // identity later. The Issue stays in backlog (no lock, no
+            // IssueWorkStarted event) — no workspace has been created.
+            throw new InvalidOperationException(
+                $"Cannot start workflow: target repository '{repo.Name}' has an unparseable Git URL (no fingerprint)");
+        }
+        if (string.IsNullOrWhiteSpace(repositoryContext.BaseBranch))
+            throw new InvalidOperationException(
+                $"Cannot start workflow: target repository '{repo.Name}' has no configured base branch");
 
         // The startup template resolution honors the issue's effective
         // workflow profile (issue selection → project default → system
@@ -247,6 +316,11 @@ public class IssueGrain : Grain, IIssueGrain
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.ProjectId, issue.Number, key, body);
 
+        return (repositoryContext, workspace, new IssueWorkStartedContext(
+            issue.ProjectId,
+            issue.Number,
+            issue.Title,
+            issue.Priority));
     }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
@@ -317,7 +391,7 @@ public class IssueGrain : Grain, IIssueGrain
     private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)
     {
         var runnerRoot = MohistWorkspaceLayout.ResolveRunnerRoot(_configuration, _environment);
-        var workspacePath = MohistWorkspaceLayout.IssueWorkspacePath(runnerRoot, projectContext.Name, issue.Number);
+        var workspacePath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, workflowRunId);
         var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
         // The runner manages the per-run head ref (`mohist/run-${workflowRunId}`)
         // inside the workspace; the integrate merge uses this branch as the
@@ -405,11 +479,251 @@ public class IssueGrain : Grain, IIssueGrain
         await SaveIssueAsync();
     }
 
-    public async Task ReopenAsync()
+    private Task<bool> ResolveReopenTargetExistsAsync()
+    {
+        if (_issue is null || string.IsNullOrWhiteSpace(_issue.RepositoryRef))
+            return Task.FromResult(false);
+        return ResolveReopenTargetExistsCoreAsync();
+    }
+
+    private async Task<bool> ResolveReopenTargetExistsCoreAsync()
+    {
+        var project = await GrainFactory.GetGrain<IProjectGrain>(_issue!.ProjectId).GetAsync();
+        return project is not null
+            && !string.IsNullOrWhiteSpace(_issue.RepositoryRef)
+            && project.GetRepository(_issue.RepositoryRef) is not null;
+    }
+
+    public async Task<Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(
+        string projectId,
+        int number,
+        string title,
+        string? body,
+        IReadOnlyDictionary<string, string>? labels,
+        string? priority,
+        string repositoryRef,
+        string? risk,
+        bool isDraft,
+        string[]? attachmentIds,
+        string? workflowProfileId,
+        int[]? prerequisiteNumbers,
+        string commandId,
+        long? expectedRevision)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryRef))
+            throw new IssueRepositoryUnknownException(repositoryRef ?? string.Empty);
+
+        if (_issue is not null)
+        {
+            // Receipt-match: a prior coordinator activation persisted this
+            // exact command, so replay the outcome without mutating state.
+            // The coordinator only issues Create with a non-null
+            // commandId/expectedRevision, so the absence of a matching
+            // receipt means a different command is reusing the same
+            // grain key — surface that as a fresh-failure conflict rather
+            // than silently allowing a duplicate.
+            if (_issue.LastRepositoryCommand is { } stored
+                && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+                && stored.Kind == "create"
+                && string.Equals(stored.RepositoryName, repositoryRef, StringComparison.Ordinal))
+            {
+                return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+            }
+            throw new InvalidOperationException(
+                $"Issue '{GrainKey}' already exists; cannot replay create command '{commandId}'");
+        }
+
+        var project = await GrainFactory.GetGrain<IProjectGrain>(projectId).GetAsync();
+        if (project is null)
+            throw new IssueRepositoryUnknownException(repositoryRef);
+        var match = project.GetRepository(repositoryRef);
+        if (match is null)
+            throw new IssueRepositoryUnknownException(repositoryRef);
+        var canonicalName = match.Name;
+
+        if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+        {
+            throw new UnknownWorkflowProfileException(workflowProfileId);
+        }
+
+        var issue = Domain.Issue.Create(
+            projectId,
+            number,
+            title,
+            body,
+            labels,
+            priority ?? "p2",
+            canonicalName,
+            risk,
+            isDraft,
+            workflowProfileId,
+            commandId,
+            expectedRevision);
+
+        _issue = issue;
+
+        try
+        {
+            if (prerequisiteNumbers is { Length: > 0 })
+            {
+                foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+                {
+                    if (prerequisiteNumber == number)
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+                        throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                    if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    _issue!.AddPrerequisite(prerequisiteNumber);
+                }
+            }
+        }
+        catch
+        {
+            _issue = null;
+            throw;
+        }
+
+        await _attachmentService.ValidateIssueBindAsync(projectId, issue.Number, attachmentIds);
+        await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(projectId, issue.Number, attachmentIds);
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public async Task<Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(
+        IssueChangeRepositoryCommand command,
+        string commandId,
+        long? expectedRevision)
     {
         EnsureIssue();
-        _issue!.Reopen();
+        if (_issue is null)
+            throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+
+        if (string.IsNullOrWhiteSpace(command.RepositoryName))
+            throw new IssueRepositoryUnknownException(command.RepositoryName ?? string.Empty);
+
+        if (_issue.LastRepositoryCommand is { } stored
+            && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+            && stored.Kind == "change"
+            && string.Equals(stored.RepositoryName, command.RepositoryName, StringComparison.Ordinal))
+        {
+            return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+        }
+
+        var project = await GrainFactory.GetGrain<IProjectGrain>(_issue.ProjectId).GetAsync();
+        if (project is null)
+            throw new IssueRepositoryUnknownException(command.RepositoryName);
+        var match = project.GetRepository(command.RepositoryName);
+        if (match is null)
+            throw new IssueRepositoryUnknownException(command.RepositoryName);
+        var canonicalName = match.Name;
+
+        var present = command.PresentFields ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal);
+        var hasTitle = present.Contains(nameof(command.Title));
+        var hasBody = present.Contains(nameof(command.Body));
+        var hasLabels = present.Contains(nameof(command.Labels));
+        var hasPriority = present.Contains(nameof(command.Priority));
+        var hasIsDraft = present.Contains(nameof(command.IsDraft));
+        var hasAttachments = present.Contains(nameof(command.AttachmentIds));
+        var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
+
+        if (hasWorkflowProfile && _issue.WorkflowRunId is not null)
+        {
+            throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
+        }
+
+        if (hasAttachments && command.AttachmentIds is not null)
+        {
+            await _attachmentService.ValidateIssueBindAsync(_issue.ProjectId, _issue.Number, command.AttachmentIds);
+        }
+
+        if (hasTitle && string.IsNullOrWhiteSpace(command.Title))
+            throw new ArgumentException("Issue title is required", nameof(command.Title));
+        if (hasPriority && command.Priority is not null)
+            _ = IssuePriority.From(command.Priority);
+        if (hasLabels && command.Labels is not null)
+        {
+            foreach (var (key, value) in command.Labels)
+            {
+                Domain.Issue.ValidateLabelKey(key);
+                Domain.Issue.ValidateLabelValue(value);
+            }
+        }
+
+        if (hasIsDraft && command.IsDraft.HasValue)
+            _issue.ValidateDraftTransition();
+
+        // Every potentially failing PATCH input has been validated before
+        // this point, so the repository transition and sibling aggregate
+        // fields are committed together or not at all.
+        if (string.Equals(_issue.RepositoryRef, canonicalName, StringComparison.Ordinal))
+            _issue.RecordRepositoryCommandReceipt(commandId, "change", expectedRevision);
+        else
+            _issue.ChangeRepository(canonicalName, commandId, expectedRevision);
+
+        IReadOnlyDictionary<string, string>? labelsForUpdate = null;
+        if (hasLabels)
+        {
+            labelsForUpdate = command.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        _issue.Update(
+            hasTitle ? command.Title : null,
+            hasBody ? command.Body : null,
+            labelsForUpdate,
+            hasPriority ? command.Priority : null);
+
+        if (hasIsDraft && command.IsDraft.HasValue)
+            _issue.SetDraft(command.IsDraft.Value);
+
+        if (hasWorkflowProfile)
+        {
+            _issue.ReplaceWorkflowProfile(command.WorkflowProfileId);
+        }
+
         await SaveIssueAsync();
+
+        if (hasAttachments)
+        {
+            if (command.AttachmentIds is null)
+            {
+                await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Number);
+            }
+            else
+            {
+                await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Number, command.AttachmentIds);
+            }
+        }
+
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public async Task<Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(
+        string commandId,
+        long? expectedRevision)
+    {
+        EnsureIssue();
+        if (_issue is null)
+            throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+
+        if (_issue.LastRepositoryCommand is { } stored
+            && string.Equals(stored.CommandId, commandId, StringComparison.Ordinal)
+            && stored.Kind == "reopen"
+            && string.Equals(stored.RepositoryName, _issue.RepositoryRef ?? string.Empty, StringComparison.Ordinal))
+        {
+            return Coordinator.IssueBindingParticipantOutcome.AlreadyApplied;
+        }
+
+        var targetExists = await ResolveReopenTargetExistsAsync();
+        _issue.ReopenWithReceipt(targetExists, commandId, expectedRevision);
+        await SaveIssueAsync();
+        return Coordinator.IssueBindingParticipantOutcome.Applied;
+    }
+
+    public Task<long> GetRepositoryBindingRevisionAsync()
+    {
+        if (_issue is null) return Task.FromResult(0L);
+        return Task.FromResult(_issue.RepositoryBindingRevision);
     }
 
     public async Task UpdateFullAsync(UpdateIssueData data)
@@ -517,8 +831,10 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        var resolvedRef = await ResolveRepositoryRefAsync(key.ProjectId, repositoryRef);
-        await _attachmentService.ValidateIssueBindAsync(key.ProjectId, key.IssueNumber, attachmentIds);
+        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+        if (string.IsNullOrWhiteSpace(resolvedRef))
+            throw new InvalidOperationException($"Cannot create issue without a resolved target repository for project '{projectId}'");
+        await _attachmentService.ValidateIssueBindAsync(projectId, key.IssueNumber, attachmentIds);
 
         if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
@@ -576,6 +892,13 @@ public class IssueGrain : Grain, IIssueGrain
         await SaveIssueAsync();
         await _attachmentService.BindIssueAsync(key.ProjectId, issue.Number, attachmentIds);
         return issue.Number;
+    }
+
+    public Task<string?> GetActiveWorkflowRunIdAsync()
+    {
+        RejectIfReloadRequired();
+        if (_issue is null) return Task.FromResult<string?>(null);
+        return Task.FromResult<string?>(_issue.WorkflowRunId);
     }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)

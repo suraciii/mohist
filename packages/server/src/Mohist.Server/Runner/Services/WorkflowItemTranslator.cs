@@ -172,11 +172,10 @@ EpicNumber: ReadEpicNumber(run),
         BuildPayloadAsync(string stage, string workId, string workType, string title, int attempt,
             string workflowRunId, WorkflowRun run)
     {
-        var resolved = await _profileManager.ResolveLayeredVariablesAsync(workflowRunId);
+        var resolved = await _profileManager.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var effectiveVarsJson = resolved.ResolveStageVars(stage)
-            ?? JSON.DeserializeElement("{}");
+        var effectiveVarsJson = resolved.Vars ?? JSON.DeserializeElement("{}");
 
         if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
         {
@@ -427,7 +426,7 @@ EpicNumber: ReadEpicNumber(run),
     private async Task<JsonElement?> ResolveBindVariablesAsync(
         string workflowRunId, WorkflowRun run, string stage)
     {
-        var resolved = await _profileManager.ResolveLayeredVariablesAsync(workflowRunId);
-        return resolved.ResolveStageVars(stage);
+        var resolved = await _profileManager.ResolveEffectiveVariableBundleAsync(workflowRunId, stage);
+        return resolved.Vars;
     }
 }

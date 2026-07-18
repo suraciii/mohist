@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.SystemInfo;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Mohist.Server.Infrastructure.Workspace;
 
@@ -43,6 +45,12 @@ public static class MohistWorkspaceLayout
 
     public static string IssueWorkspacePath(string runnerRoot, string projectName, int issueNumber)
         => Path.GetFullPath(Path.Combine(runnerRoot, Slug(projectName), "workspaces", $"issue-{issueNumber}"));
+
+    public static string WorkflowRunWorkspacePath(string runnerRoot, string workflowRunId)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(workflowRunId))).ToLowerInvariant();
+        return Path.GetFullPath(Path.Combine(runnerRoot, "workspaces", $"run-{hash}"));
+    }
 
     /// <summary>
     /// Slugifies a project name to a safe directory component. MUST stay in

@@ -363,6 +363,47 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
+    public async Task RepoDelete_InUseRepository_SurfacesConflictWithoutSuccessOutput()
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv(_ =>
+            RecordingHttpHandler.JsonError(
+                "Repository 'web' is referenced by one or more non-terminal issues and cannot be removed",
+                "repository_in_use",
+                HttpStatusCode.Conflict));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "delete", "web"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Single(handler.Requests);
+        Assert.Contains("Repository 'web'", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("non-terminal", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deleted", output.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RepoDelete_MissingRepository_RetainsNotFoundMeaning()
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv(_ =>
+            RecordingHttpHandler.JsonError(
+                "Repository 'missing' was not found in Project 'proj_test'.",
+                "repository_not_found",
+                HttpStatusCode.NotFound));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "delete", "missing"],
+            output, error, fs, executor);
+
+        Assert.Equal(4, exitCode);
+        Assert.Single(handler.Requests);
+        Assert.Contains("missing", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("deleted", output.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RepoAdd_DuplicateRepository_SurfacesRepositoryConflict()
     {
         var (_, http, output, error, fs, executor) = SetupEnv(_ =>

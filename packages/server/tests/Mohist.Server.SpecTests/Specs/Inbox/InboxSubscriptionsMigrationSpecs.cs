@@ -54,8 +54,17 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Up_StoresAndReadsSubscriptionRow()
     {
-        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
+        // Uses EnsureCreated (not the pinned migration template) because
+        // this test exercises row storage through the current model. The
+        // pinned template freezes the schema at the inbox migration, which
+        // would now omit the issue-417 T-002 coordination columns on
+        // ProjectRow and make EF-generated INSERTs reference missing
+        // columns. The schema-level tests above cover the historical
+        // pinning; this test only needs a writable schema.
+        await using var database = CreateDatabase();
         await using var context = database.CreateDbContext();
+
+        context.Database.EnsureCreated();
 
         context.Projects.Add(new ProjectRow
         {

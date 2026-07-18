@@ -119,6 +119,29 @@ describe("mohist/github-pr-status action", () => {
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 
+  it("scopes status delivery to the authoritative Issue repository", async () => {
+    const commands: string[] = []
+    installGh((cmd, args) => {
+      commands.push([cmd, ...args].join(" "))
+      if (args.join(" ") === "pr view 42 --json url,state,isDraft --repo github.com/acme/repo") return ghOk(PR_VIEW_OPEN)
+      return ghFail(`unexpected gh call: ${[cmd, ...args].join(" ")}`)
+    })
+
+    const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository()))
+
+    expect(result.status).toBe("success")
+    expect(commands).toEqual(["gh pr view 42 --json url,state,isDraft --repo github.com/acme/repo"])
+  })
+
+  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
+    const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.message).toContain("authoritative GitHub repository URL")
+    expect(output.steps).toEqual([])
+  })
+
   it("forwards gh command output to the task log sink", async () => {
     const writes: Array<{ source: string; text: string }> = []
     setGitHubPrStatusGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
@@ -307,3 +330,14 @@ describe("mohist/github-pr-status action", () => {
     expect(output.steps[0].output).toContain("timed out")
   })
 })
+
+function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
+  return {
+    repository: {
+      gitUrl,
+      baseBranch: "master",
+      remoteFingerprint: "authoritative-fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
+    },
+  }
+}

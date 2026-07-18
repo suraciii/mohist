@@ -188,7 +188,7 @@ mo project prompt ...              Project Prompts
 
 ## Repository（仓库）
 
-一个 project 可声明多个仓库作为执行资源（产品的 server 与 web 是两个代码库时，同一 project 声明两个仓库）。当前 issue 一律使用 default 仓库。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。产品语义见 [仓库](repositories.md)。
+一个 project 可声明多个仓库作为执行资源（产品的 server 与 web 是两个代码库时，同一 project 声明两个仓库）。每个 Issue 绑定一个目标仓库；未指定时绑定当前 default 仓库。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。产品语义见 [仓库](repositories.md)。
 
 ```
 mo repo list [--project <名>]
@@ -258,7 +258,7 @@ mo issue rerun <number> --from-stage <stage>
 
 Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
 
-`--parent` 创建/挂靠子 issue，`mo issue update <编号> --parent none` 解除。Issue 的仓库选择尚未进入命令面，当前工作流使用 Project 的 default 仓库。复合 issue 的完整语义见 [复合 Issue 与子 Issue](sub-issues.md)。
+`--parent` 创建/挂靠子 issue，`mo issue update <编号> --parent none` 解除。`mo issue create <标题> --repo <资源名>` 选择目标仓库；省略 `--repo` 时绑定当前 default 仓库。未启动 Issue 可通过 `mo issue update <编号> --repo <资源名>` 重指派，启动后目标仓库锁定。`mo issue list --repo <资源名>` 按已存储的目标仓库筛选。复合 issue 的完整语义见 [复合 Issue 与子 Issue](sub-issues.md)。
 
 ## Epic（产品目标）
 

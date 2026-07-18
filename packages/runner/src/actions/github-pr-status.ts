@@ -4,6 +4,7 @@ import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { timeoutStepMetadata } from "./github-pr-types.js"
+import { resolveGitHubRepository } from "./delivery-context.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:github-pr-status"
@@ -137,10 +138,19 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     steps.push({ name, command, exitCode, output, ...metadata })
   }
   const prViewFields = buildPrViewFields(expect)
+  const githubRepository = resolveGitHubRepository(context)
+  if (githubRepository === null) {
+    return buildOutput({
+      ...emptyStatusOutput("github-pr-status requires an authoritative GitHub repository URL"),
+      prNumber,
+      expectations: expect,
+      missing: expect,
+    })
+  }
 
   const viewResult = await gh(
     "gh",
-    ["pr", "view", String(prNumber), "--json", prViewFields.join(",")],
+    withGitHubRepository(["pr", "view", String(prNumber), "--json", prViewFields.join(",")], githubRepository),
     workDir,
     context.signal,
     undefined,
@@ -266,4 +276,8 @@ export const __testing = {
   buildPrViewFields,
   evaluateExpectation,
   parseGitHubPrStatusExpectation,
+}
+
+function withGitHubRepository(args: string[], githubRepository?: string): string[] {
+  return githubRepository ? [...args, "--repo", githubRepository] : args
 }

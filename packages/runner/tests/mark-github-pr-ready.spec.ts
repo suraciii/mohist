@@ -28,7 +28,7 @@ function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
 }
 
-function context(withOverrides: JsonObject = {}): ActionContext {
+function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wr-ready-1",
     workId: "mark-pr-ready",
@@ -43,6 +43,7 @@ function context(withOverrides: JsonObject = {}): ActionContext {
       repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" },
       workspace: { path: WORKSPACE_PATH, branch: "mohist/run-wr-ready-1" },
       vars: { github: { pr: { number: 42, url: "https://github.com/example/repo/pull/42" } } },
+      ...variables,
     },
     workDir: WORKSPACE_PATH,
     projectId: "proj_1",
@@ -182,6 +183,33 @@ describe("mohist/mark-github-pr-ready action", () => {
       errorCode: null,
     })
     expect(ghCalls).toContain("gh pr ready 42")
+  })
+
+  it("scopes ready delivery to the authoritative Issue repository", async () => {
+    const prArguments: string[][] = []
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((_cmd, args) => {
+      if (args[0] === "--version" || args.join(" ") === "auth status") return ghOk("ok\n")
+      if (args[0] === "pr") prArguments.push(args)
+      if (args.join(" ").startsWith("pr view ")) return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
+      if (args.join(" ").startsWith("pr ready ")) return ghOk("ready\n")
+      return ghFail(`unexpected gh call: ${args.join(" ")}`)
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository()))
+
+    expect(result.status).toBe("success")
+    expect(prArguments).toHaveLength(2)
+    expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
+  })
+
+  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("config-error")
+    expect(output.message).toContain("authoritative GitHub repository URL")
   })
 
   it("does not call git push or update title/body — the action is a state transition only", async () => {
@@ -377,3 +405,14 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(readyStep.exitCode).toBe(124)
   })
 })
+
+function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
+  return {
+    repository: {
+      gitUrl,
+      baseBranch: "master",
+      remoteFingerprint: "authoritative-fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
+    },
+  }
+}

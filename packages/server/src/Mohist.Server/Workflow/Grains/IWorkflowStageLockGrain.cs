@@ -27,4 +27,9 @@ public static class WorkflowStageLockKeys
 {
     public static string ForProjectResource(string projectId, string resource) =>
         $"project:{projectId}:{resource}";
+
+    public static string ForProjectRepositoryResource(string projectId, string repositoryName, string resource) =>
+        $"project-repository:v1:{Encode(projectId)}{Encode(repositoryName)}{Encode(resource)}";
+
+    private static string Encode(string value) => $"{value.Length}:{value}";
 }

@@ -65,9 +65,18 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 | 11 | Session | Issue/Workflow/API/AgentOps | OHS+PL | session DTO |
 | 12 | Runner/Agent | Session | PL | runtime events, close events |
 | 13 | Session/Issue/Workflow/Runner | AgentOps | OHS | cross-domain report assembly |
+| 14 | Issue | IssueRepositoryCoordinator | C | narrow participant commands (create / reassign / reopen) |
+| 15 | Project Space | IssueRepositoryCoordinator | C | narrow participant commands (repository removal) |
 
 Runner process (TS) is infrastructure, not a context. It follows Workflow Action contracts
 and AgentJob dispatch contracts.
+
+`IssueRepositoryCoordinator` is a single-grain, Project-scoped 应用层 process manager
+（见 [`architecture.md`](architecture.md) 的「持久化应用协调者」节）。它不是独立的业务
+限界上下文——不持有 Issue、Project、仓库的事实，也不参与读取投影——只为 issue 417
+引入的「建立或破坏非终态绑定」一类命令提供 Project 级串行化与失败重投安全。它的
+两条关系行（14、15）表示协调者单向调用 Issue 与 Project 的窄 participant 接口；
+参与者不在该同步调用栈中回调协调者。
 
 ## Dependency invariants
 
@@ -91,6 +100,12 @@ and AgentJob dispatch contracts.
 - runner process is infrastructure: conforms to Workflow + Agent contracts, registers with Runner and proves presence by polling.
 - ProjectId is shared identity, not a Workflow model dependency.
 - Artifact belongs to Workflow, not independent.
+- `IssueRepositoryCoordinator` 是窄化特例 process manager：仅当下游是一条需要
+  Project 级串行化、重投安全、且结果会破坏「非终态 Issue 必须有声明中的仓库」不变量的
+  命令（Issue 创建、目标仓库重新指派、cancelled Issue reopen、仓库删除）时才进入。它
+  只持久化不确定命令的 fence，**不得**写多聚合、不得同步回调、不得保存重复业务
+  事实；完整规则见 [`architecture.md`](architecture.md)。Issue 与 Project 参与者不
+  在自己的命令中反向引用协调者，事件路由与其它上下文继续走原本的接口。
 
 ## Judgment rules
 

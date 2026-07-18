@@ -8,12 +8,12 @@ namespace Mohist.Server.Runner.Services.SignalR;
 
 public interface IRunnerWorkspaceClient
 {
-    Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default);
-    Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default);
-    Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string hash, CancellationToken ct = default);
-    Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default);
-    Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string path, CancellationToken ct = default);
-    Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, CancellationToken ct = default);
+    Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
+    Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
+    Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string hash, CancellationToken ct = default);
+    Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
+    Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string path, CancellationToken ct = default);
+    Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
 }
 
 public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
@@ -34,46 +34,46 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
         _grains = grains;
     }
 
-    public async Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public async Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null) return null;
-        return await InvokeAsync<RunnerWorkspaceDiffResult>(connectionId, "GetDiff", BuildQuery(workflowRunId, workspace, baseBranch), ct);
+        return await InvokeAsync<RunnerWorkspaceDiffResult>(connectionId, "GetDiff", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), ct);
     }
 
-    public async Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public async Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null) return null;
-        return await InvokeAsync<RunnerWorkspaceCommitsResult>(connectionId, "GetCommits", BuildQuery(workflowRunId, workspace, baseBranch), ct);
+        return await InvokeAsync<RunnerWorkspaceCommitsResult>(connectionId, "GetCommits", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), ct);
     }
 
-    public async Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string hash, CancellationToken ct = default)
+    public async Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string hash, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null) return null;
-        return await InvokeAsync<RunnerWorkspaceCommitDiffResult>(connectionId, "GetCommitDiff", BuildQuery(workflowRunId, workspace, baseBranch), hash, ct);
+        return await InvokeAsync<RunnerWorkspaceCommitDiffResult>(connectionId, "GetCommitDiff", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), hash, ct);
     }
 
-    public async Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
+    public async Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null)
             return new WorkspaceStatus { Exists = false, Reason = "runner_unavailable" };
-        var result = await InvokeAsync<WorkspaceStatus>(connectionId, "GetWorkspaceStatus", BuildQuery(workflowRunId, workspace, baseBranch), ct);
+        var result = await InvokeAsync<WorkspaceStatus>(connectionId, "GetWorkspaceStatus", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), ct);
         return result ?? new WorkspaceStatus { Exists = false, Reason = "workspace_removed" };
     }
 
-    public async Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string path, CancellationToken ct = default)
+    public async Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string path, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null)
             return new RunnerWorkspaceFileContentResult(null, null, "runner_unavailable");
-        return await InvokeAsync<RunnerWorkspaceFileContentResult>(connectionId, "GetFileContent", BuildQuery(workflowRunId, workspace, baseBranch), path, ct)
+        return await InvokeAsync<RunnerWorkspaceFileContentResult>(connectionId, "GetFileContent", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), path, ct)
             ?? new RunnerWorkspaceFileContentResult(null, null, "workspace_removed");
     }
 
-    public async Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, CancellationToken ct = default)
+    public async Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
         var connectionId = await ResolveConnectionIdAsync(projectId, workflowRunId);
         if (connectionId is null)
@@ -86,7 +86,7 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
                 Message: "Runner is not connected");
         }
 
-        return await InvokeAsync<WorkspaceRemovalResult>(connectionId, "RemoveWorkspace", BuildQuery(workflowRunId, workspace, baseBranch: null), ct)
+        return await InvokeAsync<WorkspaceRemovalResult>(connectionId, "RemoveWorkspace", BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), ct)
             ?? new WorkspaceRemovalResult(false, "missing", workspace.Path, "workspace_missing", "Workspace already removed");
     }
 
@@ -125,19 +125,31 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
         return await _hub.Clients.Client(connectionId).InvokeAsync<T?>(method, query, arg, timeout.Token);
     }
 
-    private static RunnerWorkspaceQuery BuildQuery(string workflowRunId, WorkspaceIdentity workspace, string? baseBranch)
+    private static RunnerWorkspaceQuery BuildQuery(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace)
     {
         var branch = string.IsNullOrWhiteSpace(workspace.Branch)
             ? WorkflowRunBranch.For(workflowRunId)
             : workspace.Branch;
         return new RunnerWorkspaceQuery(
+            WorkflowRunId: workflowRunId,
+            ProjectId: projectId,
+            IssueNumber: issueNumber,
+            RepositoryName: repository.Name,
+            RemoteFingerprint: repository.RemoteFingerprint,
+            RemoteIdentityVersion: repository.RemoteIdentityVersion,
             WorkspacePath: workspace.Path,
             Branch: branch,
-            BaseBranch: baseBranch);
+            BaseBranch: repository.BaseBranch);
     }
 }
 
 public sealed record RunnerWorkspaceQuery(
+    string? WorkflowRunId,
+    string? ProjectId,
+    int? IssueNumber,
+    string? RepositoryName,
+    string? RemoteFingerprint,
+    string? RemoteIdentityVersion,
     string? WorkspacePath,
     string? Branch,
     string? BaseBranch);

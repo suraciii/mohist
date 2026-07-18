@@ -55,6 +55,7 @@ public static class EventCatalog
         ReverseDns.IssueArchived,
         ReverseDns.IssueUnarchived,
         ReverseDns.IssueReopened,
+        ReverseDns.IssueRepositoryChanged,
         ReverseDns.InboxItemPersisted,
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
@@ -167,6 +168,7 @@ public static class EventCatalog
         public const string IssueArchived = "com.mohist.issue.archived";
         public const string IssueUnarchived = "com.mohist.issue.unarchived";
         public const string IssueReopened = "com.mohist.issue.reopened";
+        public const string IssueRepositoryChanged = "com.mohist.issue.repository-changed";
 
         public const string EpicCreated = "com.mohist.epic.created";
         public const string EpicUpdated = "com.mohist.epic.updated";

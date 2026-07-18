@@ -100,6 +100,40 @@ Events append in same transaction as state save. Dispatcher is the sole notifier
 因此「状态与事件同事务」只指同一聚合的状态和自己的事件，不意味着一次业务操作里
 涉及的全部聚合共享事务。
 
+### 持久化应用协调者（durable application process manager）
+
+当一条跨聚合命令需要在多个参与者之间串行化、且其结果在重试、激活丢失或网络中断下
+仍要可恢复时，可以引入一个持久的应用层 process manager（即协调者 grain）。它**不**
+是新的业务权威，而是对「本聚合提交 → durable handler → 目标聚合幂等命令」这一既定
+模式的窄化特例。它存在是为了把一组容易竞态的命令一次性收敛，并让每一步骤都具备
+重投安全。
+
+约束（缺一不可）：
+
+- **只持久化不确定的命令投递状态**。协调者 grain 内部只保存当前正在执行的命令 fence
+  （如 `Pending { commandId, kind, payload, expectedRevision }`）。命令得到明确 applied
+  或 rejected 结果后 fence 立即清空，不缓存任何业务结果。
+- **每条命令最多写入一个参与者聚合**。协调者一次同步调用链只进入一个参与者事务；它
+  不得跨聚合写、不得用 join table 或 repository 绕过聚合边界。若一次业务操作要影响
+  两个聚合，由各聚合自己的事务 + 持久事件接力，协调者只负责串行化与幂等。
+- **位于参与者接口的下游**。协调者只单向调用参与者的窄接口命令；参与者**不得**在
+  该同步调用栈中回调协调者，也不得持有协调者引用。`Issue`、`Project` 等参与者聚合
+  不感知协调者存在，事件路由、handler、其它上下文命令继续直接走它们自己的接口。
+- **不存储重复的业务事实**。协调者持久层不含 Issue / Project / 仓库 / WorkflowRun 的
+  业务状态——这些事实在对应聚合内才是唯一权威。协调者最多持有 `commandId`、命令种类、
+  canonical 化的命令参数快照与 expected revision 这些技术性 fence 字段。
+- **不得引入同步回调环**。协调者调用参与者 → 参与者提交 → 持久事件 → 协调者从
+  handler 重新进入；这一步必须经过 durable dispatch，不得由参与者在命令内部再
+  同步调回协调者。
+
+适用范围（当前唯一）：`IssueRepositoryCoordinatorGrain` 串行化 Project 内的
+Issue 创建 / 仓库重新指派 / cancelled Issue reopen / 仓库删除这一组会建立或破坏
+非终态绑定的命令。它对参与者使用窄接口（`IIssueParticipant` / `IProjectParticipant`），
+并通过 `ArchTest` 防止生产代码绕过协调者。
+
+不适用范围：参与者内部的不变量校验、跨聚合的最终一致性推进、UI 推送、session 与
+runtime 绑定——这些不走协调者。
+
 ## Persistence
 
 - Product state: persist.

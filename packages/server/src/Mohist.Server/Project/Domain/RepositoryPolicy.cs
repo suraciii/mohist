@@ -193,6 +193,14 @@ public static class RepositoryPolicy
             return new(default!, errors);
         }
 
+        if (TryFindAlias(name, gitUrl, current, out var alias))
+        {
+            errors.Add(new(
+                "repository_alias_conflict",
+                $"Repository '{name}' shares its Git remote with existing repository '{alias}'; rename one of them so each physical remote is addressable by exactly one resource name."));
+            return new(default!, errors);
+        }
+
         var setDefault = input.SetDefault ?? false;
         var anyCurrentDefault = current.Any(r => r.IsDefault);
         var isDefault = setDefault || !anyCurrentDefault;
@@ -233,6 +241,19 @@ public static class RepositoryPolicy
         if (hasBaseBranch && !TryNormalizeBaseBranch(input.BaseBranch, out baseBranch))
             return new(default!, new[] { new ValidationError("baseBranch", "baseBranch must be a non-empty string.") });
 
+        if (hasGitUrl && !string.Equals(gitUrl, repo.GitUrl, StringComparison.Ordinal))
+        {
+            if (TryFindAlias(targetName, gitUrl, current, out var alias))
+            {
+                return new(default!, new[]
+                {
+                    new ValidationError(
+                        "repository_alias_conflict",
+                        $"Repository '{targetName}' shares its Git remote with existing repository '{alias}'; rename one of them so each physical remote is addressable by exactly one resource name."),
+                });
+            }
+        }
+
         return new(
             new TransitionUpdate(targetName, repo, repo with
             {
@@ -240,6 +261,48 @@ public static class RepositoryPolicy
                 BaseBranch = baseBranch,
             }),
             []);
+    }
+
+    /// <summary>
+    /// Find an existing repository in <paramref name="current"/> whose
+    /// normalized Git remote fingerprint matches the candidate
+    /// (<paramref name="candidateName"/>, <paramref name="candidateGitUrl"/>).
+    /// <para>
+    /// Uses the credential-free <see cref="GitRemoteUrlNormalizer"/>
+    /// fingerprint so equivalent URLs (case, default ports, .git
+    /// suffix, scp-like vs ssh://) collapse to the same physical remote.
+    /// Returns false when the candidate URL is not normalizable, so
+    /// callers can fall back to whatever error they were already
+    /// preparing to surface.
+    /// </para>
+    /// </summary>
+    private static bool TryFindAlias(
+        string candidateName,
+        string candidateGitUrl,
+        IReadOnlyList<NormalizedRepository> current,
+        out string aliasName)
+    {
+        aliasName = string.Empty;
+        if (current is null || current.Count == 0)
+            return false;
+        var candidateFingerprint = GitRemoteUrlNormalizer.Fingerprint(candidateGitUrl);
+        if (candidateFingerprint is null)
+            return false;
+
+        foreach (var existing in current)
+        {
+            if (string.Equals(existing.Name, candidateName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var existingFingerprint = GitRemoteUrlNormalizer.Fingerprint(existing.GitUrl);
+            if (existingFingerprint is null) continue;
+            if (string.Equals(existingFingerprint.Fingerprint, candidateFingerprint.Fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                aliasName = existing.Name;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public sealed record TransitionUpdate(

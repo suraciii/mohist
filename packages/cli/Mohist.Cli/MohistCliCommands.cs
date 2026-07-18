@@ -218,6 +218,7 @@ internal static class MohistCliCommands
         string? Label = null,
         IReadOnlyList<string>? Labels = null,
         string? Priority = null,
+        string? Repository = null,
         bool? Archived = null,
         bool? All = null)
     {
@@ -231,6 +232,7 @@ internal static class MohistCliCommands
                 Add("label", label);
         }
         Add("priority", Priority);
+        Add("repository", Repository);
         Add("archived", Archived?.ToString().ToLowerInvariant());
         Add("all", All?.ToString().ToLowerInvariant());
         return parts.Count == 0 ? "" : "?" + string.Join("&", parts);

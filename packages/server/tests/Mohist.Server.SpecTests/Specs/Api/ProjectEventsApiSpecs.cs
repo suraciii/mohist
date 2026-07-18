@@ -568,6 +568,40 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
             Assert.Empty(entry.Data.EnumerateObject());
         });
     }
+
+    [Fact]
+    public async Task GetProjectEvents_RepositoryChangedAppearsInIssueStateBucket()
+    {
+        var project = await CreateProjectAsync("repo-change");
+        await SeedIssueAsync(project.Id, number: 11);
+
+        await AppendIssueEventAsync(project.Id, 11, "com.mohist.issue.repository-changed",
+            time: FixedTime,
+            subject: "11",
+            data: new
+            {
+                oldRepositoryRef = "main",
+                newRepositoryRef = "web",
+                commandId = "cmd-1",
+                expectedRevision = 1L,
+                appliedRevision = 2L,
+            });
+
+        // The issue-state bucket must include the new event type so the
+        // event feed surfaces repository reassignments alongside other
+        // issue lifecycle events. The activity-safe data filter only
+        // retains the curated subset of payload fields, so the assertion
+        // here confirms the event itself is exposed with its full envelope
+        // metadata, not its domain payload.
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?types=issue-state");
+
+        var entry = Assert.Single(response);
+        Assert.Equal("com.mohist.issue.repository-changed", entry.Type);
+        Assert.Equal("11", entry.Subject);
+        Assert.Equal("1.0", entry.SpecVersion);
+        Assert.Equal("issue", entry.SourceAggregateKind);
+    }
 }
 
 public class ProjectEventsModelDebug

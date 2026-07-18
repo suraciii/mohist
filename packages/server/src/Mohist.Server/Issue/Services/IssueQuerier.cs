@@ -149,8 +149,9 @@ public class IssueQuerier : IScopedService
         string? label = null,
         string? priority = null,
         bool? archived = null,
-        bool? all = null) =>
-        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all);
+        bool? all = null,
+        string? repositoryName = null) =>
+        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName);
 
     public async Task<List<IssueReadModel>> ListWithLabelFiltersAsync(
         string projectId,
@@ -159,7 +160,8 @@ public class IssueQuerier : IScopedService
         IReadOnlyList<string>? labels,
         string? priority,
         bool? archived,
-        bool? all)
+        bool? all,
+        string? repositoryName = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var list = await _loader.LoadProjectedAsync(db, projectId, project);
@@ -191,6 +193,13 @@ public class IssueQuerier : IScopedService
 
         if (!string.IsNullOrEmpty(priority))
             query = query.Where(i => string.Equals(i.Priority, priority, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(repositoryName))
+        {
+            var requested = repositoryName.Trim();
+            query = query.Where(i => i.RepositoryName is not null
+                && string.Equals(i.RepositoryName, requested, StringComparison.OrdinalIgnoreCase));
+        }
 
         return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }

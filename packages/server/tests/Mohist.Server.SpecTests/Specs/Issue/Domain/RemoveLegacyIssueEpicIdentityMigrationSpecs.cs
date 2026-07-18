@@ -65,8 +65,15 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
             Assert.DoesNotContain("\"EpicNumber\"", state, StringComparison.Ordinal);
         });
 
-        var issues = await verify.Issues.AsNoTracking().OrderBy(row => row.ProjectId).ToListAsync();
-        Assert.All(issues, row => Assert.Equal(7, IssueStore.Deserialize(row.State)!.EpicNumber));
+        // Read State via raw SQL rather than through IssueRow: the
+        // RepositoryName projection column is added by a later migration
+        // (AddIssueRepositoryProjection), so the IssueRow mapping is not
+        // usable at this migration point.
+        var issueStatesByProject = await ReadStringsAsync(
+            verify,
+            "SELECT \"State\" AS \"Value\" FROM \"Issues\" ORDER BY \"ProjectId\"");
+        Assert.All(issueStatesByProject, state =>
+            Assert.Equal(7, IssueStore.Deserialize(state)!.EpicNumber));
 
         Assert.Equal(
             ["/mohist/issues/issue_alpha_42:/mohist/projects/proj_alpha/issues/42"],
@@ -89,7 +96,7 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
         });
 
         await verify.GetService<IMigrator>().MigrateAsync(TargetMigration);
-        Assert.Equal(2, await verify.Issues.CountAsync());
+        Assert.Equal(2, await ReadIntAsync(verify, "SELECT COUNT(*) AS \"Value\" FROM \"Issues\""));
         Assert.Equal(2, await verify.WorkflowRuns.CountAsync());
     }
 
@@ -106,6 +113,9 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
 
     private static async Task<string[]> ReadStringsAsync(MohistDbContext context, string sql) =>
         await context.Database.SqlQueryRaw<string>(sql).ToArrayAsync();
+
+    private static async Task<int> ReadIntAsync(MohistDbContext context, string sql) =>
+        await context.Database.SqlQueryRaw<int>(sql).FirstAsync();
 
     private static TestDatabase CreateDatabase(string migration)
     {

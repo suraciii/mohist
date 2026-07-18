@@ -593,7 +593,7 @@ public class WorkflowRunControlApiSpecs
 
     private async Task CorruptWorkflowRunStateAsync(string wrId)
     {
-        await _grains.GetGrain<IWorkflowGrain>(wrId).DeactivateForTestAsync();
+        await DeactivateWorkflowAsync(wrId);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_connectionString)
@@ -609,8 +609,7 @@ public class WorkflowRunControlApiSpecs
 
     private async Task ForceFailedStatusAsync(string wrId)
     {
-        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.DeactivateForTestAsync();
+        await DeactivateWorkflowAsync(wrId);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_connectionString)
@@ -660,10 +659,26 @@ public class WorkflowRunControlApiSpecs
         await db.SaveChangesAsync();
     }
 
+    private async Task DeactivateWorkflowAsync(string workflowRunId)
+    {
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        var management = _grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat =>
+                stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowRunId, StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"Workflow grain '{workflowRunId}' to deactivate",
+            () => management.ForceActivationCollection(TimeSpan.Zero));
+    }
+
     private async Task ForceAwaitingApprovalAsync(string wrId)
     {
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.DeactivateForTestAsync();
+        await DeactivateWorkflowAsync(wrId);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_connectionString)

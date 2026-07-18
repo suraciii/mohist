@@ -6,6 +6,7 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { combinedGhOutput, parsePrViewWithDraft } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
+import { resolveGitHubRepository } from "./delivery-context.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MarkGitHubPrReadyOutput } from "./github-pr-types.js"
 
 type GhRunner = typeof runCommand
@@ -52,6 +53,8 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
     output: payload.output ?? message,
     steps,
   })
+  const githubRepository = resolveGitHubRepository(context)
+  if (githubRepository === null) return fail("config-error", "mark-github-pr-ready requires an authoritative GitHub repository URL")
 
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
@@ -59,7 +62,7 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
 
-  const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,isDraft,url"], workDir, context.signal, undefined, ghOpts)
+  const viewResult = await gh("gh", withGitHubRepository(["pr", "view", String(prNumber), "--json", "state,isDraft,url"], githubRepository), workDir, context.signal, undefined, ghOpts)
   const viewOutput = combinedGhOutput(viewResult)
   record("gh-pr-view", `pr view ${prNumber} --json state,isDraft,url`, viewResult.exitCode, viewOutput, timeoutStepMetadata(viewResult))
   if (viewResult.exitCode !== 0) {
@@ -96,7 +99,7 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
     })
   }
 
-  const readyResult = await gh("gh", ["pr", "ready", String(prNumber)], workDir, context.signal, undefined, ghOpts)
+  const readyResult = await gh("gh", withGitHubRepository(["pr", "ready", String(prNumber)], githubRepository), workDir, context.signal, undefined, ghOpts)
   const readyOutput = combinedGhOutput(readyResult)
   record("gh-pr-ready", `pr ready ${prNumber}`, readyResult.exitCode, readyOutput, timeoutStepMetadata(readyResult))
   if (readyResult.exitCode !== 0) {
@@ -144,4 +147,8 @@ export function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {
     output: json,
     exitCode: 1,
   }
+}
+
+function withGitHubRepository(args: string[], githubRepository?: string): string[] {
+  return githubRepository ? [...args, "--repo", githubRepository] : args
 }

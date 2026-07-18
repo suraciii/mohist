@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
 using Orleans;
@@ -38,6 +39,25 @@ public sealed record WorkspaceIdentity(
     [property: Id(1)] string? Branch = null,
     [property: Id(2)] string? ChangeDir = null);
 
+/// <summary>
+/// issue-417 T-006 (D4): authoritative, immutable repository
+/// context captured at workflow-run creation. Issue-backed runs
+/// MUST populate this; generic runs may leave it null. Once
+/// assigned, ordinary run commands cannot mutate it — the context
+/// is owned by the <see cref="WorkflowRun"/> aggregate and the
+/// run store preserves it across replay. The fingerprint is
+/// produced by <c>GitRemoteUrlNormalizer</c> and the version stamp
+/// travels alongside the digest so future Server/Runner releases
+/// can refuse stale comparisons rather than silently agreeing.
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkflowRepositoryContext(
+    [property: Id(0)] string Name,
+    [property: Id(1)] string GitUrl,
+    [property: Id(2)] string BaseBranch,
+    [property: Id(3)] string RemoteFingerprint,
+    [property: Id(4)] string RemoteIdentityVersion);
+
 public sealed class WorkflowRun
 {
     public required string Id { get; init; }
@@ -64,6 +84,18 @@ public sealed class WorkflowRun
     public DateTimeOffset? ReadySince { get; set; }
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
+    /// <summary>
+    /// issue-417 T-006 (D4): immutable repository snapshot assigned
+    /// at workflow start. Normal run commands MUST NOT mutate it;
+    /// <see cref="WorkflowRunExtensions.EnsureStarted"/> is the only
+    /// entry that touches this property, and it refuses to overwrite
+    /// a non-null value with a conflicting context.
+    /// </summary>
+    [JsonInclude]
+    public WorkflowRepositoryContext? Repository { get; private set; }
+
+    internal void AssignRepositoryContext(WorkflowRepositoryContext? repository) =>
+        Repository = repository;
     public List<ApprovalFeedback> Feedback { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;

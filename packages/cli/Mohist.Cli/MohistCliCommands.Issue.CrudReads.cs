@@ -12,6 +12,7 @@ internal static partial class IssueCommands
         var stageOpt = MohistCliCommands.StageOption();
         var labelOpt = MohistCliCommands.LabelFilterOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
+        var repositoryOpt = new Option<string?>("--repo") { Description = "Filter by target repository name" };
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
         var outputOpt = MohistCliCommands.OutputOption();
@@ -20,6 +21,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(stageOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(allOpt);
         cmd.Options.Add(archivedOpt);
         cmd.Options.Add(outputOpt);
@@ -30,6 +32,7 @@ internal static partial class IssueCommands
             var stage = ctx.GetValue(stageOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var repository = ctx.GetValue(repositoryOpt);
             var all = ctx.GetValue(allOpt);
             var archived = ctx.GetValue(archivedOpt);
             var output = ctx.GetValue(outputOpt);
@@ -52,6 +55,7 @@ internal static partial class IssueCommands
                     Stage: stage,
                     Labels: labels,
                     Priority: priority,
+                    Repository: repository,
                     Archived: archived ? true : null,
                     All: all ? true : null);
                 var (mode, exit) = api.ResolveOutputMode(output);

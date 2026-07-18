@@ -9,6 +9,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
 {
     Task StartAsync(WorkflowStartInput? input = null);
     Task EnsureStartedAsync(WorkflowIssueContext context);
+    Task EnsureStartedAsync(WorkflowIssueContext context, WorkflowStartSnapshot? snapshot);
     Task RefreshIssueContextAsync(WorkflowIssueContext context);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
@@ -54,6 +55,20 @@ public sealed record WorkflowIssueContext(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] int IssueNumber,
     [property: Id(2)] int? EpicNumber);
+
+/// <summary>
+/// issue-417 T-006 (D4): immutable start snapshot carried by the
+/// <c>IssueWorkStarted</c> durable event. Captured at the moment the
+/// Issue transaction commits, it is replayed verbatim into the
+/// WorkflowRun so dispatch/review/rebase read run-owned repository
+/// facts rather than live Project metadata. Null on replay paths that
+/// only refresh issue context (e.g. retry/rerun) where the run already
+/// holds its snapshot.
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkflowStartSnapshot(
+    [property: Id(0)] WorkflowRepositoryContext? Repository,
+    [property: Id(1)] WorkspaceIdentity? Workspace);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskInput(

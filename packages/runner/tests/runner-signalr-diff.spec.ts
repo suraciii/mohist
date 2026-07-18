@@ -109,7 +109,7 @@ function runFail(stderr = ""): CommandResult {
 
 function buildGitOnlyClient() {
   builders.length = 0
-  new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+  new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, { allowUnverifiedWorkspaceQueriesForTest: true })
   return lastBuilder()
 }
 

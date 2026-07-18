@@ -26,6 +26,7 @@ internal static class IssueEventSerializer
         [typeof(IssueArchived)] = EventCatalog.ReverseDns.IssueArchived,
         [typeof(IssueUnarchived)] = EventCatalog.ReverseDns.IssueUnarchived,
         [typeof(IssueReopened)] = EventCatalog.ReverseDns.IssueReopened,
+        [typeof(IssueRepositoryChanged)] = EventCatalog.ReverseDns.IssueRepositoryChanged,
     };
 
     internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
@@ -39,13 +40,25 @@ internal static class IssueEventSerializer
     /// <summary>
     /// CloudEvents 1.0.2 reverse-DNS <c>type</c> string for the bus.
     /// </summary>
-    public static string BusType(IssueEvent payload)
+    public static string BusType(IssueEvent payload) => Unwrap(payload) switch
     {
-        var variant = Unwrap(payload);
-        return BusTypes.TryGetValue(variant.GetType(), out var type)
-            ? type
-            : throw new InvalidOperationException($"No CloudEvents type for {variant.GetType().Name}");
-    }
+        IssueCreated => "com.mohist.issue.created",
+        IssueLabelsChanged => "com.mohist.issue.labels-changed",
+        IssuePriorityChanged => "com.mohist.issue.priority-changed",
+        IssueDraftChanged => "com.mohist.issue.draft-changed",
+        IssuePrerequisiteAdded => "com.mohist.issue.prerequisite-added",
+        IssuePrerequisiteRemoved => "com.mohist.issue.prerequisite-removed",
+        IssueWorkflowProfileChanged => "com.mohist.issue.workflow-profile-changed",
+        IssueEpicChanged => EventCatalog.ReverseDns.IssueEpicChanged,
+        IssueWorkStarted => "com.mohist.issue.work-started",
+        IssueCompleted => EventCatalog.ReverseDns.IssueCompleted,
+        IssueCancelled => EventCatalog.ReverseDns.IssueCancelled,
+        IssueArchived => "com.mohist.issue.archived",
+        IssueUnarchived => "com.mohist.issue.unarchived",
+        IssueReopened => "com.mohist.issue.reopened",
+        IssueRepositoryChanged => EventCatalog.ReverseDns.IssueRepositoryChanged,
+        _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
+    };
 
     public static JsonElement ToData(IssueEvent payload) =>
         JsonSerializer.SerializeToElement(Unwrap(payload), JsonOptions);
@@ -69,6 +82,7 @@ internal static class IssueEventSerializer
         IssueArchived x => x,
         IssueUnarchived x => x,
         IssueReopened x => x,
+        IssueRepositoryChanged x => x,
         null => throw new ArgumentNullException(nameof(payload)),
     };
 }

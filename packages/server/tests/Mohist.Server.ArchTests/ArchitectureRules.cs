@@ -306,6 +306,52 @@ public class ArchitectureRules
             .Check(_architecture);
     }
 
+    // issue-417 T-005: the narrow binding-participant interfaces
+    // (IIssueBindingParticipant, IProjectBindingParticipant) are the
+    // contract the coordinator uses to invoke idempotent commands on
+    // the Issue / Project grains. Only the coordinator may depend on
+    // them; any other production grain / route / service that needs to
+    // create an issue, reassign its repository, reopen it, or remove a
+    // Project repository must go through IIssueRepositoryCoordinatorGrain
+    // instead. Without this guard, a well-intentioned contributor
+    // could re-introduce a direct IssueGrain.CreateAsync call and
+    // silently break the orphan-binding invariant.
+    [Fact]
+    public void BindingParticipantInterfaces_OnlyConsumedByCoordinator()
+    {
+        var participantInterfaces = Interfaces()
+            .That().HaveNameEndingWith("BindingParticipant")
+            .Or().HaveNameEndingWith("BindingTarget")
+            .And().ResideInNamespace("Mohist.Server.*.Grains.Coordinator", useRegularExpressions: true)
+            .As("IssueRepositoryBindingParticipantInterfaces");
+
+        var coordinatorGrain = Classes()
+            .That().HaveNameEndingWith("CoordinatorGrain")
+            .And().ResideInNamespace("Mohist.Server.*.Grains.Coordinator", useRegularExpressions: true)
+            .As("IssueRepositoryCoordinatorGrain");
+
+        Classes().That().AreNot(coordinatorGrain)
+            .And().DoNotHaveNameEndingWith("BindingParticipantProxy")
+            .And().DoNotHaveName("IssueGrain")
+            .And().DoNotResideInNamespace("OrleansCodeGen", useRegularExpressions: true)
+            .Should().NotDependOnAny(participantInterfaces)
+            .Because("only the IssueRepositoryCoordinatorGrain and its binding-participant proxies may depend on the narrow binding-participant interfaces; production routes / services / other grains must call the coordinator instead")
+            .Check(_architecture);
+    }
+
+    [Fact]
+    public void IssueGrain_DoesNotExposeDirectRepositoryBindingCommands()
+    {
+        var names = typeof(Mohist.Server.Issue.Grains.IIssueGrain)
+            .GetMethods()
+            .Select(method => method.Name);
+
+        Assert.DoesNotContain("ReopenAsync", names);
+        Assert.DoesNotContain("ReopenWithTargetCheckAsync", names);
+        Assert.DoesNotContain("ChangeRepositoryAsync", names);
+        Assert.DoesNotContain("RecordRepositoryCommandReceiptAsync", names);
+    }
+
     [Fact]
     public void Api_ShouldNotDependOnOrleans()
     {

@@ -7,4 +7,6 @@ public class ProjectRow
     public string RepositoriesJson { get; set; } = "[]";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public long RepositoryRevision { get; set; }
+    public string? LastRepositoryCommandJson { get; set; }
 }

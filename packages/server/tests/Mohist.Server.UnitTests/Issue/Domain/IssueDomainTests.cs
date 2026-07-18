@@ -16,7 +16,7 @@ public class IssueDomainTests
             "project-1",
             1,
             "Build the feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
 
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
 
@@ -28,7 +28,7 @@ public class IssueDomainTests
     [Fact]
     public void Complete_IgnoresUnrelatedWorkflowRun()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
         issue.StartWorkflow("wr_1");
 
         var completed = issue.Complete("wr_other");
@@ -76,7 +76,7 @@ public class IssueDomainTests
         // the run that was bound to it. Reopen uses Issue.Reopen which
         // preserves the reference too; starting a new workflow requires an
         // explicit ClearStoppedWorkflow call on the grain (TryReuse path).
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
         issue.StartWorkflow("wr_1");
 
         issue.Close();
@@ -88,7 +88,7 @@ public class IssueDomainTests
     [Fact]
     public void Create_WithRisk_StoresValue()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "high");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "high", repositoryRef: "main");
 
         Assert.Equal("high", issue.Risk);
     }
@@ -96,7 +96,7 @@ public class IssueDomainTests
     [Fact]
     public void Create_WithoutRisk_LeavesNull()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Plain");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Plain", repositoryRef: "main");
 
         Assert.Null(issue.Risk);
     }
@@ -105,13 +105,13 @@ public class IssueDomainTests
     public void Create_WithInvalidRisk_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", risk: "extreme"));
+            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", risk: "extreme", repositoryRef: "main"));
     }
 
     [Fact]
     public void State_RoundTripsRisk()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "low");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Risked", risk: "low", repositoryRef: "main");
 
         var json = IssueStore.Serialize(issue);
         var reloaded = IssueStore.Deserialize(json);
@@ -125,7 +125,7 @@ public class IssueDomainTests
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Backlog item",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
 
         Assert.Null(issue.CompletedAt);
 
@@ -139,7 +139,7 @@ public class IssueDomainTests
         var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
 
         issue.Complete("wr_1", now);
@@ -155,7 +155,7 @@ public class IssueDomainTests
         var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
 
         issue.Close(now: now);
@@ -171,11 +171,11 @@ public class IssueDomainTests
         var terminalMoment = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         issue.Close(now: terminalMoment);
 
-        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        issue.Reopen(targetExists: true, now: new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal(terminalMoment, issue.CompletedAt);
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Backlog, issue.Status);
@@ -188,11 +188,11 @@ public class IssueDomainTests
         var secondComplete = new DateTime(2026, 6, 6, 2, 0, 0, DateTimeKind.Utc);
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         issue.Close(now: firstComplete);
 
-        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        issue.Reopen(targetExists: true, now: new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
         issue.ClearStoppedWorkflow("wr_1", new DateTime(2026, 6, 5, 3, 5, 0, DateTimeKind.Utc));
         issue.StartWorkflow("wr_2", new DateTime(2026, 6, 5, 3, 10, 0, DateTimeKind.Utc));
         issue.Complete("wr_2", secondComplete);
@@ -208,7 +208,7 @@ public class IssueDomainTests
         var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         issue.Complete("wr_1", now);
 
@@ -225,7 +225,7 @@ public class IssueDomainTests
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         var beforeTouch = issue.UpdatedAt;
         Assert.True(issue.AssignEpic(42, new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc)));
@@ -239,7 +239,7 @@ public class IssueDomainTests
     [Fact]
     public void RemoveEpic_OnlyClearsExpectedAffiliation()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature", repositoryRef: "main");
         issue.AssignEpic(42);
 
         Assert.False(issue.RemoveEpic(7));
@@ -254,7 +254,7 @@ public class IssueDomainTests
     [Fact]
     public void AssignEpic_NoOpWhenValueUnchanged()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature", repositoryRef: "main");
         issue.AssignEpic(42, new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
         var beforeTouch = issue.UpdatedAt;
         var eventsBefore = issue.PendingEvents.Count;
@@ -268,7 +268,7 @@ public class IssueDomainTests
     [Fact]
     public void AssignEpic_MovesDirectlyBetweenEpicsWithOneChangeEvent()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature", repositoryRef: "main");
         issue.AssignEpic(7);
         issue.ClearPendingEvents();
 
@@ -282,7 +282,7 @@ public class IssueDomainTests
     [Fact]
     public void State_RoundTripsEpicNumber()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature", repositoryRef: "main");
         issue.AssignEpic(42);
 
         var json = IssueStore.Serialize(issue);

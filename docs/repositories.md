@@ -1,6 +1,6 @@
 # 仓库
 
-一个 Project 是一个产品的工作空间。产品的代码可能分布在多个代码库里——server 一个、web 一个。Project 通过声明**仓库（repository）**来引用这些代码库：仓库是 Project 声明的执行资源，当前所有 Issue 使用 Project 的 default 仓库工作。
+一个 Project 是一个产品的工作空间。产品的代码可能分布在多个代码库里——server 一个、web 一个。Project 通过声明**仓库（repository）**来引用这些代码库：仓库是 Project 声明的执行资源，每个 Issue 绑定其中一个目标仓库工作。
 
 ## 心智模型
 
@@ -24,11 +24,13 @@ mo repo delete web
 
 - 创建 project 时用 `--path` 指定的代码库，会注册为该 project 的 default 仓库——单仓库场景一条命令起步，和过去完全一样。
 - default 仓库不能直接删除：先 `set-default` 到别的仓库。
-- 非 default 仓库可以删除。
+- 非 default 仓库只有在没有未完成 Issue 绑定时可以删除。backlog 和 in_progress Issue 会阻止删除；done 和 cancelled Issue 保留历史目标仓库名但不阻止删除。
 
 ## Issue 与仓库
 
-当前 Issue 不声明目标仓库。Issue 启动时使用 Project 的 default 仓库；多个仓库首先服务于 Project 的资源管理和默认仓库切换。按 Issue 选择仓库是独立能力，不属于本能力的命令面或执行语义。
+每个 Issue 在创建时绑定一个目标仓库。`mo issue create "Web change" --repo web` 显式选择；省略 `--repo` 时绑定创建时的 default 仓库，之后切换 default 不会改写已有 Issue。未启动的 Issue 可用 `mo issue update <编号> --repo <资源名>` 重指派；首次启动后绑定永久锁定。`mo issue list --repo <资源名>` 根据已存储的绑定筛选，`mo issue show` 显示目标仓库。
+
+工作流的 workspace、分支、diff、rebase、本地集成和 GitHub Pull Request 都使用该 Issue 的目标仓库与启动时解析的 base branch。Runner 必须能访问 Project 声明的每个仓库。
 
 ## Runner 约束
 
@@ -42,4 +44,3 @@ Runner 必须能访问 Project 声明的**所有**仓库。把仓库加进 Proje
 
 - **发布协同**：多个仓库的变更"同时上线"的协调不在 Mohist 职责内。
 - **一个 issue 检出多个仓库**：联调型工作（需要同时看到两个代码库）暂不支持，将来按真实需求单独评估。
-- **按 Issue 选择仓库**：Issue 目标仓库、`--repo` 命令参数和按仓库过滤 Issue 是独立能力，将来按真实需求单独评估。

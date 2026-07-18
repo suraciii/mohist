@@ -82,10 +82,11 @@ export async function waitChecksAndMergePr(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
+  githubRepository?: string,
 ): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
   const viewResult = await runGhReadWithRetry(
     gh,
-    ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number,mergeStateStatus"],
+    withGitHubRepository(["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number,mergeStateStatus"], githubRepository),
     workDir,
     signal,
     record,
@@ -139,7 +140,7 @@ export async function waitChecksAndMergePr(
     return initialMergeStateFailure
   }
 
-  const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record, options)
+  const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record, options, githubRepository)
   if (checksWait.kind === "failure") {
     const prefix = checksWait.errorCode === "pr-checks-unavailable"
       ? "checks status unavailable"
@@ -180,7 +181,7 @@ export async function waitChecksAndMergePr(
     }
     const mergeStatusResult = await runGhReadWithRetry(
       gh,
-      ["pr", "view", String(prNumber), "--json", "mergeStateStatus"],
+      withGitHubRepository(["pr", "view", String(prNumber), "--json", "mergeStateStatus"], githubRepository),
       workDir,
       signal,
       record,
@@ -229,7 +230,7 @@ export async function waitChecksAndMergePr(
     }
   }
 
-  const mergeArgs = ["pr", "merge", String(prNumber), "--squash", "--subject", subject, "--body", ""]
+  const mergeArgs = withGitHubRepository(["pr", "merge", String(prNumber), "--squash", "--subject", subject, "--body", ""], githubRepository)
   const mergeResult = await gh("gh", mergeArgs, workDir, signal, undefined, options)
   const mergeOutput = combinedGhOutput(mergeResult)
   record("gh-pr-merge", `pr merge ${prNumber} --squash --subject "${subject}"`, mergeResult.exitCode, mergeOutput, timeoutStepMetadata(mergeResult))
@@ -245,7 +246,7 @@ export async function waitChecksAndMergePr(
 
   const recheck = await runGhReadWithRetry(
     gh,
-    ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url"],
+    withGitHubRepository(["pr", "view", String(prNumber), "--json", "state,mergeCommit,url"], githubRepository),
     workDir,
     signal,
     record,
@@ -324,6 +325,7 @@ async function waitForPrChecks(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
+  githubRepository?: string,
 ): Promise<PrChecksWaitResult> {
   // Timestamp of the first poll that saw zero check runs, or null once checks
   // have appeared. Used to bound how long we wait before treating the branch
@@ -340,7 +342,7 @@ async function waitForPrChecks(
     }
     const checksResult = await runGhReadWithRetry(
       gh,
-      ["pr", "view", String(prNumber), "--json", "statusCheckRollup"],
+      withGitHubRepository(["pr", "view", String(prNumber), "--json", "statusCheckRollup"], githubRepository),
       workDir,
       signal,
       record,
@@ -467,4 +469,8 @@ async function runGhReadWithRetry(
     }
     if (signal.aborted) return result
   }
+}
+
+function withGitHubRepository(args: string[], githubRepository?: string): string[] {
+  return githubRepository ? [...args, "--repo", githubRepository] : args
 }

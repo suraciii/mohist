@@ -69,6 +69,7 @@ export interface RunnerSignalRClientOptions {
   sessionCommandJournal?: SessionCommandJournalStore | null
   reconcileStartedSessionCommand?: import("./session-command-handler.js").SessionCommandReconciler | null
   registry?: WorkspaceRegistry | null
+  allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
 export class RunnerSignalRClient {
@@ -83,6 +84,7 @@ export class RunnerSignalRClient {
   private readonly sessionCommandHandler: SessionCommandHandler | null
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
   private readonly reconcileStartedSessionCommand: import("./session-command-handler.js").SessionCommandReconciler | null
+  private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
     serverUrl: string,
@@ -109,6 +111,7 @@ export class RunnerSignalRClient {
     this.sessionCommandHandler = options.sessionCommandHandler ?? null
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
     this.reconcileStartedSessionCommand = options.reconcileStartedSessionCommand ?? null
+    this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
     this.registerLifecycleCallbacks()
@@ -148,6 +151,8 @@ export class RunnerSignalRClient {
   private registerHandlers(): void {
     registerWorkspaceGitHandlers(this.connection, {
       resolveQuery: resolveWorkspaceQuery,
+      runnerRoot: this.runnerRoot,
+      allowUnverifiedWorkspaceQueriesForTest: this.allowUnverifiedWorkspaceQueriesForTest,
     })
 
     registerWorkspaceRemovalHandler(this.connection, {

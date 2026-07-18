@@ -20,7 +20,7 @@ internal static partial class IssueCommands
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
         var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
-        var repositoryOpt = new Option<string?>("--repository") { Description = "Target repository name in multi-repository projects" };
+        var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name in multi-repository projects" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
@@ -212,7 +212,7 @@ internal static partial class IssueCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID; pass an empty string to clear and inherit the default" };
-        var repositoryOpt = new Option<string?>("--repository") { Description = "(Not allowed) Repository ownership is immutable after creation" };
+        var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name for an eligible reassignment" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
@@ -247,6 +247,7 @@ internal static partial class IssueCommands
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
+            var repository = ctx.GetValue(repositoryOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
             var stageModels = ctx.GetValue(stageModelsOpt);
@@ -259,6 +260,7 @@ internal static partial class IssueCommands
             var priorityProvided = ctx.GetResult(priorityOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
+            var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
             var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
             var stageModelVariantsProvided = ctx.GetResult(stageModelVariantsOpt) is not null;
             var readyProvided = IsOptionProvided(ctx, readyOpt);
@@ -267,11 +269,6 @@ internal static partial class IssueCommands
 
             async Task<int> UpdateAsync()
             {
-                if (ctx.GetResult(repositoryOpt) is not null)
-                {
-                    api.Error.WriteLine("--repository cannot be used with 'issue update' — repository ownership is immutable after creation");
-                    return 1;
-                }
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
@@ -310,6 +307,8 @@ internal static partial class IssueCommands
                     payload["priority"] = priority;
                 if (modelProvided)
                     payload["model"] = model;
+                if (repositoryProvided)
+                    payload["repositoryName"] = repository;
 
                 if (workflowProfileProvided)
                 {

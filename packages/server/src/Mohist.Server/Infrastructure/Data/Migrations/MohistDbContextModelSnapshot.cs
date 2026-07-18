@@ -803,6 +803,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
 
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RepositoryName")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.repositoryRef'), json_extract(State, '$.RepositoryRef'))", true);
+
                     b.Property<string>("Risk")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
@@ -837,6 +846,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "EpicNumber", "Number");
+
+                    b.HasIndex("ProjectId", "RepositoryName", "Status")
+                        .HasDatabaseName("IX_Issues_ProjectId_RepositoryName_Status");
 
                     b.ToTable("Issues", (string)null);
                 });
@@ -917,6 +929,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LastRepositoryCommandJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(63)
@@ -925,6 +940,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("RepositoriesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<long>("RepositoryRevision")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");

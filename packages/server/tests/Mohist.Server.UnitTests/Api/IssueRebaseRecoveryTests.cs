@@ -1,5 +1,5 @@
 using Mohist.Server.Api;
-using Mohist.Server.Project.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Api;
@@ -9,12 +9,12 @@ public class IssueRebaseRecoveryTests
     [Fact]
     public void BuildRebaseTaskWith_UsesResolvedRepositoryContext()
     {
-        var repository = new RepositoryInfo
-        {
-            Name = "secondary",
-            GitUrl = "git@secondary.example:repo.git",
-            BaseBranch = "release",
-        };
+        var repository = new WorkflowRepositoryContext(
+            Name: "secondary",
+            GitUrl: "git@secondary.example:repo.git",
+            BaseBranch: "release",
+            RemoteFingerprint: "abc",
+            RemoteIdentityVersion: "git-remote-url/v1");
 
         var input = IssueRoutes.BuildRebaseTaskWith("release", repository);
 

@@ -34,7 +34,7 @@ public class IssueLabelsTests
             1,
             "Build the feature",
             labels: labels,
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
 
         var evt = issue.PendingEvents.Single();
         var created = UnwrapCreated(evt);
@@ -45,7 +45,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_AddsNewKey_AndEmitsLabelsChanged()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.SetLabel("stream", "frontend", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
@@ -65,7 +65,7 @@ public class IssueLabelsTests
             "project-1",
             1,
             "Build the feature",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.SetLabel("stream", "backend", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
@@ -86,7 +86,7 @@ public class IssueLabelsTests
             1,
             "Build the feature",
             now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc),
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
         var updatedAt = issue.UpdatedAt;
         issue.ClearPendingEvents();
 
@@ -103,7 +103,7 @@ public class IssueLabelsTests
             "project-1",
             1,
             "Build the feature",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.RemoveLabel("stream", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
@@ -123,7 +123,7 @@ public class IssueLabelsTests
             "project-1",
             1,
             "Build the feature",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.RemoveLabel("missing");
@@ -142,7 +142,7 @@ public class IssueLabelsTests
             {
                 ["stream"] = "frontend",
                 ["old"] = "x",
-            });
+            }, repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.ReplaceLabels(
@@ -164,7 +164,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_InvalidKey_ThrowsArgumentException()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
 
         Assert.Throws<ArgumentException>(() => issue.SetLabel("Stream", "frontend"));
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream frontend", "frontend"));
@@ -176,7 +176,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_EmptyValue_ThrowsArgumentException()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
 
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream", ""));
         Assert.Throws<ArgumentException>(() => issue.SetLabel("stream", "   "));
@@ -185,7 +185,7 @@ public class IssueLabelsTests
     [Fact]
     public void SetLabel_ValidKey_Accepts()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", repositoryRef: "main");
 
         issue.SetLabel("stream", "frontend");
         issue.SetLabel("module-auth", "core");
@@ -204,7 +204,7 @@ public class IssueLabelsTests
         var labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["Stream"] = "frontend" };
 
         Assert.Throws<ArgumentException>(() =>
-            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels));
+            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels, repositoryRef: "main"));
     }
 
     [Fact]
@@ -213,7 +213,7 @@ public class IssueLabelsTests
         var labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "  " };
 
         Assert.Throws<ArgumentException>(() =>
-            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels));
+            Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Bad", labels: labels, repositoryRef: "main"));
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public class IssueLabelsTests
             "project-1",
             1,
             "Build the feature",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
         issue.ClearPendingEvents();
 
         issue.Update(
@@ -250,7 +250,7 @@ public class IssueLabelsTests
             1,
             "Build the feature",
             labels: labels,
-            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc), repositoryRef: "main");
         var updatedAt = issue.UpdatedAt;
         issue.ClearPendingEvents();
 
@@ -324,7 +324,7 @@ public class IssueLabelsTests
             "project-1",
             1,
             "Build the feature",
-            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" });
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" }, repositoryRef: "main");
 
         var json = IssueStore.Serialize(issue);
         using var doc = JsonDocument.Parse(json);

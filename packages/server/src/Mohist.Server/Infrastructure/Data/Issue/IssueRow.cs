@@ -27,6 +27,7 @@ public class IssueRow
     public string? PrerequisiteNumbersJson { get; set; }
     public string? Risk { get; set; }
     public int? EpicNumber { get; set; }
+    public string? RepositoryName { get; set; }
 
     private void PopulateIdentityFromState()
     {

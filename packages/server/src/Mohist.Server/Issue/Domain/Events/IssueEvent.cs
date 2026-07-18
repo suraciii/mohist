@@ -14,7 +14,8 @@ public union IssueEvent(
     IssueCancelled,
     IssueArchived,
     IssueUnarchived,
-    IssueReopened);
+    IssueReopened,
+    IssueRepositoryChanged);
 
 public sealed record IssueCreated(
     string Title,
@@ -22,6 +23,13 @@ public sealed record IssueCreated(
     IReadOnlyDictionary<string, string> Labels,
     string? Risk,
     string? RepositoryRef);
+
+public sealed record IssueRepositoryChanged(
+    string? OldRepositoryRef,
+    string NewRepositoryRef,
+    string CommandId,
+    long? ExpectedRevision,
+    long? AppliedRevision);
 
 public sealed record IssueLabelsChanged(
     IReadOnlyDictionary<string, string> OldLabels,
@@ -49,7 +57,28 @@ public sealed record IssueEpicChanged(
     int? EpicNumber);
 
 public sealed record IssueWorkStarted(
-    string WorkflowRunId);
+    string WorkflowRunId,
+    IssueWorkStartedRepository? Repository = null,
+    IssueWorkStartedWorkspace? Workspace = null,
+    IssueWorkStartedContext? Context = null);
+
+public sealed record IssueWorkStartedRepository(
+    string Name,
+    string GitUrl,
+    string BaseBranch,
+    string RemoteFingerprint,
+    string RemoteIdentityVersion);
+
+public sealed record IssueWorkStartedWorkspace(
+    string Path,
+    string? Branch,
+    string? ChangeDir);
+
+public sealed record IssueWorkStartedContext(
+    string ProjectId,
+    int IssueNumber,
+    string? Title,
+    string? Priority);
 
 public sealed record IssueCompleted(
     string WorkflowRunId);

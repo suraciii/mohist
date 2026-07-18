@@ -58,12 +58,12 @@ public class CliIssueExecutionConfigFlagsSpecs
     }
 
     [Fact]
-    public async Task IssueCreate_RepositoryFlag_IsSentInPostBody()
+    public async Task IssueCreate_RepoFlag_IsSentInPostBody()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "create", "My issue", "--body", "Hello", "--repository", "feature-repo"], output, error, fs, executor);
+            http, ["issue", "create", "My issue", "--body", "Hello", "--repo", "feature-repo"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
@@ -230,18 +230,32 @@ public class CliIssueExecutionConfigFlagsSpecs
     }
 
     [Fact]
-    public async Task IssueUpdate_RepositoryFlag_ExitsWithCodeOneAndClearError()
+    public async Task IssueUpdate_RepoFlag_SendsRepositoryNameAndReportsCanonicalTarget()
     {
         var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
+        handler.SetResponder((req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch)
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { number = 1, repositoryName = "web" },
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
+        });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "update", "1", "--repository", "other-repo"], output, error, fs, executor);
+            http, ["issue", "update", "1", "--repo", "WEB"], output, error, fs, executor);
 
-        Assert.Equal(1, exitCode);
-        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        var stderr = error.ToString();
-        Assert.Contains("--repository", stderr);
-        Assert.Contains("immutable", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exitCode);
+        var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        var body = JsonNode.Parse(patch.Body!)!;
+        Assert.Equal("WEB", body["repositoryName"]?.GetValue<string>());
+        Assert.Contains("repositoryName", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("web", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -284,7 +298,7 @@ public class CliIssueExecutionConfigFlagsSpecs
             [
                 "issue", "create", "My issue",
                 "--body", "Hello",
-                "--repository", "feature-repo",
+                "--repo", "feature-repo",
                 "--stage-models", "{\"plan\":\"anthropic/claude-sonnet\"}",
                 "--stage-model-variants", "{\"plan\":\"max\"}",
             ],
