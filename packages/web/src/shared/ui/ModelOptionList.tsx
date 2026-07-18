@@ -4,8 +4,7 @@ import { Command as CommandRoot } from 'cmdk'
 
 import { cn } from '@/shared/lib/utils'
 import { CommandEmpty, CommandGroup } from '@/shared/ui/components/command'
-import { ModelVariantChips } from './ModelSelect'
-import type { SelectableModel } from './ModelSelect'
+import { ModelVariantChips, type SelectableModel } from './model-option-list'
 import type { ModelVariantMap } from './model-variants'
 import { variantListFor } from './model-variants'
 

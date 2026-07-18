@@ -2,15 +2,11 @@ import { useState, useMemo, useCallback } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
-import { resolveVariantAgainstModel, variantListFor, type ModelVariantMap } from './model-variants'
+import { resolveVariantAgainstModel, type ModelVariantMap } from './model-variants'
 import { ModelOptionList } from './ModelOptionList'
+import { type SelectableModel } from './model-option-list'
 
-export interface SelectableModel {
-  id: string
-  name: string
-  badges: string[]
-  contextWindow: number
-}
+export { ModelVariantChips, type ModelVariantChipsProps, type SelectableModel } from './model-option-list'
 
 export interface ModelDescriptor {
   id: string
@@ -30,82 +26,6 @@ export function describeModel(id: string): ModelDescriptor {
     fullId: id,
     provider: id.slice(0, slashIdx),
   }
-}
-
-export interface ModelVariantChipsProps {
-  modelId: string | null
-  modelVariants?: ModelVariantMap
-  activeVariant?: string | null
-  size?: 'default' | 'compact'
-  baseTestId?: string
-  chipRefs?: (HTMLButtonElement | null)[]
-  onChipKeyDown?: (event: React.KeyboardEvent, chipIndex: number) => void
-  onSelect: (modelId: string, variant: string | null) => void
-}
-
-export function ModelVariantChips({
-  modelId,
-  modelVariants,
-  activeVariant,
-  size = 'default',
-  baseTestId,
-  chipRefs,
-  onChipKeyDown,
-  onSelect,
-}: ModelVariantChipsProps) {
-  const variants = useMemo(
-    () => variantListFor(modelId, modelVariants),
-    [modelId, modelVariants],
-  )
-  if (!modelId || variants.length === 0) return null
-
-  const isCompact = size === 'compact'
-  const chipBase = isCompact
-    ? 'min-h-11 min-w-11 px-2 text-[11px]'
-    : 'min-h-11 min-w-11 px-2.5 text-xs'
-
-  return (
-    <div
-      className={`flex flex-wrap items-center gap-1 ${isCompact ? 'ml-0' : 'ml-1'}`}
-      role="group"
-      aria-label={modelId ? `${describeModel(modelId).name} variants` : undefined}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {variants.map((variant, index) => {
-        const isActive = !!activeVariant && resolveVariantAgainstModel(modelId, activeVariant, modelVariants) === variant
-        return (
-          <button
-            key={variant}
-            ref={(el) => {
-              if (chipRefs) chipRefs[index] = el
-            }}
-            type="button"
-            data-variant-chip={variant}
-            data-variant-active={isActive ? 'true' : 'false'}
-            data-testid={baseTestId ? `${baseTestId}-${variant}` : undefined}
-            onPointerDown={(e) => {
-              e.stopPropagation()
-            }}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(modelId, variant)
-            }}
-            onKeyDown={(e) => onChipKeyDown?.(e, index)}
-            className={`inline-flex items-center justify-center rounded-full border font-medium transition-colors ${chipBase} ${
-              isActive
-                ? 'border-blue-500 bg-blue-500 text-white'
-                : 'border-input bg-background text-foreground hover:bg-muted'
-            }`}
-            aria-pressed={isActive}
-            aria-label={`Select variant ${variant}`}
-          >
-            {variant}
-          </button>
-        )
-      })}
-    </div>
-  )
 }
 
 export interface ModelSelectProps {
