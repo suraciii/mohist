@@ -818,6 +818,8 @@ internal sealed class MohistCliApi
         AgentSessionTranscript,
         AgentSubscriptionList,
         AgentSubscriptionShow,
+        RoutingRuleList,
+        RoutingRule,
         ProjectTemplateList,
         ProjectTemplateShow,
         ProjectWorkflowProfile,

@@ -147,6 +147,12 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSubscriptionShow:
                 RenderAgentSubscriptionShow(data);
                 break;
+            case MohistCliApi.TableShape.RoutingRuleList:
+                RenderRoutingRuleList(data);
+                break;
+            case MohistCliApi.TableShape.RoutingRule:
+                RenderRoutingRule(data);
+                break;
             case MohistCliApi.TableShape.IssueArchiveCompleted:
                 RenderIssueArchiveCompleted(data);
                 break;

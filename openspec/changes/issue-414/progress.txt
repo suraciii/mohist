@@ -31,3 +31,10 @@
 - Added `PersistedEventMatchInput` and `ProjectRecentEventReader`; the reader scans only the four real event tables, filters by the persisted `projectid` extension, orders by event time descending, bounds by `last`, and excludes synthetic feed facts.
 - Added `GET /api/projects/{projectRef}/routing/test` with default `last=20`, ordered shared-evaluator traces, matched-rule decisions, would-trigger Agent names, and explicit no-active-rules/no-replayable-events messages. The route never resolves or calls `IAgentLauncher`.
 - Added unit coverage for project filtering/order/bounding and API spec coverage for empty states and continue/stop trace. Focused unit tests pass (15 tests). Integration route specs are currently blocked during fixture startup by the repository's existing EF pending-model warning; no route assertion executes until that migration snapshot mismatch is resolved.
+
+## T-005
+
+- Added the top-level `routing` CLI command with `rule create/list/show/update/archive/move` and `routing test` subcommands. Rule operations resolve `--project`, `--project-id`, or the active project before making any HTTP request.
+- Rule create supports `--continue` and explicit `--before`/`--after`; move sends the target rule and before/after selector to the routing API. Rule list/show/update/archive support JSON and table output, with table order preserved.
+- Dry-run defaults to the server's fixed default when `--last` is omitted and renders event/outcome/Agent trace in table mode; JSON mode preserves the response document.
+- Added CLI specs for create positioning, list ordering, move-after payload, trace rendering, and local no-project failure. CLI test project passes 1401 tests.
