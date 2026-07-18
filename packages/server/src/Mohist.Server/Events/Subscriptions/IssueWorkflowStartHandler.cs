@@ -54,9 +54,7 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
                 Repository: new WorkflowRepositoryContext(
                     repository.Name,
                     repository.GitUrl,
-                    repository.BaseBranch,
-                    repository.RemoteFingerprint,
-                    repository.RemoteIdentityVersion),
+                    repository.BaseBranch),
                 Workspace: evt.Data.Workspace is { } workspace
                     ? new WorkspaceIdentity(workspace.Path, workspace.Branch, workspace.ChangeDir)
                     : null);

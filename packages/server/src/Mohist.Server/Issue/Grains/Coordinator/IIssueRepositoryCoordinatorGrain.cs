@@ -42,6 +42,8 @@ public interface IIssueRepositoryCoordinatorGrain : IGrainWithStringKey
     /// </summary>
     Task<IssueRepositoryBindingResult> RemoveRepositoryAsync(RepositoryCommandPayload.Remove payload, string commandId, long? expectedRevision);
 
+    Task<IssueRepositoryBindingResult> UpdateRepositoryAsync(RepositoryCommandPayload.Update payload, string commandId, long? expectedRevision);
+
     /// <summary>
     /// issue-417 T-005: test-only hook that lets a test force the
     /// coordinator activation to deactivate. Used to prove that
@@ -63,6 +65,7 @@ public enum IssueRepositoryBindingResultCode
     RepositoryNotFound = 7,
     RepositoryDefault = 8,
     RepositoryMissingOnReopen = 9,
+    RepositoryInvalid = 10,
 }
 
 [GenerateSerializer]

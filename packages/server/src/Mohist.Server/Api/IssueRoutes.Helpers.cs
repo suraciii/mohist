@@ -135,8 +135,6 @@ public static partial class IssueRoutes
                 ["name"] = repository.Name,
                 ["gitUrl"] = repository.GitUrl,
                 ["baseBranch"] = repository.BaseBranch,
-                ["remoteFingerprint"] = repository.RemoteFingerprint,
-                ["remoteIdentityVersion"] = repository.RemoteIdentityVersion,
             },
         };
 

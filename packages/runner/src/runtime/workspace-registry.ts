@@ -28,12 +28,7 @@ export interface WorkspaceRegistryEntry {
   issueNumber: number
   workflowRunId: string
   workspacePath: string
-  projectId?: string | null
-  repositoryName?: string | null
-  baseBranch?: string | null
   runBranch?: string | null
-  remoteFingerprint?: string | null
-  remoteIdentityVersion?: string | null
   phase: WorkspaceRegistryPhase
   materializedAt: string
   terminalAt: string | null
@@ -50,12 +45,7 @@ export interface RegisterInput {
   issueNumber: number
   workflowRunId: string
   workspacePath: string
-  projectId?: string | null
-  repositoryName?: string | null
-  baseBranch?: string | null
   runBranch?: string | null
-  remoteFingerprint?: string | null
-  remoteIdentityVersion?: string | null
 }
 
 export interface WorkspaceRegistryOptions {
@@ -131,12 +121,7 @@ export class WorkspaceRegistry {
       issueNumber: input.issueNumber,
       workflowRunId: input.workflowRunId,
       workspacePath: resolve(input.workspacePath),
-      projectId: input.projectId ?? null,
-      repositoryName: input.repositoryName ?? null,
-      baseBranch: input.baseBranch ?? null,
       runBranch: input.runBranch ?? null,
-      remoteFingerprint: input.remoteFingerprint ?? null,
-      remoteIdentityVersion: input.remoteIdentityVersion ?? null,
       phase: "active",
       materializedAt,
       terminalAt: existing?.terminalAt ?? null,
@@ -273,12 +258,7 @@ export class WorkspaceRegistry {
         issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,
         workflowRunId: entry.workflowRunId,
         workspacePath: resolve(entry.workspacePath),
-        projectId: typeof entry.projectId === "string" ? entry.projectId : null,
-        repositoryName: typeof entry.repositoryName === "string" ? entry.repositoryName : null,
-        baseBranch: typeof entry.baseBranch === "string" ? entry.baseBranch : null,
         runBranch: typeof entry.runBranch === "string" ? entry.runBranch : null,
-        remoteFingerprint: typeof entry.remoteFingerprint === "string" ? entry.remoteFingerprint : null,
-        remoteIdentityVersion: typeof entry.remoteIdentityVersion === "string" ? entry.remoteIdentityVersion : null,
         phase: entry.phase,
         materializedAt: entry.materializedAt,
         terminalAt: typeof entry.terminalAt === "string" ? entry.terminalAt : null,

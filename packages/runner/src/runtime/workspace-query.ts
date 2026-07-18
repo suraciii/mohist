@@ -12,8 +12,7 @@ export interface WorkspaceQuery {
   projectId?: string | null
   issueNumber?: number
   repositoryName?: string | null
-  remoteFingerprint?: string | null
-  remoteIdentityVersion?: string | null
+  gitUrl?: string | null
   workspacePath?: string | null
   branch?: string | null
   baseBranch?: string | null
@@ -36,20 +35,16 @@ export function resolveWorkspaceQuery(
   if (!query?.workspacePath || !query.baseBranch) return null
   const head = query.branch ?? null
   if (!head) return null
-  const identityFields = [query.workflowRunId, query.projectId, query.issueNumber, query.repositoryName, query.remoteFingerprint, query.remoteIdentityVersion]
+  const identityFields = [query.workflowRunId, query.gitUrl]
   const hasIdentity = identityFields.some((value) => value !== undefined && value !== null)
-  if (hasIdentity && (!query.workflowRunId || !query.projectId || query.issueNumber === undefined || !query.repositoryName || !query.remoteFingerprint || !query.remoteIdentityVersion)) return null
+  if (hasIdentity && (!query.workflowRunId || !query.gitUrl)) return null
   const resolved = { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
   return hasIdentity ? { ...resolved, identity: query } : resolved
 }
 
 export function hasCompleteWorkspaceIdentity(query: WorkspaceQuery | null | undefined): query is WorkspaceQuery & {
   workflowRunId: string
-  projectId: string
-  issueNumber: number
-  repositoryName: string
-  remoteFingerprint: string
-  remoteIdentityVersion: string
+  gitUrl: string
   workspacePath: string
   branch: string
   baseBranch: string

@@ -138,6 +138,7 @@ public enum BindingParticipantProbeKind
     Change = 1,
     Reopen = 2,
     Remove = 3,
+    Update = 4,
 }
 
 /// <summary>

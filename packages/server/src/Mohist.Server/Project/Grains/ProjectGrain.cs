@@ -311,12 +311,67 @@ public class ProjectGrain : Grain, IProjectGrain
         var repositories = ToRepositoryInfos(next);
         var updatedAt = Now();
         if (!await PersistRepositoriesWithReceiptAsync(
-                repositories, updatedAt, commandId, repoName, storedRevision))
+                repositories, updatedAt, commandId, "remove", repoName, storedRevision))
             return ProjectRepositoryRemovalOutcome.ProjectNotFound;
 
         _project.Repositories = repositories;
         _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return ProjectRepositoryRemovalOutcome.Removed;
+    }
+
+    public async Task<ProjectRepositoryUpdateOutcome> UpdateRepositoryWithReceiptAsync(
+        string repoName,
+        string? gitUrl,
+        string? baseBranch,
+        string commandId,
+        long? expectedRevision)
+    {
+        if (_project is null) return ProjectRepositoryUpdateOutcome.ProjectNotFound;
+
+        var (_, storedRevision, storedReceipt) = await ReadReceiptAsync();
+        if (storedReceipt is not null
+            && string.Equals(storedReceipt.CommandId, commandId, StringComparison.Ordinal)
+            && storedReceipt.Kind == "update"
+            && string.Equals(storedReceipt.RepositoryName, repoName, StringComparison.Ordinal))
+        {
+            return ProjectRepositoryUpdateOutcome.AlreadyApplied;
+        }
+
+        if (expectedRevision.HasValue && storedRevision != expectedRevision.Value)
+            throw new ProjectRepositoryStaleRevisionException(commandId, expectedRevision.Value, storedRevision);
+
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildUpdate(
+            repoName,
+            new RepositoryPolicy.TransitionInput(repoName, gitUrl, baseBranch),
+            current);
+        if (!build.IsSuccess)
+        {
+            if (build.Errors.Any(e => e.Code == "name" && e.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)))
+                throw new ProjectRepositoryNotFoundException(repoName);
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
+        }
+
+        if (await _blockerQuery.HasBlockerAsync(GrainKey, repoName))
+            throw new RepositoryInUseException(repoName);
+
+        var update = build.Value;
+        var next = current
+            .Select(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase) ? update.Next : r)
+            .ToList();
+        var validation = RepositoryPolicy.Validate(next);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesWithReceiptAsync(
+                repositories, updatedAt, commandId, "update", repoName, storedRevision))
+            return ProjectRepositoryUpdateOutcome.ProjectNotFound;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
+        return ProjectRepositoryUpdateOutcome.Updated;
     }
 
     private async Task<(bool HasRow, long Revision, ProjectRepositoryCommandReceipt? Receipt)> ReadReceiptAsync()
@@ -342,6 +397,7 @@ public class ProjectGrain : Grain, IProjectGrain
         IReadOnlyList<RepositoryInfo> repositories,
         DateTimeOffset updatedAt,
         string commandId,
+        string kind,
         string repositoryName,
         long currentRevision)
     {
@@ -353,7 +409,7 @@ public class ProjectGrain : Grain, IProjectGrain
         var appliedAt = updatedAt.UtcDateTime;
         var receipt = new ProjectRepositoryCommandReceipt(
             CommandId: commandId,
-            Kind: "remove",
+            Kind: kind,
             RepositoryName: repositoryName,
             AppliedRevision: nextRevision,
             AppliedAt: appliedAt);

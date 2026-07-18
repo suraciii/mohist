@@ -72,9 +72,7 @@ public sealed record IssueWorkStarted(
 public sealed record IssueWorkStartedRepository(
     string Name,
     string GitUrl,
-    string BaseBranch,
-    string RemoteFingerprint,
-    string RemoteIdentityVersion);
+    string BaseBranch);
 
 public sealed record IssueWorkStartedWorkspace(
     string Path,

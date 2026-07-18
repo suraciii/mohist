@@ -32,6 +32,7 @@ internal static class RepositoryCommandPayloadKinds
     public const string Change = "change";
     public const string Reopen = "reopen";
     public const string Remove = "remove";
+    public const string Update = "update";
 }
 
 /// <summary>
@@ -103,6 +104,16 @@ public abstract record RepositoryCommandPayload
     {
         public override string Kind => RepositoryCommandPayloadKinds.Remove;
     }
+
+    [GenerateSerializer]
+    public sealed record Update(
+        string ProjectId,
+        string RepositoryName,
+        string? GitUrl,
+        string? BaseBranch) : RepositoryCommandPayload
+    {
+        public override string Kind => RepositoryCommandPayloadKinds.Update;
+    }
 }
 
 internal static class RepositoryCommandPayloadCodec
@@ -138,6 +149,8 @@ internal static class RepositoryCommandPayloadCodec
             RepositoryCommandPayloadKinds.Reopen => JsonSerializer.Deserialize<RepositoryCommandPayload.Reopen>(
                 dataElement.GetRawText(), JSON.Options)!,
             RepositoryCommandPayloadKinds.Remove => JsonSerializer.Deserialize<RepositoryCommandPayload.Remove>(
+                dataElement.GetRawText(), JSON.Options)!,
+            RepositoryCommandPayloadKinds.Update => JsonSerializer.Deserialize<RepositoryCommandPayload.Update>(
                 dataElement.GetRawText(), JSON.Options)!,
             _ => throw new InvalidOperationException($"Unknown repository command kind '{kind}'"),
         };

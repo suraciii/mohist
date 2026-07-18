@@ -256,23 +256,12 @@ export class DefaultCleanupRunner implements CleanupRunner {
   }
 
   private async withValidWorkspace(entry: WorkspaceRegistryEntry, operation: (workspacePath: string) => Promise<boolean>): Promise<boolean> {
-    if (!entry.projectId || !entry.repositoryName || !entry.baseBranch || !entry.runBranch || !entry.remoteFingerprint || !entry.remoteIdentityVersion) return false
+    if (!entry.runBranch) return false
     if (entry.workspacePath !== issueWorkspacePath(this.runnerRoot, entry.workflowRunId)) return false
-    const expected: IssueWorkspaceMarker = {
-      issueNumber: entry.issueNumber,
-      workflowRunId: entry.workflowRunId,
-      projectId: entry.projectId!,
-      repositoryName: entry.repositoryName!,
-      baseBranch: entry.baseBranch!,
-      runBranch: entry.runBranch!,
-      remoteFingerprint: entry.remoteFingerprint!,
-      remoteIdentityVersion: entry.remoteIdentityVersion!,
-    }
     try {
       return await withManagedWorkspacePath(this.runnerRoot, entry.workspacePath, true, async (workspacePath) => {
         const markerRunId = await readMarkerWorkflowRunId(workspacePath)
         if (markerRunId !== entry.workflowRunId) return false
-        await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal)
         return await operation(workspacePath)
       })
     } catch {

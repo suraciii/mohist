@@ -63,8 +63,6 @@ public static class AuthoritativeRoutingOverlay
                 name = repository.Name,
                 gitUrl = repository.GitUrl,
                 baseBranch = repository.BaseBranch,
-                remoteFingerprint = repository.RemoteFingerprint,
-                remoteIdentityVersion = repository.RemoteIdentityVersion,
             });
         }
 

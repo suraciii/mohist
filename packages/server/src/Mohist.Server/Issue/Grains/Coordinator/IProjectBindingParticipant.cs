@@ -13,10 +13,16 @@ public interface IProjectBindingParticipant : IGrainWithStringKey
         RepositoryCommandPayload.Remove payload,
         string commandId,
         long? expectedRevision);
+
+    Task<ProjectBindingParticipantOutcome> UpdateRepositoryAsync(
+        RepositoryCommandPayload.Update payload,
+        string commandId,
+        long? expectedRevision);
 }
 
 public enum ProjectBindingParticipantOutcome
 {
-    Removed = 0,
-    AlreadyApplied = 1,
+    Updated = 0,
+    Removed = 1,
+    AlreadyApplied = 2,
 }

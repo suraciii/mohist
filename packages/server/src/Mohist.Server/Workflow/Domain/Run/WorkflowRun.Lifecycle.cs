@@ -139,9 +139,7 @@ public static partial class WorkflowRunExtensions
         ///   <item>A run already started with the same repository
         ///     context (matches <see cref="WorkflowRepositoryContext.Name"/>,
         ///     <see cref="WorkflowRepositoryContext.GitUrl"/>,
-        ///     <see cref="WorkflowRepositoryContext.BaseBranch"/>,
-        ///     <see cref="WorkflowRepositoryContext.RemoteFingerprint"/>,
-        ///     and <see cref="WorkflowRepositoryContext.RemoteIdentityVersion"/>)
+        ///     and <see cref="WorkflowRepositoryContext.BaseBranch"/>)
         ///     succeeds as a duplicate-replay no-op (no events).</item>
         ///   <item>A different context on the same run id, OR a
         ///     different workspace path/branch, throws
@@ -211,9 +209,7 @@ public static partial class WorkflowRunExtensions
             if (a is null || b is null) return false;
             return string.Equals(a.Name, b.Name, StringComparison.Ordinal)
                 && string.Equals(a.GitUrl, b.GitUrl, StringComparison.Ordinal)
-                && string.Equals(a.BaseBranch, b.BaseBranch, StringComparison.Ordinal)
-                && string.Equals(a.RemoteFingerprint, b.RemoteFingerprint, StringComparison.Ordinal)
-                && string.Equals(a.RemoteIdentityVersion, b.RemoteIdentityVersion, StringComparison.Ordinal);
+                && string.Equals(a.BaseBranch, b.BaseBranch, StringComparison.Ordinal);
         }
 
         private static bool WorkspaceIdentityEquals(WorkspaceIdentity? a, WorkspaceIdentity? b)

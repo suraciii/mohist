@@ -227,25 +227,34 @@ public static class ProjectRoutes
                     "Provide gitUrl and/or baseBranch to update repository metadata",
                     "repository_update_empty");
 
-            try
+            var coordinator = grains.GetGrain<IIssueRepositoryCoordinatorGrain>(project.Id);
+            var result = await coordinator.UpdateRepositoryAsync(
+                new RepositoryCommandPayload.Update(project.Id, repoName, req.GitUrl, req.BaseBranch),
+                commandId: $"update:{project.Id}:{repoName}:{Guid.NewGuid():N}",
+                expectedRevision: null);
+
+            switch (result.Code)
             {
-                var updated = await projectGrain.UpdateRepositoryAsync(
-                    repoName,
-                    gitUrl: req.GitUrl,
-                    baseBranch: req.BaseBranch);
-                return updated is not null
-                    ? ApiResults.Ok(updated)
-                    : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Conflict(ex.Message);
-            }
-            catch (ArgumentException ex)
-            {
-                if (TryGetRepositoryAliasError(ex, out var aliasMessage))
-                    return ApiResults.Conflict(aliasMessage!, "repository_alias_conflict");
-                return ApiResults.BadRequest(ex.Message);
+                case IssueRepositoryBindingResultCode.Applied:
+                case IssueRepositoryBindingResultCode.AlreadyApplied:
+                {
+                    var updated = await projectGrain.GetAsync();
+                    return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound($"Project '{project.Id}' not found");
+                }
+                case IssueRepositoryBindingResultCode.RepositoryInUse:
+                    return ApiResults.Conflict(
+                        result.Message ?? $"Repository '{repoName}' is referenced by one or more non-terminal issues",
+                        "repository_in_use");
+                case IssueRepositoryBindingResultCode.RepositoryNotFound:
+                    return ApiResults.NotFound(result.Message ?? $"Repository '{repoName}' not found in project '{project.Id}'");
+                case IssueRepositoryBindingResultCode.RepositoryInvalid:
+                    if (result.Message is not null && result.Message.Contains("shares its Git remote", StringComparison.OrdinalIgnoreCase))
+                        return ApiResults.Conflict(result.Message, "repository_alias_conflict");
+                    return ApiResults.BadRequest(result.Message ?? "Repository metadata is invalid");
+                case IssueRepositoryBindingResultCode.RepositoryStaleRevision:
+                    return ApiResults.Conflict(result.Message ?? "Repository revision is stale", "repository_stale_revision");
+                default:
+                    return ApiResults.Conflict(result.Message ?? "Repository update rejected");
             }
         });
 

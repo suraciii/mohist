@@ -114,17 +114,11 @@ export function registerWorkspaceGitHandlers(
     if (!deps.runnerRoot) return false
     if (query.workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) return false
     const expected: IssueWorkspaceMarker = {
-      issueNumber: query.issueNumber,
       workflowRunId: query.workflowRunId,
-      projectId: query.projectId,
-      repositoryName: query.repositoryName,
-      baseBranch: query.baseBranch,
       runBranch: query.branch,
-      remoteFingerprint: query.remoteFingerprint,
-      remoteIdentityVersion: query.remoteIdentityVersion,
     }
     try {
-      await validateWorkspaceIdentity(query.workspacePath, expected, signal, null, deps.runnerRoot)
+      await validateWorkspaceIdentity(query.workspacePath, expected, query.gitUrl, signal, null, deps.runnerRoot)
       return true
     } catch {
       return false
