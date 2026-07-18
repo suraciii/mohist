@@ -135,8 +135,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     State = table.Column<string>(type: "TEXT", nullable: false),
                     ProjectId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.ProjectId')", stored: true),
                     Number = table.Column<int>(type: "INTEGER", nullable: true, computedColumnSql: "json_extract(State, '$.Number')", stored: true),
-                    WorkflowRunId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.WorkflowRunId')", stored: true),
-                    ParentIssueNumber = table.Column<int>(type: "INTEGER", nullable: true)
+                    WorkflowRunId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.WorkflowRunId')", stored: true)
                 },
                 constraints: table =>
                 {
@@ -353,7 +352,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 {
                     table.PrimaryKey("PK_WorkflowVariables", x => x.WorkflowRunId);
                 });
-
             migrationBuilder.CreateIndex(
                 name: "IX_EpicIssues_ProjectId_IssueId",
                 table: "EpicIssues",

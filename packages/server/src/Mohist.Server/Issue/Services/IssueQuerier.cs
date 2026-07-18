@@ -203,10 +203,10 @@ public class IssueQuerier : IScopedService
                 && string.Equals(i.RepositoryName, requested, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (parentIssueNumber is not null)
-            query = query.Where(i => i.ParentIssueRef?.Number == parentIssueNumber);
-
-        return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
+        var issues = await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
+        return parentIssueNumber is null
+            ? issues
+            : issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
     }
 
     public async Task<IReadOnlyList<IssueReadModel>> ListInProgressWithApprovalGateAsync(string projectId)

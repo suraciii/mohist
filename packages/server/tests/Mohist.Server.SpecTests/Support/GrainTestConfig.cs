@@ -62,15 +62,8 @@ public static class GrainTestConfig
         // index. Once T-004 lands, the model matches the snapshot and
         // the warning suppression becomes a no-op for any test that
         // exercises the full Migrate() path.
-        db.Database.EnsureCreated();
+        db.Database.Migrate();
         ApplyWorkflowRunsStatusSchemaFix(db);
-        try
-        {
-            db.Database.ExecuteSqlRaw("ALTER TABLE \"Issues\" ADD COLUMN \"ParentIssueNumber\" INTEGER NULL;");
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.Ordinal))
-        {
-        }
     }
 
     /// <summary>

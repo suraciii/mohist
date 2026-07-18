@@ -227,9 +227,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasComputedColumnSql("json_extract(State, '$.Number')", true);
 
-                    b.Property<int?>("ParentIssueNumber")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")

@@ -304,6 +304,7 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
             entity.Property(e => e.PrerequisiteNumbersJson)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
+            entity.Property(e => e.ParentIssueNumber);
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
             // issue-417 T-002 / D3: stored generated RepositoryName projected
@@ -314,6 +315,7 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.repositoryRef'), json_extract(State, '$.RepositoryRef'))", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.Number });
+            entity.HasIndex(e => new { e.ProjectId, e.ParentIssueNumber, e.Number });
             entity.HasIndex(e => e.WorkflowRunId);
             entity.HasIndex(e => e.Status);
             // issue-417 T-002 / D3: deletion-blocker + list filter index.

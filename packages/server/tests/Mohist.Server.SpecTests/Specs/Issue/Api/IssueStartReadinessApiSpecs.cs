@@ -282,10 +282,11 @@ public class IssueStartReadinessApiSpecs
         var details = (JsonElement)envelope.Details!;
         Assert.Equal("parent-has-children", details.GetProperty("blocker").GetProperty("kind").GetString());
 
-        using var detachResponse = await _client.PatchAsJsonAsync(
+        using var detachResponse = await _client.PatchAsync(
             $"/api/projects/{project.Id}/issues/{child.Number}",
-            new { parentIssueNumber = (int?)null },
-            JsonOptions);
+            JsonContent.Create(
+                new { parentIssueNumber = (int?)null },
+                options: new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Assert.Equal(HttpStatusCode.OK, detachResponse.StatusCode);
 
         using var startResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);

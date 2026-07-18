@@ -142,7 +142,11 @@ public class IssueQuerierSpecs
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : new Dictionary<string, string>(StringComparer.Ordinal) { [label[0]] = label[1] },
         };
-        db.Issues.Add(new IssueRow { State = IssueStore.Serialize(issue) });
+        db.Issues.Add(new IssueRow
+        {
+            State = IssueStore.Serialize(issue),
+            ParentIssueNumber = issue.ParentIssueNumber,
+        });
         await db.SaveChangesAsync();
     }
 }
