@@ -25,3 +25,9 @@
 - Renamed launcher idempotency and generic-session trigger metadata from subscription id to rule id, including `AgentSessionQuery`, `AgentSessionRow`, EF mapping, and the session computed-column rename migration.
 - Removed the obsolete arbitration unit test and updated service/launcher/session test references to the new names. The legacy subscription resource remains for T-006 removal.
 - Runtime expression failures are represented as matched-but-skipped outcomes so dispatch logs them and continues without allowing them to stop table evaluation.
+
+## T-004
+
+- Added `PersistedEventMatchInput` and `ProjectRecentEventReader`; the reader scans only the four real event tables, filters by the persisted `projectid` extension, orders by event time descending, bounds by `last`, and excludes synthetic feed facts.
+- Added `GET /api/projects/{projectRef}/routing/test` with default `last=20`, ordered shared-evaluator traces, matched-rule decisions, would-trigger Agent names, and explicit no-active-rules/no-replayable-events messages. The route never resolves or calls `IAgentLauncher`.
+- Added unit coverage for project filtering/order/bounding and API spec coverage for empty states and continue/stop trace. Focused unit tests pass (15 tests). Integration route specs are currently blocked during fixture startup by the repository's existing EF pending-model warning; no route assertion executes until that migration snapshot mismatch is resolved.
