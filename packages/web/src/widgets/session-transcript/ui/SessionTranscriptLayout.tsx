@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { useNow } from '../model/use-now'
 import { selectActiveToolCall } from '../model/select-active-tool-call'
+import { selectToolCallGroupIds } from '../model/select-failed-tool-calls'
+import { useTranscriptLocate } from '../model/use-transcript-locate'
 import type { TurnRefsMap } from '../model/turn-refs'
 import { formatDuration } from '../model/format-duration'
 import { TurnList } from './TurnList'
 import { CopyFullTextButton } from './CopyFullTextButton'
 import { CurrentActivityBar } from './CurrentActivityBar'
+import { MiniTimeline } from './MiniTimeline'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -57,6 +60,8 @@ export function SessionTranscriptLayout({
   scrollContainerRef,
   now: providedNow,
 }: SessionTranscriptLayoutProps) {
+  const { expansionRegistry, highlightRegistry, locate } = useTranscriptLocate({ scrollContainerRef })
+  const toolCallGroupIds = useMemo(() => selectToolCallGroupIds(turns), [turns])
   const turnRefs = useRef<TurnRefsMap>(new Map()).current
   const [, setRefsVersion] = useState(0)
 
@@ -95,28 +100,31 @@ export function SessionTranscriptLayout({
   }, [isRunning])
 
   return (
-    <div className="px-4 py-6 min-w-0" data-scrollable="">
-      {turns.length === 0 ? (
-        <TranscriptEmptyState isRunning={isRunning} />
-      ) : (
-        <div className="min-w-0">
-          <div className="mb-3 flex items-center justify-end gap-2">
-            <CopyFullTextButton turns={turns} />
+    <div className="block xl:flex xl:flex-row xl:items-start px-4 py-6 min-w-0" data-scrollable="">
+      <MiniTimeline turns={turns} locate={locate} groupIdsByToolCallId={toolCallGroupIds} />
+      <div className="min-w-0 flex-1">
+        {turns.length === 0 ? (
+          <TranscriptEmptyState isRunning={isRunning} />
+        ) : (
+          <div className="min-w-0">
+            <div className="mb-3 flex items-center justify-end gap-2">
+              <CopyFullTextButton turns={turns} />
+            </div>
+            <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} expansionRegistry={expansionRegistry} highlightRegistry={highlightRegistry} />
+            {isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null && (
+              <ThinkingPlaceholder now={now} thinkingStartedAt={thinkingStartedAt} />
+            )}
+            {isRunning && isStreaming && <StreamingIndicator />}
+            {activeTool && now !== undefined && scrollContainerRef && (
+              <CurrentActivityBar
+                activeTool={activeTool}
+                now={now}
+                scrollContainerRef={scrollContainerRef}
+              />
+            )}
           </div>
-          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} />
-          {isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null && (
-            <ThinkingPlaceholder now={now} thinkingStartedAt={thinkingStartedAt} />
-          )}
-          {isRunning && isStreaming && <StreamingIndicator />}
-          {activeTool && now !== undefined && scrollContainerRef && (
-            <CurrentActivityBar
-              activeTool={activeTool}
-              now={now}
-              scrollContainerRef={scrollContainerRef}
-            />
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

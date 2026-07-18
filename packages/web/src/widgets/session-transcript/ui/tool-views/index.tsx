@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart, DisplayToolPart, DisplayChangedFile } from '../../model/session-transcript-display'
 import { formatElapsed, formatElapsedNow } from '../../model/format-duration'
@@ -15,6 +15,8 @@ import {
   deriveVerbLedTitle,
   getToolDisplayArgs,
 } from './shared'
+import type { ExpansionRegistry, HighlightRegistry } from '../../model/use-transcript-locate'
+import { useHighlight } from '../../model/use-highlight'
 
 export { BashContentView } from './bash-view'
 export { ReadContentView } from './read-view'
@@ -115,10 +117,13 @@ function deriveChangedFilesForExpand(part: DisplayToolPart): DisplayChangedFile[
 interface ToolRowViewProps {
   part: Extract<DisplayAssistantPart, { partType: 'tool' }>
   now?: number
+  highlightRegistry?: HighlightRegistry
 }
 
-export function ToolRowView({ part, now }: ToolRowViewProps) {
+export function ToolRowView({ part, now, highlightRegistry }: ToolRowViewProps) {
   const [expanded, setExpanded] = useState(false)
+  const { isHighlighted, setHighlighted } = useHighlight({ now })
+  const rowRef = useRef<HTMLDivElement>(null)
   const isRunning = part.status === 'running' || part.status === 'pending'
   const isFailed = part.status === 'failed'
   const family = deriveVerbFamily(part.normalizedName)
@@ -142,6 +147,22 @@ export function ToolRowView({ part, now }: ToolRowViewProps) {
   const expandable = !isRunning && hasExpandableDetail
 
   const displayType = getDisplayType(part.normalizedName)
+
+  useEffect(() => {
+    if (!highlightRegistry) return
+    highlightRegistry.set(part.toolCallId, setHighlighted)
+    return () => { highlightRegistry.delete(part.toolCallId) }
+  }, [highlightRegistry, part.toolCallId, setHighlighted])
+
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row || !isHighlighted) return
+    const dismiss = (event: PointerEvent) => {
+      if (!row.contains(event.target as Node)) setHighlighted(false)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [isHighlighted, setHighlighted])
 
   const renderExpandedContent = () => {
     if (part.error) {
@@ -228,12 +249,15 @@ export function ToolRowView({ part, now }: ToolRowViewProps) {
 
   return (
     <div
+      ref={rowRef}
       data-testid="tool-row"
       data-tone={isFailed ? 'danger' : part.status === 'completed' ? 'success' : isRunning ? 'info' : 'neutral'}
       data-tool-call-id={part.toolCallId}
       data-tool-state={part.status}
-      className="w-full min-w-0"
+      data-highlight={isHighlighted ? 'on' : undefined}
+      className={`relative w-full min-w-0 ${isHighlighted ? 'ring-2 ring-info ring-offset-2 rounded-sm' : ''}`}
     >
+      {isHighlighted && <span aria-hidden="true" data-testid="transcript-jump-highlight" className="absolute inset-0 pointer-events-none rounded-sm bg-info/10" />}
       <Button
         variant="ghost"
         size="sm"
@@ -329,14 +353,22 @@ export function ToolRowView({ part, now }: ToolRowViewProps) {
 }
 
 interface ContextGroupViewProps {
+  id?: string
   title: string
   tools: Extract<DisplayAssistantPart, { partType: 'tool' }>[]
   hasError: boolean
   now?: number
+  expansionRegistry?: ExpansionRegistry
+  highlightRegistry?: HighlightRegistry
 }
 
-export function ContextGroupView({ title, tools, hasError, now }: ContextGroupViewProps) {
+export function ContextGroupView({ id, title, tools, hasError, now, expansionRegistry, highlightRegistry }: ContextGroupViewProps) {
   const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (!id || !expansionRegistry) return
+    expansionRegistry.set(id, () => setExpanded(true))
+    return () => { expansionRegistry.delete(id) }
+  }, [expansionRegistry, id])
   const titleSegments = title.split(' · ')
   const titlePrefix = titleSegments[0]
   const titleDetail = titleSegments.length > 1 ? titleSegments.slice(1).join(' · ') : null
@@ -401,7 +433,7 @@ export function ContextGroupView({ title, tools, hasError, now }: ContextGroupVi
         >
           {tools.map((tool) => {
             const isInProgress = tool.status === 'running' || tool.status === 'pending'
-            return <ToolRowView key={tool.id} part={tool} now={isInProgress ? now : undefined} />
+            return <ToolRowView key={tool.id} part={tool} now={isInProgress ? now : undefined} highlightRegistry={highlightRegistry} />
           })}
         </div>
       )}

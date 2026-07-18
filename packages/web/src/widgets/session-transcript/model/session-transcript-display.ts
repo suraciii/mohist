@@ -114,7 +114,7 @@ export interface DisplayTurn {
   state: DisplayTurnState
 }
 
-const CONTEXT_TOOL_NAMES = new Set([
+export const CONTEXT_TOOL_NAMES = new Set([
   'read', 'read_file', 'glob', 'grep', 'search', 'list',
   'membrowse', 'memread', 'memsearch', 'search_files',
 ])

@@ -1,0 +1,17 @@
+## Codebase Patterns
+
+- `TurnList` keeps every turn and tool row mounted; per-turn `contentVisibility: 'auto'` preserves DOM anchor lookup while deferring browser layout/paint.
+- A `3rem` per-turn `containIntrinsicSize` matches the turn divider's minimum footprint and provides a stable off-screen placeholder.
+- jsdom verification for this strategy is structural: assert styles and `querySelector` anchor/expansion behavior; real off-screen painting remains browser-only.
+
+## T-001
+
+Moved lazy-render styling from the transcript `role="log"` container to every `TurnItem`, added `containIntrinsicSize: '3rem'`, and added structural specs for uniform styling, turn/tool anchor resolvability, and typed terminal detail expansion. Web typecheck and all 346 web test files (4821 tests) pass.
+
+## T-002
+
+Added failed-tool selection, shared transcript locate registries, row highlight behavior, context-group expansion registration, and activatable session error evidence. Typecheck and focused selector/locate tests pass. Full web tests still report existing fixture incompatibilities plus remaining integration coverage gaps; implementation requires further repair before commit.
+
+## T-003
+
+Added `projectSessionToTimelineNodes` (pure projection over `displayTurns`: turn boundary + failed/file-change/read-explore events, descending into `context-group.parts.tools[]` via `deriveVerbFamily` and `CONTEXT_TOOL_NAMES`). Added `MiniTimeline` component (sticky left rail, `hidden xl:flex` Tailwind gating, button per node, color tones per kind, click + Enter/Space activation routed through `useTranscriptLocate.locate({ toolCallId?, turnId?, groupId? })` — reuses T-002's expand→rAF→querySelector→scrollIntoView→highlight path unchanged). Wired into `SessionTranscriptLayout`: root became `block xl:flex xl:flex-row`, the rail is the first sibling, the transcript column became `flex-1 min-w-0`. Group-id lookup uses the existing `selectToolCallGroupIds(turns)` selector. Tests: 14 unit cases for the projection (node kinds, single-turn, context-group descent, no-event-for-non-qualifying-tools), 8 component cases for `MiniTimeline` (locate target shape, hidden below xl, context-group descent), 10 integration cases for the layout (rail sibling of transcript column, scrollIntoView on activation for turn/tool/failed-in-group nodes). Web typecheck and all 351 web test files (4857 tests) pass. Pre-existing `check:fsd` violations (SessionDetailShell importing from widgets/session-transcript/model) and `check:test-boundaries` (use-transcript-locate.test.ts using DOM globals in a `.test.ts` file) remain unchanged from T-002.
