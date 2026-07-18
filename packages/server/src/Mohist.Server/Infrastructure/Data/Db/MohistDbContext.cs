@@ -180,8 +180,8 @@ public class MohistDbContext : DbContext
 
             entity.Property(e => e.LabelTriggerEventId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerEventId), stored: false);
-            entity.Property(e => e.LabelTriggerSubscriptionId)
-                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerSubscriptionId), stored: false);
+            entity.Property(e => e.LabelTriggerRuleId)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerRuleId), stored: false);
 
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");

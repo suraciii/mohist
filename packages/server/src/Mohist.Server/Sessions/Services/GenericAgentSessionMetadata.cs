@@ -82,7 +82,7 @@ public static class GenericAgentSessionMetadata
     /// <see cref="TriggerEventId"/> this provides the forward link from session
     /// back to the triggering event and the subscription that caused it.
     /// </summary>
-    public const string TriggerSubscriptionId = "mohist.io/trigger/subscription-id";
+    public const string TriggerRuleId = "mohist.io/trigger/rule-id";
 
     public static IReadOnlyDictionary<string, string> LookupLabels(GenericAgentSessionContext context) =>
         Labels(context);

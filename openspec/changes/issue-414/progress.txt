@@ -18,3 +18,10 @@
 - Added transport-independent `RoutingTableEvaluator` with ordered traces, first-match stop, continue fanout, explicit inactive-agent/empty-prompt/runtime-error outcomes, execution probes, and an optional expression cache.
 - Extended `ResponsePromptRenderer` with the canonical `EventMatchInput` API and `{{event.<attr>}}` substitution. Present empty values render as empty; absent attributes remain verbatim; legacy aliases remain supported.
 - Focused evaluator and renderer unit tests pass: 20 tests in 32 ms.
+
+## T-003
+
+- Replaced the wildcard subscription dispatch handler with `RoutingDispatchHandler`; dispatch resolves the envelope project, loads only that project's active ordered rules, evaluates through `RoutingTableEvaluator`, and launches each executable outcome with event/rule trigger labels.
+- Renamed launcher idempotency and generic-session trigger metadata from subscription id to rule id, including `AgentSessionQuery`, `AgentSessionRow`, EF mapping, and the session computed-column rename migration.
+- Removed the obsolete arbitration unit test and updated service/launcher/session test references to the new names. The legacy subscription resource remains for T-006 removal.
+- Runtime expression failures are represented as matched-but-skipped outcomes so dispatch logs them and continues without allowing them to stop table evaluation.

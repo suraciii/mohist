@@ -7,7 +7,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <summary>
 /// Plain-text substitution of CloudEvent envelope-sourced placeholders in
 /// a subscription's <c>ResponsePrompt</c>. Used by
-/// <see cref="AgentSubscriptionDispatchHandler"/> to compose the
+/// <see cref="RoutingDispatchHandler"/> to compose the
 /// second-layer prompt fed into <see cref="Mohist.Server.Agent.Services.IAgentLauncher"/>.
 /// </summary>
 /// <remarks>

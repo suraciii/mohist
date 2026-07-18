@@ -12,7 +12,7 @@ using static Mohist.Server.SpecTests.Specs.Events.Subscriptions.AgentSubscriptio
 namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 
 /// <summary>
-/// Unit specs for <see cref="AgentSubscriptionDispatchHandler"/>. The
+/// Unit specs for <see cref="RoutingDispatchHandler"/>. The
 /// handler is the dispatch pipeline's event-driven entry point
 /// (issue-391 T-003). These specs cover:
 /// <list type="bullet">
@@ -31,7 +31,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 ///         run's metadata annotations) and skips when absent.</item>
 /// </list>
 /// </summary>
-public class AgentSubscriptionDispatchHandlerSpecs
+public class RoutingDispatchHandlerSpecs
 {
     [Fact]
     public async Task HandleAsync_HighestPriorityAgentWins_OnlyOneLaunchFires()
@@ -387,7 +387,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         var launch = Assert.Single(recorder.Calls);
         Assert.NotNull(launch.TriggerLabels);
         Assert.Equal("evt_trigger_42", launch.TriggerLabels![GenericAgentSessionMetadata.TriggerEventId]);
-        Assert.Equal("subs_xyz", launch.TriggerLabels[GenericAgentSessionMetadata.TriggerSubscriptionId]);
+        Assert.Equal("subs_xyz", launch.TriggerLabels[GenericAgentSessionMetadata.TriggerRuleId]);
     }
 
     [Fact]
@@ -498,7 +498,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         if (scope.Handler is null)
             throw new InvalidOperationException("handler missing");
         // Reflection-free access to the scope factory via test support.
-        return ((IServiceScopeFactory)typeof(AgentSubscriptionDispatchHandler)
+        return ((IServiceScopeFactory)typeof(RoutingDispatchHandler)
                 .GetField("_scopeFactory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                 .GetValue(scope.Handler)!).CreateScope();
     }

@@ -177,7 +177,7 @@ public class AgentSessionQuerySpecs
             [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
             [GenericAgentSessionMetadata.AgentName] = AgentA1Name,
             [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
         };
         await using (var db = fixture.CreateDbContext())
         {
@@ -195,14 +195,14 @@ public class AgentSessionQuerySpecs
 
         var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
         });
         Assert.Equal(new[] { "s_triggered" }, bySubscription.Select(m => m.Row.Id).ToArray());
 
         var byBoth = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
         });
         Assert.Equal(new[] { "s_triggered" }, byBoth.Select(m => m.Row.Id).ToArray());
 
@@ -249,7 +249,7 @@ public class AgentSessionQuerySpecs
             [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             [GenericAgentSessionMetadata.IssueNumber] = "999",
             [GenericAgentSessionMetadata.TriggerEventId] = "evt_runtime",
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "subs_runtime",
+            [GenericAgentSessionMetadata.TriggerRuleId] = "subs_runtime",
         };
         var state = JsonSerializer.Serialize(new
         {
@@ -299,7 +299,7 @@ public class AgentSessionQuerySpecs
 
         var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "subs_runtime",
+            [GenericAgentSessionMetadata.TriggerRuleId] = "subs_runtime",
         });
         Assert.Equal(new[] { "s_runtime" }, bySubscription.Select(m => m.Row.Id).ToArray());
 
@@ -315,7 +315,7 @@ public class AgentSessionQuerySpecs
             Assert.Equal(ProjectB, row.LabelProjectId);
             Assert.Equal("agent-launch", row.LabelSourceKind);
             Assert.Equal("evt_runtime", row.LabelTriggerEventId);
-            Assert.Equal("subs_runtime", row.LabelTriggerSubscriptionId);
+            Assert.Equal("subs_runtime", row.LabelTriggerRuleId);
         }
     }
 

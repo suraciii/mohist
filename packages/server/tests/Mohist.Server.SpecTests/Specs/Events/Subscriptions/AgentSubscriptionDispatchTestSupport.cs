@@ -15,10 +15,10 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 
 /// <summary>
-/// Test support for <see cref="AgentSubscriptionDispatchHandler"/>. Each
-/// test stands up an in-memory SQLite with the AgentSubscription table
+/// Test support for <see cref="RoutingDispatchHandler"/>. Each
+/// test stands up an in-memory SQLite with the RoutingRules table
 /// materialised (no full EF Migrate() needed — the dispatch handler only
-/// reads/writes AgentSubscription rows + Agent rows + AgentJob launches,
+/// reads RoutingRule rows + Agent rows + AgentJob launches,
 /// the latter going through the recording <see cref="RecordingAgentLauncher"/>
 /// stub). Each <see cref="Build"/> call creates a fresh <see cref="RecordingAgentLauncher"/>
 /// instance per test so the test can assert on captured launch calls.
@@ -29,9 +29,9 @@ internal static class AgentSubscriptionDispatchTestSupport
     {
         var database = CreateDatabase();
         var recording = new RecordingAgentLauncher();
-        var logger = new RecordingLogger<AgentSubscriptionDispatchHandler>();
+        var logger = new RecordingLogger<RoutingDispatchHandler>();
         var scopeFactory = new TestScopeFactory(database, recording);
-        var handler = new AgentSubscriptionDispatchHandler(
+        var handler = new RoutingDispatchHandler(
             scopeFactory,
             logger);
         return (recording, new TestScope(database, handler, logger));
@@ -98,16 +98,16 @@ internal static class AgentSubscriptionDispatchTestSupport
         private readonly TestSqliteDatabase _database;
         public TestScope(
             TestSqliteDatabase database,
-            AgentSubscriptionDispatchHandler handler,
-            RecordingLogger<AgentSubscriptionDispatchHandler> logger)
+            RoutingDispatchHandler handler,
+            RecordingLogger<RoutingDispatchHandler> logger)
         {
             _database = database;
             Handler = handler;
             Logger = logger;
         }
         public TestSqliteDatabase Database => _database;
-        public AgentSubscriptionDispatchHandler Handler { get; }
-        public RecordingLogger<AgentSubscriptionDispatchHandler> Logger { get; }
+        public RoutingDispatchHandler Handler { get; }
+        public RecordingLogger<RoutingDispatchHandler> Logger { get; }
         public async ValueTask DisposeAsync() => await _database.DisposeAsync();
     }
 

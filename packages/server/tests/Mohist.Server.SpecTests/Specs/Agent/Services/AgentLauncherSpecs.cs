@@ -74,7 +74,7 @@ public class AgentLauncherSpecs
                 triggerLabels: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [GenericAgentSessionMetadata.TriggerEventId] = "evt_abc123",
-                    [GenericAgentSessionMetadata.TriggerSubscriptionId] = "sub_def456",
+                    [GenericAgentSessionMetadata.TriggerRuleId] = "sub_def456",
                 });
         }
 
@@ -89,7 +89,7 @@ public class AgentLauncherSpecs
             record!.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerEventId));
         Assert.Equal(
             "sub_def456",
-            record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerSubscriptionId));
+            record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerRuleId));
 
         // Sanity: subscription-driven launch still carries the generic
         // labels that every agent-launch session has.
@@ -109,7 +109,7 @@ public class AgentLauncherSpecs
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [GenericAgentSessionMetadata.TriggerEventId] = "evt_repeat",
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "sub_repeat",
+            [GenericAgentSessionMetadata.TriggerRuleId] = "sub_repeat",
         };
 
         AgentLaunchResult first;
@@ -172,7 +172,7 @@ public class AgentLauncherSpecs
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
         };
         var runnerId = $"launcher-trigger-runner-{Guid.NewGuid():N}";
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -274,7 +274,7 @@ public class AgentLauncherSpecs
             .ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [GenericAgentSessionMetadata.TriggerEventId] = eventId,
-                [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+                [GenericAgentSessionMetadata.TriggerRuleId] = subscriptionId,
             });
         var session = Assert.Single(sessions);
         Assert.Equal(agent.Id, session.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
@@ -304,7 +304,7 @@ public class AgentLauncherSpecs
         // trigger metadata — neither key may appear at all (we
         // distinguish "absent" from "empty string").
         Assert.Null(record!.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerEventId));
-        Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerSubscriptionId));
+        Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerRuleId));
 
         var labels = record.Session.Metadata.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal);
         Assert.DoesNotContain(labels, kv => kv.Key.StartsWith("mohist.io/trigger/", StringComparison.Ordinal));
@@ -330,7 +330,7 @@ public class AgentLauncherSpecs
         var record = await LoadSessionByIdAsync(result.SessionId);
         Assert.NotNull(record);
         Assert.Null(record!.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerEventId));
-        Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerSubscriptionId));
+        Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerRuleId));
     }
 
     [Theory]

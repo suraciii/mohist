@@ -224,9 +224,9 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var handler = new AgentSubscriptionDispatchHandler(
+        var handler = new RoutingDispatchHandler(
             new ThrowingScopeFactory(),
-            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+            NullLogger<RoutingDispatchHandler>.Instance);
         var dispatcher = BuildDispatcher(
             events,
             dlq,
@@ -274,9 +274,9 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var handler = new AgentSubscriptionDispatchHandler(
+        var handler = new RoutingDispatchHandler(
             new ThrowingScopeFactory(),
-            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+            NullLogger<RoutingDispatchHandler>.Instance);
         var dispatcher = BuildDispatcher(
             events,
             dlq,
