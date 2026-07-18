@@ -19,7 +19,7 @@ interface CommandCall {
 
 class FakeGitRunner {
   readonly calls: CommandCall[] = []
-  readonly remoteBranches = new Set(["master"])
+  readonly remoteBranches = new Set(["master", "issue-symlink", "issue-parent-swap", "issue-mismatch", "issue-recover-registry"])
   readonly remoteUrl = "https://example.test/mohist.git"
   cloneResult: CommandResult | null = null
   lsRemoteResult: CommandResult | null = null
@@ -406,8 +406,6 @@ describe("DefaultCleanupRunner", () => {
     const entry = cleanupEntry(workspacePath, workflowRunId)
     await mkdir(join(workspacePath, ".mohist"), { recursive: true })
     await writeFile(join(workspacePath, ".mohist", "workspace.json"), JSON.stringify({
-      version: 2,
-      issueId: entry.issueId,
       issueNumber: entry.issueNumber,
       workflowRunId,
       projectId: entry.projectId,
@@ -476,7 +474,6 @@ function managedPathPattern(path: string) {
 
 function cleanupEntry(workspacePath: string, workflowRunId: string): WorkspaceRegistryEntry {
   return {
-    issueId: "issue-cleanup-parent-swap",
     issueNumber: 9,
     workflowRunId,
     workspacePath,

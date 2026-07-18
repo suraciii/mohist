@@ -61,8 +61,6 @@ export function registerWorkspaceRemovalHandler(
       return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
     }
     const expected: IssueWorkspaceMarker = {
-      version: 2,
-      issueId: null,
       issueNumber: query.issueNumber,
       workflowRunId: query.workflowRunId,
       projectId: query.projectId,

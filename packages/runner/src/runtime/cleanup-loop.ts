@@ -259,8 +259,6 @@ export class DefaultCleanupRunner implements CleanupRunner {
     if (!entry.projectId || !entry.repositoryName || !entry.baseBranch || !entry.runBranch || !entry.remoteFingerprint || !entry.remoteIdentityVersion) return false
     if (entry.workspacePath !== issueWorkspacePath(this.runnerRoot, entry.workflowRunId)) return false
     const expected: IssueWorkspaceMarker = {
-      version: 2,
-      issueId: entry.issueId,
       issueNumber: entry.issueNumber,
       workflowRunId: entry.workflowRunId,
       projectId: entry.projectId!,

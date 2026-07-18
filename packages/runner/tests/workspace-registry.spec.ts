@@ -370,7 +370,7 @@ describe("WorkspaceRegistry", () => {
     const staleAt = "2026-06-20T08:00:00.000Z"
     const materialisedAt = "2026-06-15T08:00:00.000Z"
     await writeFile(filePath, JSON.stringify({
-      version: 1,
+      version: 2,
       entries: {
         "wr-stuck": {
           issueNumber: 33,

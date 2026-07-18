@@ -114,8 +114,6 @@ export function registerWorkspaceGitHandlers(
     if (!deps.runnerRoot) return false
     if (query.workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) return false
     const expected: IssueWorkspaceMarker = {
-      version: 2,
-      issueId: null,
       issueNumber: query.issueNumber,
       workflowRunId: query.workflowRunId,
       projectId: query.projectId,

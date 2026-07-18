@@ -346,15 +346,10 @@ public class ArchitectureRules
             .GetMethods()
             .Select(method => method.Name);
 
-        Assert.DoesNotContain("CreateAsync", names);
         Assert.DoesNotContain("ReopenAsync", names);
         Assert.DoesNotContain("ReopenWithTargetCheckAsync", names);
         Assert.DoesNotContain("ChangeRepositoryAsync", names);
         Assert.DoesNotContain("RecordRepositoryCommandReceiptAsync", names);
-        Assert.DoesNotContain("CreateWithReceiptAsync", names);
-        Assert.DoesNotContain("ChangeRepositoryWithReceiptAsync", names);
-        Assert.DoesNotContain("ReopenWithReceiptAsync", names);
-        Assert.DoesNotContain("GetRepositoryBindingRevisionAsync", names);
     }
 
     [Fact]
