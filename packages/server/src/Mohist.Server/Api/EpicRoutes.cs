@@ -5,6 +5,7 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Domain;
 using System.Net.Http.Json;
 
 namespace Mohist.Server.Api;
@@ -70,6 +71,10 @@ public static class EpicRoutes
             catch (EpicClosedCannotLinkException ex)
             {
                 return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicNumber = ex.EpicNumber });
+            }
+            catch (IssueChildCannotJoinEpicException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "issue_is_sub_issue");
             }
             catch (InvalidOperationException ex)
             {
@@ -286,6 +291,10 @@ public static class EpicRoutes
         catch (EpicClosedCannotLinkException ex)
         {
             return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicNumber = ex.EpicNumber });
+        }
+        catch (IssueChildCannotJoinEpicException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "issue_is_sub_issue");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {

@@ -21,7 +21,8 @@ public record CreateIssueRequest(
     string? Risk = null,
     bool? IsDraft = null,
     string[]? AttachmentIds = null,
-    int[]? PrerequisiteNumbers = null);
+    int[]? PrerequisiteNumbers = null,
+    int? ParentIssueNumber = null);
 
 /// <summary>
 /// PATCH body for issue updates. Includes a <see cref="Raw"/> JsonElement
@@ -58,6 +59,7 @@ public record UpdateIssueRequest
     public string[]? AttachmentIds { get; init; }
     public string? WorkflowProfileId { get; init; }
     public string? RepositoryName { get; init; }
+    public int? ParentIssueNumber { get; init; }
 
     /// <summary>
     /// Raw JSON body, captured at bind time. Used by the route handler to
@@ -106,6 +108,7 @@ public record UpdateIssueRequest
         if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
         if (raw.TryGetProperty("workflowProfileId", out _)) fields.Add(nameof(WorkflowProfileId));
         if (raw.TryGetProperty("repositoryName", out _)) fields.Add(nameof(RepositoryName));
+        if (raw.TryGetProperty("parentIssueNumber", out _)) fields.Add(nameof(ParentIssueNumber));
 
         return new UpdateIssueRequest
         {
@@ -123,6 +126,7 @@ public record UpdateIssueRequest
             AttachmentIds = GetStringArray(raw, "attachmentIds"),
             WorkflowProfileId = GetString(raw, "workflowProfileId"),
             RepositoryName = GetString(raw, "repositoryName"),
+            ParentIssueNumber = GetNullableInt(raw, "parentIssueNumber"),
             Raw = raw,
             Fields = fields,
         };
@@ -173,6 +177,11 @@ public record UpdateIssueRequest
     private static bool? GetNullableBool(JsonElement raw, string name) =>
         raw.TryGetProperty(name, out var el) && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False)
             ? el.GetBoolean()
+            : null;
+
+    private static int? GetNullableInt(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var value)
+            ? value
             : null;
 
     private static string[]? GetStringArray(JsonElement raw, string name)

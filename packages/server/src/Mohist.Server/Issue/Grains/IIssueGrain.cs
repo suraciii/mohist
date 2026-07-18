@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
+    Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -55,6 +55,7 @@ public interface IIssueGrain : IGrainWithStringKey
         string[]? attachmentIds,
         string? workflowProfileId,
         int[]? prerequisiteNumbers,
+        int? parentIssueNumber,
         string commandId,
         long? expectedRevision);
 
@@ -106,7 +107,8 @@ public sealed record IssueChangeRepositoryCommand(
     [property: Id(5)] bool? IsDraft,
     [property: Id(6)] string[]? AttachmentIds,
     [property: Id(7)] string? WorkflowProfileId,
-    [property: Id(8)] IReadOnlySet<string>? PresentFields);
+     [property: Id(8)] IReadOnlySet<string>? PresentFields,
+     [property: Id(9)] int? ParentIssueNumber);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(

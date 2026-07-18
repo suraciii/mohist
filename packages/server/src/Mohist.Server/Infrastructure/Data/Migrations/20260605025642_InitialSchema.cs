@@ -352,7 +352,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 {
                     table.PrimaryKey("PK_WorkflowVariables", x => x.WorkflowRunId);
                 });
-
             migrationBuilder.CreateIndex(
                 name: "IX_EpicIssues_ProjectId_IssueId",
                 table: "EpicIssues",
@@ -394,6 +393,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 name: "IX_Issues_WorkflowRunId",
                 table: "Issues",
                 column: "WorkflowRunId");
+
 
             migrationBuilder.CreateIndex(
                 name: "IX_ProjectPromptTemplates_ProjectId_UpdatedAt",

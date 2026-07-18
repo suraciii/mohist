@@ -10,6 +10,46 @@ namespace Mohist.Server.UnitTests.Issue.Domain;
 public class IssueDomainTests
 {
     [Fact]
+    public void ParentTransitions_RecordChangesAndDetachIsIdempotent()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 2, "Child", repositoryRef: "main");
+
+        Assert.True(issue.AssignParent(1, new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc)));
+        Assert.Equal(1, issue.ParentIssueNumber);
+        Assert.Equal(new IssueParentChanged(null, 1), issue.PendingEvents.Last());
+
+        Assert.True(issue.RemoveParent());
+        Assert.Equal(new IssueParentChanged(1, null), issue.PendingEvents.Last());
+        var count = issue.PendingEvents.Count;
+        Assert.False(issue.RemoveParent());
+        Assert.Equal(count, issue.PendingEvents.Count);
+    }
+
+    [Fact]
+    public void ParentTransitions_RejectSelfAndEpicMemberAndStartedIssue()
+    {
+        var self = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Self", repositoryRef: "main");
+        Assert.Throws<IssueSelfParentException>(() => self.AssignParent(1));
+
+        var epicMember = Mohist.Server.Issue.Domain.Issue.Create("project-1", 2, "Epic", repositoryRef: "main");
+        epicMember.AssignEpic(42);
+        Assert.Throws<IssueEpicMemberCannotBecomeChildException>(() => epicMember.AssignParent(1));
+
+        var started = Mohist.Server.Issue.Domain.Issue.Create("project-1", 3, "Started", repositoryRef: "main");
+        started.StartWorkflow("wr_1");
+        Assert.Throws<IssueCannotBecomeChildException>(() => started.AssignParent(1));
+    }
+
+    [Fact]
+    public void AssignEpic_RejectsSubIssue()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 2, "Child", repositoryRef: "main");
+        issue.AssignParent(1);
+
+        Assert.Throws<IssueChildCannotJoinEpicException>(() => issue.AssignEpic(42));
+    }
+
+    [Fact]
     public void StartWorkflow_MarksIssueInProgress()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(

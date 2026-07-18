@@ -490,18 +490,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     console.warn = () => undefined
     const run = host.run(controller.signal)
     try {
-      // Wait for `initializeSharedConnection` to set the runtime
-      // handle on the host. The startup chain runs through
-      // `await this.openCodeRuntime.start(signal)`, then
-      // `connectRunner`, then the worker pool — all async, so we
-      // pump the microtask queue and tick the timer until the
-      // runtime is published.
-      let hostRuntime = (host as unknown as { openCodeRuntime: { ready(): boolean } | null }).openCodeRuntime
-      for (let i = 0; i < 50 && !hostRuntime; i += 1) {
-        await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
-        hostRuntime = (host as unknown as { openCodeRuntime: { ready(): boolean } | null }).openCodeRuntime
-      }
-      expect(hostRuntime).not.toBeNull()
+      const runtime = await installedHandles.runtimeCreated
+      expect(installedHandles.lastRuntime).toBe(runtime)
       // Drive the run loop until the first poll fires.
       for (let i = 0; i < 30 && poll.mock.calls.length === 0; i += 1) {
         await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)

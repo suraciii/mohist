@@ -63,6 +63,16 @@ export interface IssuePrerequisiteSummary {
   health: IssueHealth
 }
 
+export interface IssueParentRef {
+  number: number
+  title: string
+}
+
+export interface ChildIssuesSummary {
+  hasChildren: boolean
+  count: number
+}
+
 export type IssueStartBlocker =
   | { kind: 'draft' }
   | { kind: 'waiting-for'; issue: { number: number; title: string; stage?: string; status?: string } }
@@ -113,6 +123,8 @@ export interface Issue {
   blocker: IssueStartBlocker | null
   drift?: BaseDriftInfo | null
   primaryEpic?: { number: number | null; title: string; status: string; priority: string } | null
+  parentIssueRef?: IssueParentRef | null
+  childIssuesSummary?: ChildIssuesSummary | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
   feedback?: ApprovalFeedback[] | null

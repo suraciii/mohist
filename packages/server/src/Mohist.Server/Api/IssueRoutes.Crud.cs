@@ -27,13 +27,14 @@ public static partial class IssueRoutes
             bool? archived,
             bool? all,
             string? repository,
+            int? parent,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             if (TryValidateLabelFilters(label, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
 
-            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository);
+            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository, parent);
             return ApiResults.Ok(list);
         });
 
@@ -106,7 +107,8 @@ public static partial class IssueRoutes
                         IsDraft: req.IsDraft ?? true,
                         AttachmentIds: req.AttachmentIds,
                         WorkflowProfileId: requestedWorkflowProfileId,
-                        PrerequisiteNumbers: req.PrerequisiteNumbers),
+                        PrerequisiteNumbers: req.PrerequisiteNumbers,
+                        ParentIssueNumber: req.ParentIssueNumber),
                     commandId: commandId,
                     expectedRevision: null);
             }
@@ -131,6 +133,22 @@ public static partial class IssueRoutes
                     _ => $"prerequisite_{ex.Reason}",
                 };
                 return ApiResults.BadRequest(ex.Message, code);
+            }
+            catch (IssueDomain.IssueParentNotFoundException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "parent_not_found");
+            }
+            catch (IssueDomain.IssueParentIneligibleException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "parent_ineligible");
+            }
+            catch (IssueDomain.IssueParentIsChildException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "parent_is_sub_issue");
+            }
+            catch (IssueDomain.IssueEpicMemberCannotBecomeChildException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "issue_belongs_to_epic");
             }
 
             // Coordinator-level results are mapped onto the same HTTP
@@ -253,7 +271,8 @@ public static partial class IssueRoutes
                             AttachmentIds: req.AttachmentIds,
                             WorkflowProfileId: workflowProfileIdForUpdate,
                             PresentFields: req.Fields,
-                            Title: req.Title),
+                            Title: req.Title,
+                            ParentIssueNumber: req.ParentIssueNumber),
                         commandId: $"change:{project.Id}:{number}:{Guid.NewGuid():N}",
                         expectedRevision: null);
                 }
@@ -261,6 +280,11 @@ public static partial class IssueRoutes
                 {
                     return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
                 }
+                catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
+                catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
+                catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
+                catch (IssueDomain.IssueHasChildrenCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "target_has_children"); }
+                catch (IssueDomain.IssueEpicMemberCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "issue_belongs_to_epic"); }
                 catch (InvalidOperationException ex)
                 {
                     return ApiResults.Conflict(ex.Message);
@@ -315,12 +339,18 @@ public static partial class IssueRoutes
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,
-                    WorkflowProfileId: workflowProfileIdForUpdate));
+                    WorkflowProfileId: workflowProfileIdForUpdate,
+                    ParentIssueNumber: req.ParentIssueNumber));
             }
             catch (IssueDomain.WorkflowProfileLockedException ex)
             {
                 return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
             }
+            catch (IssueDomain.IssueParentNotFoundException ex) { return ApiResults.BadRequest(ex.Message, "parent_not_found"); }
+            catch (IssueDomain.IssueParentIneligibleException ex) { return ApiResults.Conflict(ex.Message, "parent_ineligible"); }
+            catch (IssueDomain.IssueParentIsChildException ex) { return ApiResults.Conflict(ex.Message, "parent_is_sub_issue"); }
+            catch (IssueDomain.IssueHasChildrenCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "target_has_children"); }
+            catch (IssueDomain.IssueEpicMemberCannotBecomeChildException ex) { return ApiResults.Conflict(ex.Message, "issue_belongs_to_epic"); }
             catch (IssueRepositoryUnknownException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "repository_not_found");

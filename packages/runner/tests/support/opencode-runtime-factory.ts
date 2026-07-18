@@ -40,6 +40,7 @@ export interface FakeRuntimeHandles {
   }
   server: OpencodeServerHandle
   lastRuntime: OpenCodeRuntime | null
+  runtimeCreated: Promise<OpenCodeRuntime>
 }
 
 export interface InstallFakeRuntimeArgs {
@@ -85,12 +86,16 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
       closed.value = true
     },
   }
+  let resolveRuntime!: (runtime: OpenCodeRuntime) => void
   const handles: FakeRuntimeHandles = {
     subscription,
     catalogList: vi.fn<() => Promise<RuntimeModelCatalog>>(async () => seed),
     client: { health },
     server,
     lastRuntime: null,
+    runtimeCreated: new Promise(resolve => {
+      resolveRuntime = resolve
+    }),
   }
   setOpenCodeRuntimeFactoryForTest((deps: OpenCodeRuntimeDeps) => {
     const catalogClient = {
@@ -110,6 +115,7 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
       ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
     })
     handles.lastRuntime = runtime
+    resolveRuntime(runtime)
     return runtime
   })
   return handles

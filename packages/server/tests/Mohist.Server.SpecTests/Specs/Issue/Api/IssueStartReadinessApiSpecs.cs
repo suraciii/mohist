@@ -260,6 +260,39 @@ public class IssueStartReadinessApiSpecs
         Assert.Equal(prereq.Number, waiting.Issue.Number);
     }
 
+    [Fact]
+    public async Task StartIssue_OnParentWithChildren_ReturnsParentBlockerCode()
+    {
+        var project = await CreateProjectAsync();
+        var parent = await CreateIssueAsync(project.Id, "Parent", isDraft: false);
+        var child = await CreateIssueAsync(project.Id, "Child", isDraft: false);
+
+        using var attachResponse = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{child.Number}",
+            new { parentIssueNumber = parent.Number },
+            JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, attachResponse.StatusCode);
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope>(JsonOptions);
+        Assert.NotNull(envelope);
+        Assert.False(envelope!.Success);
+        Assert.Equal("is_parent", envelope.Code);
+        var details = (JsonElement)envelope.Details!;
+        Assert.Equal("parent-has-children", details.GetProperty("blocker").GetProperty("kind").GetString());
+
+        using var detachResponse = await _client.PatchAsync(
+            $"/api/projects/{project.Id}/issues/{child.Number}",
+            JsonContent.Create(
+                new { parentIssueNumber = (int?)null },
+                options: new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(HttpStatusCode.OK, detachResponse.StatusCode);
+
+        using var startResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{parent.Number}/start", null);
+        Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
+    }
+
     private async Task<ProjectResponse> CreateProjectAsync()
     {
         using var response = await _client.PostAsJsonAsync(
