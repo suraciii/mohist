@@ -1,93 +1,10 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen, waitFor } from '../../../../tests/test-utils'
+import { fireEvent, screen, waitFor } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useMswServer } from '../../../../tests/support/msw'
-import { AiSettingsSection } from './AiSettingsSection'
-
-let _opencodeRuntime: { mode: string; command: string; model: string | null; note: string } = {
-  mode: 'local',
-  command: 'opencode',
-  model: 'openai/gpt-4',
-  note: '',
-}
-let _availableModels: { models: string[]; modelVariants: Record<string, string[]> } = {
-  models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'],
-  modelVariants: {},
-}
-let _workflowVariables: Record<string, unknown> = { vars: null, stages: null }
-const patchCaptures: Array<Record<string, unknown>> = []
-
-useMswServer(
-  http.get('/api/opencode/runtime', () =>
-    HttpResponse.json({ success: true, data: _opencodeRuntime }),
-  ),
-  http.get('/api/projects/:projectId/opencode/models', () =>
-    HttpResponse.json({ success: true, data: _availableModels }),
-  ),
-  http.get('/api/projects/:projectId/workflow-profile/variables', () =>
-    HttpResponse.json({ success: true, data: _workflowVariables }),
-  ),
-  http.patch('/api/projects/:projectId/workflow-profile/variables', async ({ request }) => {
-    const body = await request.json()
-    patchCaptures.push(body as Record<string, unknown>)
-    return HttpResponse.json({ success: true, data: body })
-  }),
-)
-
-function renderSection() {
-  return render(<AiSettingsSection />)
-}
-
-interface ArrangeOptions {
-  models?: string[]
-  modelVariants?: Record<string, string[]>
-  defaultModel?: string | null
-  defaultVariant?: string | null
-  stageModels?: Record<string, string> | null
-  stageModelVariants?: Record<string, string> | null
-}
-
-function arrangeLoaded(options: ArrangeOptions = {}) {
-  const models = options.models ?? ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2']
-  const modelVariants = options.modelVariants ?? {}
-
-  _availableModels = { models, modelVariants }
-  _opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
-
-  const vars: Record<string, unknown> = {}
-  if (options.defaultModel) {
-    const agent: Record<string, unknown> = { type: 'opencode', model: options.defaultModel }
-    if (options.defaultVariant) agent.variant = options.defaultVariant
-    vars.agent = agent
-  }
-
-  const stages: Record<string, { vars?: Record<string, unknown> | null }> = {}
-  if (options.stageModels) {
-    for (const [stage, model] of Object.entries(options.stageModels)) {
-      const agent: Record<string, unknown> = { type: 'opencode', model }
-      const variant = options.stageModelVariants?.[stage]
-      if (variant) agent.variant = variant
-      stages[stage] = { vars: { agent } }
-    }
-  }
-
-  _workflowVariables = {
-    vars: Object.keys(vars).length > 0 ? vars : null,
-    stages: Object.keys(stages).length > 0 ? stages : null,
-  }
-}
+import { describe, expect, it } from 'vitest'
+import { arrangeLoaded, patchCaptures, renderSection } from './AiSettingsSectionTestSupport'
 
 describe('AiSettingsSection', () => {
-  afterEach(() => {
-    vi.clearAllMocks()
-    patchCaptures.length = 0
-    _availableModels = { models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'], modelVariants: {} }
-    _opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
-    _workflowVariables = { vars: null, stages: null }
-  })
-
   it('does not render the Runtime/Command/Models summary block', async () => {
     arrangeLoaded()
     renderSection()
@@ -191,14 +108,6 @@ describe('AiSettingsSection', () => {
 })
 
 describe('AiSettingsSection inline variant chips', () => {
-  afterEach(() => {
-    vi.clearAllMocks()
-    patchCaptures.length = 0
-    _availableModels = { models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'], modelVariants: {} }
-    _opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
-    _workflowVariables = { vars: null, stages: null }
-  })
-
   it('does not render a standalone variant picker next to the default model selector', async () => {
     arrangeLoaded({
       defaultModel: 'anthropic/claude-3',
@@ -469,95 +378,5 @@ describe('AiSettingsSection inline variant chips', () => {
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
     expect(agent?.agent).toEqual({ type: 'opencode', model: 'anthropic/claude-3', variant: 'high' })
-  })
-})
-
-describe('AiSettingsSection default-model row click', () => {
-  afterEach(() => {
-    vi.clearAllMocks()
-    patchCaptures.length = 0
-    _availableModels = { models: ['openai/gpt-4', 'anthropic/claude-3', 'google/gemini-2'], modelVariants: {} }
-    _opencodeRuntime = { mode: 'local', command: 'opencode', model: 'openai/gpt-4', note: '' }
-    _workflowVariables = { vars: null, stages: null }
-  })
-
-  it('re-clicking the already-selected default model row fires the mutation with variant: null to clear any stale default variant', async () => {
-    arrangeLoaded({
-      defaultModel: 'anthropic/claude-3',
-      defaultVariant: 'high',
-      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
-    })
-    const user = userEvent.setup()
-    renderSection()
-
-    const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
-    await user.click(defaultModelButton)
-
-    const claudeRow = await waitFor(
-      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
-    )
-    fireEvent.click(claudeRow)
-
-    await waitFor(() => {
-      expect(patchCaptures.length).toBe(1)
-    })
-    const body = patchCaptures[0]
-    const agent = (body.vars as Record<string, unknown>)?.agent as Record<string, unknown>
-    expect(agent?.model).toBe('anthropic/claude-3')
-    expect(agent?.variant).toBeNull()
-    expect(Object.prototype.hasOwnProperty.call(agent ?? {}, 'variant')).toBe(true)
-  })
-
-  it('selecting a different default model row fires the mutation with the new model and variant: null', async () => {
-    arrangeLoaded({
-      defaultModel: 'openai/gpt-4',
-      defaultVariant: 'high',
-      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
-    })
-    const user = userEvent.setup()
-    renderSection()
-
-    const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
-    await user.click(defaultModelButton)
-
-    const claudeRow = await waitFor(
-      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
-    )
-    fireEvent.click(claudeRow)
-
-    await waitFor(() => {
-      expect(patchCaptures.length).toBe(1)
-    })
-    const body = patchCaptures[0]
-    const agent = (body.vars as Record<string, unknown>)?.agent as Record<string, unknown>
-    expect(agent?.model).toBe('anthropic/claude-3')
-    expect(agent?.variant).toBeNull()
-    expect(Object.prototype.hasOwnProperty.call(agent ?? {}, 'variant')).toBe(true)
-  })
-
-  it('clicking a default model row fires the mutation with variant: null even when no prior variant was stored (idempotent delete)', async () => {
-    arrangeLoaded({
-      defaultModel: 'openai/gpt-4',
-      defaultVariant: null,
-      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
-    })
-    const user = userEvent.setup()
-    renderSection()
-
-    const defaultModelButton = await screen.findByRole('button', { name: /Default Coder Agent Model/i })
-    await user.click(defaultModelButton)
-
-    const claudeRow = await waitFor(
-      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
-    )
-    fireEvent.click(claudeRow)
-
-    await waitFor(() => {
-      expect(patchCaptures.length).toBe(1)
-    })
-    const body = patchCaptures[0]
-    const agent = (body.vars as Record<string, unknown>)?.agent as Record<string, unknown>
-    expect(agent?.model).toBe('anthropic/claude-3')
-    expect(agent?.variant).toBeNull()
   })
 })
