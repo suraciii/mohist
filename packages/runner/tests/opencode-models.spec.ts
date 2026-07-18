@@ -1,7 +1,7 @@
-import { describe, expect, it, afterEach, beforeEach, vi } from "vitest"
+import { describe, expect, it, afterEach, vi } from "vitest"
 import {
-  clearOpencodeModelsCacheForTesting,
   discoverOpencodeModels,
+  opencodeModelSetsEqual,
   parseOpencodeModelsVerbose,
   setModelsCommandRunnerForTest,
 } from "../src/runtime/opencode-models.js"
@@ -84,13 +84,61 @@ describe("parseOpencodeModelsVerbose", () => {
   })
 })
 
-describe("discoverOpencodeModels", () => {
-  beforeEach(() => {
-    clearOpencodeModelsCacheForTesting()
+describe("opencodeModelSetsEqual", () => {
+  const base = {
+    models: ["openai/gpt-5.5", "anthropic/claude-sonnet-4"],
+    variants: {
+      "openai/gpt-5.5": ["low", "high"],
+      "anthropic/claude-sonnet-4": ["max"],
+    },
+  }
+
+  it("returnsTrueForSameOrder", () => {
+    expect(opencodeModelSetsEqual(base, base)).toBe(true)
   })
 
+  it("returnsTrueForDifferentModelOrder", () => {
+    expect(opencodeModelSetsEqual(base, { ...base, models: [...base.models].reverse() })).toBe(true)
+  })
+
+  it("returnsFalseForNewModelId", () => {
+    expect(opencodeModelSetsEqual(base, { ...base, models: [...base.models, "google/gemini-3"] })).toBe(false)
+  })
+
+  it("returnsFalseForMissingModelId", () => {
+    expect(opencodeModelSetsEqual(base, { ...base, models: [base.models[0]!] })).toBe(false)
+  })
+
+  it("returnsTrueForDifferentVariantOrder", () => {
+    expect(
+      opencodeModelSetsEqual(base, {
+        ...base,
+        variants: { ...base.variants, "openai/gpt-5.5": ["high", "low"] },
+      }),
+    ).toBe(true)
+  })
+
+  it("returnsFalseForAddedVariant", () => {
+    expect(
+      opencodeModelSetsEqual(base, {
+        ...base,
+        variants: { ...base.variants, "openai/gpt-5.5": ["low", "high", "max"] },
+      }),
+    ).toBe(false)
+  })
+
+  it("returnsFalseForRemovedVariant", () => {
+    expect(
+      opencodeModelSetsEqual(base, {
+        ...base,
+        variants: { ...base.variants, "openai/gpt-5.5": ["low"] },
+      }),
+    ).toBe(false)
+  })
+})
+
+describe("discoverOpencodeModels", () => {
   afterEach(() => {
-    clearOpencodeModelsCacheForTesting()
     setModelsCommandRunnerForTest(null)
   })
 
@@ -134,22 +182,25 @@ describe("discoverOpencodeModels", () => {
     }
   })
 
-  it("cachesSuccessfulResultsForSubsequentCalls", async () => {
-    let callCount = 0
-    const payload = "openai/gpt-5.5\n" + JSON.stringify({ variants: { high: {} } }) + "\n"
-    setModelsCommandRunnerForTest(async () => {
-      callCount += 1
-      return payload
-    })
+  it("executesCommandForEveryCall", async () => {
+    const runner = vi
+      .fn()
+      .mockResolvedValueOnce("openai/gpt-5.5\n" + JSON.stringify({ variants: { high: {} } }) + "\n")
+      .mockResolvedValueOnce("anthropic/claude-sonnet-4\n" + JSON.stringify({ variants: { max: {} } }) + "\n")
+    setModelsCommandRunnerForTest(runner)
 
     const first = await discoverOpencodeModels(new AbortController().signal)
     const second = await discoverOpencodeModels(new AbortController().signal)
-    const third = await discoverOpencodeModels(new AbortController().signal)
 
-    expect(first).toEqual(second)
-    expect(second).toEqual(third)
-    expect(first.variants["openai/gpt-5.5"]).toEqual(["high"])
-    expect(callCount).toBe(1)
+    expect(first).toEqual({
+      models: ["openai/gpt-5.5"],
+      variants: { "openai/gpt-5.5": ["high"] },
+    })
+    expect(second).toEqual({
+      models: ["anthropic/claude-sonnet-4"],
+      variants: { "anthropic/claude-sonnet-4": ["max"] },
+    })
+    expect(runner).toHaveBeenCalledTimes(2)
   })
 
   it("handlesMalformedStdoutWithoutThrowing", async () => {
