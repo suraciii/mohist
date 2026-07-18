@@ -25,6 +25,7 @@ export function isIssueBacked(context: ActionContext): boolean {
 
 function hasAuthoritativeIssueRepository(context: ActionContext): boolean {
   return isIssueBacked(context)
+    && !!stringAt(context.variables, ["repository", "name"])
     && !!stringAt(context.variables, ["repository", "gitUrl"])
     && !!stringAt(context.variables, ["repository", "baseBranch"])
 }

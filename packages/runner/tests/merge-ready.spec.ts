@@ -236,7 +236,10 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context({ source: "custom-source" }))
+    const result = await mergeReadyAction(context(
+      { source: "custom-source" },
+      { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
+    ))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
@@ -268,7 +271,10 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context({ remote: "upstream" }))
+    const result = await mergeReadyAction(context(
+      { remote: "upstream" },
+      { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
+    ))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
@@ -324,7 +330,10 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     })
 
     const result = await mergeReadyAction(
-      context({}, { workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null } }),
+      context({}, {
+        repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" },
+        workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null },
+      }),
     )
     const output = JSON.parse(result.output ?? "{}")
 

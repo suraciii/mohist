@@ -288,7 +288,10 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ remote: "upstream" }))
+    const result = await pushAction(context(
+      { remote: "upstream" },
+      { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
+    ))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
@@ -308,10 +311,9 @@ describe("mohist/push", () => {
       { remote: "upstream", source: "other", target: "release" },
       {
         repository: {
+          name: "web",
           gitUrl: "https://github.com/acme/web.git",
           baseBranch: "master",
-          remoteFingerprint: "a".repeat(64),
-          remoteIdentityVersion: "git-remote-url/v1",
         },
         workspace: { path: WORKSPACE_PATH, branch: "mohist/run-issue" },
       },
@@ -334,7 +336,10 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ source: "custom-source" }))
+    const result = await pushAction(context(
+      { source: "custom-source" },
+      { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
+    ))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")

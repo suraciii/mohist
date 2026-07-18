@@ -31,18 +31,13 @@ describe("WorkspaceRegistry", () => {
       issueNumber: 42,
       workflowRunId: "wr-123",
       workspacePath: join(root, "mohist-local/workspaces/issue-42"),
-      projectId: "project-1",
-      repositoryName: "web",
-      baseBranch: "develop",
       runBranch: "mohist/run-wr-123",
-      remoteFingerprint: "fingerprint",
-      remoteIdentityVersion: "git-remote-url/v1",
     })
 
     expect(entry.issueNumber).toBe(42)
     expect(entry.workflowRunId).toBe("wr-123")
     expect(entry.workspacePath).toBe(join(root, "mohist-local/workspaces/issue-42"))
-    expect(entry).toMatchObject({ projectId: "project-1", repositoryName: "web", baseBranch: "develop", runBranch: "mohist/run-wr-123", remoteFingerprint: "fingerprint", remoteIdentityVersion: "git-remote-url/v1" })
+    expect(entry).toMatchObject({ runBranch: "mohist/run-wr-123" })
     expect(entry.phase).toBe("active")
     expect(entry.materializedAt).toBe(now.toISOString())
     expect(entry.terminalAt).toBeNull()

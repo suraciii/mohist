@@ -158,16 +158,12 @@ describe("RunnerSignalRClient workspace queries", () => {
   it("IssueWorkspaceQuery_CarriesCompleteIdentity", () => {
     const query = resolveWorkspaceQuery({
       workflowRunId: "wr-1",
-      projectId: "project-1",
-      issueNumber: 1,
-      repositoryName: "web",
-      remoteFingerprint: "a".repeat(64),
-      remoteIdentityVersion: "git-remote-url/v1",
+      gitUrl: "https://example.test/web.git",
       workspacePath: "/runner/workspaces/run-hash",
       branch: "mohist/run-wr-1",
       baseBranch: "develop",
     })
-    expect(query).toMatchObject({ workDir: "/runner/workspaces/run-hash", baseBranch: "develop", head: "mohist/run-wr-1", identity: { repositoryName: "web", remoteIdentityVersion: "git-remote-url/v1" } })
+    expect(query).toMatchObject({ workDir: "/runner/workspaces/run-hash", baseBranch: "develop", head: "mohist/run-wr-1", identity: { workflowRunId: "wr-1", gitUrl: "https://example.test/web.git" } })
   })
 
   it("WorkspaceRemoval_OnlyAllowsPathsUnderRunnerRoot", () => {

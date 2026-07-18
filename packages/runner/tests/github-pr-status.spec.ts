@@ -334,10 +334,9 @@ describe("mohist/github-pr-status action", () => {
 function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
   return {
     repository: {
+      name: "repo",
       gitUrl,
       baseBranch: "master",
-      remoteFingerprint: "authoritative-fingerprint",
-      remoteIdentityVersion: "git-remote-url/v1",
     },
   }
 }

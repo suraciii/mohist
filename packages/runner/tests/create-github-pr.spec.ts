@@ -110,10 +110,9 @@ function installMoIssueShow(title = "Use GitHub PR workflow", body = "Open, revi
 function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
   return {
     repository: {
+      name: "repo",
       gitUrl,
       baseBranch: "master",
-      remoteFingerprint: "authoritative-fingerprint",
-      remoteIdentityVersion: "git-remote-url/v1",
     },
   }
 }
