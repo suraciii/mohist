@@ -37,10 +37,8 @@
   "packages/web/src/widgets/issue-workflow/ui/WorkflowView.test.tsx": 785,
   "packages/web/src/widgets/kanban-board/ui/IssueCard.test.tsx": 629,
   "packages/web/src/widgets/runner-status/ui/runner-status.test.tsx": 579,
-  "packages/web/src/widgets/session-transcript/model/session-transcript-display.test.ts": 554,
   "packages/web/src/widgets/session-transcript/model/transcript-state.test.ts": 620,
   "packages/web/src/widgets/session-transcript/model/useTurnKeyboardNav.test.tsx": 573,
-  "packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.integration.test.tsx": 591,
   "packages/web/tests/IssueDetailPage.spec.tsx": 1180,
   "packages/web/tests/SessionLiveUpdates.spec.tsx": 913,
   "packages/web/tests/SessionPageHeader.spec.tsx": 1006

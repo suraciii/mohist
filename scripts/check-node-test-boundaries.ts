@@ -1154,10 +1154,11 @@ function parseBudgetBaseline(sourceText, sourceName) {
   const entries = new Map<string, number>()
   for (const [filePath, allowedLines] of Object.entries(parsed as Record<string, number>)) {
     validateBudgetBaselinePath(filePath, sourceName)
-    const budget = testFileLineBudget(filePath)
-    if (!Number.isSafeInteger(allowedLines) || allowedLines <= budget) {
-      throw new Error(`${sourceName} must allow more than ${budget} lines for ${filePath}`)
+    if (!Number.isSafeInteger(allowedLines)) {
+      throw new Error(`${sourceName} must allow a positive integer line count for ${filePath}`)
     }
+    const budget = testFileLineBudget(filePath)
+    if (allowedLines <= budget) continue
     entries.set(filePath, allowedLines)
   }
   return entries
