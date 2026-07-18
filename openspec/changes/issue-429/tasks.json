@@ -1,0 +1,80 @@
+{
+  "project": "mohist-local",
+  "description": "Add navigation and error-location to long session transcripts: a mini timeline rail with event markers (failed/file-change/read-explore), an activatable error-evidence bar with next-error iteration, a shared transient highlight on jump, and per-turn lazy-render granularity. Pure presentation layer; consumes the #427 row/turn anchors and the #428 useNow/time-injection seam.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Move transcript lazy-render granularity from container to per-turn",
+      "spec": "specs/transcript-render-performance/spec.md#lazy-render-granularity-is-the-turn-or-tool-row-not-the-whole-transcript-container",
+      "description": "Drop the single `style={{ contentVisibility: 'auto' }}` from the `role=\"log\"` container in `widgets/session-transcript/ui/TurnList.tsx` and apply `contentVisibility: 'auto'` to each `TurnItem` root element instead. Add a `containIntrinsicSize` value (sized to a turn divider's min-height) so the scrollbar position stays stable when off-screen turns skip paint/layout. No change to `ToolRowView`, `ContextGroupView`, or any row's expansion contract — only the off-screen rendering strategy changes.",
+      "acceptanceCriteria": [
+        "The `role=\"log\"` transcript container no longer carries a `contentVisibility` style; each `TurnItem` root does",
+        "Every `TurnItem` root carries a `containIntrinsicSize` value so scroll height is stable when off-screen turns skip layout",
+        "Off-screen turn elements still expose their stable anchors (`data-turn-id`, `data-turn-index`, and inner `[data-tool-call-id]` / `[data-tool-state]`) resolvable via `querySelector` against the scroll container",
+        "On-screen turns render their full content (divider, prompt, assistant parts, tool rows, changed-files summary) identically to the pre-change baseline",
+        "Expanding a tool row that was off-screen when mounted produces the same typed detail content (terminal output, inline diff, or result summary) as expanding an on-screen row of the same kind",
+        "Spec tests assert the lazy-render outcome structurally (container attribute removed, per-turn attribute applied, anchor resolvability, expansion correctness); no wall-clock `elapsed < N` assertions",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/ui/TurnList.tsx (per-turn contentVisibility + containIntrinsicSize), updated TurnList render specs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-002/T-003 functionally. Per design D6, `content-visibility: auto` keeps elements in the DOM and addressable by `querySelector` — `scrollIntoView` triggers layout on demand, so the locate flow in T-002/T-003 resolves anchors in off-screen turns. jsdom cannot exercise layout; cover the off-screen anchor case with a `querySelector` assertion against an off-screen turn, defer true painting verification to the browser track if visual flakiness appears. Lands first because T-002 also modifies `TurnItem` (highlight registry registration); landing T-001 first keeps that file's diff small."
+    },
+    {
+      "id": "T-002",
+      "title": "Shared locate flow, transient highlight, and activatable error-evidence bar",
+      "spec": "specs/transcript-error-jump/spec.md#the-session-tool-error-evidence-bar-is-activatable-to-jump-to-the-first-failed-tool-call",
+      "description": "Introduce the shared locate infrastructure that the mini-timeline (T-003) will also consume, and ship the first launcher against it. Add: (a) a pure `selectFailedToolCalls(turns: DisplayTurn[]): DisplayToolPart[]` selector (mirrors `select-active-tool-call.ts`, descending into `context-group` parts, document order); (b) a `useTranscriptLocate({ scrollContainerRef })` hook owning two registries (`expansionRegistry: Map<groupId, () => void>`, `highlightRegistry: Map<rowAnchorId, (on: boolean) => void>`); (c) registration of an expander on each `ContextGroupView` and a highlight toggler on each `ToolRowView` and `TurnItem`; (d) a row-local highlight effect with a time-injected auto-dismiss timer (reuse #428's `useNow` seam), `aria-hidden`, dismissable by Escape / pointer-down-outside / next locate; (e) the locate flow itself — expand containing group → `requestAnimationFrame` → `CSS.escape` + `querySelector` → `scrollIntoView({ block: 'center' })` → highlight target and clear previous. Make `SessionErrorsEvidence` activatable (pointer + keyboard) to trigger `locate` on the first failed tool call, render a next-error affordance when `failed.length > 1`, and cycle through failures in document order with wrap-around. Preserve the existing count/category/reason display and the region's render gating.",
+      "acceptanceCriteria": [
+        "Activating the session-errors region while ≥1 `[data-tool-state=\"failed\"]` row is mounted scrolls the first failed row into view and applies the transient highlight to it (issue AC#1: locate + highlight within one activation)",
+        "Activating next-error moves the highlight to the next failed row in document order; activating past the last failure wraps to the first",
+        "The next-error affordance is absent when exactly one failed tool call exists",
+        "Activation is a no-op (no scroll, no exception) when no `[data-tool-state=\"failed\"]` element is currently mounted",
+        "Locating a target inside a collapsed context group expands the containing group before querying the inner row, so the target row is visible on screen after the jump",
+        "The existing tool-error count, failure-category badge, and failure-reason text are unchanged by activation or next-error iteration; the region still renders only under the existing `statusKind==='failed' || failureCategory || toolErrorCount>0` condition",
+        "At most one row carries the highlight at any time; a new locate moves it rather than stacking",
+        "The highlight auto-dismisses after a bounded duration; Escape and pointer-down outside the highlighted row dismiss it early",
+        "The highlight is `aria-hidden=\"true\"` to assistive tech, not conveyed via `aria-live`, and does not change any row's role or accessible name",
+        "Both launchers (error bar and next-error) reach the row through the same `useTranscriptLocate` pathway",
+        "`selectFailedToolCalls`, `useTranscriptLocate`, and the highlight hook have unit tests; the error bar and highlight behavior have spec tests using `vi.useFakeTimers`, fixed timestamps, and a mocked `Element.prototype.scrollIntoView`; no wall-clock waits or `elapsed < N` assertions",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/model/select-failed-tool-calls.ts (selector + unit test), widgets/session-transcript/model/use-transcript-locate.ts (hook + registries + unit test), widgets/session-transcript/model/use-highlight.ts (row-local highlight hook + unit test), widgets/session-transcript/ui/tool-views/index.tsx (highlight + expander registration on ToolRowView / ContextGroupView), widgets/session-transcript/ui/TurnList.tsx (highlight registration on TurnItem), pages/session/ui/SessionDetailShell.tsx (activatable SessionErrorsEvidence + next-error + spec test), new spec files under packages/web/tests/ for error-jump and jump-highlight",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This task delivers two capabilities together — `transcript-error-jump` (the launcher) and `transcript-jump-highlight` (the shared highlight behavior the launcher exercises) — because the locate/highlight infrastructure is not usable without a launcher. Spec references for the highlight capability: `specs/transcript-jump-highlight/spec.md`. Reuses the #428 `useNow` seam for the auto-dismiss timer. Per design D3, locate order is expand-group → rAF → querySelector → scrollIntoView → highlight; per D4 the highlight registry is a side-channel and the row stays authoritative for its own state. The mini-timeline (T-003) consumes this hook unchanged. Touches `TurnList.tsx` (TurnItem highlight registration) — if T-001 has not landed, coordinate so the per-turn `contentVisibility` from T-001 and the TurnItem ref-callback registration here compose cleanly."
+    },
+    {
+      "id": "T-003",
+      "title": "Mini-timeline rail with turn and event nodes",
+      "spec": "specs/transcript-mini-timeline/spec.md#a-mini-timeline-plots-the-session-as-activatable-nodes",
+      "description": "Add the mini-timeline navigation surface and its pure event-node projection. Add: (a) `projectSessionToTimelineNodes(turns: DisplayTurn[]): TimelineNode[]` in `widgets/session-transcript/model/timeline-nodes.ts` — emits `turn` nodes per turn boundary plus `failed` / `file-change` / `read-explore` nodes per qualifying tool call, descending into `context-group.parts.tools[]`; classification reuses `deriveVerbFamily` (`ui/tool-views/shared.tsx`) and the context-tool name set (export `CONTEXT_TOOL_NAMES` from `session-transcript-display.ts`); (b) a new `MiniTimeline` component rendered inside `SessionTranscriptLayout` as a sticky left rail at `xl+` (hidden below `xl`), mapping node positions to scroll offsets; (c) wire each node's activation to call `useTranscriptLocate({ toolCallId?, turnId?, groupId? })` from T-002, which already handles context-group expansion, scroll, and highlight. Convert `SessionTranscriptLayout`'s root to a flex row at `xl` so the rail and the transcript column compose without narrowing the transcript below its full-width invariant.",
+      "acceptanceCriteria": [
+        "A mini-timeline rail renders alongside the transcript at `xl+` breakpoints and is hidden below `xl`; the transcript retains its full-width single-column layout invariant",
+        "The rail plots one node per turn boundary plus one node per qualifying event (failed / file-change / read-explore) — failed=red, file-change=green, read-explore=gray, each visually distinct",
+        "Completed tool calls that neither fail, modify files, nor belong to the exploratory-read verb family do not produce event nodes",
+        "A single-turn session with ≥1 qualifying event renders one event node per event (not a single featureless turn node)",
+        "Activating any node (pointer click or keyboard Enter/Space) scrolls the corresponding row into view via its existing anchor (`data-turn-id` for turn nodes, `data-tool-call-id` for event nodes)",
+        "Activating an event node whose target lives inside a collapsed context group expands the group and locates the inner row (the expand-then-locate behavior is provided by T-002's locate hook)",
+        "Failed tool calls inside context groups produce reachable failed-event nodes",
+        "The rail does not introduce a parallel anchor system — it reuses `data-tool-call-id` / `data-turn-id` and the locate hook from T-002",
+        "`projectSessionToTimelineNodes` has unit tests covering each node kind, single-turn derivation, and context-group descent; the rail rendering and activation have spec tests using a mocked `scrollIntoView`; no wall-clock waits",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/model/timeline-nodes.ts (projection + unit test), widgets/session-transcript/ui/MiniTimeline.tsx (component + spec test), widgets/session-transcript/ui/SessionTranscriptLayout.tsx (flex-row-at-xl mount + spec test updates), new spec file under packages/web/tests/ for mini-timeline",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Consumes the `useTranscriptLocate` hook from T-002 unchanged; per design D1 the rail is a sticky left rail (not a horizontal bar, not the right-side `siblingSidebar` which is occupied by sibling-session nav). Per design D2, classification is a pure function over `displayTurns` — no new fields on `DisplayTurn`/`DisplayToolPart`. Open questions deferred to implementation: rail width (≈48–64px), node marker shape (dot vs. ordinal label), whether to render labels on hover. The rail does not tick (it consumes projected row states, not `useNow`)."
+    }
+  ]
+}
