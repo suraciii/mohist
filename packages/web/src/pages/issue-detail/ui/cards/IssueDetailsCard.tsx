@@ -4,7 +4,7 @@ import { formatStageName } from '../../model/format'
 
 export type IssueDetailsCardIssue = Pick<
   Issue,
-  'status' | 'projectName' | 'repository' | 'workflowStage'
+  'status' | 'projectName' | 'repository' | 'workflowStage' | 'parentIssueRef' | 'childIssuesSummary'
 >
 
 export interface IssueDetailsCardProps {
@@ -27,6 +27,22 @@ export function IssueDetailsCard({ issue, unframed = false }: IssueDetailsCardPr
             <dt className="text-muted-foreground">Workflow Stage</dt>
             <dd className="min-w-0 text-foreground font-medium text-right">
               {formatStageName(workflowStage)}
+            </dd>
+          </div>
+        )}
+        {issue.parentIssueRef && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="parent-issue-metadata-row">
+            <dt className="text-muted-foreground">Parent Issue</dt>
+            <dd className="min-w-0 text-foreground font-medium text-right break-words">
+              #{issue.parentIssueRef.number} {issue.parentIssueRef.title}
+            </dd>
+          </div>
+        )}
+        {issue.childIssuesSummary?.hasChildren && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="child-issues-metadata-row">
+            <dt className="text-muted-foreground">Parent Issue</dt>
+            <dd className="min-w-0 text-foreground font-medium text-right">
+              {issue.childIssuesSummary.count} child issue{issue.childIssuesSummary.count === 1 ? '' : 's'}
             </dd>
           </div>
         )}

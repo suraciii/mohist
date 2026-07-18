@@ -13,6 +13,7 @@ internal static partial class IssueCommands
         var labelOpt = MohistCliCommands.LabelFilterOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var repositoryOpt = new Option<string?>("--repo") { Description = "Filter by target repository name" };
+        var parentOpt = new Option<int?>("--parent") { Description = "Filter by parent issue number" };
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
         var outputOpt = MohistCliCommands.OutputOption();
@@ -22,6 +23,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(repositoryOpt);
+        cmd.Options.Add(parentOpt);
         cmd.Options.Add(allOpt);
         cmd.Options.Add(archivedOpt);
         cmd.Options.Add(outputOpt);
@@ -33,6 +35,7 @@ internal static partial class IssueCommands
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
             var repository = ctx.GetValue(repositoryOpt);
+            var parent = ctx.GetValue(parentOpt);
             var all = ctx.GetValue(allOpt);
             var archived = ctx.GetValue(archivedOpt);
             var output = ctx.GetValue(outputOpt);
@@ -56,6 +59,7 @@ internal static partial class IssueCommands
                     Labels: labels,
                     Priority: priority,
                     Repository: repository,
+                    Parent: parent,
                     Archived: archived ? true : null,
                     All: all ? true : null);
                 var (mode, exit) = api.ResolveOutputMode(output);

@@ -22,6 +22,7 @@ public interface IIssueBindingTarget : IGrainWithStringKey
         string[]? attachmentIds,
         string? workflowProfileId,
         int[]? prerequisiteNumbers,
+        int? parentIssueNumber,
         string commandId,
         long? expectedRevision);
 

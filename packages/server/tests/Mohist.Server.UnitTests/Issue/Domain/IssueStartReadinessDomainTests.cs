@@ -138,6 +138,17 @@ public class IssueStartReadinessDomainTests
     }
 
     [Fact]
+    public void StartBlocker_ReadyParent_ReturnsParentHasChildrenBeforePrerequisites()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false, repositoryRef: "main");
+        issue.AddPrerequisite(7);
+
+        var blocker = issue.StartBlocker(new HashSet<int> { 7 }, hasChildren: true);
+
+        Assert.IsType<IssueStartBlocker.ParentHasChildren>(blocker);
+    }
+
+    [Fact]
     public void StartBlocker_ReadyIssue_AllPrereqsDelivered_ReturnsNull()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false, repositoryRef: "main");

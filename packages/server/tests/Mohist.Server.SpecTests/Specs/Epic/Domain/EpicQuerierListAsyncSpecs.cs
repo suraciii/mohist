@@ -380,7 +380,8 @@ public class EpicQuerierListAsyncSpecs
             string? priority = null,
             bool? archived = null,
             bool? all = null,
-            string? repositoryName = null) =>
+            string? repositoryName = null,
+            int? parentIssueNumber = null) =>
             throw new InvalidOperationException("IssueQuerier.ListAsync should not be invoked on the epic list path.");
     }
 }

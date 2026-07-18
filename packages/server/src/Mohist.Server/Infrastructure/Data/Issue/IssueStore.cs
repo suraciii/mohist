@@ -103,6 +103,7 @@ public class IssueStore : IIssueStore
                 State = Serialize(state),
                 Risk = state.Risk,
                 EpicNumber = state.EpicNumber,
+                ParentIssueNumber = state.ParentIssueNumber,
             });
         }
         else
@@ -110,6 +111,7 @@ public class IssueStore : IIssueStore
             row.State = Serialize(state);
             row.Risk = state.Risk;
             row.EpicNumber = state.EpicNumber;
+            row.ParentIssueNumber = state.ParentIssueNumber;
         }
     }
 

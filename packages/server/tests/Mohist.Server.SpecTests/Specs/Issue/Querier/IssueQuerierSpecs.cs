@@ -75,6 +75,29 @@ public class IssueQuerierSpecs
     }
 
     [Fact]
+    public async Task Reads_ProjectParentAndChildSummary_AndParentFilter()
+    {
+        var project = NewProject("parents");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Child one", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 3, "Child two", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 4, "Other");
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parent = await querier.GetAsync(project.Id, 1, project);
+        var child = await querier.GetAsync(project.Id, 2, project);
+        var children = await querier.ListWithLabelFiltersAsync(project.Id, project, null, null, null, null, null, null, 1);
+        var empty = await querier.ListWithLabelFiltersAsync(project.Id, project, null, null, null, null, null, null, 99);
+
+        Assert.Equal((1, "Parent"), (child!.ParentIssueRef!.Number, child.ParentIssueRef.Title));
+        Assert.Equal((true, 2), (parent!.ChildIssuesSummary!.HasChildren, parent.ChildIssuesSummary.Count));
+        Assert.Equal([2, 3], children.Select(issue => issue.Number).ToArray());
+        Assert.Empty(empty);
+    }
+
+    [Fact]
     public async Task GetIssueRefForWorkflowRunAsync_ReturnsScopedIssueReadContext()
     {
         var project = NewProject("workflow");
@@ -103,7 +126,8 @@ public class IssueQuerierSpecs
         string status = "backlog",
         string priority = "p2",
         string[]? label = null,
-        string? workflowRunId = null)
+        string? workflowRunId = null,
+        int? parentIssueNumber = null)
     {
         var issue = new DomainIssue
         {
@@ -113,11 +137,16 @@ public class IssueQuerierSpecs
             Status = Enum.Parse<IssueStatus>(status, ignoreCase: true),
             Priority = priority,
             WorkflowRunId = workflowRunId,
+            ParentIssueNumber = parentIssueNumber,
             Labels = label is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : new Dictionary<string, string>(StringComparer.Ordinal) { [label[0]] = label[1] },
         };
-        db.Issues.Add(new IssueRow { State = IssueStore.Serialize(issue) });
+        db.Issues.Add(new IssueRow
+        {
+            State = IssueStore.Serialize(issue),
+            ParentIssueNumber = issue.ParentIssueNumber,
+        });
         await db.SaveChangesAsync();
     }
 }

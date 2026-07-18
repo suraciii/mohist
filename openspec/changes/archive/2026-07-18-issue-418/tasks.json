@@ -1,0 +1,72 @@
+{
+  "project": "mohist-local",
+  "description": "Add a one-level parent-child (sub-issue) relationship to the Issue domain: establish/remove the link via --parent on create and update, enforce single-level / Backlog-only / Epic-isolation / parent-start-refusal validations, inherit child priority, and project the relationship on read surfaces and `mo issue list --parent` (issue #418).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Establish and remove the parent-child link (domain + persistence + grain + API + CLI)",
+      "spec": "specs/issue-parent-child/spec.md#requirement-a-sub-issue-shall-be-created-with-a-parent-back-reference-via---parent",
+      "description": "Add `int? ParentIssueNumber` to the Issue aggregate mirroring `EpicNumber?` (backing field + init-only property). Add `AssignParent`/`RemoveParent` transitions recording `IssueParentChanged` in-transaction, enforcing self-invariants: target is Backlog and `!HasWorkflowStarted`; target carries no Epic (`_epicNumber == null`); self-parent rejected; idempotent detach. Make `Issue.AssignEpic` reject when `_parentIssueNumber != null` (Epic isolation self-invariant). Add the `ParentIssueNumber` projection column to `IssueRow` with an additive null-backfill migration paralleling `20260715000000_BackfillIssueEpicAffiliation.cs`. In the create path resolve the parent (existence + eligibility: Backlog/not-started + not-itself-a-child) and inherit priority when `--priority` is absent; in the update path run the cross-aggregate guards (parent exists, parent eligible, parent not a child, target has no children) before issuing `AssignParent`. Wire `ParentIssueNumber` into `CreateIssueRequest`/`UpdateIssueRequest` (three-state via the existing `Fields` set) and the create/update routes; add `--parent <number>` (with `none` sentinel on update) to `mo issue create`/`mo issue update`. Satisfies requirements: sub-issue creation, single-level hierarchy, priority inheritance, attach/detach via update, derived-fact storage model, and bidirectional Epic isolation.",
+      "acceptanceCriteria": [
+        "`Issue.ParentIssueNumber?` exists and is persisted via a new `IssueRow.ParentIssueNumber` column; an additive migration backfills all existing rows to null with no data transformation (migration applies cleanly on a populated DB).",
+        "`mo issue create \"Add web hook\" --parent 42` where 42 is an eligible Backlog parent creates a new issue whose persisted `ParentIssueNumber == 42`; the new child otherwise behaves as a normal issue (own repository, workflow, approvals, prerequisites).",
+        "`mo issue create --parent 42` without `--priority` creates the child with 42's priority; with an explicit `--priority` the explicit value wins (grain/unit tests cover both).",
+        "`mo issue update 7 --parent 42` attaches a Backlog, non-Epic issue 7 to 42; `mo issue update 7 --parent none` clears 7's parent and removes 7 from 42's children; `mo issue update 7 --parent none` on an issue that is not a child succeeds as an idempotent no-op.",
+        "Create/update rejections are enforced and surface as distinguishable errors: parent does not exist; parent has started a workflow (`HasWorkflowStarted`) or is Done/Cancelled; parent is itself a child (single-level); target has started a workflow or is terminal; target currently belongs to an Epic; target already has children (a parent cannot become a child); self-parenting (`update 42 --parent 42`).",
+        "`mo epic link <epic> <child>` is rejected when the target issue already has a `ParentIssueNumber`; the rejection originates from `Issue.AssignEpic` (Epic domain/grain logic unchanged) and is mapped at the Epic route catch to a typed 409 code distinct from `EPIC_CLOSED_CANNOT_LINK` (e.g. `issue_is_sub_issue`).",
+        "An `IssueParentChanged(previous, current)` event is recorded in the same aggregate transaction as every `AssignParent`/`RemoveParent` (and is absent on an idempotent no-op detach); the event is part of the `IssueEvent` union alongside `IssueEpicChanged`.",
+        "Domain unit tests cover every transition and self-invariant (attach/detach success, idempotent detach, Backlog/not-started target, Epic-member target, self-parent, AssignEpic-rejects-child); grain spec tests cover cross-aggregate guards (nonexistent/terminal/in-workflow parent, single-level, parent-can't-become-child) and priority inheritance; API spec tests cover the create/update request shapes and the Epic-link rejection code; CLI tests cover `--parent`/`--parent none` parsing and request payload.",
+        "`npm test` (server, `dotnet test Mohist.sln`) is green, including the new domain unit tests and spec tests."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Issue aggregate (`Issue.cs`, `Issue.Transitions.cs`), new `IssueParentChanged` event, `Issue.AssignEpic` guard, `IssueRow.ParentIssueNumber` + additive migration, IssueGrain create/update parent resolution + cross-aggregate guards + priority inheritance, `CreateIssueRequest`/`UpdateIssueRequest` parent fields + route wiring, CLI `--parent` flags; domain + spec + CLI tests green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Validation split per design Decision 2: self-invariants (Backlog/!HasWorkflowStarted, not-in-Epic, self-parent, idempotent detach, AssignEpic-rejects-child) live in the aggregate and throw; cross-aggregate facts (parent exists, parent eligible, parent-not-a-child, target-has-no-children) are gathered by the grain before issuing AssignParent, mirroring how EpicGrain reads Issue before AssignEpic (design/workflow/issue-coordination.md:26-37). Use `HasWorkflowStarted` (durable) — not `status == InProgress` — as the 'has entered a workflow' guard so a Reopened issue cannot become a child. Epic isolation is a pure self-invariant on Issue (design Decision 3): the only Epic-side change is the route catch mapping; do not touch Epic domain/grain logic. Direct re-parenting (`update 7 --parent 5` when 7 is already a child of 3) is allowed as a single AssignParent transaction and must run the same guards against the new parent (open question 2)."
+    },
+    {
+      "id": "T-002",
+      "title": "Refuse `mo issue start` on a parent via a typed start blocker",
+      "spec": "specs/issue-parent-child/spec.md#requirement-an-issue-that-has-children-shall-not-start-its-own-workflow",
+      "description": "Extend the `IssueStartBlocker` discriminated union with a `ParentHasChildren` variant. Add a `bool hasChildren` parameter to `Issue.StartBlocker` (alongside the existing `undeliveredPrerequisites`) and return the new variant when it is true. In `IssueGrain.StartWorkAsync` compute `hasChildren` via `IssueQuerier` (count of issues whose `ParentIssueNumber == Number`) and pass it through `ThrowIfStartBlocked`. Map the new variant to a distinct code (e.g. `is_parent`) in the blocker→code switch at `IssueRoutes.Lifecycle.cs:36-41`, alongside `draft` and `waiting_for_prerequisite`. Satisfies the start-refusal requirement and completes the derived-fact requirement's 'eligible to start again after the last child detaches' scenario.",
+      "acceptanceCriteria": [
+        "`mo issue start 42` on an issue that currently has one or more children is rejected with the `ParentHasChildren` blocker, mapped to a distinct start-blocker code (not `draft` or `waiting_for_prerequisite`); issue 42 acquires no workflow run.",
+        "`mo issue start 42` on an issue whose children have all been detached proceeds subject only to the other start blockers (draft / prerequisites), proving the parent reverts to a startable normal issue.",
+        "`IssueStartBlocker.ParentHasChildren` is part of the same discriminated union and flows through the existing `IssueStartBlockerDto.FromDomain` mapping so the CLI/Web receive the same blocker envelope shape as other refusals.",
+        "The grain computes `hasChildren` from `IssueQuerier` (count over `IssueRow.ParentIssueNumber`), not from a stored flag on the parent — there is no persistent 'is parent' field (derived-fact requirement).",
+        "Domain unit test asserts `StartBlocker` returns `ParentHasChildren` when `hasChildren` and not Draft; grain spec test asserts start is refused when children exist and allowed once the last child is detached; API spec test asserts the response carries the new blocker code.",
+        "`npm test` (server) is green, including the new and updated start-blocker tests."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `IssueStartBlocker.ParentHasChildren` variant; `StartBlocker(...)` `hasChildren` parameter; IssueGrain children-count + passthrough; start-route code mapping; domain + grain + API tests green.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is the temporary parent-start refusal explicitly called out in the proposal; the later composite-advancement issue will replace this rejection with fan-out by amending this single blocker variant (design Decision 4). The `hasChildren` fact is gathered by the grain exactly like `undeliveredPrerequisites` — the aggregate decides, the grain supplies facts. Open question 1 (blocker code name `is_parent` vs `has_children`) is resolved at implementation; either satisfies the 'distinct code' requirement."
+    },
+    {
+      "id": "T-003",
+      "title": "Project the relationship on read surfaces and support `mo issue list --parent`",
+      "spec": "specs/issue-parent-child/spec.md#requirement-the-parent-child-relationship-shall-be-visible-on-both-the-parents-and-childs-detail",
+      "description": "Extend `IssueReadModel` with a `ParentIssueRef?` (number + title) for the child side and a `ChildIssuesSummary?` (existence + count, computed by `IssueQuerier` at read time) for the parent side. Add a `parentIssueNumber` filter to `IssueQuerier.ListWithLabelFiltersAsync` (where `IssueRow.ParentIssueNumber == value`) and expose `--parent <number>` on `mo issue list`. Add minimal Web rendering on the issue detail so a child shows its parent and a parent shows that it is a parent with a child count (board-card progress badges and composite-status UI remain out of scope). Satisfies the detail-visibility requirement and the `list --parent` requirement.",
+      "acceptanceCriteria": [
+        "Reading a child issue's detail exposes its parent reference (parent number, and title where the read model carries it); reading a parent issue's detail exposes that it is a parent and reports the presence and count of its children.",
+        "`mo issue list --parent 42` returns exactly the issues whose `ParentIssueNumber == 42` and no others; for a parent with no children (or a number that is not a parent) it returns an empty list.",
+        "The children summary is derived by `IssueQuerier` at read time from the `ParentIssueNumber` column — it is a projection, not a second source of truth stored on the parent (no denormalized child list).",
+        "The Web issue detail renders the parent reference on a child and a 'is a parent' indicator with child count on a parent; no board-card progress badge or composite-status UI is added (deferred).",
+        "Querier spec test asserts the child→parent projection, the parent→children-count projection, and the `--parent` list filter (children returned, non-child excluded, empty for a non-parent); Web test asserts the minimal detail rendering; CLI test covers the `--parent` list flag payload.",
+        "`npm test` (server) is green; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`IssueReadModel.ParentIssueRef` + `ChildIssuesSummary` projections; `IssueQuerier` children summary + `--parent` list filter; `mo issue list --parent` flag; minimal Web detail rendering; querier + Web + CLI tests green.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Independent of T-002 — read projection only needs the `ParentIssueNumber` column introduced in T-001, not the start blocker. Open question 3 (children-summary depth: count-only vs full child numbers/titles) — default to count + a navigable `list --parent` call for #418; expand only if the detail-read spec test demands more. The children-summary query is a cheap indexed filter on `ParentIssueNumber`, the same cost class as the existing `EpicNumber` membership queries Epic already runs (design Decision 6)."
+    }
+  ]
+}

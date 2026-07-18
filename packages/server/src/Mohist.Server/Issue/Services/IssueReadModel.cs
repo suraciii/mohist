@@ -52,6 +52,8 @@ public class IssueReadModel
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
+    public IssueParentRef? ParentIssueRef { get; set; }
+    public ChildIssuesSummary? ChildIssuesSummary { get; set; }
     public IssueFeedbackDto[] Feedback { get; set; } = [];
 }
 
