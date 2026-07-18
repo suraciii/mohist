@@ -312,6 +312,18 @@ export interface RunnerOptions {
    * batches are smaller but the rail tolerates more slack (design D1).
    */
   taskLogIncrementalUploadTimeoutMs?: number
+
+  /**
+   * Optional override for the opencode model rediscovery interval in
+   * milliseconds. Defaults to 30 minutes inside RunnerHost and is
+   * clamped to a 60_000 ms floor. The timer drives the post-startup
+   * re-discovery that converges the server-registered model set with
+   * what opencode currently exposes; the first fire happens one
+   * interval after `run()` registers the timer (startup discovery
+   * already runs in `connectRunner`). Used by tests to drive ticks
+   * deterministically.
+   */
+  modelRediscoveryIntervalMs?: number
 }
 
 export interface RunnerRegistration {

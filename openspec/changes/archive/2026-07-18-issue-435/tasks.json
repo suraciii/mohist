@@ -1,0 +1,49 @@
+{
+  "project": "mohist-local",
+  "description": "Runner-side periodic rediscovery of opencode coder models: drop the unreachable TTL cache guard inside opencode-models.ts, add an order-insensitive set-equality helper, and wire a single 30-minute periodic timer into RunnerHost that re-runs discovery and pushes one change-gated heartbeat when the discovered set changes (issue #435).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make opencode-models.ts always execute and add order-insensitive set equality",
+      "spec": "specs/runner-model-discovery/spec.md#Discovery module always executes the underlying command",
+      "description": "Refactor packages/runner/src/runtime/opencode-models.ts into a pure always-executes discovery module plus a reusable equality helper. Delete the `CACHE_TTL_MS` constant, the `cached` variable, the `cached.fetchedAt` accounting, the `Date.now()` read, and the `if (cached !== null && now - cached.fetchedAt < CACHE_TTL_MS) return cached.result` short-circuit — every call to `discoverOpencodeModels` SHALL spawn `opencode models --verbose` and parse the output. Preserve the existing \"return `{ models: [], variants: {} }` on spawn/parse error\" and \"do not cache empty results\" semantics (the empty-result skip now lives only where it is observable — the host — not inside the module). Drop `clearOpencodeModelsCacheForTesting`. Add an exported pure helper `opencodeModelSetsEqual(a: DiscoveredOpencodeModels, b: DiscoveredOpencodeModels): boolean` that compares `models` as a set (sorted-then-compare) and `variants` by key set plus, per shared key, sorted variant arrays — order-insensitive on both levels. Migrate packages/runner/tests/opencode-models.spec.ts: drop the `cachesSuccessfulResultsForSubsequentCalls` TTL assertion and replace it with one asserting two successive calls each invoke the underlying command; add a focused unit-test block for `opencodeModelSetsEqual` covering same-order-equal, different-order-equal, new-id, missing-id, variant-reorder-equal, variant-added, variant-removed.",
+      "acceptanceCriteria": [
+        "`opencode-models.ts` contains no `CACHE_TTL_MS`, no `cached` variable, no `Date.now()` call, and no `clearOpencodeModelsCacheForTesting` export.",
+        "Two successive `discoverOpencodeModels(signal)` calls each invoke the underlying command runner (asserted via the test-injected `setModelsCommandRunnerForTest` mock being called twice).",
+        "A discovery call that throws or returns zero parsed models still returns `{ models: [], variants: {} }` without rethrowing (existing error-path test continues to pass).",
+        "`opencodeModelSetsEqual` is exported and returns true for same-elements-different-order model lists and same-elements-different-order variant arrays; returns false when a model id is added or removed, or when any model's variant-element set changes (unit tests cover all six cases).",
+        "`npm run typecheck -w packages/runner` passes; `npm test -w packages/runner` passes with the migrated `opencode-models.spec.ts` green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Refactored packages/runner/src/runtime/opencode-models.ts (no TTL, new `opencodeModelSetsEqual`); migrated packages/runner/tests/opencode-models.spec.ts; green runner typecheck + tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not touch packages/runner/src/runtime/host.ts in this task — the existing single call site in `connectRunner` keeps working (it always did one discovery per process). Removing the TTL guard means connectRunner's retry loop may spawn `opencode models --verbose` once per retry during connection failures; this is the explicitly accepted cost documented in the design (Decision D4)."
+    },
+    {
+      "id": "T-002",
+      "title": "Wire periodic model rediscovery and change-gated heartbeat into RunnerHost",
+      "spec": "specs/runner-model-discovery/spec.md#Periodic rediscovery timer",
+      "description": "Add the periodic rediscovery timer to packages/runner/src/runtime/host.ts and the option that feeds it. Add optional `modelRediscoveryIntervalMs?: number` to `RunnerOptions` (packages/runner/src/core/types.ts); the `RunnerHost` constructor clamps it with `Math.max(60_000, options.modelRediscoveryIntervalMs ?? 30 * 60_000)` alongside the existing cadence clamps. In `run()`, register `rediscoveryTimer = setInterval(() => void this.runModelRediscoveryOnce(signal).catch((error) => console.error(\"model rediscovery fire failed\", error)), this.modelRediscoveryIntervalMs)` next to the existing four timers, and clear it in the existing `finally` block. Implement private `async runModelRediscoveryOnce(signal)`: call `discoverOpencodeModels(signal)`; if it returns `models.length === 0`, return without touching state or sending a heartbeat; otherwise compare via `opencodeModelSetsEqual(discovered, { models: this.coderModels, variants: this.coderModelVariants })`, and only on inequality assign `this.coderModels` / `this.coderModelVariants` and call `await this.sendImmediateHeartbeat()`. First fire happens at `+interval` (no manual call from `run()`). Add a new spec file packages/runner/tests/runner-host-model-rediscovery.spec.ts using `vi.useFakeTimers()` and the existing `discoverOpencodeModels` mock pattern: assert (a) timer does not fire before the configured interval and fires exactly once at it; (b) rediscovery returning the same set as last reported does NOT call `connection.heartbeat` beyond baseline (set `heartbeatIntervalMs` large to isolate); (c) rediscovery returning a changed set updates local state and triggers exactly one `connection.heartbeat` carrying the new `coderModels`/`coderModelVariants`; (d) rediscovery returning an empty set leaves local state and server-registered set untouched and triggers no heartbeat; (e) a thrown error from `discoverOpencodeModels` is logged, does not escape as an unhandled rejection, and the next interval still fires; (f) clearing the timer on abort prevents further fires.",
+      "acceptanceCriteria": [
+        "`RunnerOptions` declares optional `modelRediscoveryIntervalMs?: number` and `RunnerHost`'s constructor clamps it with a 60_000 ms floor, defaulting to 30 * 60 * 1000 ms.",
+        "`run()` registers a rediscovery `setInterval` next to the existing heartbeat/self-check/convergence/cleanup timers and clears it in the same `finally` block on abort or return; no rediscovery runs at startup (first fire at +interval).",
+        "When a rediscovery fire returns a non-empty set equal (order-insensitively) to the last-reported set, `connection.heartbeat` is NOT called as a result of that fire and local `coderModels`/`coderModelVariants` are unchanged (spec test asserts heartbeat call count stays at baseline).",
+        "When a rediscovery fire returns a non-empty set that differs (order-insensitively) from the last-reported set, local `coderModels`/`coderModelVariants` are updated and exactly one immediate `connection.heartbeat` carrying the new values is sent.",
+        "When a rediscovery fire returns an empty model set OR throws, local `coderModels`/`coderModelVariants` are left unchanged, no clearing heartbeat is sent, the error is logged, no unhandled rejection escapes the timer, and the next interval still fires (spec test covers both empty and thrown cases via the injected `discoverOpencodeModels` mock).",
+        "Spec test uses `vi.useFakeTimers()` to advance time past the configured interval — no real wall-clock sleep, no real `opencode` invocation (mock is hoisted via `vi.mock` as in `runner-host-lifecycle.spec.ts`).",
+        "No changes to server-side `RunnerInfo`, registration, heartbeat endpoint, or `/api/projects/{id}/opencode/models` shape; the immediate heartbeat body reuses the existing `registrationState()` shape with no new fields.",
+        "`npm run typecheck -w packages/runner` passes; `npm test -w packages/runner` passes with the new `runner-host-model-rediscovery.spec.ts` green and existing `runner-host-lifecycle.spec.ts` / `runner-host-reporting.spec.ts` still green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Optional `RunnerOptions.modelRediscoveryIntervalMs`; `rediscoveryTimer` + `runModelRediscoveryOnce` in RunnerHost; new packages/runner/tests/runner-host-model-rediscovery.spec.ts; green runner typecheck + tests.",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "Reuse `sendImmediateHeartbeat` (host.ts:397-405) for the uplink — it already reads `registrationState()` and already has the abort-signal guard. The `Math.max(60_000, …)` floor on the interval prevents accidental hot-looping in production while still letting tests pass small values. Do not thread a separate clock abstraction through RunnerHost — `vi.useFakeTimers()` already intercepts `setInterval` (the rest of host.ts relies on this), and Decision D4 removed the only `Date.now()` in the path."
+    }
+  ]
+}
