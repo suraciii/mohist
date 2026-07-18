@@ -93,8 +93,45 @@ public class IssueQuerierSpecs
 
         Assert.Equal((1, "Parent"), (child!.ParentIssueRef!.Number, child.ParentIssueRef.Title));
         Assert.Equal((true, 2), (parent!.ChildIssuesSummary!.HasChildren, parent.ChildIssuesSummary.Count));
+        Assert.Equal((2, 0, 0, 0), (parent.ChildIssuesSummary.BacklogCount, parent.ChildIssuesSummary.InProgressCount, parent.ChildIssuesSummary.DoneCount, parent.ChildIssuesSummary.CancelledCount));
         Assert.Equal([2, 3], children.Select(issue => issue.Number).ToArray());
         Assert.Empty(empty);
+    }
+
+    [Fact]
+    public async Task ChildIssuesSummary_ComputesPerStatusBreakdownFromSameGroupBy()
+    {
+        var project = NewProject("status-breakdown");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Parent");
+        await SeedIssueAsync(db, project.Id, 2, "Backlog child", status: "backlog", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 3, "Backlog child two", status: "backlog", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 4, "In-progress child", status: "inProgress", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 5, "Done child", status: "done", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 6, "Cancelled child", status: "cancelled", parentIssueNumber: 1);
+        await SeedIssueAsync(db, project.Id, 7, "Unrelated parent", status: "done");
+        await SeedIssueAsync(db, project.Id, 8, "Unrelated child of unrelated parent", status: "done", parentIssueNumber: 7);
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var parent = await querier.GetAsync(project.Id, 1, project);
+        var unrelated = await querier.GetAsync(project.Id, 7, project);
+        var orphanChild = await querier.GetAsync(project.Id, 8, project);
+
+        Assert.NotNull(parent!.ChildIssuesSummary);
+        Assert.Equal(5, parent.ChildIssuesSummary.Count);
+        Assert.Equal(2, parent.ChildIssuesSummary.BacklogCount);
+        Assert.Equal(1, parent.ChildIssuesSummary.InProgressCount);
+        Assert.Equal(1, parent.ChildIssuesSummary.DoneCount);
+        Assert.Equal(1, parent.ChildIssuesSummary.CancelledCount);
+
+        Assert.NotNull(unrelated!.ChildIssuesSummary);
+        Assert.Equal(1, unrelated.ChildIssuesSummary.Count);
+        Assert.Equal((0, 0, 1, 0), (unrelated.ChildIssuesSummary.BacklogCount, unrelated.ChildIssuesSummary.InProgressCount, unrelated.ChildIssuesSummary.DoneCount, unrelated.ChildIssuesSummary.CancelledCount));
+
+        Assert.NotNull(orphanChild!.ParentIssueRef);
+        Assert.Equal(7, orphanChild.ParentIssueRef.Number);
+        Assert.Null(orphanChild.ChildIssuesSummary);
     }
 
     [Fact]

@@ -178,4 +178,8 @@ public sealed class ChildIssuesSummary
 {
     public bool HasChildren { get; set; }
     public int Count { get; set; }
+    public int BacklogCount { get; set; }
+    public int InProgressCount { get; set; }
+    public int DoneCount { get; set; }
+    public int CancelledCount { get; set; }
 }

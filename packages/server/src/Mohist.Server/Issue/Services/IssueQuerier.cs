@@ -346,13 +346,26 @@ public class IssueQuerier : IScopedService
 
         var childCounts = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId && row.ParentIssueNumber != null)
-            .GroupBy(row => row.ParentIssueNumber!.Value)
-            .Select(group => new { ParentNumber = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(x => x.ParentNumber, x => x.Count);
+            .GroupBy(row => new { Parent = row.ParentIssueNumber!.Value, Status = row.Status ?? string.Empty })
+            .Select(group => new { group.Key.Parent, group.Key.Status, Count = group.Count() })
+            .ToListAsync();
+        var childCountsByParent = childCounts
+            .GroupBy(row => row.Parent)
+            .ToDictionary(
+                group => group.Key,
+                group => new ChildIssuesSummary
+                {
+                    HasChildren = true,
+                    Count = group.Sum(row => row.Count),
+                    BacklogCount = group.Where(row => string.Equals(row.Status, "backlog", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
+                    InProgressCount = group.Where(row => string.Equals(row.Status, "in_progress", StringComparison.OrdinalIgnoreCase) || string.Equals(row.Status, "inProgress", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
+                    DoneCount = group.Where(row => string.Equals(row.Status, "done", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
+                    CancelledCount = group.Where(row => string.Equals(row.Status, "cancelled", StringComparison.OrdinalIgnoreCase)).Sum(row => row.Count),
+                });
         foreach (var issue in issues)
         {
-            if (childCounts.TryGetValue(issue.Number, out var count))
-                issue.ChildIssuesSummary = new ChildIssuesSummary { HasChildren = true, Count = count };
+            if (childCountsByParent.TryGetValue(issue.Number, out var summary))
+                issue.ChildIssuesSummary = summary;
         }
 
         var comments = await db.IssueComments.AsNoTracking()
