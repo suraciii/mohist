@@ -149,6 +149,7 @@ export function withFiles(files: DiffFile[]) {
 
 export function useIssueChangedFilesPageFixture() {
   const sessionResponseResolvers = new Set<() => void>()
+  const sessionResponsePromises = new Set<Promise<void>>()
   let currentQueryClient: QueryClient | null = null
   const state = {
     issueData: SAMPLE_ISSUE as unknown,
@@ -171,9 +172,11 @@ export function useIssueChangedFilesPageFixture() {
     blockSessions: false,
     commitDiffError: false,
     blockCommitDiff: false,
-    releaseSessionResponses: () => {
+    releaseSessionResponses: async () => {
       sessionResponseResolvers.forEach((resolve) => resolve())
       sessionResponseResolvers.clear()
+      await Promise.all(sessionResponsePromises)
+      sessionResponsePromises.clear()
     },
     getSessionsQueryStatus: () => currentQueryClient
       ?.getQueryState(['workflow-runs', 'wr-1', 'sessions'])
@@ -236,10 +239,16 @@ export function useIssueChangedFilesPageFixture() {
     }),
     http.get('*/api/workflow-runs/:workflowRunId/sessions', async () => {
       state.sessionsRequestCount += 1
+      let markResponseComplete: (() => void) | undefined
       if (state.blockSessions) {
+        const responseComplete = new Promise<void>((resolve) => {
+          markResponseComplete = resolve
+        })
+        sessionResponsePromises.add(responseComplete)
         await new Promise<void>((resolve) => sessionResponseResolvers.add(resolve))
       }
       state.sessionsResponseCount += 1
+      markResponseComplete?.()
       return HttpResponse.json({ success: true, data: state.sessionsData })
     }),
   )

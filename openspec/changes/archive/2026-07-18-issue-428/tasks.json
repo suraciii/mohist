@@ -1,0 +1,94 @@
+{
+  "project": "mohist-local",
+  "description": "Add real-time progress feel to the session page: live-ticking duration on running tool rows, a persistent current-activity bar, a block cursor on streaming assistant text, and an elapsed timer on the thinking indicator. Pure presentation layer; consumes the #427 row anchor and the #426 liveness gate.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Live-ticking duration on running tool rows",
+      "spec": "specs/transcript-live-tool-duration/spec.md#a-running-tool-row-displays-a-live-ticking-elapsed-duration",
+      "description": "Introduce the shared ticking clock infrastructure (an injectable `useNow({ intervalMs, now? })` hook in `widgets/session-transcript/model/use-now.ts` and a `formatElapsedNow(startedAt, nowMs)` helper alongside the existing `formatElapsed`) and render a once-per-second ticking elapsed duration on tool rows whose state is `pending` or `running`. Wire `SessionTranscriptLayout` to call `useNow` only while `isRunning` is true and thread the resulting `now` value down to in-progress rows only (terminal rows keep using `formatElapsed` and stay memoizable). On transition to `completed`/`failed`/`cancelled` the displayed duration freezes at the finalized `startedAt → completedAt` delta.",
+      "acceptanceCriteria": [
+        "A `pending` or `running` tool row in a live session renders an elapsed duration that advances once per second, formatted via the existing duration format (e.g. `4.7s`, `2m 03s`)",
+        "A `completed`, `failed`, or `cancelled` tool row renders the frozen `startedAt → completedAt` delta and does not change on subsequent ticks",
+        "When the session transitions from running to not running mid-tool, the in-progress row's duration stops ticking",
+        "A non-running session renders no ticking duration on any row",
+        "Only in-progress rows receive the `now` prop; terminal rows are unaffected by per-second re-renders",
+        "`useNow` and `formatElapsedNow` unit tests pass with fixed timestamps and `vi.useFakeTimers`; no wall-clock waits or `elapsed < N` assertions",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/model/use-now.ts (hook + unit test), widgets/session-transcript/model/format-duration.ts (formatElapsedNow + unit test), ToolRowView ticking duration in tool-views/index.tsx, SessionTranscriptLayout useNow wiring",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This task introduces the shared clock infrastructure that T-002 and T-004 consume. Follow the ActivityPage `now?: number` injection precedent (pages/activity/ui/ActivityPage.tsx:133-161). Per design D2, only pass `now` to in-progress rows so React.memo on ToolRowView stays effective for terminal rows."
+    },
+    {
+      "id": "T-002",
+      "title": "Persistent current-activity bar with click-to-jump",
+      "spec": "specs/transcript-current-activity-bar/spec.md#a-persistent-current-activity-bar-renders-while-the-session-is-alive-and-a-tool-call-is-in-progress",
+      "description": "Add a `selectActiveToolCall(turns: DisplayTurn[]): DisplayToolPart | null` pure selector and a new `CurrentActivityBar` component rendered inside `SessionTranscriptLayout` as the last child of the scroll content, pinned with `position: sticky; bottom: 0`. The bar shows the active tool's verb-led title and live elapsed duration (reusing T-001's `now` and `formatElapsedNow`), renders only when `isRunning` and an active tool exists, and on activation (click or keyboard) queries the scroll container for `[data-tool-call-id=\"<activeToolCallId>\"]` and calls `scrollIntoView({ block: 'center' })`.",
+      "acceptanceCriteria": [
+        "The bar renders at the bottom of the transcript viewport, remaining visible across all scroll positions, while the session is running and a `pending`/`running` tool call exists",
+        "The bar does not render when the session is not running or when no tool call is in progress",
+        "The bar is removed when the session ends mid-tool",
+        "The bar displays the active tool's title and a duration that ticks once per second",
+        "Activating the bar scrolls the tool row whose `data-tool-call-id` matches the active tool call into view",
+        "When the active tool transitions to a new call, subsequent activation targets the new call's row",
+        "`selectActiveToolCall` unit tests cover: no active tool, single active tool, and deterministic last-match tiebreak",
+        "Bar render/gating/click-jump spec tests use mocked `scrollIntoView` and fixed timestamps; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/model/select-active-tool-call.ts (selector + unit test), widgets/session-transcript/ui/CurrentActivityBar.tsx (component + spec test), SessionTranscriptLayout bar mounting",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuses T-001's useNow call already in SessionTranscriptLayout; consume the same `now` value for the bar's duration. Do not introduce a parallel ref registry — the existing data-tool-call-id anchor from #427 is the lookup key. Sticky positioning cannot be asserted in jsdom; assert presence/absence and the position class, defer true sticky verification to the browser track if needed."
+    },
+    {
+      "id": "T-003",
+      "title": "Block cursor on streaming assistant text",
+      "spec": "specs/transcript-streaming-cursor/spec.md#a-block-cursor-renders-at-the-end-of-streaming-assistant-text-in-a-live-session",
+      "description": "Replace the trailing streaming dot glyph in `AssistantTextPartView` with a block cursor (an `inline-block` span rendered after the TranscriptMarkdown output) that appears when `isRunning && (completedAt is null || isStreaming)`. Blinking is via Tailwind's existing `animate-pulse`. The cursor is `aria-hidden=\"true\"`, not focusable, and carries no semantic role.",
+      "acceptanceCriteria": [
+        "An incomplete or actively streaming assistant text part in a live session renders a block cursor at the end of the streamed text",
+        "A completed text part renders no block cursor",
+        "The block cursor does not render when the session is not running, regardless of the streaming flag",
+        "The block cursor is removed when a streaming text part completes or when the session ends mid-stream",
+        "The cursor is marked `aria-hidden=\"true\"`, is not focusable, and carries no semantic role",
+        "The previous trailing dot glyph (`assistant-text-streaming-glyph`) is removed; the Copy button row remains",
+        "Spec tests cover render gating, removal on completion/session-end, and accessibility attributes; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/ui/AssistantParts.tsx (AssistantTextPartView block cursor replacing dot glyph + spec test updates)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001: the cursor uses CSS animate-pulse for blinking and consumes only the already-plumbed isRunning flag and the part's completedAt/isStreaming state. No useNow dependency."
+    },
+    {
+      "id": "T-004",
+      "title": "Thinking-elapsed timer on the thinking indicator",
+      "spec": "specs/transcript-thinking-elapsed/spec.md#the-thinking-indicator-displays-an-elapsed-wait-time-in-a-live-session",
+      "description": "Capture the thinking-state start timestamp in `SessionTranscriptLayout` via a ref that records `Date.now()` when `isThinking` transitions from false to true (reset to null when it becomes false). Modify `ThinkingPlaceholder` to receive `now` (from T-001's useNow call) and the captured start, and display the elapsed time formatted via `formatDuration`, ticking once per second. The elapsed display is gated on `isRunning && isThinking`.",
+      "acceptanceCriteria": [
+        "While the session is running and in the thinking state, the thinking indicator displays an elapsed time that advances once per second, formatted via the existing duration format",
+        "The thinking elapsed display does not render when the session is not running, regardless of any lingering thinking flag",
+        "The thinking indicator and its elapsed display are removed when the session ends",
+        "The elapsed display stops advancing or is removed when the agent leaves the thinking state (e.g. visible content begins streaming)",
+        "The thinking-start timestamp captures the false→true transition of isThinking and resets on true→false",
+        "Spec tests use `vi.useFakeTimers` and fixed timestamps to verify ticking, gating, and removal; no wall-clock waits; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/session-transcript/ui/SessionTranscriptLayout.tsx (ThinkingPlaceholder elapsed timer + thinking-start ref capture + spec test)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes T-001's useNow call already in SessionTranscriptLayout. Per design D7, the thinking-start timestamp is presentation-local (captured via ref on isThinking transition), not a new data-source field. A page reload mid-think resets the timer — acceptable per the issue's live-progress framing."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { ProjectProvider } from '../../entities/project'
@@ -9,6 +9,16 @@ import {
   useEventTimeline,
   type EventTimelineHistoryHook,
 } from './useEventTimeline'
+
+// react-query resolves via notifyManager's scheduled timers; advance the clock
+// ourselves under fake timers instead of polling wall-clock time (waitFor's
+// default 1000ms is too tight on slow CI — design/testing.md: advance fake
+// time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 let historyResponse: StoredCloudEventDto[] | 'never' = []
 let requestedIssueNumbers: string[] = []
@@ -85,6 +95,11 @@ function renderTimelineHook(enabled: boolean = true) {
 beforeEach(() => {
   historyResponse = []
   requestedIssueNumbers = []
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('useEventTimeline', () => {
@@ -95,9 +110,8 @@ describe('useEventTimeline', () => {
 
     const { result } = renderTimelineHook()
 
-    await waitFor(() => {
-      expect(result.current.entries).toHaveLength(1)
-    })
+    await flush()
+    expect(result.current.entries).toHaveLength(1)
     expect(result.current.entries[0].id).toBe('h1')
     expect(result.current.entries[0].isLive).toBe(false)
   })
@@ -142,9 +156,8 @@ describe('useEventTimeline', () => {
     historyResponse = [makeHistoryEvent({ eventId: 'shared-1', type: 'com.mohist.workflow.run.started' })]
     const { result } = renderTimelineHook()
 
-    await waitFor(() => {
-      expect(result.current.entries).toHaveLength(1)
-    })
+    await flush()
+    expect(result.current.entries).toHaveLength(1)
 
     act(() => {
       dispatchTimelineEvent(makeLiveEvent({ eventId: 'shared-1', issueNumber: 42, }))
@@ -161,9 +174,8 @@ describe('useEventTimeline', () => {
 
     const { result } = renderTimelineHook()
 
-    await waitFor(() => {
-      expect(result.current.entries.map((event) => event.id)).toEqual(['h2', 'h1'])
-    })
+    await flush()
+    expect(result.current.entries.map((event) => event.id)).toEqual(['h2', 'h1'])
   })
 
   it('caps live events at 500 entries', () => {
@@ -211,9 +223,8 @@ describe('useEventTimeline', () => {
 
     rerender({ number: 42, isEnabled: true })
 
-    await waitFor(() => {
-      expect(requestedIssueNumbers).toEqual(['42'])
-    })
+    await flush()
+    expect(requestedIssueNumbers).toEqual(['42'])
   })
 
   it('does not subscribe to live events when enabled is false', () => {

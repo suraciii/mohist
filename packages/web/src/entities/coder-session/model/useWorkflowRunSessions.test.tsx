@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
 import { dispatchAgentEvent } from '../../agent/model/events'
+
+// Advance react-query's notifyManager timers under fake timers instead of
+// polling wall-clock (design/testing.md: advance fake time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
+
 let _sessionsData: WorkflowRunSession[] = []
 let _sessionsResponses: Array<WorkflowRunSession[] | 'never'> = []
 
@@ -53,9 +62,10 @@ describe('useWorkflowRunSessions', () => {
     vi.clearAllMocks()
     _sessionsData = []
     _sessionsResponses = []
+    vi.useFakeTimers()
   })
-
   afterEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
@@ -75,9 +85,8 @@ describe('useWorkflowRunSessions', () => {
       { initialProps: { workflowRunId: 'wr-1' }, wrapper },
     )
 
-    await waitFor(() => {
-      expect(result.current.sessions.map((s) => s.sessionName)).toEqual(['old-run-session'])
-    })
+    await flush()
+    expect(result.current.sessions.map((s) => s.sessionName)).toEqual(['old-run-session'])
 
     rerender({ workflowRunId: 'wr-2' })
 
@@ -99,9 +108,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => {
-        expect(result.current.sessions.length).toBe(1)
-      })
+      await flush()
+      expect(result.current.sessions.length).toBe(1)
 
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
@@ -113,11 +121,10 @@ describe('useWorkflowRunSessions', () => {
         })
       })
 
-      await waitFor(() => {
-        const s = result.current.sessions[0]
-        expect(s.usage?.contextUsagePercent).toBe(72)
-        expect(s.usage?.healthStatus).toBe('yellow')
-      })
+      await flush()
+      const s = result.current.sessions[0]
+      expect(s.usage?.contextUsagePercent).toBe(72)
+      expect(s.usage?.healthStatus).toBe('yellow')
     })
 
     it('refetches sessions when a runtime binding changes', async () => {
@@ -135,7 +142,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-old'))
+      await flush()
+      expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-old')
 
       act(() => {
         dispatchAgentEvent('com.mohist.agent-session.runtime-bound', {
@@ -144,10 +152,9 @@ describe('useWorkflowRunSessions', () => {
         })
       })
 
-      await waitFor(() => {
-        expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
-        expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-new')
-      })
+      await flush()
+      expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
+      expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-new')
     })
 
     it('ignores runtime events without a physical binding', async () => {
@@ -163,9 +170,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => {
-        expect(result.current.sessions.length).toBe(1)
-      })
+      await flush()
+      expect(result.current.sessions.length).toBe(1)
 
       const fetchCountBefore = workflowRunSessionsFetcher.mock.calls.length
 
@@ -178,9 +184,8 @@ describe('useWorkflowRunSessions', () => {
         })
       })
 
-      await waitFor(() => {
-        expect(result.current.sessions[0].usage?.contextUsagePercent).toBeUndefined()
-      })
+      await flush()
+      expect(result.current.sessions[0].usage?.contextUsagePercent).toBeUndefined()
 
       expect(workflowRunSessionsFetcher.mock.calls.length).toBe(fetchCountBefore)
     })
@@ -197,7 +202,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+      await flush()
+      expect(result.current.sessions).toHaveLength(1)
       act(() => {
         dispatchAgentEvent('session.closed', {
           sessionId: 'sess-1',
@@ -225,7 +231,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+      await flush()
+      expect(result.current.sessions).toHaveLength(1)
       act(() => {
         dispatchAgentEvent('session.closed', {
           sessionId: 'sess-1',
@@ -254,7 +261,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => expect(result.current.sessions.length).toBe(1))
+      await flush()
+      expect(result.current.sessions.length).toBe(1)
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
@@ -282,7 +290,8 @@ describe('useWorkflowRunSessions', () => {
         { wrapper },
       )
 
-      await waitFor(() => expect(result.current.sessions).toHaveLength(2))
+      await flush()
+      expect(result.current.sessions).toHaveLength(2)
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-other',

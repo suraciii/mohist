@@ -28,3 +28,15 @@ export function formatElapsed(
   if (!Number.isFinite(diff) || diff < 0) return null
   return formatDuration(diff)
 }
+
+export function formatElapsedNow(
+  startedAt: string | null | undefined,
+  nowMs: number,
+): string | null {
+  const start = toMillis(startedAt)
+  if (start === null) return null
+  if (!Number.isFinite(nowMs)) return null
+  const diff = nowMs - start
+  if (!Number.isFinite(diff) || diff < 0) return null
+  return formatDuration(diff)
+}

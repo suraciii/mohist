@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart, DisplayToolPart, DisplayChangedFile } from '../../model/session-transcript-display'
-import { formatElapsed } from '../../model/format-duration'
+import { formatElapsed, formatElapsedNow } from '../../model/format-duration'
 import { getDisplayType, parseEditInput, parseEditWriteChanges, parsePatchOperations } from '../../model/transcript-tool-utils'
 import { BashContentView } from './bash-view'
 import { ReadContentView } from './read-view'
@@ -114,9 +114,10 @@ function deriveChangedFilesForExpand(part: DisplayToolPart): DisplayChangedFile[
 
 interface ToolRowViewProps {
   part: Extract<DisplayAssistantPart, { partType: 'tool' }>
+  now?: number
 }
 
-export function ToolRowView({ part }: ToolRowViewProps) {
+export function ToolRowView({ part, now }: ToolRowViewProps) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = part.status === 'running' || part.status === 'pending'
   const isFailed = part.status === 'failed'
@@ -126,7 +127,11 @@ export function ToolRowView({ part }: ToolRowViewProps) {
   const verbTitle = deriveVerbLedTitle(part.status, part.normalizedName, part.input, part.toolName)
   const toolArgs = getToolDisplayArgs(part.normalizedName, part.input)
 
-  const duration = formatElapsed(part.startedAt, part.completedAt ?? undefined)
+  const finalizedDuration = formatElapsed(part.startedAt, part.completedAt ?? undefined)
+  const liveDuration = isRunning && now !== undefined
+    ? formatElapsedNow(part.startedAt, now)
+    : null
+  const duration = liveDuration ?? finalizedDuration
 
   const derivedChangedFiles = isEditFamily ? deriveChangedFilesForExpand(part) : []
   const hasExpandableDetail =
@@ -291,9 +296,10 @@ export function ToolRowView({ part }: ToolRowViewProps) {
             {editStats.fileCount} files
           </span>
         )}
-        {duration && !isRunning && (
+        {duration && (!isRunning || liveDuration) && (
           <span
             data-testid="tool-row-duration"
+            data-duration-mode={liveDuration ? 'live' : 'frozen'}
             className={`ml-auto text-xs shrink-0 tabular-nums ${isFailed ? 'text-danger/70' : 'text-muted-foreground/70'}`}
           >
             {duration}
@@ -326,9 +332,10 @@ interface ContextGroupViewProps {
   title: string
   tools: Extract<DisplayAssistantPart, { partType: 'tool' }>[]
   hasError: boolean
+  now?: number
 }
 
-export function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
+export function ContextGroupView({ title, tools, hasError, now }: ContextGroupViewProps) {
   const [expanded, setExpanded] = useState(false)
   const titleSegments = title.split(' · ')
   const titlePrefix = titleSegments[0]
@@ -392,9 +399,10 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
           data-testid="context-group-children"
           className="min-w-0 mt-1 space-y-0.5"
         >
-          {tools.map((tool) => (
-            <ToolRowView key={tool.id} part={tool} />
-          ))}
+          {tools.map((tool) => {
+            const isInProgress = tool.status === 'running' || tool.status === 'pending'
+            return <ToolRowView key={tool.id} part={tool} now={isInProgress ? now : undefined} />
+          })}
         </div>
       )}
     </div>

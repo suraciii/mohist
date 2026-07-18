@@ -1,8 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { usePreviewProjectTemplate, type ProjectTemplatePreviewer } from '..'
+
+// react-query mutations resolve through notifyManager's scheduled timers;
+// advance the clock ourselves under fake timers instead of polling wall-clock
+// time (waitFor's default 1000ms is too tight on slow CI — design/testing.md:
+// advance fake time, don't poll harder).
+async function flush() {
+  await vi.advanceTimersByTimeAsync(1000)
+}
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
@@ -56,9 +64,11 @@ beforeEach(() => {
   previewResponse = PREVIEW_RESPONSE
   previewError = null
   previewCalls.length = 0
+  vi.useFakeTimers()
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
 })
@@ -69,11 +79,10 @@ describe('usePreviewProjectTemplate hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ variables: VARIABLES })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(previewCalls).toEqual([[PROJECT_ID, KEY, VARIABLES]])
   })
@@ -83,11 +92,10 @@ describe('usePreviewProjectTemplate hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ variables: VARIABLES })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(result.result.current.data).toEqual(PREVIEW_RESPONSE)
     expect(result.result.current.data).toMatchObject({
@@ -108,11 +116,10 @@ describe('usePreviewProjectTemplate hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ variables: VARIABLES })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(result.result.current.data?.missingVariables).toEqual([])
     expect(result.result.current.data?.rendered).toBe('fully resolved body')
@@ -125,11 +132,10 @@ describe('usePreviewProjectTemplate hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ variables: VARIABLES })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isError).toBe(true)
-    })
+    expect(result.result.current.isError).toBe(true)
 
     expect(result.result.current.error).toBeInstanceOf(Error)
     expect((result.result.current.error as Error).message).toBe('Render failed')

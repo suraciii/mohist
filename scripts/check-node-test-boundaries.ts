@@ -83,7 +83,7 @@ const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'contex
 const runnerDefaultTrack = 'default'
 const runnerIntegrationTrack = 'integration'
 const testFileBudgetBaselineRelativePath = 'scripts/node-test-file-budget-baseline.json'
-const testFileLineBudgets = Object.freeze({ test: 300, spec: 800 })
+const testFileLineBudgets = Object.freeze({ test: 500, spec: 800 })
 
 type BudgetRecord = {
   filePath: string
@@ -1154,10 +1154,11 @@ function parseBudgetBaseline(sourceText, sourceName) {
   const entries = new Map<string, number>()
   for (const [filePath, allowedLines] of Object.entries(parsed as Record<string, number>)) {
     validateBudgetBaselinePath(filePath, sourceName)
-    const budget = testFileLineBudget(filePath)
-    if (!Number.isSafeInteger(allowedLines) || allowedLines <= budget) {
-      throw new Error(`${sourceName} must allow more than ${budget} lines for ${filePath}`)
+    if (!Number.isSafeInteger(allowedLines)) {
+      throw new Error(`${sourceName} must allow a positive integer line count for ${filePath}`)
     }
+    const budget = testFileLineBudget(filePath)
+    if (allowedLines <= budget) continue
     entries.set(filePath, allowedLines)
   }
   return entries

@@ -125,10 +125,10 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
       />,
     )
 
-    expect(screen.queryByTestId('assistant-text-streaming-glyph')).toBeNull()
+    expect(screen.queryByTestId('assistant-text-streaming-cursor')).toBeNull()
   })
 
-  it('renders the per-part streaming glyph on an incomplete part of a live session', () => {
+  it('renders the per-part streaming cursor on an incomplete part of a live session', () => {
     render(
       <SessionTranscriptLayout
         turns={[
@@ -151,11 +151,11 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
       />,
     )
 
-    expect(screen.getByTestId('assistant-text-streaming-glyph')).toBeInTheDocument()
-    expect(screen.getByTestId('assistant-text-streaming-glyph').getAttribute('aria-hidden')).toBe('true')
+    expect(screen.getByTestId('assistant-text-streaming-cursor')).toBeInTheDocument()
+    expect(screen.getByTestId('assistant-text-streaming-cursor').getAttribute('aria-hidden')).toBe('true')
   })
 
-  it('hides the per-part streaming glyph when isRunning is false even on an incomplete part', () => {
+  it('hides the per-part streaming cursor when isRunning is false even on an incomplete part', () => {
     render(
       <SessionTranscriptLayout
         turns={[
@@ -178,7 +178,7 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
       />,
     )
 
-    expect(screen.queryByTestId('assistant-text-streaming-glyph')).toBeNull()
+    expect(screen.queryByTestId('assistant-text-streaming-cursor')).toBeNull()
   })
 
   it('exposes role="status" on the streaming indicator so its appearance/removal is announced', () => {
