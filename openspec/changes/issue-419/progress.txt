@@ -1,0 +1,26 @@
+## Codebase Patterns
+
+- Issue affiliations (Epic, Parent) are stored on the child aggregate via init-only `EpicNumber` / `ParentIssueNumber` properties and projected to `IssueRow`. Affinities are guard-constrained at the aggregate layer (e.g. child cannot join Epic).
+- The C# 14 `union` syntax compiles to a base class + per-case records. The base class name shadows the union's case name at the type level: `IsType<UnionCase>(unionValue)` and `OfType<UnionCase>(unionSequence)` both fail at runtime — the analyzer's CA2021 actually flags this statically. Use the `is UnionCase` pattern (or iterate and switch) instead. Existing tests already follow this pattern (`IssueStartReadinessDomainTests.SingleDraftEvent`).
+- `IssueLineage.BuildExtensions` and the related event serializers are pure helpers that read only the producing aggregate's state — no DB calls. The `parent` lineage key mirrors `epic`: stamped conditionally on the producing issue, omitted entirely when the affiliation is null.
+- `IssueStatus` JSON serialization uses `JsonStringEnumConverter` with `CamelCase` policy: `Backlog → "backlog"`, `InProgress → "inProgress"`, `Done → "done"`, `Cancelled → "cancelled"`. The new `IssueCompositeStatusChanged` event payload uses the same wire strings.
+- `dotnet test Mohist.sln` runs four test projects: UnitTests (1,217), SpecTests (2,827), ArchTests (30), CLI.Tests (1,397). All currently green.
+
+## T-001
+
+- Added `IssueCompositeStarted` and `IssueCompositeStatusChanged(PreviousStatus, NewStatus)` to the `IssueEvent` union; wired serializer map + `BusType` switch + `Unwrap` switch.
+- Added `com.mohist.issue.composite-started` and `com.mohist.issue.composite-status-changed` to `EventCatalog.ReverseDns` and `EventCatalog.All`; added `parent` to `EventCatalog.Lineage`.
+- Extended `IssueLineage.BuildExtensions` to stamp `parent = <n>` whenever `state.ParentIssueNumber is > 0`; mirrors the `epic` branch.
+- Added `CloudEventLineage.TryReadParent` (positive-int parser; returns false on missing/invalid values).
+- Added `ChildSnapshot(Number, Status)` record + `IssueEmptyCompositeSnapshotException` in a new `IssueCompositeSnapshot.cs` file.
+- Added four aggregate transitions on `Issue.Transitions.cs`:
+  - `MarkCompositeStarted(snapshot)` — Backlog → InProgress; no `WorkflowRunId`, no `HasWorkflowStarted`, no `RepositoryBindingRevision` bump; no-op if already InProgress; throws on empty snapshot.
+  - `MarkCompositeDone(snapshot)` — InProgress → Done; sets `CompletedAt`; verifies snapshot yields Done; no-op if already Done; throws on empty snapshot.
+  - `MarkCompositeCancelled(snapshot)` — Backlog/InProgress → Cancelled; verifies snapshot yields Cancelled; no-op if already Cancelled; throws on empty snapshot.
+  - `ReopenComposite()` — Cancelled → Backlog, bypasses the repository-existence check (no snapshot argument, no target gate).
+  - `RecomputeCompositeStatus(snapshot)` — pure decision method returning the aggregated target status; throws on empty snapshot. Aggregation order: any InProgress child → InProgress; all Backlog → Backlog; any Backlog + terminal mix → InProgress (some work still pending); all Cancelled → Cancelled; mixed terminal with ≥1 Done → Done.
+- Updated `ProjectEventFeedAssembler.IssueTypes` so the two new event types are returned by `/events` filtered feeds.
+- Wrote `IssueCompositeStatusTransitionTests` (16 tests covering all transitions + the four-state table + empty-snapshot throws + wrong-source-state throws + revision-untouched invariant); `IssueLineageTests` (5 tests covering parent stamping + omission + key-set invariance); extended `CloudEventLineageTests` with `TryReadParent` cases; extended `IssueEventSerializerTests` with both new event bus types + payload round-trips.
+- Did NOT touch `IssueStartBlocker.ParentHasChildren` — T-002 removes it. `mo issue start <parent>` still returns the `is_parent` blocker (regression-free).
+- Did NOT add `Close(snapshot, reason)` or `ArchiveForced` — those belong to T-003 with the lifecycle grain/API wiring.
+- Full `dotnet test Mohist.sln` (5,471 tests) green; full `npm test` (server, CLI, runner, web — 8,900+ tests) green.

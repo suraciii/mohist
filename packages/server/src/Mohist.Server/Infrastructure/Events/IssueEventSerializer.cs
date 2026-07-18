@@ -28,6 +28,8 @@ internal static class IssueEventSerializer
         [typeof(IssueUnarchived)] = EventCatalog.ReverseDns.IssueUnarchived,
         [typeof(IssueReopened)] = EventCatalog.ReverseDns.IssueReopened,
         [typeof(IssueRepositoryChanged)] = EventCatalog.ReverseDns.IssueRepositoryChanged,
+        [typeof(IssueCompositeStarted)] = EventCatalog.ReverseDns.IssueCompositeStarted,
+        [typeof(IssueCompositeStatusChanged)] = EventCatalog.ReverseDns.IssueCompositeStatusChanged,
     };
 
     internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
@@ -59,6 +61,8 @@ internal static class IssueEventSerializer
         IssueUnarchived => "com.mohist.issue.unarchived",
         IssueReopened => "com.mohist.issue.reopened",
         IssueRepositoryChanged => EventCatalog.ReverseDns.IssueRepositoryChanged,
+        IssueCompositeStarted => EventCatalog.ReverseDns.IssueCompositeStarted,
+        IssueCompositeStatusChanged => EventCatalog.ReverseDns.IssueCompositeStatusChanged,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
 
@@ -86,6 +90,8 @@ internal static class IssueEventSerializer
         IssueUnarchived x => x,
         IssueReopened x => x,
         IssueRepositoryChanged x => x,
+        IssueCompositeStarted x => x,
+        IssueCompositeStatusChanged x => x,
         null => throw new ArgumentNullException(nameof(payload)),
     };
 }

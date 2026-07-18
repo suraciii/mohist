@@ -74,6 +74,20 @@ public static class CloudEventLineage
         out string projectId)
         => TryReadValue(extensions, EventCatalog.Lineage.ProjectId, out projectId);
 
+    /// <summary>
+    /// Reads the <c>parent</c> lineage extension produced by
+    /// <see cref="Mohist.Server.Infrastructure.Data.Issue.IssueLineage"/>
+    /// when an issue carries a parent reference. Returns <c>true</c> only
+    /// when the key is present and parses to a positive integer; absent
+    /// keys, non-numeric values, and zero or negative numbers all return
+    /// <c>false</c>. Handlers that ignore unknown extension keys remain
+    /// unaffected when an event lacks this key (pre-issue-418 lineage).
+    /// </summary>
+    public static bool TryReadParent(
+        IReadOnlyDictionary<string, string> extensions,
+        out int parentNumber)
+        => TryReadPositiveNumber(extensions, EventCatalog.Lineage.Parent, out parentNumber);
+
     public static bool TryReadPositiveNumber(
         IReadOnlyDictionary<string, string> extensions,
         string key,

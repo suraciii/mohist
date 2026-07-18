@@ -399,6 +399,7 @@ public sealed class ProjectEventFilter
         "com.mohist.issue.draft-changed", "com.mohist.issue.prerequisite-added",
         "com.mohist.issue.prerequisite-removed", "com.mohist.issue.workflow-profile-changed",
         "com.mohist.issue.repository-changed",
+        "com.mohist.issue.composite-started", "com.mohist.issue.composite-status-changed",
     ];
 
     private static readonly string[] WorkflowTypes =

@@ -92,6 +92,59 @@ public sealed class CloudEventLineageTests
         Assert.Null(CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId));
     }
 
+    [Fact]
+    public void TryReadParent_ReadsPositiveParentNumber()
+    {
+        var extensions = new Dictionary<string, string>
+        {
+            [EventCatalog.Lineage.Parent] = "42",
+        };
+
+        Assert.True(CloudEventLineage.TryReadParent(extensions, out var parentNumber));
+        Assert.Equal(42, parentNumber);
+    }
+
+    [Fact]
+    public void TryReadParent_ReturnsFalse_WhenKeyAbsent()
+    {
+        var extensions = new Dictionary<string, string>();
+
+        Assert.False(CloudEventLineage.TryReadParent(extensions, out var parentNumber));
+        Assert.Equal(0, parentNumber);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("not-a-number")]
+    public void TryReadParent_RejectsInvalidValues(string rawValue)
+    {
+        var extensions = new Dictionary<string, string>
+        {
+            [EventCatalog.Lineage.Parent] = rawValue,
+        };
+
+        Assert.False(CloudEventLineage.TryReadParent(extensions, out _));
+    }
+
+    [Fact]
+    public void TryReadParent_IgnoresUnknownExtensionKeys()
+    {
+        // Mirrors the existing TryReadIssueContext behavior: extra keys
+        // are simply not consulted. The handler choosing to read only
+        // `parent` (and ignoring everything else) sees no regressions.
+        var extensions = new Dictionary<string, string>
+        {
+            [EventCatalog.Lineage.ProjectId] = "proj_a",
+            [EventCatalog.Lineage.Issue] = "5",
+            [EventCatalog.Lineage.Epic] = "7",
+            ["futurekey"] = "irrelevant",
+        };
+
+        Assert.False(CloudEventLineage.TryReadParent(extensions, out _));
+    }
+
     private static CloudEvent Event(
         IReadOnlyDictionary<string, string> extensions,
         JsonElement? data = null) =>
