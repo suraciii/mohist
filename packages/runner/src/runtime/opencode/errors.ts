@@ -22,7 +22,7 @@ export interface RawSdkError {
   readonly cause?: unknown
 }
 
-const NON_RECOVERABLE_MESSAGE_PATTERNS: readonly RegExp[] = [
+const DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS: readonly RegExp[] = [
   /quota/i,
   /credit/i,
   /billing/i,
@@ -34,8 +34,13 @@ const NON_RECOVERABLE_MESSAGE_PATTERNS: readonly RegExp[] = [
   /欠费/i,
 ]
 
-export function isNonRecoverableProviderMessage(message: string): boolean {
-  return NON_RECOVERABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(message))
+export const DEFAULT_PROVIDER_ERROR_POLICY = {
+  nonRecoverablePatterns: DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
+  consecutiveRetryThreshold: 5,
+} as const
+
+export function isNonRecoverableProviderMessage(message: string, patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS): boolean {
+  return patterns.some((pattern) => pattern.test(message))
 }
 
 export function normalizePermissionRequired(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
@@ -67,7 +72,7 @@ export function normalizeInterrupted(diagnostics: readonly RuntimeDiagnostic[] =
 export function normalizeMissingSession(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
     kind: "missing-session",
-    message: "No current OpenCode Runtime Session is bound to this logical AgentSession",
+    message: "No current OpenCode Runtime Session is bound to this logical AgentSession — issue a Reset to establish a fresh Runtime Session, then retry",
     diagnostics: [
       ...diagnostics,
       {

@@ -9,31 +9,32 @@
  *   - the readiness check (health plus model catalog load via
  *     `client.v2.provider.list()` + `client.v2.model.list()`);
  *   - error normalization to a small Mohist result set;
- *   - permission authorization (no auto-approve, no Workflow Approval).
+ *   - permission authorization (no auto-approve, no Workflow Approval);
+ *   - Workflow Inline Agent turn execution (T-004) over the native
+ *     `client.session.*` surface.
  *
  * Callers depend only on Mohist-owned request/result types from
  * `./types.js`. The generated SDK is an implementation detail
  * contained inside this module.
- *
- * T-002 stops short of executing turns or running session commands —
- * those land in T-003/T-004/T-005, which wire this runtime into the
- * host and the Action adapter. What lives here is the lifecycle and
- * readiness contract the rest of the system depends on.
  */
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type {
   RuntimeDiagnostic,
   RuntimeModelCatalog,
+  RuntimeProviderErrorPolicy,
   RuntimeReadyState,
   RuntimeResult,
   RuntimeSessionCreateRequest,
   RuntimeSessionCreateResult,
+  RuntimeTurnRequest,
+  RuntimeTurnResult,
 } from "./types.js"
 import { errorKindFor, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { CatalogClient } from "./catalog.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
+import { runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
@@ -41,6 +42,13 @@ export interface OpenCodeRuntimeDeps {
   readonly catalogFactory?: (client: OpencodeClient) => CatalogClient
   readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
+  /**
+   * Optional override for the provider-error failure policy. Defaults
+   * to the design defaults (quota/credit/billing pattern set,
+   * consecutive-retry threshold 5). See `errors.ts` and
+   * `design/runtimes/opencode.md`「Provider 错误失败策略」.
+   */
+  readonly providerErrorPolicy?: RuntimeProviderErrorPolicy
 }
 
 interface InternalState {
@@ -58,6 +66,7 @@ export class OpenCodeRuntime {
   private readonly deps: OpenCodeRuntimeDeps
   private readonly state: InternalState
   private startInFlight: Promise<RuntimeResult<RuntimeReadyState>> | null = null
+  private inFlight: ReturnType<typeof bindTurnInFlightTracker> | null = null
 
   constructor(deps: OpenCodeRuntimeDeps) {
     this.deps = deps
@@ -142,7 +151,7 @@ export class OpenCodeRuntime {
     try {
       const created = await client.session.create({
         directory: request.target.workDir,
-        ...(request.model ? { model: { id: request.model.modelID, providerID: request.model.providerID } } : {}),
+        ...(request.model ? { model: { providerID: request.model.providerID, id: request.model.modelID } } : {}),
       })
       const data = created?.data as { id?: string } | undefined
       if (!data || typeof data.id !== "string") {
@@ -165,6 +174,68 @@ export class OpenCodeRuntime {
             : normalizeTurnFailed(raw)
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+  }
+
+  /**
+   * Run a Workflow Inline Agent turn over the OpenCode runtime. The
+   * runtime:
+   *
+   *   - resolves or creates the physical Session via
+   *     `client.session.create()` (no rotation on model/variant
+   *     change; rotation is governed by the binding + directory);
+   *   - constructs the SDK model DTO from the parsed provider/model
+   *     and applies model/variant on the prompt body
+   *     (`client.session.prompt()`);
+   *   - awaits the prompt response as the sole completion authority
+   *     (no `client.v2.session.wait()`);
+   *   - watches `session.status` retry events for provider-error
+   *     recoverability (per the design call table), aborting and
+   *     returning `turn-failed` only when a non-recoverable pattern
+   *     matches or `attempt` reaches the consecutive-retry
+   *     threshold;
+   *   - uses the caller's abort signal as the deadline, calling
+   *     `client.session.abort()` on deadline and returning
+   *     `interrupted`;
+   *   - does not auto-replay an uncertain prompt submission;
+   *   - never exposes SDK DTOs across the boundary.
+   *
+   * The returned `RuntimeTurnResult.facts.finalAssistantText` is the
+   * private turn fact the Workflow task executor evaluates `path:
+   * _output` against; the Action does not synthesize `{ promise }`.
+   */
+  async runTurn(
+    request: RuntimeTurnRequest,
+    signal: AbortSignal,
+  ): Promise<RuntimeResult<RuntimeTurnResult>> {
+    if (!this.state.server || !this.state.ready || !this.state.events) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const inFlight = this.ensureInFlightTracker()
+    const sessionKey = request.target.runtimeSessionId ?? `${request.target.workDir}::pending`
+    if (!inFlight.start(sessionKey)) {
+      const error = normalizeUnavailableRuntime([{
+        severity: "error",
+        code: "in-flight",
+        message: "Another work prompt is already running for this AgentSession",
+      }])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    try {
+      const deps: TurnExecutionDeps = {
+        client: this.state.server.client,
+        events: this.state.events,
+        ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
+      }
+      return await runTurn(request, deps, signal)
+    } finally {
+      inFlight.end(sessionKey)
+    }
+  }
+
+  private ensureInFlightTracker() {
+    if (!this.inFlight) this.inFlight = bindTurnInFlightTracker()
+    return this.inFlight
   }
 
   /**

@@ -47,6 +47,68 @@ export interface RuntimeSessionCreateResult {
   readonly workDir: string
 }
 
+/**
+ * Inputs for a Workflow-owned turn over the OpenCode runtime. The
+ * runtime owns the SDK DTO construction and the per-turn application
+ * of `model`/`variant`; callers pass only Mohist-owned shapes.
+ *
+ * `runtimeSessionId` carries the current logical Session's physical
+ * binding. `null` means "no current binding — create a new physical
+ * Session in `workDir`". A persisted binding whose physical Session
+ * cannot be restored is the caller's problem (the runtime surfaces a
+ * `Reset` hint via `missing-session`); the runtime itself never
+ * implicitly calls `create` to fabricate continuous context.
+ *
+ * `options` is the Mohist Action's parsed `options` shape; the
+ * runtime ignores unknown keys (tolerant of persisted legacy keys
+ * such as `type` or liveness configuration) and reports them as
+ * diagnostics.
+ */
+export interface RuntimeTurnRequest {
+  readonly target: RuntimeSessionTarget
+  readonly prompt: string
+  readonly options?: RuntimeTurnOptions | null
+}
+
+export interface RuntimeTurnOptions {
+  readonly model?: { providerID: string; modelID: string } | null
+  readonly variant?: string | null
+  readonly unknownKeys?: readonly string[]
+}
+
+export interface RuntimeTurnFacts {
+  readonly finalAssistantText: string | null
+  readonly runtimeSessionId: string
+  readonly workDir: string
+}
+
+export interface RuntimeTurnResult {
+  readonly facts: RuntimeTurnFacts
+  readonly diagnostics: readonly RuntimeDiagnostic[]
+}
+
+/**
+ * Configuration for the runtime's provider-error failure policy.
+ *
+ * - `nonRecoverablePatterns` are matched (case-insensitive) against
+ *   the `message` of a `session.status` retry event; a match on
+ *   first occurrence aborts the turn with a `turn-failed` result
+ *   carrying the provider message as diagnostics.
+ * - `consecutiveRetryThreshold` is the maximum `attempt` value on
+ *   a recoverable retry event after which the runtime aborts the
+ *   turn (`turn-failed`). A recoverable retry sequence that
+ *   completes the turn before `attempt` reaches the threshold is
+ *   left to OpenCode.
+ *
+ * Defaults match `design/runtimes/opencode.md` Provider 错误失败策略:
+ * the pattern set covers quota/credit/billing wording in both
+ * English and Chinese, and the threshold defaults to 5.
+ */
+export interface RuntimeProviderErrorPolicy {
+  readonly nonRecoverablePatterns: readonly RegExp[]
+  readonly consecutiveRetryThreshold: number
+}
+
 export type RuntimeErrorKind =
   | "invalid-input"
   | "unavailable-runtime"

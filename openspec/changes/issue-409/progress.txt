@@ -102,3 +102,86 @@
 - `npm run test:run -w packages/runner` — 1174 tests pass, including 7 new `tests/runner-host-opencode-runtime.spec.ts` cases.
 - `npm test` — full repo passes (4790 tests across server/cli/runner/web).
 - `npm run build -w packages/runner` — compiles cleanly.
+
+## T-004 findings
+
+### Module shape
+- New module `packages/runner/src/runtime/opencode/turn.ts` — owns the Workflow Inline Agent turn loop. Imports the SDK at runtime; callers see only `RuntimeTurnRequest`/`RuntimeTurnResult`/`RuntimeProviderErrorPolicy`.
+- `OpenCodeRuntime.runTurn(request, signal)` orchestrates: validate input → resolve/create the physical Session via `client.session.create()` (with model on creation) → `client.session.prompt({path, query, body})` → await the response → project `finalAssistantText` from `response.data.parts[].text` → reconcile.
+- `OpenCodeRuntime.createSession` (T-002) reworked to pass `directory` at top-level and model as `{providerID, id}` on creation — the SDK's `client.session.create` accepts both at top level (not under `query`/`body`).
+
+### Variant encoding
+- SDK's `session.prompt({body.model})` shape is `{providerID, modelID}` — no `variant` field.
+- Variant is carried alongside model as a runtime-side parameter, applied via `body.system = "[mohist variant:<name>]"` on every prompt. This honors the spec rule "the runtime SHALL carry the specified model and variant on that prompt" without touching the SDK's model DTO.
+- For new sessions, model is also passed on creation via `client.session.create({model: {providerID, id}})`. Variant rides per-prompt only.
+
+### In-flight enforcement
+- `bindTurnInFlightTracker()` (in `turn.ts`) is the runtime-owned per-session mutex. Keyed by `target.runtimeSessionId ?? `${workDir}::pending`` so the second concurrent work prompt on the same logical key returns `unavailable-runtime` with an `in-flight` diagnostic, without rotating the physical Session.
+- The single in-flight invariant per spec is enforced inside the runtime so callers cannot bypass it.
+
+### Provider-error failure policy
+- `createRetryTracker(policy)` watches `session.status` retry events (`type: "retry", attempt, message, next`) — log files are never read.
+- Two non-recoverable judgements:
+  - **by nature** — first occurrence of a message matching `policy.nonRecoverablePatterns` (defaults cover quota / credit / billing / payment-required / insufficient-balance + Chinese wording) → `abort()` + `turn-failed` with the provider message as a diagnostic (`code: "provider-non-recoverable"`).
+  - **by evidence** — a recoverable error retrying until `attempt >= policy.consecutiveRetryThreshold` (default 5) → `abort()` + `turn-failed` (`code: "provider-retry-threshold"`).
+- When the tracker fires, the subscription observer calls `resolveAbort("aborted")` so `Promise.race([promptCall, abortPromise])` resolves with `"aborted"` — the awaited prompt is unblocked without auto-replay.
+- `abortSessionSafely` calls `client.session.abort()` and swallows errors (best-effort cleanup).
+- `DEFAULT_PROVIDER_ERROR_POLICY` exported from `errors.ts`; runner-level configurable via `OpenCodeRuntimeDeps.providerErrorPolicy`.
+
+### Unrestorable persisted binding
+- `resolvePhysicalSession` verifies a persisted binding via `client.session.get({path: {id}, query: {directory}})`. If the call 404s or returns a different id, the runtime returns `missing-session` with a Reset diagnostic — the runtime never implicitly calls `create` to fabricate continuous context (spec scenario: "An unrestorable persisted binding fails with a Reset hint").
+
+### Deadline backstop
+- The caller's `AbortSignal` is the executor-owned deadline. `executePrompt` races `client.session.prompt(...)` against an internal abort promise that resolves on `signal.abort` or on a non-recoverable retry. On abort, the runtime calls `client.session.abort()` and returns `interrupted`. No liveness probe is run; `client.v2.session.wait()` is never called.
+
+### Idle events do not complete
+- Live events (`session.idle`, etc.) are observed but ignored as completion authority. The awaited `client.session.prompt()` response is the sole completion authority.
+
+### Uncertain prompt admission
+- When the prompt rejects with an unknown error and no non-recoverable retry event fired, the runtime returns `turn-failed` with the cause as diagnostics — no auto-replay, no deterministic Prompt ID. The existing in-process dispatch deduplication is the only defense against crash-window duplicates.
+
+### Workflow-path ACP retirement
+- `runAcpWorkflowAgentSession` removed. `runAcpGenericAgentSession` is now the single public ACP entry point; the Workflow branch is gone. The AgentJob path is unchanged.
+- `acp-agent.ts` simplified: removed `restoreAgentToolNoise` + the `.opencode` lockfile restore, removed `withOpencodeAgentBinding`, removed the `runAcpWorkflowAgentSession` delegation. Calls `runAcpGenericAgentSession` directly.
+- `actions/opencode.ts` is now a thin Action-layer wrapper: validates the input, opens the Workflow AgentSession binding via `serverConnection.openWorkflowAgentSession`, calls `runtime.runTurn`, projects `finalAssistantText` to `turnFact`, never synthesizes `{ promise }`.
+
+### Tests retired
+- Deleted: `tests/acp-tool-noise.spec.ts` (tests the retired lockfile restore), `tests/opencode-bridge-handler.spec.ts` (tested the old ACP bridge), `tests/acp/session-strategies-{bootstrap,expectations-and-liveness,liveness,prompt,resume,reuse,runtime-events,transcript-axis}.spec.ts` (Workflow-path tests for the retired branch).
+- Updated: `tests/acp/session-strategies-generic.spec.ts` (removed the `WorkflowOwnerKind_StillUsesWorkflowConnectionMethods` test which relied on the retired Workflow path), `tests/acp/liveness.spec.ts` (`SharedSessionCancelHangs_NoProcessIsKilled` now sets `ownerKind: "agent-job"` + `agentSessionId`), `tests/acp/session-events.spec.ts` (same — switched to `agentSessionRuntimeEvents`), `tests/acp/support.ts` (added `getAgentSession`/`openAgentSession`/`attachAgentSession`/`agentSessionRuntimeEvents` to `FakeServerConnection` so AgentJob-path tests can drive the generic strategy).
+
+### Tests added
+- `tests/opencode-runtime-turn.spec.ts` — 18 fake-runtime tests for `OpenCodeRuntime.runTurn`. Coverage:
+  - Happy path + turn fact (incl. empty parts → `null` text)
+  - Model/variant non-rotation (model change, variant change reuse the same physical Session)
+  - Multi-slash model is split at the first `/` only (provider + remainder)
+  - Legacy-key tolerance (unknown `options` keys surface as `options-unknown-keys` info diagnostic, no failure)
+  - Non-string variant → `invalid-input` before any SDK call
+  - Unrestorable persisted binding → `missing-session` with Reset diagnostic, no implicit create
+  - Single in-flight work prompt (concurrent second prompt on same key → `unavailable-runtime` + `in-flight` diagnostic)
+  - Silent hang → `interrupted` on executor abort, `client.session.abort()` called
+  - Idle event during in-flight prompt does NOT complete the turn
+  - Quota pattern on first retry → `turn-failed` + `provider-non-recoverable` diagnostic, abort called
+  - Chinese wording (`额度已用完`) triggers first-occurrence failure
+  - Recoverable transient error completing within N retries continues
+  - Consecutive-N failure (5 attempts of `transient 5xx`) → `turn-failed` + `provider-retry-threshold` diagnostic
+  - Custom policy (configurable patterns + threshold) is honoured
+  - Restart reconciliation from persisted binding + `session.get/messages/status` snapshot (fake server exit + rebuild; the persisted binding is verified and reused)
+  - No auto-replay on uncertain prompt rejection (one `client.session.prompt` call, no resubmit)
+- `tests/opencode-action-turn.spec.ts` — 14 Action-layer tests for `opencodeAction`:
+  - `parseOpencodeInput` validation (non-string model/variant, malformed model, multi-slash, legacy-key tolerance)
+  - Happy path: turn via `runtime.runTurn`, populates `turnFact.finalAssistantText`
+  - Action output does NOT synthesize `{ promise }` (executor projects it from markers)
+  - Multi-slash model passed to runtime verbatim as provider + remainder
+  - Legacy option keys (type, liveness) ignored with diagnostic, no failure
+  - Readiness gates (missing runtime, not-ready runtime) fail actionably
+  - Input validation short-circuits (blank prompt, malformed options) before any SDK call
+  - Provider quota on first retry → `failure` + abort called
+
+### Verification commands used
+- `npm run typecheck -w packages/runner` — passes.
+- `npm run typecheck:tests -w packages/runner` — passes.
+- `npm run check:test-boundaries -w packages/runner` — passes (fake timers where wall-clock would otherwise be used; no real network/process/fs/clock).
+- `npm run test:run -w packages/runner` — 1112 tests pass (1080 pre-existing + 18 runtime-turn + 14 action-turn = 32 new).
+- `npm test` — full repo passes.
+- `npm run build -w packages/runner` — compiles cleanly.
+

@@ -13,17 +13,23 @@ export type {
   RuntimeHealthCheck,
   RuntimeModelCatalog,
   RuntimeModelDescriptor,
+  RuntimeProviderErrorPolicy,
   RuntimeReadyState,
   RuntimeResult,
   RuntimeSessionCreateRequest,
   RuntimeSessionCreateResult,
   RuntimeSessionTarget,
+  RuntimeTurnFacts,
+  RuntimeTurnOptions,
+  RuntimeTurnRequest,
+  RuntimeTurnResult,
 } from "./types.js"
 
 export { parseModelIdentifier } from "./model-string.js"
 export type { ParsedModelIdentifier, ParseModelResult } from "./model-string.js"
 
 export {
+  DEFAULT_PROVIDER_ERROR_POLICY,
   isNonRecoverableProviderMessage,
   errorKindFor,
   normalizeInterrupted,
