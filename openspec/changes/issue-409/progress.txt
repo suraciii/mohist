@@ -185,3 +185,59 @@
 - `npm test` — full repo passes.
 - `npm run build -w packages/runner` — compiles cleanly.
 
+
+## T-006 findings
+
+### Verification scope
+- AC items re-verified after T-004/T-005 progress: Workflow-source ACP-free.
+  The grep covered `packages/runner/src`, `packages/server/src`,
+  `packages/server/tests`, and `packages/web/src`. Only matches were either
+  inside `actions/acp-agent.ts` + `actions/acp/*` (AgentJob ACP bridge,
+  explicitly out of scope) or in spec tests that *assert* the absence of
+  `acpSessionId` (e.g.
+  `Mohist.Server.SpecTests/.../IssueSessionApiSpecs.cs` line 107,
+  `AgentSessionTranscriptProjectionSpecs.cs` line 116,
+  `GenericAgentSessionFollowupApiSpecs.cs` line 188,
+  `LiveTaskProvider.transcript.dom.test.ts` line 87).
+- No `featureFlag` / `compatibilityAlias` / `acpFallback` symbol exists in
+  runner, server, or web source — grep returns nothing.
+- Built-in profiles (`packages/server/src/.../Profiles/mohist-local.workflow.yaml`,
+  `mohist-github-pr.workflow.yaml`) use `mohist/opencode` exclusively
+  (the only `mohist/acp-agent` matches are server-side uses-string
+  dispatch helpers that report "action not registered" for old workflows
+  that referenced `mohist/acp-agent`).
+- `mohist/acp-agent` is registered in `createDefaultRegistry()`
+  (`packages/runner/src/actions/registry.ts:57`); the handler body in
+  `actions/acp-agent.ts` is gated by
+  `context.ownerKind !== "agent-job"` and `!context.agentSessionId`,
+  so it cannot run on the Workflow path.
+
+### Gap-note updates
+- `design/runtimes/opencode.md` (实装差距, ~line 368) rewritten:
+  Workflow-source Native OpenCode replacement is recorded as landed,
+  with a follow-up section listing the #410 AgentJob deferral and the
+  T-005 Session-command deferral.
+- `design/agent-execution.md` (实装差距, ~line 168) rewritten: Workflow
+  source via `OpenCodeRuntime.runTurn` is recorded as landed; AgentJob
+  ACP deferral (issue-410) is the explicit remaining gap.
+- `docs/actions/opencode.md` (实装差距, ~line 139) rewritten in product
+  language: Workflow source on `mohist/opencode` is the current truth,
+  with the AgentJob cleanup deferred to issue-410 and the Workflow-source
+  Session-command cleanup deferred to T-005.
+
+### No technical language introduced in docs/
+- The `docs/actions/opencode.md` gap rewrite stays in product + domain
+  language: `Workflow 来源`, `Session 身份`, `OpenCode 驱动`, `内置 Profile`
+  are all product-level concepts. The technical term "ACP bridge" was
+  softened to "历史 ACP 路径" in the doc since "bridge" leaks
+  implementation detail.
+- Body of all three docs was untouched per the spec-first rule
+  ("body is spec, gap note is footnote" per AGENTS.md).
+
+### Verification commands used
+- `npm run typecheck -w packages/runner` — passes.
+- `npm run typecheck -w packages/web` — passes.
+- `npm run test:run -w packages/runner` — 1112 tests pass (no change in
+  count vs T-004 baseline).
+- `npm run build` (server + runner + web) — passes; server
+  `dotnet build Mohist.sln` — 0 warnings, 0 errors.
