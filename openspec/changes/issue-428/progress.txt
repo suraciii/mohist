@@ -1,5 +1,6 @@
 T-001 (Live-ticking duration on running tool rows) — completed 2026-07-18
 
+
 ## Codebase Patterns
 
 - Tool row duration rendering lives at `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx:129` (`formatElapsed(part.startedAt, part.completedAt ?? undefined)`), and the JSX block was historically gated on `!isRunning` (line 294 originally).
@@ -77,3 +78,25 @@ T-003 (Block cursor on streaming assistant text) — completed 2026-07-18
 - `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx` (ToolRowView + ContextGroupView accept `now`, ToolRowView renders live duration)
 - `packages/web/src/widgets/session-transcript/ui/tool-views/tool-row-view-live-duration.spec.tsx` (new, 15 spec tests)
 - `packages/web/tests/SessionTranscriptStreamingCursor.spec.tsx` (new, 10 spec tests, T-003)
+
+T-004 (Thinking-elapsed timer on the thinking indicator) — completed 2026-07-18
+
+## Implementation notes
+
+- `SessionTranscriptLayout` now owns a `thinkingStartedAt` (`useState<number | null>`) and a `wasThinkingRef` (`useRef<boolean>`); the layout effect on `[isThinking, providedNow]` calls `setThinkingStartedAt(providedNow ?? Date.now())` on false→true and clears to `null` on true→false. A second effect on `[isRunning]` clears both pieces of state when the session ends so a stale thinking flag never re-arms.
+- The thinking indicator gating condition in the layout is `isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null` — five gates so the elapsed display can NEVER render in a non-running session, in an empty transcript, or before the false→true transition has been committed by the layout effect.
+- `ThinkingPlaceholder` accepts `now` and `thinkingStartedAt: number | null`. `elapsedMs = now - thinkingStartedAt`; `elapsedText` is `formatDuration(elapsedMs)` when finite and >= 0, else `null`. The display span has `data-testid="transcript-thinking-elapsed"` and `data-elapsed-mode="live"` so tests can branch on it without coupling to format details.
+- The thinking-elapsed span sits at the far right (`ml-auto tabular-nums`) of the same flex row that already hosts the indicator dot and the "Thinking..." label. No new CSS — the same `text-muted-foreground/70 text-xs` palette as the other muted timestamps in the transcript.
+- Used `useState` rather than `useRef` for `thinkingStartedAt` so the value is read consistently during render. Refs would have worked via mutation-during-render, but `useState` is the idiomatic pattern and avoids coupling the capture timing to commit ordering in concurrent React.
+
+## Gotchas
+
+- The pre-existing gotcha that `vi.advanceTimersByTime(N)` only fires the interval on its strict boundary (e.g. `advanceTimersByTime(59_400)` lands the last fired tick at `t=59000`) carries forward. Sub-second granularity cannot be asserted in the "seconds tier" formatter test because `useNow`'s interval is 1000ms; the test asserts `59.0s` after `advanceTimersByTime(59_000)` instead.
+- A captured thinking start equals `providedNow` when the layout-level transition fires (i.e. `isThinking` first becomes true). When tests mount the layout with `isThinking=true` already and an injected `now`, the captured start = `now` → elapsed = 0. This is intentional — it preserves the design's invariant that the start is captured at the false→true moment — but means we cannot ask "the elapsed time is N seconds" via `now` injection alone; the ticking tests drive that value through `vi.advanceTimersByTime(N)` against the auto-ticking path.
+- The transition-handler effect depends on `isThinking` only; `providedNow` is read from the closure at the moment of the transition. Since `now` ticks independently after the transition, the captured start reflects the moment thinking began (not the latest `now`), matching the spec's "thinking began" semantic.
+- `data-elapsed-mode="live"` mirrors the convention already established by the bar's `data-duration-mode="live"`; future tests can distinguish the "rendered by elapsed-time path" without scraping text.
+
+## Files changed (T-004)
+
+- `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.tsx` (added `thinkingStartedAt` useState + `wasThinkingRef`, two transition-handling effects, gate the indicator on `thinkingStartedAt !== null`; ThinkingPlaceholder now takes `now` + `thinkingStartedAt` and renders the elapsed span with `data-testid="transcript-thinking-elapsed"`)
+- `packages/web/tests/SessionTranscriptThinkingElapsed.spec.tsx` (new, 16 spec tests covering rendering, ticking, gating, removal on session end, removal on transition out, and ref-capture semantics)

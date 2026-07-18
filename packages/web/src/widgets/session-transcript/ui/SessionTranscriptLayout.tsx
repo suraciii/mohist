@@ -4,6 +4,7 @@ import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { useNow } from '../model/use-now'
 import { selectActiveToolCall } from '../model/select-active-tool-call'
 import type { TurnRefsMap } from '../model/turn-refs'
+import { formatDuration } from '../model/format-duration'
 import { TurnList } from './TurnList'
 import { CopyFullTextButton } from './CopyFullTextButton'
 import { CurrentActivityBar } from './CurrentActivityBar'
@@ -72,6 +73,26 @@ export function SessionTranscriptLayout({
   const liveNow = useNow({ intervalMs: 1000, enabled: isRunning, now: providedNow })
   const now = liveNow
   const activeTool = isRunning ? selectActiveToolCall(turns) : null
+  const [thinkingStartedAt, setThinkingStartedAt] = useState<number | null>(null)
+  const wasThinkingRef = useRef<boolean>(false)
+
+  useEffect(() => {
+    const wasThinking = wasThinkingRef.current
+    const isThinkingValue = isThinking ?? false
+    if (isThinkingValue && !wasThinking) {
+      setThinkingStartedAt(providedNow ?? Date.now())
+    } else if (!isThinkingValue && wasThinking) {
+      setThinkingStartedAt(null)
+    }
+    wasThinkingRef.current = isThinkingValue
+  }, [isThinking, providedNow])
+
+  useEffect(() => {
+    if (!isRunning) {
+      setThinkingStartedAt(null)
+      wasThinkingRef.current = false
+    }
+  }, [isRunning])
 
   return (
     <div className="px-4 py-6 min-w-0" data-scrollable="">
@@ -83,7 +104,9 @@ export function SessionTranscriptLayout({
             <CopyFullTextButton turns={turns} />
           </div>
           <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} />
-          {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
+          {isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null && (
+            <ThinkingPlaceholder now={now} thinkingStartedAt={thinkingStartedAt} />
+          )}
           {isRunning && isStreaming && <StreamingIndicator />}
           {activeTool && now !== undefined && scrollContainerRef && (
             <CurrentActivityBar
@@ -110,11 +133,31 @@ function StreamingIndicator() {
   )
 }
 
-function ThinkingPlaceholder() {
+interface ThinkingPlaceholderProps {
+  now: number
+  thinkingStartedAt: number | null
+}
+
+function ThinkingPlaceholder({ now, thinkingStartedAt }: ThinkingPlaceholderProps) {
+  const elapsedMs = thinkingStartedAt === null ? null : now - thinkingStartedAt
+  const elapsedText =
+    elapsedMs !== null && Number.isFinite(elapsedMs) && elapsedMs >= 0
+      ? formatDuration(elapsedMs)
+      : null
+
   return (
     <div className="flex items-center gap-2 py-4 pl-4" data-testid="transcript-thinking-indicator" data-tone="info" role="status">
       <span className="h-3 w-3 rounded-full bg-info animate-pulse" aria-hidden="true" />
       <span className="text-sm text-muted-foreground/70">Thinking...</span>
+      {elapsedText && (
+        <span
+          data-testid="transcript-thinking-elapsed"
+          data-elapsed-mode="live"
+          className="ml-auto text-xs tabular-nums text-muted-foreground/70 shrink-0"
+        >
+          {elapsedText}
+        </span>
+      )}
     </div>
   )
 }
