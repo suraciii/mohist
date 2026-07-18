@@ -1,5 +1,5 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { isObject } from "../core/json.js"
+import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext } from "./acp/agent-config.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
@@ -7,6 +7,8 @@ import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
 import { sessionNameFromContext } from "./acp/session-events.js"
 
 export const OPENCODE_USES = "mohist/opencode"
+
+export const DEFAULT_TURN_DEADLINE_MS = 60 * 60 * 1000
 
 export interface OpencodeOptions {
   model?: string
@@ -119,7 +121,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
     binding = { runtimeSessionId: null, workDir: context.workDir }
   }
 
-  const turnRequest = buildTurnRequest(binding, prompt, options)
+  const turnRequest = buildTurnRequest(binding, prompt, options, resolveTurnDeadlineMs(context))
   const result = await runtime.runTurn(turnRequest, context.signal)
   if (!result.ok) {
     const message = result.error.message
@@ -228,10 +230,22 @@ function parseOpencodeOptions(raw: Record<string, unknown>): ParsedOptions {
   return { kind: "ok", options }
 }
 
-function buildTurnRequest(
+function resolveTurnDeadlineMs(context: ActionContext): number {
+  const override = numberInput(context.with, "timeout")
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) return override
+  return DEFAULT_TURN_DEADLINE_MS
+}
+
+/**
+ * Build the `RuntimeTurnRequest` the Action hands to
+ * `OpenCodeRuntime.runTurn`. Exported for tests so the deadline
+ * declaration can be asserted independently of the runtime turn.
+ */
+export function buildTurnRequest(
   binding: { runtimeSessionId: string | null; workDir: string },
   prompt: string,
   options: OpencodeOptions | undefined,
+  deadlineMs: number,
 ): Parameters<OpenCodeRuntime["runTurn"]>[0] {
   const model = options?.model ? parseModelIdentifier(options.model) : undefined
   const modelDto = model?.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null
@@ -243,6 +257,7 @@ function buildTurnRequest(
       workDir: binding.workDir,
     },
     prompt,
+    deadlineMs,
     options: {
       model: modelDto,
       variant: options?.variant ?? null,

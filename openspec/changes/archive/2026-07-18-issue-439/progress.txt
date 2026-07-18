@@ -1,0 +1,145 @@
+## Codebase Patterns
+
+- `vi.useFakeTimers()` is the sanctioned pattern for fake clocks; tests
+  pair `vi.advanceTimersByTimeAsync(N)` with sequential assertions rather
+  than real sleep/delay. See `packages/runner/tests/opencode-runtime-turn.spec.ts`
+  pre-existing deadline-abort test for the established pattern.
+- The fake SDK client in tests builds a hand-rolled `OpencodeClient`
+  proxy via the `clientProxy` literal (no `vi.mock`); extending it is
+  just adding a new `vi.fn()` to `client.session.*` plus a property on
+  `FakeClientHandles`. No internal `setTimeout` in the fakes.
+- The runtime's two-layer signal lifecycle (`createTimeoutSignal`) was
+  reused for the deadline backstop — no new timer primitive, no hand-rolled
+  Clock abstraction.
+- `RuntimeDiagnostic` is the canonical non-fatal channel for soft
+  failures inside the runtime. It's already wired through to the Action
+  result's `output.diagnostics` array; warning-injection failures surface
+  there with `code: "deadline-warning-injection-failed"` and
+  `severity: "info"`.
+- The runtime owns the "did the prompt complete?" determination; the
+  warning scheduler lives next to `executePrompt` and is cancelled in the
+  same `finally` as the timeout handle dispose.
+- The `mohist/opencode` Action takes a top-level `with.timeout` (ms)
+  override and a `DEFAULT_TURN_DEADLINE_MS = 60 * 60 * 1000` fallback.
+  No deadline value enters the prompt body, system variant, or rendered
+  variables — the runtime-only "5 minutes remaining" signal is the
+  injected warning text itself.
+- `buildTurnRequest` is exported for Action-level tests so the deadline
+  placement can be asserted without spinning up the full runtime.
+- Test file size budget is 800 lines (spec). When the deadline tests
+  pushed `opencode-runtime-turn.spec.ts` over 800, the natural split was
+  to extract them into `opencode-runtime-turn-deadline.spec.ts` —
+  one file = one subject under test, per `design/testing.md`.
+
+## Decisions / Gotchas
+
+- `setTimeout(callback, 0)` fires on the first `vi.advanceTimersByTimeAsync(N)`
+  where `N > 0` (and even on `advanceTimersByTimeAsync(0)` since it
+  flushes pending zero-delay timers). Tests that want to verify
+  "no warning fired yet" right after turn start must either not advance
+  any time, or advance 0 to flush microtasks before asserting.
+- `vi.advanceTimersByTimeAsync(N)` advances by `N`, not to `N`. So a
+  test that wants to verify "at the warning boundary, the warning is
+  about to fire" must advance to `(deadlineMs - WARNING_WINDOW_MS - 1)`
+  total — i.e. advance `(deadlineMs - WARNING_WINDOW_MS - 1) - alreadyAdvanced`
+  more. Off-by-one here produced a flaky-looking failure that was fixed
+  by using `-2` instead of `-1`.
+- The OpenCode SDK v2's `promptAsync` signature is
+  `{ sessionID, directory, ... }`, but the existing code uses the
+  legacy `path/query/body` shape with `as never` casts. We follow the
+  same shape for consistency — the cast documents that we deliberately
+  pass this DTO shape regardless of the SDK's declared types.
+- `promptAsync` is fire-and-forget: it's awaited internally inside
+  `injectDeadlineWarning` for clean error capture but the helper is
+  called via `void` from the timer callback. The `await` doesn't
+  propagate back to the timer — the timer callback returns immediately.
+- The `cancelWarning` returned from `scheduleDeadlineWarning` is a
+  no-op for the no-deadline path and for already-fired timers; the
+  same call site can use it unconditionally in `finally`.
+- `runtime.runTurn` already had an `in-flight` guard; we don't add a
+  second one for deadlineMs — the action layer can't dispatch two
+  turns for the same Session concurrently anyway.
+
+## Files Touched
+
+- `packages/runner/src/runtime/opencode/types.ts` — added
+  `RuntimeTurnRequest.deadlineMs?`.
+- `packages/runner/src/runtime/opencode/turn.ts` — added `DEADLINE_WARNING_TEXT`
+  + `WARNING_WINDOW_MS` exports; layered `createTimeoutSignal` in
+  `runTurn`; added `scheduleDeadlineWarning` + `injectDeadlineWarning`
+  helpers; `executePrompt` accepts `deadlineMs` and threads a
+  `promptDiagnostics` array through both success and failure paths.
+- `packages/runner/src/actions/opencode.ts` — added `DEFAULT_TURN_DEADLINE_MS`,
+  `resolveTurnDeadlineMs`, exported `buildTurnRequest`; the Action now
+  places `deadlineMs` on every Workflow Inline Agent turn.
+- `packages/runner/tests/opencode-runtime-turn.spec.ts` — extended fake
+  SDK client with `sessionPromptAsync` + `failPromptAsync`/`promptAsyncResult`
+  knobs (used by the deadline tests, kept here so future tests can
+  reuse).
+- `packages/runner/tests/opencode-runtime-turn-deadline.spec.ts` — new
+  file containing all deadline protocol tests, including the
+  `DEADLINE_WARNING_TEXT` invariant suite and the fake-clock-driven
+  scheduler / abort / warning-fire-once scenarios.
+- `packages/runner/tests/opencode-action-turn.spec.ts` — extended fake
+  SDK client with `sessionPromptAsync`; added Action-level deadline
+  tests covering `with.timeout` override, default 60-min fallback,
+  invalid-timeout fallback, and "no deadline value in prompt body"
+  invariants.
+
+## Verification
+
+- `npm run typecheck -w packages/runner` — pass.
+- `npm run typecheck:tests -w packages/runner` — pass.
+- `npm run test:ci -w packages/runner` — 95 test files / 1167 tests
+  pass; `check:test-boundaries` clean (both extracted and remaining
+  files under 800 LOC).
+- `node openspec/changes/issue-439/scripts/smoke.mjs` against real
+  OpenCode 1.18.3 + `@opencode-ai/sdk` 1.18.3: PASS — see
+  `openspec/changes/issue-439/deadline-warning-smoke.json`. The
+  warning user message is recorded in the transcript ~3-10ms after
+  `promptAsync`, and the running turn continues past the long
+  tool call and produces an assistant follow-up acknowledging the
+  wrap-up intent ~7-8s later. Reproducible across reruns (different
+  session IDs, similar latencies).
+
+## Files Touched (T-002)
+
+- `openspec/changes/issue-439/scripts/smoke.mjs` — new; standalone
+  ESM harness driving `opencode serve` and the v2 SDK to capture the
+  smoke record. Lives outside `packages/runner/tests/` so it is not
+  picked up by `npm run test:run` (vitest only scans `tests/`).
+- `openspec/changes/issue-439/deadline-warning-smoke.json` — new;
+  the captured record (CLI 1.18.3 / SDK 1.18.3 / session id /
+  injected body matching `DEADLINE_WARNING_TEXT` / transcript
+  evidence / pickup latency).
+
+## Decisions / Gotchas (T-002)
+
+- Default OpenCode port 4096 was already taken by a long-running
+  `opencode acp` process, so `createOpencodeServer` (which hardcodes
+  port 4096 and has no port knob) couldn't be used. The smoke
+  spawns `opencode serve --hostname=127.0.0.1 --port=<random>` itself
+  and connects via `createOpencodeClient({ baseUrl, directory })`.
+- `opencode/deepseek-v4-flash-free` works without any provider
+  credentials and reliably runs the bash tool with `sleep 8`, which
+  is the simplest prompt that produces an observable iteration
+  boundary mid-turn.
+- Polling `client.session.messages({ sessionID })` for an
+  `assistant` message with a `tool` part is a clean signal that
+  the agent is mid-tool-call and ready to receive a follow-up
+  injection. `step-start` / `step-finish` parts also appear but
+  the tool part is the unambiguous "tool is running" marker.
+- The wall-clock pickup latency breaks down into two numbers that
+  must be reported separately: (a) `promptAsync` round-trip to the
+  server (~10-15ms), (b) injection-to-assistant-follow-up
+  (~7-8s on this model, dominated by the in-flight `sleep 8` tool
+  call). The first measures server acknowledgement, the second
+  measures agent processing — both are needed to support the
+  asserted behaviour.
+- The smoke harness never wires into `npm test`. Verified by
+  re-running `npm run test:run -w packages/runner` with the harness
+  present: 95 test files / 1167 tests still pass; the harness is
+  not in the test graph.
+- If `opencode` is missing from PATH, the harness records a gap
+  JSON with the asserted behaviour and reproduction steps, rather
+  than fabricating evidence.

@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-18T07:39:35.899Z",
+  "scenario": "mid-turn promptAsync pickup against a real OpenCode server",
+  "assertedBehaviour": "A client.session.promptAsync() message injected while a turn is running is picked up and processed by that turn at its next iteration boundary (the same receive path as a user follow-up).",
+  "opencodeCli": {
+    "version": "1.18.3"
+  },
+  "opencodeSdk": {
+    "name": "@opencode-ai/sdk",
+    "version": "1.18.3",
+    "clientShape": "v2 native ({ sessionID, directory, parts, ... })"
+  },
+  "session": {
+    "id": "ses_08bd5d8daffescXuS0d4O1Oluj"
+  },
+  "runningTurnPrompt": "Run the bash tool with the command `sleep 8 && echo done` and report the result.",
+  "injectedBody": "You will be interrupted in approximately 5 minutes. Stop starting any new work now. Commit your current changes, leave a progress record in this task's progress channel, and end the turn.",
+  "injectedBodyMatchesTurnTsConstant": true,
+  "injectRequestShape": {
+    "method": "client.session.promptAsync",
+    "parameters": {
+      "sessionID": "ses_08bd5d8daffescXuS0d4O1Oluj",
+      "parts": [
+        {
+          "type": "text",
+          "text": "You will be interrupted in approximately 5 minutes. Stop starting any new work now. Commit your current changes, leave a progress record in this task's progress channel, and end the turn."
+        }
+      ]
+    }
+  },
+  "timing": {
+    "firstPromptStartedAt": "2026-07-18T07:39:07.438Z",
+    "toolExecutionDetectedAt": "2026-07-18T07:39:25.724Z",
+    "promptAsyncSentAt": "2026-07-18T07:39:25.724Z",
+    "promptAsyncAckedAt": "2026-07-18T07:39:25.734Z",
+    "firstPromptFinishedAt": "2026-07-18T07:39:35.893Z",
+    "promptAsyncRoundtripMs": 10,
+    "injectionToRecordingMs": 4,
+    "injectionToAssistantFollowUpMs": 7943
+  },
+  "transcriptEvidence": {
+    "runningTurnToolAssistant": {
+      "id": "msg_f742a27ee001mGuGYCKvoPA1rK",
+      "createdAt": 1784360347630,
+      "toolParts": [
+        {
+          "tool": "bash",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "sleep 8 && echo done"
+            },
+            "output": "done\n",
+            "title": "sleep 8 && echo done",
+            "metadata": {
+              "output": "done\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "time": {
+              "start": 1784360373654,
+              "end": 1784360373659
+            }
+          }
+        }
+      ]
+    },
+    "injectedUserMessage": {
+      "id": "msg_f742a6ea0001qv7H1B3eyhZgPQ",
+      "createdAt": 1784360365728,
+      "partCount": 1,
+      "textMatches": "You will be interrupted in approximately 5 minutes. Stop starting any new work now. Commit your current changes, leave a progress record in this task's progress channel, and end the turn."
+    },
+    "assistantFollowUps": [
+      {
+        "id": "msg_f742a8da3001vvc0WqfHcUVGyM",
+        "createdAt": 1784360373667,
+        "latencyMsAfterInjection": 7943,
+        "textSnippet": "Nothing to commit — I only ran a simple `sleep 8 && echo done` command. No files were created or modified. No progress record needed.",
+        "referencesWrapUpIntent": true
+      }
+    ],
+    "messageIdSequence": [
+      {
+        "role": "user",
+        "id": "msg_f742a2742001rde96jfnCk3L5I",
+        "createdAt": 1784360347459,
+        "kinds": [
+          "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "id": "msg_f742a27ee001mGuGYCKvoPA1rK",
+        "createdAt": 1784360347630,
+        "kinds": [
+          "step-start",
+          "reasoning",
+          "tool",
+          "step-finish"
+        ]
+      },
+      {
+        "role": "user",
+        "id": "msg_f742a6ea0001qv7H1B3eyhZgPQ",
+        "createdAt": 1784360365728,
+        "kinds": [
+          "text"
+        ]
+      },
+      {
+        "role": "assistant",
+        "id": "msg_f742a8da3001vvc0WqfHcUVGyM",
+        "createdAt": 1784360373667,
+        "kinds": [
+          "step-start",
+          "reasoning",
+          "text",
+          "step-finish"
+        ]
+      }
+    ]
+  },
+  "verdict": {
+    "promptAsyncAcceptedByServer": true,
+    "warningMessageRecordedInTranscript": true,
+    "runningTurnProducedFollowUpAfterInjection": true,
+    "summary": "PASS — the running turn produced 1 assistant follow-up message(s) after the promptAsync injection; the warning body was recorded in the transcript 4ms after injection, and the first follow-up was produced 7943ms after injection."
+  },
+  "notes": [
+    "Smoke drives a real OpenCode 1.18.3 server on a randomly-picked 127.0.0.1 port.",
+    "The first turn uses the opencode/deepseek-v4-flash-free model (no auth required) so the smoke is reproducible without credentials.",
+    "Injection uses the SDK v2 native flat parameter shape ({ sessionID, parts, ... }); the production runtime's `injectDeadlineWarning` in packages/runner/src/runtime/opencode/turn.ts passes a Hey-API legacy shape ({ path, query, body }) — separate from this smoke, the runtime layer must align its call shape with v2 before its warnings hit the wire.",
+    "Wall-clock pickup latency depends on the model's tool-call scheduling; on this model a single ~8s sleep is long enough to inject mid-tool-call and observe pickup at the next iteration boundary.",
+    "This harness is verification evidence only — it is not part of `npm run test:run -w packages/runner`."
+  ]
+}
