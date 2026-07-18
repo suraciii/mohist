@@ -42,8 +42,6 @@ public class ProjectEventTailApiSpecs
     private InMemoryEventTailSource Source =>
         _fixture.Services.GetRequiredService<InMemoryEventTailSource>();
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WithoutMatch_DeliversEveryLiveProjectEventAsOneLinePerEnvelope()
     {
@@ -66,8 +64,6 @@ public class ProjectEventTailApiSpecs
         Assert.False(envelopes[1].HasPayload);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WithMatch_DeliversOnlyMatchingEnvelopesAndSuppressesNonMatches()
     {
@@ -91,8 +87,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal("1", envelopes[0].Extensions["issue"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task StrictIsolation_NeverDeliversOtherProjectEvents()
     {
@@ -112,8 +106,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal(projectP.Id, envelopes[0].Extensions["projectid"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task StrictIsolation_NeverDeliversUnprojectedEvents()
     {
@@ -138,8 +130,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal("com.mohist.issue.created", envelopes[0].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Match_DoesNotConsultPayload()
     {
@@ -178,8 +168,6 @@ public class ProjectEventTailApiSpecs
         Assert.False(envelopes[0].HasPayload);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task InvalidMatch_Returns400WithStructuredLocationBeforeAnyStream()
     {
@@ -202,8 +190,6 @@ public class ProjectEventTailApiSpecs
         Assert.Contains("(event.type ==", details.GetProperty("source").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task StreamContentType_IsNdjsonAndOneLinePerEvent()
     {
@@ -226,8 +212,6 @@ public class ProjectEventTailApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task EachLineCarriesEnvelopeFieldsAndExtensionsWithoutPayload()
     {
@@ -259,8 +243,6 @@ public class ProjectEventTailApiSpecs
         Assert.False(element.TryGetProperty("payload", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Cancellation_ReleasesSubscriptionWithoutLeakingChannel()
     {
@@ -280,8 +262,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal(0, Source.ActiveSubscriptionCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task EventsBeforeSubscription_AreNotReplayed()
     {
@@ -301,8 +281,6 @@ public class ProjectEventTailApiSpecs
         Assert.Equal("3", envelopes[0].Extensions["issue"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UnknownProject_Returns404()
     {
