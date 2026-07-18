@@ -1,0 +1,132 @@
+{
+  "project": "mohist-local",
+  "description": "Replace the priority-arbitrated Agent subscription model with a project-level ordered event routing table whose evaluation is shared with a read-only dry-run (issue-414).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Routing rule resource: model, persistence, dense ordering, write-time validation, and HTTP API",
+      "spec": "specs/routing-rules/spec.md#project-scoped-routing-table",
+      "description": "Introduce the RoutingRule domain object (Id, ProjectId, Name, Position, Match, AgentId, ResponsePrompt, Continue, Status), its RoutingRuleRow, the RoutingRules table (via EF migration) with project-unique-name and project-position indexes, and a RoutingRuleStore exposing create/list/get/update/archive/move with dense-integer Position renumbering per mutation. Enforce write-time validation (expression compiles, Agent exists and is active, prompt non-blank). Expose CRUD + move over HTTP under /api/projects/{project}/routing/rules, surfacing compile diagnostics and conflict/not-found error codes.",
+      "acceptanceCriteria": [
+        "RoutingRule domain and RoutingRuleRow persist to a new RoutingRules table via an EF Core migration with indexes UX_RoutingRules_ProjectId_Name, IX_RoutingRules_ProjectId_Position, IX_RoutingRules_ProjectId.",
+        "RoutingRuleStore create appends a new rule at the next position; move --before/--after repositions the target; after any create or move the project's rule positions form a dense 1..n sequence with no gaps and no ties (unit assertion).",
+        "Write-time validation rejects a non-compiling match expression (diagnostic carries the error location), a non-existent Agent, an archived Agent, and a blank response prompt; a rejected create stores nothing and a rejected update leaves the stored rule's fields and position unchanged (unit matrix).",
+        "Archive is idempotent, non-destructive, and preserves position (unit assertion).",
+        "GET/POST/PATCH on /api/projects/{project}/routing/rules plus archive and move endpoints return 201/200/404/409 with stable error codes and surface the match-compile diagnostic on validation failure (spec test through the test web host).",
+        "`npm test` (server) is green and TreatWarningsAsErrors is clean."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RoutingRule domain + RoutingRuleRow + RoutingRuleStore + MohistDbContext mapping + EF migration (create RoutingRules) + RoutingRulesRoutes + unit/spec tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Reuse the events-tail compile-failure diagnostic rendering for the validation error response. Project-scoped Position renormalization runs inside one transaction per mutation."
+    },
+    {
+      "id": "T-002",
+      "title": "Shared routing evaluator and {{event.*}} response-prompt renderer",
+      "spec": "specs/routing-dispatch/spec.md#shared-evaluator-between-dispatch-and-dry-run",
+      "description": "Add a pure RoutingTableEvaluator that takes an EventMatchInput and a project's ordered active rules and returns an ordered RuleOutcome trace (NotMatched/Matched plus WouldLaunch/SkippedInactiveAgent/SkippedEmptyPrompt/SkippedRuntimeError), honoring first-match-stops and the continue flag and delegating matching to EventMatchExpression. Introduce an IRuleExecutionProbe (Agent-active check + rendered-prompt check) and an optional IRuleExpressionCache invalidated on cache miss. Extend ResponsePromptRenderer to substitute {{event.<attr>}} over EventMatchInput (present incl. empty -> value; absent -> verbatim) while keeping the {{workflow_run_id}}/{{stage}}/{{event_type}} aliases.",
+      "acceptanceCriteria": [
+        "RoutingTableEvaluator stops after the first matched non-continue rule and continues through matched continue rules, evaluating rules in ascending Position order (unit).",
+        "Matched-but-not-executable outcomes (inactive Agent, empty rendered prompt) and runtime-expression-error outcomes are treated as non-matches with a recorded cause and do not stop evaluation (unit).",
+        "Evaluation is deterministic: the same EventMatchInput and rule set always yields the same outcome trace (unit).",
+        "ResponsePromptRenderer substitutes {{event.<attr>}} for present attributes (including empty values), leaves absent-attribute placeholders verbatim, and still substitutes the three legacy token aliases (unit).",
+        "RoutingTableEvaluator and ResponsePromptRenderer take EventMatchInput (not CloudEvent) so dispatch and dry-run share them identically.",
+        "Unit specs run under 50ms each; `npm test` (server) is green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RoutingTableEvaluator + RuleOutcome + IRuleExecutionProbe + IRuleExpressionCache + extended ResponsePromptRenderer + unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the IEventMatchFailureSink extension point from issue-413 to distinguish a runtime evaluation error from a clean non-match. The cache is an optimization only; correctness must not depend on it."
+    },
+    {
+      "id": "T-003",
+      "title": "Routing dispatch handler, trigger-label/idempotency rename, and session computed column",
+      "spec": "specs/routing-dispatch/spec.md#ordered-first-match-stops-evaluation",
+      "description": "Replace AgentSubscriptionDispatchHandler (and delete Arbitrate) with RoutingDispatchHandler ([Subscription(Type = \"*\")]) that resolves the project id from the envelope, loads the project's active rules ordered by Position, runs RoutingTableEvaluator, and launches via IAgentLauncher for each WouldLaunch outcome until stop. Move the launcher idempotency key to (project, event, rule), rename GenericAgentSessionMetadata.TriggerSubscriptionId to TriggerRuleId (label key mohist.io/trigger/rule-id), rename the AgentSessions stored computed column to LabelTriggerRuleId, and update AgentSessionQuery's trigger filter. Add the session-column rename migration.",
+      "acceptanceCriteria": [
+        "An event carrying no project id is skipped; an event stamped with project P is evaluated only against project P's active rules (spec).",
+        "A targeted rule placed above a global fallback wins for matching events; a non-matching event falls through to the fallback; matched continue rules each trigger their Agent while the first matched non-continue rule stops evaluation (spec via DispatcherFixture + RecordingAgentLauncher).",
+        "Repeated dispatch of the same event against the same rule creates exactly one AgentJob; the same event matching two rules (first continue) creates two distinct AgentJobs (spec).",
+        "Each hit records trigger labels carrying the event id and rule id, enabling event -> rules/AgentJobs and AgentJob -> event/rule lookup (spec).",
+        "Matched-but-not-executable rules and runtime-expression-error rules are logged as structured records and do not abort table evaluation (spec).",
+        "No priority field, three-field subscription filter, or single-winner arbitration remains on the dispatch path; the bus dispatches solely via the ordered table.",
+        "`npm test` (server) is green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RoutingDispatchHandler + AgentLauncher idempotency/label rename + session computed-column rename migration + updated AgentSessionQuery + dispatch spec tests (reuse RecordingAgentLauncher/DispatcherFixture)",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "This task deletes AgentSubscriptionDispatchHandler and its Arbitrate path (the switchover). The remaining subscription resource (domain/store/routes/CLI) is removed in T-006."
+    },
+    {
+      "id": "T-004",
+      "title": "Routing dry-run: real-event replay reader, test endpoint, and shared-evaluator trace",
+      "spec": "specs/routing-dry-run/spec.md#read-only-replay-with-no-side-effects",
+      "description": "Add ProjectRecentEventReader that unions the real per-aggregate event tables (IssueEvents, WorkflowRunEvents, EpicEvents, AgentSessionEvents) filtered by projectid, orders most-recent-first, takes N, and returns each canonical envelope as an EventMatchInput (excluding synthetic feed entries). Add GET /api/projects/{project}/routing/test?last=N that loads the project's active rules, runs RoutingTableEvaluator per replayed event, and returns the per-event trace (rules compared, matched, continue/stop, would-trigger Agent). Provide explicit empty-state messaging and a nonzero default last N.",
+      "acceptanceCriteria": [
+        "ProjectRecentEventReader replays only events stamped with the selected project id, most-recent-first, bounded by --last N; events from other projects, unprojected events, and synthetic feed entries are excluded (spec).",
+        "GET /routing/test returns, per replayed event, the ordered rules compared, which matched, the continue/stop decision, and the would-trigger Agent for each match (spec).",
+        "The dry-run never calls IAgentLauncher.LaunchAsync, creates no AgentJob or AgentSession, and consumes no launch idempotency keys, so a later real dispatch of the same events still produces jobs (spec via RecordingAgentLauncher asserting zero launches).",
+        "For an identical project table and event sequence, the dry-run's hit/continue/stop/would-trigger conclusions equal real dispatch's (spec cross-check against the dispatch path).",
+        "Running the test against a project with no active rules, or with rules but no replayable events, prints a clear empty-state message instead of silent empty output (spec).",
+        "`npm test` (server) is green."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ProjectRecentEventReader + RoutingTestRoutes + dry-run spec tests (including the dry-run == dispatch symmetry assertion)",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Default --last N is 20 (pin in CLI help and the dry-run spec scenario). The reader must not reuse ProjectEventFeedAssembler because its synthetic coder_session_started/session.closed entries would make dry-run report hits real dispatch cannot produce."
+    },
+    {
+      "id": "T-005",
+      "title": "CLI routing surface: mo routing rule and mo routing test",
+      "spec": "specs/routing-rules/spec.md#routing-rule-command-surface",
+      "description": "Add a top-level `routing` command to the .NET CLI with `rule` subcommands (create/list/show/update/archive/move; create and move accept --before/--after; create accepts --continue; all project-scoped via active project or --project/--project-id) and a `test` subcommand (--last N). The rule commands hit /api/projects/{project}/routing/rules; test hits /routing/test and renders the per-event trace. Fail locally when no project is resolved.",
+      "acceptanceCriteria": [
+        "`mo routing rule create --name --match --agent --response-prompt [--continue] [--before|--after]` creates a rule; `list` enumerates rules in ascending Position order; `show`/`update`/`archive`/`move --before|--after` behave per the rule lifecycle (CLI spec).",
+        "`mo routing test [--last N]` renders the per-event evaluation trace returned by the server, using the default N when --last is omitted (CLI spec).",
+        "Every routing command resolves the project from the active project or --project/--project-id and fails locally with a no-project message when none is resolved (CLI spec).",
+        "Routing CLI spec tests cover create-with-explicit-position, list ordering, move before/after, and test trace rendering (CLI spec).",
+        "`npm test` (which builds and tests the .NET CLI) is green."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli routing command tree (rule + test) + CLI spec tests",
+      "dependsOn": ["T-001", "T-004"],
+      "passes": false,
+      "notes": "Follow design/cli.md: resource-first noun, project scope via active project / --project / --project-id. Removal of the legacy `mo agent subscription` subtree happens in T-006."
+    },
+    {
+      "id": "T-006",
+      "title": "Remove the legacy Agent subscription model and command surface",
+      "spec": "specs/routing-rules/spec.md#legacy-agent-subscription-surface-removed",
+      "description": "Delete the superseded subscription resource now that routing rules replace every consumer: AgentSubscription, SubscriptionFilter, AgentSubscriptionStore, AgentSubscriptionQuerier, AgentSubscriptionDto, AgentSubscriptionRoutes, AgentSubscriptionRow, the AgentSubscriptions DbSet and mapping, the CLI `agent subscription` subtree, and CliAgentSubscriptionCommandSpecs. Add the EF migration that drops the AgentSubscriptions table. No data migration and no compatibility layer.",
+      "acceptanceCriteria": [
+        "AgentSubscription, SubscriptionFilter, AgentSubscriptionStore, AgentSubscriptionQuerier, AgentSubscriptionDto, AgentSubscriptionRoutes, and AgentSubscriptionRow are deleted from production code (grep finds no remaining references).",
+        "An EF Core migration drops the AgentSubscriptions table; the MohistDbContext mapping and DbSet are removed.",
+        "`mo agent subscription ...` no longer resolves and `GET/POST /api/projects/{project}/agents/{agent}/subscriptions` is not served (spec).",
+        "No priority field or three-field subscription filter remains anywhere in the codebase.",
+        "CliAgentSubscriptionCommandSpecs is deleted and replaced by routing CLI coverage where equivalent behavior is required.",
+        "`npm test` is green and TreatWarningsAsErrors is clean across server and CLI."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Deletions across server and CLI + drop-AgentSubscriptions EF migration + updated service-graph registration test",
+      "dependsOn": ["T-001", "T-003", "T-005"],
+      "passes": false,
+      "notes": "MohistServiceRegistrationTests and MohistServiceGraphRegistrationTests currently assert AgentSubscriptionDispatchHandler registration; update them to assert RoutingDispatchHandler instead. Historical sessions keep their old label key in State JSON; the new computed column is populated only for sessions created after T-003."
+    }
+  ]
+}
