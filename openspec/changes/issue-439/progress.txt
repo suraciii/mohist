@@ -93,3 +93,53 @@
 - `npm run test:ci -w packages/runner` — 95 test files / 1167 tests
   pass; `check:test-boundaries` clean (both extracted and remaining
   files under 800 LOC).
+- `node openspec/changes/issue-439/scripts/smoke.mjs` against real
+  OpenCode 1.18.3 + `@opencode-ai/sdk` 1.18.3: PASS — see
+  `openspec/changes/issue-439/deadline-warning-smoke.json`. The
+  warning user message is recorded in the transcript ~3-10ms after
+  `promptAsync`, and the running turn continues past the long
+  tool call and produces an assistant follow-up acknowledging the
+  wrap-up intent ~7-8s later. Reproducible across reruns (different
+  session IDs, similar latencies).
+
+## Files Touched (T-002)
+
+- `openspec/changes/issue-439/scripts/smoke.mjs` — new; standalone
+  ESM harness driving `opencode serve` and the v2 SDK to capture the
+  smoke record. Lives outside `packages/runner/tests/` so it is not
+  picked up by `npm run test:run` (vitest only scans `tests/`).
+- `openspec/changes/issue-439/deadline-warning-smoke.json` — new;
+  the captured record (CLI 1.18.3 / SDK 1.18.3 / session id /
+  injected body matching `DEADLINE_WARNING_TEXT` / transcript
+  evidence / pickup latency).
+
+## Decisions / Gotchas (T-002)
+
+- Default OpenCode port 4096 was already taken by a long-running
+  `opencode acp` process, so `createOpencodeServer` (which hardcodes
+  port 4096 and has no port knob) couldn't be used. The smoke
+  spawns `opencode serve --hostname=127.0.0.1 --port=<random>` itself
+  and connects via `createOpencodeClient({ baseUrl, directory })`.
+- `opencode/deepseek-v4-flash-free` works without any provider
+  credentials and reliably runs the bash tool with `sleep 8`, which
+  is the simplest prompt that produces an observable iteration
+  boundary mid-turn.
+- Polling `client.session.messages({ sessionID })` for an
+  `assistant` message with a `tool` part is a clean signal that
+  the agent is mid-tool-call and ready to receive a follow-up
+  injection. `step-start` / `step-finish` parts also appear but
+  the tool part is the unambiguous "tool is running" marker.
+- The wall-clock pickup latency breaks down into two numbers that
+  must be reported separately: (a) `promptAsync` round-trip to the
+  server (~10-15ms), (b) injection-to-assistant-follow-up
+  (~7-8s on this model, dominated by the in-flight `sleep 8` tool
+  call). The first measures server acknowledgement, the second
+  measures agent processing — both are needed to support the
+  asserted behaviour.
+- The smoke harness never wires into `npm test`. Verified by
+  re-running `npm run test:run -w packages/runner` with the harness
+  present: 95 test files / 1167 tests still pass; the harness is
+  not in the test graph.
+- If `opencode` is missing from PATH, the harness records a gap
+  JSON with the asserted behaviour and reproduction steps, rather
+  than fabricating evidence.
