@@ -159,6 +159,17 @@ describe("WorkspaceManager.prepare", () => {
     }, null, 2))
   })
 
+  it.runIf(process.platform === "linux")("ChildProcessPath_ReferencesTheRunnerProcessDirectoryHandle", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+
+    await new WorkspaceManager(runnerRoot).prepare(work("wr-child-path"), new AbortController().signal)
+
+    const clone = gitRunner.commandArgs().find((args) => args[0] === "clone")
+    expect(clone?.[2]).toMatch(new RegExp(`^/proc/${process.pid}/fd/\\d+/`))
+    expect(clone?.[2]).not.toContain("/proc/self/fd")
+  })
+
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const manager = new WorkspaceManager(join(root, "runner"))
@@ -469,7 +480,7 @@ function managedPath(path: string) {
 }
 
 function managedPathPattern(path: string) {
-  return process.platform === "linux" ? `/proc/self/fd/\\d+/${basename(path)}` : path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return process.platform === "linux" ? `/proc/${process.pid}/fd/\\d+/${basename(path)}` : path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function cleanupEntry(workspacePath: string, workflowRunId: string): WorkspaceRegistryEntry {

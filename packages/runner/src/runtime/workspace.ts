@@ -472,10 +472,11 @@ export async function withManagedWorkspacePath<T>(
   let managedWorkspacePath: string
   try {
     rootHandle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-    const stableRoot = `/proc/self/fd/${rootHandle.fd}`
+    const processFdRoot = `/proc/${process.pid}/fd`
+    const stableRoot = join(processFdRoot, String(rootHandle.fd))
     await mkdir(join(stableRoot, "workspaces"), { recursive: true })
     workspaceHandle = await open(join(stableRoot, "workspaces"), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-    managedWorkspacePath = join(`/proc/self/fd/${workspaceHandle.fd}`, name)
+    managedWorkspacePath = join(processFdRoot, String(workspaceHandle.fd), name)
     await assertManagedWorkspaceEntry(managedWorkspacePath, target, requireFinal)
   } catch (error) {
     await workspaceHandle?.close()
