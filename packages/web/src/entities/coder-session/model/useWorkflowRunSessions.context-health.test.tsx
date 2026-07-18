@@ -1,10 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
 import { dispatchAgentEvent } from '../../agent/model/events'
+
+// react-query resolves via notifyManager's scheduled timers; advance the clock
+// ourselves under fake timers instead of polling wall-clock time (waitFor's
+// default 1000ms is too tight on slow CI — design/testing.md: advance fake
+// time, don't poll harder).
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000)
+  })
+}
 
 let sessions: WorkflowRunSession[] = []
 const fetchSessions = vi.fn(() => Promise.resolve(sessions))
@@ -47,16 +57,19 @@ describe('useWorkflowRunSessions context health', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessions = []
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
   it('updates a session matched by logical and physical ids', async () => {
     sessions = [session({})]
     const hook = renderSessions()
-    await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1))
+    await flush()
+    expect(hook.result.current.sessions).toHaveLength(1)
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
@@ -65,15 +78,17 @@ describe('useWorkflowRunSessions context health', () => {
       })
     })
 
-    await waitFor(() => expect(hook.result.current.sessions[0].usage).toMatchObject({
+    await flush()
+    expect(hook.result.current.sessions[0].usage).toMatchObject({
       healthStatus: 'red', contextUsagePercent: 91, contextWindowUsed: 182000, contextWindowSize: 200000,
-    }))
+    })
   })
 
   it('ignores context health updates without the complete runtime binding', async () => {
     sessions = [session({})]
     const hook = renderSessions()
-    await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1))
+    await flush()
+    expect(hook.result.current.sessions).toHaveLength(1)
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
@@ -88,7 +103,8 @@ describe('useWorkflowRunSessions context health', () => {
   it('ignores context health updates for another session', async () => {
     sessions = [session({ usage: { healthStatus: 'green', contextUsagePercent: 30 } })]
     const hook = renderSessions()
-    await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1))
+    await flush()
+    expect(hook.result.current.sessions).toHaveLength(1)
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
@@ -97,8 +113,9 @@ describe('useWorkflowRunSessions context health', () => {
       })
     })
 
-    await waitFor(() => expect(hook.result.current.sessions[0].usage).toMatchObject({
+    await flush()
+    expect(hook.result.current.sessions[0].usage).toMatchObject({
       healthStatus: 'green', contextUsagePercent: 30,
-    }))
+    })
   })
 })

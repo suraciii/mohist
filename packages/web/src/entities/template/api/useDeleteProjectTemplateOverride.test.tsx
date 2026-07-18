@@ -1,10 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import type { ReactNode } from 'react'
 import { useDeleteProjectTemplateOverride } from '..'
+
+// react-query mutations (MSW-backed) resolve through notifyManager's scheduled
+// timers and fetch microtasks; advance the clock ourselves under fake timers
+// instead of polling wall-clock time (waitFor's default 1000ms is too tight on
+// slow CI — design/testing.md: advance fake time, don't poll harder).
+async function flush() {
+  await vi.advanceTimersByTimeAsync(1000)
+}
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
@@ -39,7 +47,12 @@ function renderUseDelete(projectId: string | undefined) {
 
 useMswServer(...defaultHandlers)
 
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
 afterEach(() => {
+  vi.useRealTimers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
 })
@@ -73,11 +86,10 @@ describe('useDeleteProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(deleteRequests).toHaveLength(1)
     expect(deleteRequests[0].method).toBe('DELETE')
@@ -92,11 +104,10 @@ describe('useDeleteProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     expect(result.result.current.data).toEqual({ message: `Override ${KEY} removed` })
   })
@@ -112,11 +123,10 @@ describe('useDeleteProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isSuccess).toBe(true)
-    })
+    expect(result.result.current.isSuccess).toBe(true)
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey)
     const hasList = calls.some(
@@ -139,11 +149,10 @@ describe('useDeleteProjectTemplateOverride hook', () => {
 
     await act(async () => {
       result.result.current.mutate({ key: KEY })
+      await flush()
     })
 
-    await waitFor(() => {
-      expect(result.result.current.isError).toBe(true)
-    })
+    expect(result.result.current.isError).toBe(true)
 
     expect(result.result.current.error).toBeInstanceOf(Error)
     expect((result.result.current.error as Error).message).toBe('Server error')
