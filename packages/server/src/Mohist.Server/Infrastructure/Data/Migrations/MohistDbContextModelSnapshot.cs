@@ -794,9 +794,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
 
                     b.Property<int?>("ParentIssueNumber")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.parentIssueNumber'), json_extract(State, '$.ParentIssueNumber'))");
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PrerequisiteNumbersJson")
                         .ValueGeneratedOnAddOrUpdate()

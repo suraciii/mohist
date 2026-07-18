@@ -304,8 +304,6 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
             entity.Property(e => e.PrerequisiteNumbersJson)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
-            entity.Property(e => e.ParentIssueNumber)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.parentIssueNumber'), json_extract(State, '$.ParentIssueNumber'))");
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
             // issue-417 T-002 / D3: stored generated RepositoryName projected
