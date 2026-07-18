@@ -4,7 +4,6 @@ import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkIte
 import { numberInput, objectInput, safeParseObject } from "../core/json.js"
 import { errorMessage, isNotFoundError } from "../core/errors.js"
 import { runCommand } from "../system/process.js"
-import { acpAgentAction } from "../actions/acp-agent.js"
 import {
   buildCleanupWith,
   isAgentBackedTask,
@@ -55,15 +54,17 @@ export type ContextParts = {
   baseContext: BaseContextFactory
 }
 
-let cleanupAgentAction: CleanupAgentAction = acpAgentAction
+let cleanupAgentActionOverride: CleanupAgentAction | null = null
 let lockHolderProbe: LockHolderProbe = defaultLockHolderProbe
 const defaultNow = () => Date.now()
 let now = defaultNow
 
-export { cleanupAgentAction }
-
 export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null) {
-  cleanupAgentAction = handler ?? acpAgentAction
+  cleanupAgentActionOverride = handler
+}
+
+export function resolveCleanupAgentAction(originalAction: CleanupAgentAction): CleanupAgentAction {
+  return cleanupAgentActionOverride ?? originalAction
 }
 
 export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null) {

@@ -217,6 +217,41 @@ describe("WorkExecutor clean worktree invariant", () => {
     expectWorktreeClean()
   })
 
+  it("runs an OpenCode cleanup follow-up through the original Action instead of ACP", async () => {
+    let openCodeCalls = 0
+    let acpCalls = 0
+    const registry = new ActionRegistry()
+    registry.register("mohist/opencode", async (ctx) => {
+      openCodeCalls += 1
+      if (openCodeCalls === 1) {
+        markWorktreeDirty("src/opencode-output.ts", "untracked")
+      } else {
+        expect(String(ctx.with?.prompt ?? "")).toContain("Cleanup Follow-up (attempt 1)")
+        expect(ctx.workId).toBe("work-opencode-cleanup")
+        expect(ctx.with?.session).toBe("plan")
+        commitCleanup(["src/opencode-output.ts"])
+      }
+      return { status: "success", message: "OpenCode turn completed" }
+    })
+    registry.register("mohist/acp-agent", async () => {
+      acpCalls += 1
+      return { status: "failure", message: "legacy ACP action must not run" }
+    })
+    const executor = buildExecutor(registry)
+
+    const result = await executor.execute(buildWork({
+      workId: "work-opencode-cleanup",
+      uses: "mohist/opencode",
+      with: { session: "plan", prompt: "write output" },
+    }), new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(result.cleanupAttempts).toBe(1)
+    expect(openCodeCalls).toBe(2)
+    expect(acpCalls).toBe(0)
+    expectWorktreeClean()
+  })
+
   it("clearsStaleGitIndexLockBeforeAgentCleanupCommit", async () => {
     // A stale Git index lock is runner control-plane state, not task
     // output. The runner should clear it before asking the agent to

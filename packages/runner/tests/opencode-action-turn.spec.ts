@@ -199,6 +199,61 @@ describe("opencodeAction — happy path + turn fact", () => {
     expect(output.kind).toBe("opencode")
   })
 
+  it("Persists a new physical Session before the first prompt and reuses it across tasks", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    let runtimeSessionId: string | null = null
+    const openWorkflowAgentSession = vi.fn(async () => ({ runtimeSessionId, workDir: "/tmp/work" }))
+    const attachWorkflowAgentSession = vi.fn(async (_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) => {
+      runtimeSessionId = (body as { runtimeSessionId: string }).runtimeSessionId
+    })
+    const serverConnection = {
+      openWorkflowAgentSession,
+      attachWorkflowAgentSession,
+    } as unknown as NonNullable<ActionContext["serverConnection"]>
+    const first = await opencodeAction(baseContext({
+      openCodeRuntime: runtime,
+      serverConnection,
+      with: { session: "plan", prompt: "first task" } as never,
+    }))
+    const second = await opencodeAction(baseContext({
+      openCodeRuntime: runtime,
+      serverConnection,
+      workId: "work-2",
+      with: { session: "plan", prompt: "second task" } as never,
+    }))
+
+    expect(first.status).toBe("success")
+    expect(second.status).toBe("success")
+    expect(client.sessionCreate).toHaveBeenCalledTimes(1)
+    expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
+    expect(attachWorkflowAgentSession).toHaveBeenCalledTimes(1)
+    expect(attachWorkflowAgentSession.mock.invocationCallOrder[0])
+      .toBeLessThan(client.sessionPrompt.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER)
+    expect(client.sessionPrompt.mock.calls.map((call) => (call[0] as { sessionID: string }).sessionID))
+      .toEqual(["ses_default", "ses_default"])
+  })
+
+  it("Does not submit the first prompt when persisting the new binding fails", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    const serverConnection = {
+      openWorkflowAgentSession: vi.fn(async () => ({ runtimeSessionId: null, workDir: "/tmp/work" })),
+      attachWorkflowAgentSession: vi.fn(async () => { throw new Error("attach rejected") }),
+    } as unknown as NonNullable<ActionContext["serverConnection"]>
+
+    const result = await opencodeAction(baseContext({
+      openCodeRuntime: runtime,
+      serverConnection,
+      with: { session: "plan", prompt: "do not submit" } as never,
+    }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toMatch(/persist.*binding.*attach rejected/i)
+    expect(client.sessionCreate).toHaveBeenCalledTimes(1)
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
+  })
+
   it("Action passes multi-slash model as provider + remainder without rotation", async () => {
     const { runtime, client } = buildRuntime()
     await ensureReady(runtime)
