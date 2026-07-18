@@ -1,11 +1,13 @@
+using System.Text.RegularExpressions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Events.Matching;
 
 namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Plain-text substitution of CloudEvent envelope-sourced placeholders in
 /// a subscription's <c>ResponsePrompt</c>. Used by
-/// <see cref="AgentSubscriptionDispatchHandler"/> to compose the
+/// <see cref="RoutingDispatchHandler"/> to compose the
 /// second-layer prompt fed into <see cref="Mohist.Server.Agent.Services.IAgentLauncher"/>.
 /// </summary>
 /// <remarks>
@@ -49,22 +51,23 @@ public static class ResponsePromptRenderer
     /// supported envelope placeholders substituted. Returns the input
     /// template unchanged when it is null/empty.
     /// </summary>
-    public static string Render(string? template, CloudEvent? evt)
+    public static string Render(string? template, EventMatchInput? input)
     {
-        if (string.IsNullOrEmpty(template) || evt is null)
+        if (string.IsNullOrEmpty(template) || input is null)
             return template ?? string.Empty;
 
-        var rendered = template;
-        rendered = rendered.Replace(
-            WorkflowRunIdToken,
-            CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.WorkflowRunId) ?? string.Empty,
-            StringComparison.Ordinal);
-        rendered = rendered.Replace(
-            StageToken,
-            CloudEventLineage.ReadValue(evt.Extensions, EventCatalog.Lineage.Stage) ?? string.Empty,
-            StringComparison.Ordinal);
-        rendered = rendered.Replace(EventTypeToken, evt.Type ?? string.Empty, StringComparison.Ordinal);
+        var rendered = Regex.Replace(template, @"\{\{event\.([A-Za-z0-9_.-]+)\}\}", match =>
+            input.Has(match.Groups[1].Value) ? input.GetValue(match.Groups[1].Value) : match.Value);
+        rendered = ReplaceAlias(rendered, WorkflowRunIdToken, "workflowrunid", input);
+        rendered = ReplaceAlias(rendered, StageToken, "stage", input);
+        rendered = ReplaceAlias(rendered, EventTypeToken, "type", input);
         return rendered;
     }
+
+    public static string Render(string? template, CloudEvent? evt) =>
+        Render(template, evt is null ? null : new CloudEventEventMatchInput(evt));
+
+    private static string ReplaceAlias(string template, string token, string attribute, EventMatchInput input) =>
+        template.Replace(token, input.Has(attribute) ? input.GetValue(attribute) : string.Empty, StringComparison.Ordinal);
 
 }

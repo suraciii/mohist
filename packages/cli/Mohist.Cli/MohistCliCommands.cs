@@ -24,6 +24,7 @@ internal static class MohistCliCommands
         var operatorCredential = provider.GetService<OperatorCredentialProvider>()
             ?? new OperatorCredentialProvider(api.FileSystem, environment);
         root.Subcommands.Add(EventCommands.Build(api, operatorCredential));
+        root.Subcommands.Add(RoutingCommands.Build(api));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));

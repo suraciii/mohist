@@ -34,5 +34,5 @@ public class AgentSessionRow
     public string? LabelAgentLaunchWorkspacePath { get; set; }
 
     public string? LabelTriggerEventId { get; set; }
-    public string? LabelTriggerSubscriptionId { get; set; }
+    public string? LabelTriggerRuleId { get; set; }
 }

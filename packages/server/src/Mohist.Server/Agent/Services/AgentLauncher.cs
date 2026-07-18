@@ -130,15 +130,15 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         if (!triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerEventId, out var eventId)
             || string.IsNullOrWhiteSpace(eventId)
-            || !triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerSubscriptionId, out var subscriptionId)
-            || string.IsNullOrWhiteSpace(subscriptionId))
+            || !triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerRuleId, out var ruleId)
+            || string.IsNullOrWhiteSpace(ruleId))
         {
             throw new ArgumentException(
-                "Trigger labels must include non-empty event and subscription ids.",
+                "Trigger labels must include non-empty event and rule ids.",
                 nameof(triggerLabels));
         }
 
-        return $"{projectId}\n{eventId}\n{subscriptionId}";
+        return $"{projectId}\n{eventId}\n{ruleId}";
     }
 
     private static string StableId(string prefix, string identity)

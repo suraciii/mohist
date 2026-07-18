@@ -1,0 +1,47 @@
+## Codebase Patterns
+
+- Server persistence uses `MohistDbContext` with explicit row mappings and migration-chain SQLite templates in SpecTests.
+- Project-scoped API groups resolve the project through `ProjectResolutionEndpointFilter`; API errors use `ApiResults` and stable `Code` values.
+- Agent state is stored as JSON in `AgentRow`; `AgentQuerier.GetByIdAsync` is the existing project/status lookup used for routing-rule validation.
+- Event match validation uses `EventMatchExpression.Compile`, whose `MatchDiagnostic` contains offset, line, and column. The API reuses the `invalid_match_expression` code and exposes these fields.
+
+## T-001
+
+- Added `RoutingRule`/`RoutingRuleRow`, project-scoped `RoutingRuleStore`, EF model mapping, migration, and `/api/projects/{projectRef}/routing/rules` CRUD/archive/move endpoints.
+- Store validation runs before row mutation, checks expression compilation, active project Agent, prompt, and project-unique name. Create and move renumber all project rows to dense positions inside a transaction; archive is non-destructive and idempotent.
+- `dotnet ef` was unavailable, so the migration and model snapshot were authored in the repository's existing EF migration format.
+- Focused `RoutingRuleStoreSpecs` covers dense ordering, archive idempotency, invalid create matrix, and rejected update immutability.
+- Verification: `npm test` passed all .NET, Web, and Runner suites.
+
+## T-002
+
+- Added transport-independent `RoutingTableEvaluator` with ordered traces, first-match stop, continue fanout, explicit inactive-agent/empty-prompt/runtime-error outcomes, execution probes, and an optional expression cache.
+- Extended `ResponsePromptRenderer` with the canonical `EventMatchInput` API and `{{event.<attr>}}` substitution. Present empty values render as empty; absent attributes remain verbatim; legacy aliases remain supported.
+- Focused evaluator and renderer unit tests pass: 20 tests in 32 ms.
+
+## T-003
+
+- Replaced the wildcard subscription dispatch handler with `RoutingDispatchHandler`; dispatch resolves the envelope project, loads only that project's active ordered rules, evaluates through `RoutingTableEvaluator`, and launches each executable outcome with event/rule trigger labels.
+- Renamed launcher idempotency and generic-session trigger metadata from subscription id to rule id, including `AgentSessionQuery`, `AgentSessionRow`, EF mapping, and the session computed-column rename migration.
+- Removed the obsolete arbitration unit test and updated service/launcher/session test references to the new names. The legacy subscription resource remains for T-006 removal.
+- Runtime expression failures are represented as matched-but-skipped outcomes so dispatch logs them and continues without allowing them to stop table evaluation.
+
+## T-004
+
+- Added `PersistedEventMatchInput` and `ProjectRecentEventReader`; the reader scans only the four real event tables, filters by the persisted `projectid` extension, orders by event time descending, bounds by `last`, and excludes synthetic feed facts.
+- Added `GET /api/projects/{projectRef}/routing/test` with default `last=20`, ordered shared-evaluator traces, matched-rule decisions, would-trigger Agent names, and explicit no-active-rules/no-replayable-events messages. The route never resolves or calls `IAgentLauncher`.
+- Added unit coverage for project filtering/order/bounding and API spec coverage for empty states and continue/stop trace. Focused unit tests pass (15 tests). Integration route specs are currently blocked during fixture startup by the repository's existing EF pending-model warning; no route assertion executes until that migration snapshot mismatch is resolved.
+
+## T-005
+
+- Added the top-level `routing` CLI command with `rule create/list/show/update/archive/move` and `routing test` subcommands. Rule operations resolve `--project`, `--project-id`, or the active project before making any HTTP request.
+- Rule create supports `--continue` and explicit `--before`/`--after`; move sends the target rule and before/after selector to the routing API. Rule list/show/update/archive support JSON and table output, with table order preserved.
+- Dry-run defaults to the server's fixed default when `--last` is omitted and renders event/outcome/Agent trace in table mode; JSON mode preserves the response document.
+- Added CLI specs for create positioning, list ordering, move-after payload, trace rendering, and local no-project failure. CLI test project passes 1401 tests.
+
+## T-006
+
+- Removed the legacy Agent subscription domain, store, querier, DTO, row, API routes, DbSet/mapping, CLI subtree/renderers, and their obsolete specs/support.
+- Removed the old subscription filter unit coverage and the remaining launcher test that provisioned a subscription; routing dispatch registration and coverage remain the replacement path.
+- Removed `AgentSubscriptionRow` from the current EF model snapshot and added `20260718090000_DropAgentSubscriptions`, whose `Up` operation drops `AgentSubscriptions` without data migration. A focused migration operation spec verifies the drop operation.
+- Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore` passes with 0 warnings/errors; CLI tests pass (1381); server unit tests pass (1164); the focused drop migration spec passes. Full `npm test` still reports the pre-existing T-003 migration snapshot/fixture failures (`PendingModelChangesWarning` and missing `LabelTriggerRuleId` in older test schemas), as recorded during T-004.
