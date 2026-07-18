@@ -391,7 +391,13 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 一个深模块，不改变 Workflow Action 或 Session 产品契约。
 
 实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 OpenCode 上做
-一次冒烟验证；发现漂移时先修订本表，再进入实现。
+一次冒烟验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3
+服务器上对上表每个调用做了一次冒烟验证（详见
+[`openspec/changes/issue-409/sdk-smoke-verification.json`](../../openspec/changes/issue-409/sdk-smoke-verification.json)）：
+表内 `client.session.*`、`client.global.event()`、`client.v2.model.list()`、
+`client.v2.provider.list()` 全部可用；`client.v2.session.wait()` 与
+`client.v2.session.compact()` 仍返回 `ServiceUnavailableError`，确认不进入执行链。
+实际锁定的 SDK 版本见实装差距小节。
 
 ## 实装差距
 
@@ -400,11 +406,26 @@ issue-407 已落地 OpenCode 替换所需的稳定身份与命令契约：Compac
 两者的 API 与 CLI 响应都保持同一稳定 `sessionId`。Canonical wire 使用 `runtime` +
 `runtimeSessionId`，当前 Runtime Session 缺失时命令明确失败并提示 Reset。
 
-Runtime adapter 替换仍由 issue-409 负责。当前 Runner 仍使用
-`@agentclientprotocol/sdk`、`mohist/acp-agent`、ACP liveness 与 log heuristics、CLI model
-parsing 和 private compaction metadata；正文中的 OpenCode SDK Session 调用尚未接入。
-Workflow schema 也仍把 `expect` 放在 `with` 内，内置 profile 中写在 task 顶层的
-`expect` 被当前解析器静默丢弃，从未生效。
+issue-409 已为 Workflow 来源落地 `OpenCodeRuntime` 深模块并完成 Native OpenCode
+替换：Workflow 来源的回合执行改为 `client.session.create/prompt/abort`，
+Workflow schema 把 `expect` 抬到 task 顶层（#408），内置 profile 全部切换到
+`mohist/opencode`；Workflow 来源的配置、Session state、命令请求 / 结果与用户可见
+诊断不再暴露 `acpSessionId` 或 ACP Action 身份，wire 字段统一使用 `runtimeSessionId`
+而非历史 ACP 字段名。Runner 为 AgentJob 路径继续保留 `mohist/acp-agent` 注册，
+其 ACP 痕迹、依赖与配置面的最终清理由 issue-410 负责；本 issue 不为 Workflow
+来源引入 feature flag、compatibility alias 或 ACP fallback。
 
 「回合期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止回合，agent 没有收尾机会。
+
+T-001 完成时实际锁定的 SDK 版本是 `@opencode-ai/sdk@1.18.3`（与安装在 PATH 上的
+`opencode` CLI 版本一致），不是 1.17.18。决策文本保留 1.17.18 作为该节撰写时点的
+参考版本；后续 T-002+ 实现时按 1.18.3 进行。冒烟记录在
+[`openspec/changes/issue-409/sdk-smoke-verification.json`](../../openspec/changes/issue-409/sdk-smoke-verification.json)。
+
+issue-409 范围之外、当前仍未实装：
+
+- AgentJob 执行路径仍使用 `mohist/acp-agent` Action 与 ACP bridge；
+  最终迁移与 ACP 依赖移除由 issue-410 完成。
+- Workflow 来源的 Session 命令（Follow-up / Compact / Reset / Cancel）
+  的 Runtime 替换按 T-005 推进；T-005 落地后该路径同样不再暴露 ACP 身份。

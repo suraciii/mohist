@@ -41,12 +41,12 @@ describe("mohist/acp-agent shared session observability", () => {
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context())
+    }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = shared.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")
+      .filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "model.resolved")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(resolvedModelEvent).toBeTruthy()
@@ -63,7 +63,7 @@ describe("mohist/acp-agent shared session observability", () => {
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context())
+    }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
     expect(result.status).toBe("success")
@@ -85,7 +85,7 @@ describe("mohist/acp-agent shared session observability", () => {
       probeTimeoutMs: 5_000,
       timeout: 5_000,
       compaction: { threshold: 0.65, strategy: "summary" },
-    }, undefined, shared.context())
+    }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
     expect(result.status).toBe("success")

@@ -9,6 +9,7 @@ import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from 
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
+import type { OpenCodeRuntime } from "./opencode/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
@@ -69,10 +70,24 @@ export class WorkExecutor {
      * constructor so the value is per-host, not per-work.
      */
     private readonly now: () => Date = () => new Date(),
+    /**
+     * Shared OpenCode runtime handle for the Workflow Inline Agent
+     * path. Set by the runner host after `OpenCodeRuntime.start()`
+     * passes readiness; cleared when the runtime exits and rebuilds.
+     * The AgentJob path keeps the ACP connection above; only Workflow
+     * work receives this handle via `ActionContext.openCodeRuntime`.
+     * Hosts may swap it through {@link updateOpenCodeRuntime} when the
+     * runtime rebuilds after a server exit.
+     */
+    private openCodeRuntime: OpenCodeRuntime | null = null,
   ) {}
 
   updateAcpConnection(acp: SharedAcpConnection | null) {
     this.acpConnection = acp
+  }
+
+  updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
+    this.openCodeRuntime = runtime
   }
 
   async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -135,7 +150,7 @@ export class WorkExecutor {
         return startCheck.result
       }
       const result = await action({
-        ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log),
+        ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
         with: renderedWith,
         rawWith: work.with,
         workDir,
@@ -174,7 +189,7 @@ export class WorkExecutor {
         variables,
         signal,
         cleanupAgentAction,
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log) },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime) },
         log,
       )
       if (worktreeResult.status !== "completed") {
@@ -200,7 +215,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log),
+      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -352,7 +367,24 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
 }
 
-function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection, log: TaskLogger | null = null): Omit<ActionContext, "with" | "workDir"> {
+function baseContext(
+  work: RenderedWorkItem,
+  variables: JsonObject,
+  signal: AbortSignal,
+  sessionManager: AcpSessionManager,
+  acpConnection: SharedAcpConnection | null,
+  connection: ServerConnection,
+  log: TaskLogger | null = null,
+  openCodeRuntime: OpenCodeRuntime | null = null,
+): Omit<ActionContext, "with" | "workDir"> {
+  // The OpenCode runtime handle reaches the Workflow Inline Agent path
+  // only. The AgentJob path keeps the ACP connection above until #410
+  // migrates it. This is the same source-keyed dispatch the host uses
+  // for the readiness gate (T-003 AC: "runtime handle reaches
+  // ActionContext for Workflow work; the AgentJob path still receives
+  // the ACP connection").
+  const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+  const runtimeHandle = ownerKind === "agent-job" ? null : openCodeRuntime
   return {
     workflowRunId: work.workflowRunId,
     workId: work.workId,
@@ -366,12 +398,13 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     projectId: work.projectId,
     issueNumber: work.issueNumber,
     epicNumber: work.epicNumber,
-    ownerKind: work.ownerKind,
+    ownerKind,
     agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,
     acpSessionManager: sessionManager,
     acpConnection,
     serverConnection: connection,
+    openCodeRuntime: runtimeHandle,
     log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }

@@ -4,6 +4,9 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
+import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+
+const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
 // Lifecycle coverage for the convergence backstop wiring:
 //   - On startup (after the first SignalR connect) the runner fires a
@@ -109,10 +112,6 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/runtime/opencode-models.js", () => ({
-  discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
-}))
-
 vi.mock("../src/runtime/workspace-registry.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace-registry.js")>()
 
@@ -146,6 +145,7 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
 }))
 
 beforeEach(() => {
+  installReadyRuntimeFactory()
   registryEvents = {
     eligible: eventQueue<string>(),
     removed: eventQueue<string>(),
@@ -216,6 +216,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   afterEach(async () => {
+    clearOpenCodeRuntimeFactoryForTest()
     vi.useRealTimers()
     await rm(root, { recursive: true, force: true })
   })

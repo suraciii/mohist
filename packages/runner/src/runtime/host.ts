@@ -15,7 +15,12 @@ import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./clean
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { TaskLogCollector } from "./task-log.js"
-import { discoverOpencodeModels, opencodeModelSetsEqual } from "./opencode-models.js"
+import {
+  getOpenCodeRuntimeFactory,
+  type OpenCodeRuntime,
+  type RuntimeModelCatalog,
+  type RuntimeModelDescriptor,
+} from "./opencode/index.js"
 import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
@@ -96,6 +101,15 @@ export class RunnerHost {
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
+
+  /**
+   * Shared OpenCode runtime handle. Constructed in
+   * {@link initializeSharedConnection} via the factory seam; rebuilt in
+   * the background after a server exit. `pollOnce` gates work claiming
+   * on `ready()` — when the runtime is not ready, claiming is paused
+   * and the runner emits the runtime's actionable diagnostic.
+   */
+  private openCodeRuntime: OpenCodeRuntime | null = null
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -317,8 +331,15 @@ export class RunnerHost {
         console.error("failed to load workspace registry; starting empty:", error)
       }
       await this.sessionCommandJournal.load()
-      await this.connectRunner(signal)
+      // The OpenCode runtime must be initialized BEFORE we connect to
+      // the server so the first `RunnerRegistration` already carries
+      // the runtime-loaded catalog (`coderModels` /
+      // `coderModelVariants`). Initializing after `connectRunner`
+      // would mean the first registration reports an empty catalog —
+      // the server would then observe a model set flip on the second
+      // heartbeat.
       await this.initializeSharedConnection(signal)
+      await this.connectRunner(signal)
       // Startup convergence: pick up any terminal events the runner
       // missed while it was offline (e.g. completed while the previous
       // process was down). Runs immediately after SignalR is up so the
@@ -355,11 +376,13 @@ export class RunnerHost {
   }
 
   private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
-    const discovered = await discoverOpencodeModels(signal)
-    if (discovered.models.length === 0) return
-    if (opencodeModelSetsEqual(discovered, { models: this.coderModels, variants: this.coderModelVariants })) return
-    this.coderModels = discovered.models
-    this.coderModelVariants = discovered.variants
+    const runtime = this.openCodeRuntime
+    if (runtime === null || !runtime.ready()) return
+    const previous = this.coderCatalogFromRuntime()
+    const refreshed = await runtime.refreshCatalog(signal)
+    if (!refreshed.ok || refreshed.value.models.length === 0) return
+    const current = this.coderCatalogFromRuntime()
+    if (coderCatalogsEqual(previous, current)) return
     await this.sendImmediateHeartbeat()
   }
 
@@ -419,6 +442,24 @@ export class RunnerHost {
 
   private async initializeSharedConnection(signal: AbortSignal) {
     if (this.sharedAcpConnection !== null) return;
+    // Construct the shared OpenCode runtime BEFORE the shared ACP
+    // connection so the runner's readiness gate and registration
+    // catalog are populated even when the ACP connection fails
+    // initially (the per-work-item fallback path uses the same
+    // runtime handle). The factory seam returns a real
+    // `OpenCodeRuntime` (production) or a fake the test injected via
+    // `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
+    // check + catalog load and only flips `ready()` true after both
+    // pass; until then the host's `pollOnce` gate keeps the runner
+    // from claiming work.
+    const factory = getOpenCodeRuntimeFactory()
+    this.openCodeRuntime = factory({
+      directory: process.cwd(),
+    })
+    const startResult = await this.openCodeRuntime.start(signal)
+    if (!startResult.ok) {
+      console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
+    }
     try {
       this.sharedAcpConnection = await createSharedAcpConnection(process.cwd())
       this.workExecutor = new WorkExecutor(
@@ -427,6 +468,9 @@ export class RunnerHost {
         this.connection,
         this.sessionManager,
         this.sharedAcpConnection,
+        undefined,
+        undefined,
+        this.openCodeRuntime,
       )
       console.log("runner ACP connection established (per-host, shared across work items)")
     } catch (error) {
@@ -443,6 +487,12 @@ export class RunnerHost {
     this.workExecutor = null
     // Reset the session manager so the next initialize starts clean.
     this.sessionManager = new AcpSessionManager()
+    if (this.openCodeRuntime !== null) {
+      try {
+        await this.openCodeRuntime.shutdown()
+      } catch { /* best effort */ }
+      this.openCodeRuntime = null
+    }
   }
 
   private async runWorkerPool(signal: AbortSignal) {
@@ -450,8 +500,33 @@ export class RunnerHost {
     // declared on the host instance, so it survives poll exceptions. Polling
     // and report retries share this one process-critical reconciliation loop;
     // no sibling lifetime task can prevent a failed poll from being retried.
+    let lastReadinessDiagnostic: string | null = null
+    let lastReadinessLoggedAt = 0
     while (!signal.aborted) {
       await this.retryDueReports()
+
+      // OpenCode readiness gate. While the runtime is not ready, the
+      // runner skips claiming new work and emits the actionable
+      // readiness diagnostic — but it still drains `awaitingAck`
+      // reports (the line above) and respects the existing poll
+      // cadence so a recovered runtime resumes claiming on the next
+      // tick. One gate also pauses AgentJob work still on ACP until
+      // #410 (design D3, transitional scope).
+      if (!this.isOpenCodeReadyForClaim()) {
+        const diagnostic = this.openCodeReadinessDiagnostic()
+        const now = Date.now()
+        const diagnosticChanged = diagnostic !== lastReadinessDiagnostic
+        const reLogDue = now - lastReadinessLoggedAt > READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS
+        if (diagnosticChanged || reLogDue) {
+          console.warn(diagnostic ?? "opencode runtime not ready; skipping poll")
+          lastReadinessDiagnostic = diagnostic
+          lastReadinessLoggedAt = now
+        }
+        await raceInterval(this.nextReconciliationInterval(), signal, [
+          ...[...this.inFlight.values()].map((e) => e.done),
+        ])
+        continue
+      }
 
       let works: RenderedWorkItem[]
       try {
@@ -494,6 +569,29 @@ export class RunnerHost {
     // Drain in-flight executions on abort so completed work can finish its
     // bounded first report attempt before process shutdown.
     await Promise.allSettled([...this.inFlight.values()].map((e) => e.done))
+  }
+
+  private isOpenCodeReadyForClaim(): boolean {
+    const runtime = this.openCodeRuntime
+    return runtime !== null && runtime.ready()
+  }
+
+  /**
+   * Produce the user-visible, actionable readiness diagnostic emitted
+   * when the runner pauses claiming. The OpenCode runtime's own
+   * `diagnostic()` (set on each rebuild and on every startup failure)
+   * is the authoritative message — it carries the failure stage
+   * (`server-spawn-failed` / `health-failed` / `catalog-load-failed` /
+   * `server-exit`) plus the recovery suggestion. When the runtime
+   * has not been constructed yet (very early in startup), fall back
+   * to a generic message so the log line is still informative.
+   */
+  private openCodeReadinessDiagnostic(): string | null {
+    const runtime = this.openCodeRuntime
+    if (runtime === null) return null
+    const diagnostic = runtime.diagnostic()
+    if (diagnostic === null) return null
+    return `opencode runtime not ready (${diagnostic.code}): ${diagnostic.message}`
   }
 
   private async pollOnce(signal: AbortSignal): Promise<RenderedWorkItem[]> {
@@ -743,6 +841,9 @@ export class RunnerHost {
         this.connection,
         sessionManager,
         null,
+        undefined,
+        undefined,
+        this.openCodeRuntime,
       )
       const fallback = await createSharedAcpConnection(process.cwd())
       try {
@@ -805,21 +906,56 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
+    const { coderModels, coderModelVariants } = this.coderCatalogFromRuntime()
     return {
       capabilities: [],
       projectId: this.options.projectId,
-      coderModels: this.coderModels,
-      coderModelVariants: this.coderModelVariants,
+      coderModels,
+      coderModelVariants,
       connectionId: this.signalR.getConnectionId(),
     }
+  }
+
+  /**
+   * Project the OpenCode runtime catalog into the
+   * `RunnerRegistration` shape the control plane consumes. The catalog
+   * is loaded via the v2 list APIs inside `OpenCodeRuntime.start()`
+   * (see T-002); once `ready()` is true the catalog is populated and
+   * the host re-reports the registration on every heartbeat. When the
+   * runtime is not ready (e.g. before start, during a rebuild), the
+   * previous in-memory snapshot is preserved so a heartbeat does not
+   * regress to an empty list. Both `coderModels` (full
+   * `provider/model-id`) and `coderModelVariants` (per-model variant
+   * ids) are surfaced so the server-side validation has the data it
+   * already used under the CLI-discovery path.
+   */
+  private coderCatalogFromRuntime(): { coderModels: string[]; coderModelVariants: Record<string, string[]> } {
+    const runtime = this.openCodeRuntime
+    const catalog: RuntimeModelCatalog | null = runtime ? runtime.catalog() : null
+    if (catalog === null) {
+      return { coderModels: this.coderModels, coderModelVariants: this.coderModelVariants }
+    }
+    const descriptors: RuntimeModelDescriptor[] = [...catalog.models]
+    const coderModels = descriptors.map((m) => `${m.providerID}/${m.modelID}`)
+    const coderModelVariants: Record<string, string[]> = {}
+    for (const model of descriptors) {
+      if (model.variants.length > 0) {
+        coderModelVariants[`${model.providerID}/${model.modelID}`] = [...model.variants]
+      }
+    }
+    this.coderModels = coderModels
+    this.coderModelVariants = coderModelVariants
+    return { coderModels, coderModelVariants }
   }
 
   private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
-        const discovered = await discoverOpencodeModels(signal)
-        this.coderModels = discovered.models
-        this.coderModelVariants = discovered.variants
+        // The model catalog is sourced from `OpenCodeRuntime.catalog()`
+        // inside `registrationState()`. The runtime loads it during
+        // `initializeSharedConnection`; this connect path no longer
+        // shells out to `opencode models --verbose` — the catalog
+        // arrives via the v2 list APIs on the runtime.
         await this.connection.connect({
           ...this.registrationState(),
           buildGitHash: this.buildGitHash,
@@ -842,6 +978,16 @@ export class RunnerHost {
  * a wedged connection is retried rather than hung.
  */
 const REPORT_TIMEOUT_MS = 10_000
+
+/**
+ * Minimum interval between repeated "opencode runtime not ready"
+ * warnings while the runner pauses claiming. The gate fires on every
+ * loop tick when the runtime is unhealthy; without this throttle a
+ * not-ready window would spam the log every poll. The first emission
+ * always logs; the same diagnostic message is then re-logged at most
+ * once per interval (or as soon as the message changes).
+ */
+const READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS = 30_000
 
 const RESTORED_SESSION_RESUME_TIMEOUT_MS = 30_000
 
@@ -1051,4 +1197,22 @@ function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortS
       parent.removeEventListener("abort", abortFromParent)
     },
   }
+}
+
+function coderCatalogsEqual(
+  a: { coderModels: string[]; coderModelVariants: Record<string, string[]> },
+  b: { coderModels: string[]; coderModelVariants: Record<string, string[]> },
+): boolean {
+  if (!stringSetsEqual(a.coderModels, b.coderModels)) return false
+  const aVariantKeys = Object.keys(a.coderModelVariants)
+  const bVariantKeys = Object.keys(b.coderModelVariants)
+  if (!stringSetsEqual(aVariantKeys, bVariantKeys)) return false
+  return aVariantKeys.every((key) => stringSetsEqual(a.coderModelVariants[key] ?? [], b.coderModelVariants[key] ?? []))
+}
+
+function stringSetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, index) => value === sortedB[index])
 }

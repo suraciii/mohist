@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import type { SessionCommandRequest } from "../src/server/session-command-handler.js"
 import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
+import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+
+const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
@@ -87,10 +90,6 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/runtime/opencode-models.js", () => ({
-  discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
-}))
-
 vi.mock("../src/actions/registry.js", () => ({
   createDefaultRegistry: () => ({
     resolve: (uses?: string | null) => uses === "test/block" ? blockingAction : undefined,
@@ -113,6 +112,7 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
 
 beforeEach(() => {
   vi.useFakeTimers()
+  installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
   capturedSessionCommandHandler = null
@@ -135,6 +135,10 @@ beforeEach(() => {
     }
     return aborted.promise
   })
+})
+
+afterEach(() => {
+  clearOpenCodeRuntimeFactoryForTest()
 })
 
 describe("RunnerHost", () => {

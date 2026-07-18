@@ -4,6 +4,9 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
+import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+
+const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
 // Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
@@ -99,10 +102,6 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/runtime/opencode-models.js", () => ({
-  discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
-}))
-
 vi.mock("../src/runtime/cleanup-loop.js", () => {
   return {
     CleanupLoop: class {
@@ -147,6 +146,7 @@ function resetState() {
 
 beforeEach(() => {
   resetState()
+  installReadyRuntimeFactory()
   vi.clearAllMocks()
   mocks.createSharedAcpConnection.mockResolvedValue({
     connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
@@ -277,6 +277,7 @@ describe("RunnerHost idle-system cleanup", () => {
   })
 
   afterEach(async () => {
+    clearOpenCodeRuntimeFactoryForTest()
     await rm(root, { recursive: true, force: true })
     vi.useRealTimers()
   })
