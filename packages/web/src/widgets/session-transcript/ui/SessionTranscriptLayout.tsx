@@ -3,6 +3,7 @@ import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { useNow } from '../model/use-now'
 import { selectActiveToolCall } from '../model/select-active-tool-call'
+import { useTranscriptLocate } from '../model/use-transcript-locate'
 import type { TurnRefsMap } from '../model/turn-refs'
 import { formatDuration } from '../model/format-duration'
 import { TurnList } from './TurnList'
@@ -57,6 +58,7 @@ export function SessionTranscriptLayout({
   scrollContainerRef,
   now: providedNow,
 }: SessionTranscriptLayoutProps) {
+  const { expansionRegistry, highlightRegistry } = useTranscriptLocate({ scrollContainerRef })
   const turnRefs = useRef<TurnRefsMap>(new Map()).current
   const [, setRefsVersion] = useState(0)
 
@@ -103,7 +105,7 @@ export function SessionTranscriptLayout({
           <div className="mb-3 flex items-center justify-end gap-2">
             <CopyFullTextButton turns={turns} />
           </div>
-          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} />
+          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} expansionRegistry={expansionRegistry} highlightRegistry={highlightRegistry} />
           {isRunning && isThinking && turns.length > 0 && now !== undefined && thinkingStartedAt !== null && (
             <ThinkingPlaceholder now={now} thinkingStartedAt={thinkingStartedAt} />
           )}

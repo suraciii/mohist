@@ -8,7 +8,10 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
+import type { DisplayToolPart } from '../../../widgets/session-transcript/model/session-transcript-display'
 import { formatDuration } from '../../../widgets/session-transcript'
+import { selectFailedToolCalls, selectToolCallGroupIds } from '../../../widgets/session-transcript/model/select-failed-tool-calls'
+import { useTranscriptLocate } from '../../../widgets/session-transcript/model/use-transcript-locate'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -31,8 +34,9 @@ interface SessionErrorsEvidenceProps {
   failureCategory: string | null | undefined
   toolErrorCount: number | null | undefined
   failureReason: string | null | undefined
+  failedTools: DisplayToolPart[]
+  locate: (target: { toolCallId?: string; groupId?: string }) => void
 }
-
 const ERROR_SURFACE_CLASS = 'bg-danger-subtle text-danger border-danger-border'
 
 const FAILURE_CATEGORY_LABELS: Record<string, string> = {
@@ -51,11 +55,26 @@ export function SessionErrorsEvidence({
   failureCategory,
   toolErrorCount,
   failureReason,
+  failedTools,
+  locate,
 }: SessionErrorsEvidenceProps) {
   const hasFailureCategory = failureCategory != null && failureCategory !== ''
   const hasToolErrors = toolErrorCount != null && toolErrorCount > 0
   const isFailed = statusKind === 'failed'
+  const [currentIndex, setCurrentIndex] = useState(0)
   if (!isFailed && !hasFailureCategory && !hasToolErrors) return null
+
+  const activate = () => {
+    const tool = failedTools[currentIndex]
+    if (tool) locate({ toolCallId: tool.toolCallId })
+  }
+  const next = () => {
+    if (failedTools.length === 0) return
+    const nextIndex = (currentIndex + 1) % failedTools.length
+    setCurrentIndex(nextIndex)
+    const tool = failedTools[nextIndex]
+    locate({ toolCallId: tool.toolCallId })
+  }
 
   return (
     <div
@@ -63,8 +82,16 @@ export function SessionErrorsEvidence({
       data-failure-category={failureCategory ?? ''}
       data-tool-error-count={toolErrorCount != null ? String(toolErrorCount) : ''}
       className={`border-b border-border px-4 py-2 ${ERROR_SURFACE_CLASS}`}
-      role={isFailed ? 'status' : undefined}
-      aria-live="polite"
+      onClick={activate}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          activate()
+        }
+      }}
+      tabIndex={failedTools.length > 0 ? 0 : undefined}
+      role={failedTools.length > 0 ? 'button' : isFailed ? 'status' : undefined}
+      aria-live={failedTools.length > 0 ? undefined : 'polite'}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1 font-semibold">
@@ -89,13 +116,14 @@ export function SessionErrorsEvidence({
           </span>
         )}
         {failureReason && (
-          <span
-            className="text-danger truncate max-w-[300px]"
-            title={failureReason}
-            data-testid="session-errors-region-reason"
-          >
+          <span className="text-danger truncate max-w-[300px]" title={failureReason} data-testid="session-errors-region-reason">
             {failureReason}
           </span>
+        )}
+        {failedTools.length > 1 && (
+          <Button type="button" variant="link" size="sm" data-testid="session-errors-region-next-error" onClick={(event) => { event.stopPropagation(); next() }} className="h-auto p-0 text-xs text-danger">
+            Next error
+          </Button>
         )}
       </div>
     </div>
@@ -161,6 +189,9 @@ export function SessionDetailShell({
   // ── All hooks must be before any early return ──
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
+  const { locate } = useTranscriptLocate({ scrollContainerRef })
+  const failedTools = selectFailedToolCalls(displayTurns)
+  const failedGroupIds = selectToolCallGroupIds(displayTurns)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
 
@@ -217,6 +248,8 @@ export function SessionDetailShell({
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}
       failureReason={meta?.failureReason ?? null}
+      failedTools={failedTools}
+      locate={(target) => locate({ ...target, groupId: target.toolCallId ? failedGroupIds.get(target.toolCallId) : undefined })}
     />
   )
 

@@ -7,3 +7,7 @@
 ## T-001
 
 Moved lazy-render styling from the transcript `role="log"` container to every `TurnItem`, added `containIntrinsicSize: '3rem'`, and added structural specs for uniform styling, turn/tool anchor resolvability, and typed terminal detail expansion. Web typecheck and all 346 web test files (4821 tests) pass.
+
+## T-002
+
+Added failed-tool selection, shared transcript locate registries, row highlight behavior, context-group expansion registration, and activatable session error evidence. Typecheck and focused selector/locate tests pass. Full web tests still report existing fixture incompatibilities plus remaining integration coverage gaps; implementation requires further repair before commit.
