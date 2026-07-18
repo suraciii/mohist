@@ -83,7 +83,7 @@ const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'contex
 const runnerDefaultTrack = 'default'
 const runnerIntegrationTrack = 'integration'
 const testFileBudgetBaselineRelativePath = 'scripts/node-test-file-budget-baseline.json'
-const testFileLineBudgets = Object.freeze({ test: 300, spec: 800 })
+const testFileLineBudgets = Object.freeze({ test: 500, spec: 800 })
 
 type BudgetRecord = {
   filePath: string

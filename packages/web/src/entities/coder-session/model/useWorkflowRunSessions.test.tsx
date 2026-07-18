@@ -6,10 +6,8 @@ import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
 import { dispatchAgentEvent } from '../../agent/model/events'
 
-// react-query resolves via notifyManager's scheduled timers; advance the clock
-// ourselves under fake timers instead of polling wall-clock time (waitFor's
-// default 1000ms is too tight on slow CI — design/testing.md: advance fake
-// time, don't poll harder).
+// Advance react-query's notifyManager timers under fake timers instead of
+// polling wall-clock (design/testing.md: advance fake time, don't poll harder).
 async function flush() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000)
@@ -66,7 +64,6 @@ describe('useWorkflowRunSessions', () => {
     _sessionsResponses = []
     vi.useFakeTimers()
   })
-
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
