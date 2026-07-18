@@ -1,6 +1,5 @@
 import { constants } from "node:fs"
 import { lstat, mkdir, open, readdir, rename } from "node:fs/promises"
-import { createHash } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import type { JsonObject, RenderedWorkItem } from "../core/types.js"
@@ -9,7 +8,6 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
-import { fingerprintGitRemote } from "./git-remote-identity.js"
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -106,7 +104,7 @@ export class WorkspaceManager {
     }
 
     const runId = work.workflowRunId
-    const expected = workspaceIdentity(work, variables, runId, gitUrl, baseBranch, issueNumber)
+    const expected = workspaceIdentity(work, variables, runId)
     const runBranch = expected.runBranch
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
@@ -116,7 +114,7 @@ export class WorkspaceManager {
     }
     await withManagedWorkspacePath(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
       if (await pathExists(managedWorkspacePath)) {
-        await validateWorkspaceIdentity(managedWorkspacePath, expected, signal, log)
+        await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log)
         if (!await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log)) {
           throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`, workspacePath, expected)
         }
@@ -128,15 +126,10 @@ export class WorkspaceManager {
 
     if (this.registry) {
       await this.registry.register({
-        issueNumber: expected.issueNumber,
+        issueNumber,
         workflowRunId: expected.workflowRunId,
         workspacePath,
-        projectId: expected.projectId,
-        repositoryName: expected.repositoryName,
-        baseBranch: expected.baseBranch,
         runBranch: expected.runBranch,
-        remoteFingerprint: expected.remoteFingerprint,
-        remoteIdentityVersion: expected.remoteIdentityVersion,
       })
     }
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
@@ -151,13 +144,13 @@ export class WorkspaceManager {
     if (!gitUrl || !baseBranch || issueNumber === undefined) {
       throw new WorkspaceIdentityMismatchError("Issue workspace identity is incomplete")
     }
-    const expected = workspaceIdentity(work, variables, runId, gitUrl, baseBranch, issueNumber)
+    const expected = workspaceIdentity(work, variables, runId)
     const runBranch = expected.runBranch
     const changeDir = stringAt(variables, ["openspecChangeDir"])
 
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
     await withManagedWorkspacePath(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
-      await validateWorkspaceIdentity(managedWorkspacePath, expected, signal, log)
+      await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log)
 
       // Health gate: every dispatch passes through verify(), so this is
       // the per-task entry point. A residual rebase / merge / cherry-pick
@@ -196,11 +189,11 @@ export class WorkspaceManager {
     await assertNotSymlink(preparationPath)
     if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     await this.cloneFresh(preparationPath, gitUrl, signal, log)
-    await validateWorkspaceOrigin(preparationPath, expected, signal, log)
-    await this.createRunBranch(preparationPath, baseBranch, expected.runBranch, signal, log)
+    await validateWorkspaceOrigin(preparationPath, gitUrl, signal, log)
+    await this.restoreOrCreateRunBranch(preparationPath, baseBranch, expected.runBranch, signal, log)
     await ensureMarkerExcluded(preparationPath)
     await writeText(markerPath(preparationPath), JSON.stringify(expected, null, 2))
-    await validateWorkspaceIdentity(preparationPath, expected, signal, log)
+    await validateWorkspaceIdentity(preparationPath, expected, gitUrl, signal, log)
     await rename(preparationPath, workspacePath)
   }
 
@@ -229,9 +222,12 @@ export class WorkspaceManager {
 
   // Create the run branch off the latest base. A fresh clone already has
   // up-to-date origin/<base> refs, so no separate fetch is needed.
-  private async createRunBranch(workspacePath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+  private async restoreOrCreateRunBranch(workspacePath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     const sink = workspacePrepSink(log)
-    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-b", runBranch, `origin/${baseBranch}`], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const branchRef = `refs/remotes/origin/${runBranch}`
+    const existing = await runCommand("git", ["-C", workspacePath, "show-ref", "--verify", "--quiet", branchRef], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const source = existing.exitCode === 0 ? `origin/${runBranch}` : `origin/${baseBranch}`
+    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-B", runBranch, source], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     if (create.exitCode !== 0) {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
@@ -325,8 +321,8 @@ export function runnerVariables() {
 }
 
 export function issueWorkspacePath(runnerRoot: string, workflowRunId: string) {
-  const hash = createHash("sha256").update(workflowRunId).digest("hex")
-  return resolve(join(runnerRoot, "workspaces", `run-${hash}`))
+  if (!/^wr[-_A-Za-z0-9]+$/.test(workflowRunId)) throw new WorkspaceIdentityMismatchError("Invalid workflow run id")
+  return resolve(join(runnerRoot, "workspaces", workflowRunId))
 }
 
 function runBranchName(runId: string | null | undefined) {
@@ -335,39 +331,16 @@ function runBranchName(runId: string | null | undefined) {
 }
 
 export interface IssueWorkspaceMarker {
-  issueNumber: number
   workflowRunId: string
-  projectId: string
-  repositoryName: string
-  baseBranch: string
   runBranch: string
-  remoteFingerprint: string
-  remoteIdentityVersion: string
 }
 
-function workspaceIdentity(work: RenderedWorkItem, variables: JsonObject, workflowRunId: string, gitUrl: string, baseBranch: string, issueNumber: number): IssueWorkspaceMarker {
+function workspaceIdentity(work: RenderedWorkItem, variables: JsonObject, workflowRunId: string): IssueWorkspaceMarker {
   const variableRunId = stringAt(variables, ["mohist", "runId"])
   if (variableRunId && variableRunId !== workflowRunId) throw new WorkspaceIdentityMismatchError("Dispatch workflowRunId does not match the authoritative run identity")
-  const projectId = work.projectId ?? stringAt(variables, ["project", "id"])
-  const repositoryName = stringAt(variables, ["repository", "name"])
-  const remoteFingerprint = stringAt(variables, ["repository", "remoteFingerprint"])
-  const remoteIdentityVersion = stringAt(variables, ["repository", "remoteIdentityVersion"])
-  if (!projectId || !repositoryName || !remoteFingerprint || !remoteIdentityVersion) {
-    throw new WorkspaceIdentityMismatchError("Issue workspace identity requires project.id, repository.name, repository.remoteFingerprint, and repository.remoteIdentityVersion")
-  }
-  const computed = fingerprintGitRemote(gitUrl)
-  if (!computed || computed.remoteIdentityVersion !== remoteIdentityVersion || computed.remoteFingerprint !== remoteFingerprint) {
-    throw new WorkspaceIdentityMismatchError(`Repository remote identity does not match the authoritative fingerprint for ${repositoryName}`)
-  }
   return {
-    issueNumber,
     workflowRunId,
-    projectId,
-    repositoryName,
-    baseBranch,
     runBranch: runBranchName(workflowRunId),
-    remoteFingerprint,
-    remoteIdentityVersion,
   }
 }
 
@@ -392,26 +365,25 @@ export async function readMarkerWorkflowRunId(workspacePath: string): Promise<st
   return marker?.workflowRunId
 }
 
-export async function validateWorkspaceIdentity(workspacePath: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null = null, runnerRoot?: string): Promise<void> {
+export async function validateWorkspaceIdentity(workspacePath: string, expected: IssueWorkspaceMarker, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null, runnerRoot?: string): Promise<void> {
   if (runnerRoot) await assertManagedWorkspacePath(runnerRoot, workspacePath, true)
   const marker = await readMarker(workspacePath)
   if (!marker) {
     throw new WorkspaceCorruptError(`Workflow workspace ${workspacePath} has no readable identity marker`, workspacePath)
   }
-  const fields: (keyof IssueWorkspaceMarker)[] = ["issueNumber", "workflowRunId", "projectId", "repositoryName", "baseBranch", "runBranch", "remoteFingerprint", "remoteIdentityVersion"]
+  const fields: (keyof IssueWorkspaceMarker)[] = ["workflowRunId", "runBranch"]
   if (fields.some((field) => marker[field] !== expected[field])) {
     throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} marker identity does not match the requested run`, workspacePath, expected, marker)
   }
-  await validateWorkspaceOrigin(workspacePath, expected, signal, log)
+  await validateWorkspaceOrigin(workspacePath, gitUrl, signal, log)
 }
 
-async function validateWorkspaceOrigin(workspacePath: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+async function validateWorkspaceOrigin(workspacePath: string, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
   const sink = workspacePrepSink(log)
   const options = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
   const result = await runCommand("git", ["-C", workspacePath, "remote", "get-url", "origin"], ".", signal, undefined, options)
-  const actual = result.exitCode === 0 ? fingerprintGitRemote(result.stdout.trim()) : null
-  if (!actual || actual.remoteIdentityVersion !== expected.remoteIdentityVersion || actual.remoteFingerprint !== expected.remoteFingerprint) {
-    throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} origin does not match repository ${expected.repositoryName}`, workspacePath, expected)
+  if (result.exitCode !== 0 || result.stdout.trim() !== gitUrl.trim()) {
+    throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} origin does not match the requested repository`, workspacePath)
   }
 }
 

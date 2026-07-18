@@ -197,9 +197,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             repository: new IssueWorkStartedRepository(
                 repositoryContext.Name,
                 repositoryContext.GitUrl,
-                repositoryContext.BaseBranch,
-                repositoryContext.RemoteFingerprint,
-                repositoryContext.RemoteIdentityVersion),
+                repositoryContext.BaseBranch),
             workspace: new IssueWorkStartedWorkspace(
                 workspace.Path,
                 workspace.Branch,
@@ -240,29 +238,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
         var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
 
-        // Compute the authoritative repository context BEFORE saving the
-        // Issue transaction (T-006 / D4). Fingerprint normalization lives
-        // in GitRemoteUrlNormalizer; the same fingerprint is shared with
-        // RepositoryPolicy alias-rejection so two Project-local names
-        // that resolve to the same physical remote are forbidden from
-        // the start.
-        var fingerprint = Mohist.Server.Project.Domain.GitRemoteUrlNormalizer.Fingerprint(repo.GitUrl);
-        var repositoryContext = fingerprint is null
-            ? (Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext?)null
-            : new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
-                Name: repo.Name,
-                GitUrl: repo.GitUrl,
-                BaseBranch: repo.BaseBranch,
-                RemoteFingerprint: fingerprint.Fingerprint,
-                RemoteIdentityVersion: fingerprint.Version);
-        if (repositoryContext is null)
-        {
-            // Fail closed: an unparseable Git URL means we cannot prove
-            // identity later. The Issue stays in backlog (no lock, no
-            // IssueWorkStarted event) — no workspace has been created.
-            throw new InvalidOperationException(
-                $"Cannot start workflow: target repository '{repo.Name}' has an unparseable Git URL (no fingerprint)");
-        }
+        var repositoryContext = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
+            Name: repo.Name,
+            GitUrl: repo.GitUrl,
+            BaseBranch: repo.BaseBranch);
         if (string.IsNullOrWhiteSpace(repositoryContext.BaseBranch))
             throw new InvalidOperationException(
                 $"Cannot start workflow: target repository '{repo.Name}' has no configured base branch");

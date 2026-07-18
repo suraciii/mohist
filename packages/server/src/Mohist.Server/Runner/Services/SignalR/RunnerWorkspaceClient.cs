@@ -135,8 +135,7 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
             ProjectId: projectId,
             IssueNumber: issueNumber,
             RepositoryName: repository.Name,
-            RemoteFingerprint: repository.RemoteFingerprint,
-            RemoteIdentityVersion: repository.RemoteIdentityVersion,
+            GitUrl: repository.GitUrl,
             WorkspacePath: workspace.Path,
             Branch: branch,
             BaseBranch: repository.BaseBranch);
@@ -148,8 +147,7 @@ public sealed record RunnerWorkspaceQuery(
     string? ProjectId,
     int? IssueNumber,
     string? RepositoryName,
-    string? RemoteFingerprint,
-    string? RemoteIdentityVersion,
+    string? GitUrl,
     string? WorkspacePath,
     string? Branch,
     string? BaseBranch);

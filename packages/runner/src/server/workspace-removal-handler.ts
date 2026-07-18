@@ -61,17 +61,11 @@ export function registerWorkspaceRemovalHandler(
       return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
     }
     const expected: IssueWorkspaceMarker = {
-      issueNumber: query.issueNumber,
       workflowRunId: query.workflowRunId,
-      projectId: query.projectId,
-      repositoryName: query.repositoryName,
-      baseBranch: query.baseBranch,
       runBranch: query.branch,
-      remoteFingerprint: query.remoteFingerprint,
-      remoteIdentityVersion: query.remoteIdentityVersion,
     }
     try {
-      await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal, null, deps.runnerRoot)
+      await validateWorkspaceIdentity(workspacePath, expected, query.gitUrl, new AbortController().signal, null, deps.runnerRoot)
     } catch (error) {
       return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
     }

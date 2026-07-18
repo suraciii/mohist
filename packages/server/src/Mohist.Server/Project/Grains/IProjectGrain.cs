@@ -13,6 +13,7 @@ public interface IProjectGrain : IGrainWithStringKey
     Task<List<RepositoryInfo>> ListRepositoriesAsync();
     Task<ProjectInfo?> AddRepositoryAsync(string repoName, string gitUrl, string? baseBranch, bool? setDefault = null);
     Task<ProjectInfo?> UpdateRepositoryAsync(string repoName, string? gitUrl = null, string? baseBranch = null);
+    Task<ProjectRepositoryUpdateOutcome> UpdateRepositoryWithReceiptAsync(string repoName, string? gitUrl, string? baseBranch, string commandId, long? expectedRevision);
     Task<ProjectInfo?> RemoveRepositoryAsync(string repoName);
     Task<ProjectRepositoryRemovalOutcome> RemoveRepositoryWithReceiptAsync(string repoName, string commandId, long? expectedRevision);
     Task<ProjectInfo?> SetDefaultRepositoryAsync(string repoName);
@@ -27,6 +28,13 @@ public interface IProjectGrain : IGrainWithStringKey
 public enum ProjectRepositoryRemovalOutcome
 {
     Removed,
+    AlreadyApplied,
+    ProjectNotFound,
+}
+
+public enum ProjectRepositoryUpdateOutcome
+{
+    Updated,
     AlreadyApplied,
     ProjectNotFound,
 }

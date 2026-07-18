@@ -25,8 +25,8 @@ export function isIssueBacked(context: ActionContext): boolean {
 
 function hasAuthoritativeIssueRepository(context: ActionContext): boolean {
   return isIssueBacked(context)
-    && !!stringAt(context.variables, ["repository", "remoteFingerprint"])
-    && !!stringAt(context.variables, ["repository", "remoteIdentityVersion"])
+    && !!stringAt(context.variables, ["repository", "gitUrl"])
+    && !!stringAt(context.variables, ["repository", "baseBranch"])
 }
 
 export function resolveDeliveryRemote(context: ActionContext, genericDefault: string | null = "origin"): string | null {

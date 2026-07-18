@@ -359,13 +359,88 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         }
     }
 
+    public async Task<IssueRepositoryBindingResult> UpdateRepositoryAsync(
+        RepositoryCommandPayload.Update payload, string commandId, long? expectedRevision)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (string.IsNullOrWhiteSpace(commandId))
+            throw new ArgumentException("commandId is required", nameof(commandId));
+
+        var requestedRepository = payload.RepositoryName ?? string.Empty;
+        var project = await _grains.GetGrain<IProjectGrain>(payload.ProjectId).GetAsync();
+        var repository = project?.GetRepository(requestedRepository);
+        if (repository is null)
+        {
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryNotFound,
+                requestedRepository,
+                expectedRevision ?? 0L,
+                $"Repository '{requestedRepository}' not found in project '{payload.ProjectId}'");
+        }
+
+        var canonicalRepository = repository.Name;
+        var canonicalPayload = payload with { RepositoryName = canonicalRepository };
+        if (await _blockerQuery.HasBlockerAsync(payload.ProjectId, canonicalRepository))
+        {
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryInUse,
+                canonicalRepository,
+                expectedRevision ?? 0L);
+        }
+
+        var pending = await AcquireFenceAsync(
+            RepositoryCommandPayloadKinds.Update,
+            canonicalRepository,
+            commandId,
+            expectedRevision,
+            canonicalPayload);
+        if (pending.Replay is not null)
+            return pending.Replay;
+
+        await CoordinatorProbe.AfterFencePersistedAsync(
+            CoordinatorProbeKind.Update, ProjectId, commandId);
+
+        try
+        {
+            var participant = _grains.GetGrain<IProjectBindingParticipant>(payload.ProjectId);
+            var outcome = await participant.UpdateRepositoryAsync(canonicalPayload, commandId, pending.CapturedRevision);
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                MapApplied(outcome), canonicalRepository, pending.CapturedRevision);
+        }
+        catch (ProjectRepositoryNotFoundException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryNotFound, canonicalRepository, pending.CapturedRevision, ex.Message);
+        }
+        catch (ProjectRepositoryStaleRevisionException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryStaleRevision, canonicalRepository, pending.CapturedRevision, ex.Message);
+        }
+        catch (RepositoryInUseException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryInUse, canonicalRepository, pending.CapturedRevision, ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.RepositoryInvalid, canonicalRepository, pending.CapturedRevision, ex.Message);
+        }
+    }
+
     private static IssueRepositoryBindingResultCode MapApplied(IssueBindingParticipantOutcome outcome) =>
         outcome == IssueBindingParticipantOutcome.Applied
             ? IssueRepositoryBindingResultCode.Applied
             : IssueRepositoryBindingResultCode.AlreadyApplied;
 
     private static IssueRepositoryBindingResultCode MapApplied(ProjectBindingParticipantOutcome outcome) =>
-        outcome == ProjectBindingParticipantOutcome.Removed
+        outcome is ProjectBindingParticipantOutcome.Removed or ProjectBindingParticipantOutcome.Updated
             ? IssueRepositoryBindingResultCode.Applied
             : IssueRepositoryBindingResultCode.AlreadyApplied;
 
@@ -426,6 +501,8 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 ((RepositoryCommandPayload.Reopen)payload).IssueNumber),
             RepositoryCommandPayloadKinds.Remove => await CaptureProjectRevisionAsync(
                 ((RepositoryCommandPayload.Remove)payload).ProjectId),
+            RepositoryCommandPayloadKinds.Update => await CaptureProjectRevisionAsync(
+                ((RepositoryCommandPayload.Update)payload).ProjectId),
             _ => throw new InvalidOperationException($"Unknown coordinator kind '{kind}'"),
         };
     }
@@ -482,6 +559,17 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                         pending.ExpectedRevision);
                     break;
                 }
+                case RepositoryCommandPayloadKinds.Update:
+                {
+                    var p = (RepositoryCommandPayload.Update)payload;
+                    var projectId = string.IsNullOrEmpty(p.ProjectId) ? ProjectId : p.ProjectId;
+                    var participant = _grains.GetGrain<IProjectBindingParticipant>(projectId);
+                    await participant.UpdateRepositoryAsync(
+                        p with { ProjectId = projectId, RepositoryName = pending.RepositoryName },
+                        pending.CommandId,
+                        pending.ExpectedRevision);
+                    break;
+                }
             }
         }
         catch (Exception ex)
@@ -521,6 +609,7 @@ public enum CoordinatorProbeKind
     Change = 1,
     Reopen = 2,
     Remove = 3,
+    Update = 4,
 }
 
 /// <summary>

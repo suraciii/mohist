@@ -54,9 +54,7 @@ public sealed record WorkspaceIdentity(
 public sealed record WorkflowRepositoryContext(
     [property: Id(0)] string Name,
     [property: Id(1)] string GitUrl,
-    [property: Id(2)] string BaseBranch,
-    [property: Id(3)] string RemoteFingerprint,
-    [property: Id(4)] string RemoteIdentityVersion);
+    [property: Id(2)] string BaseBranch);
 
 public sealed class WorkflowRun
 {

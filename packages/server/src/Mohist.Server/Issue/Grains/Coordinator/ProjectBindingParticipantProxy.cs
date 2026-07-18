@@ -61,4 +61,43 @@ public class ProjectBindingParticipantProxy : Grain, IProjectBindingParticipant
             throw;
         }
     }
+
+    public async Task<ProjectBindingParticipantOutcome> UpdateRepositoryAsync(
+        RepositoryCommandPayload.Update payload,
+        string commandId,
+        long? expectedRevision)
+    {
+        try
+        {
+            await BindingParticipantProbe.BeforeParticipantAsync(
+                BindingParticipantProbeKind.Update,
+                payload.ProjectId,
+                commandId);
+            var outcome = await ProjectGrain(payload.ProjectId).UpdateRepositoryWithReceiptAsync(
+                payload.RepositoryName,
+                payload.GitUrl,
+                payload.BaseBranch,
+                commandId,
+                expectedRevision);
+            return outcome switch
+            {
+                Mohist.Server.Project.Grains.ProjectRepositoryUpdateOutcome.Updated => ProjectBindingParticipantOutcome.Updated,
+                Mohist.Server.Project.Grains.ProjectRepositoryUpdateOutcome.AlreadyApplied => ProjectBindingParticipantOutcome.AlreadyApplied,
+                _ => throw new InvalidOperationException(
+                    $"Unexpected update outcome {outcome} for project '{payload.ProjectId}' repository '{payload.RepositoryName}'"),
+            };
+        }
+        catch (ProjectRepositoryStaleRevisionException)
+        {
+            throw;
+        }
+        catch (ProjectRepositoryNotFoundException)
+        {
+            throw;
+        }
+        catch (RepositoryInUseException)
+        {
+            throw;
+        }
+    }
 }

@@ -3,7 +3,6 @@ import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { issueWorkspacePath, WorkspaceManager, slugify } from "../src/runtime/workspace.js"
-import { fingerprintGitRemote } from "../src/runtime/git-remote-identity.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
 import { DefaultCleanupRunner } from "../src/runtime/cleanup-loop.js"
 import type { WorkspaceRegistryEntry } from "../src/runtime/workspace-registry.js"
@@ -83,7 +82,12 @@ class FakeGitRunner {
       return commandResult(0, "fake-sha\n")
     }
 
-    if (gitArgs[0] === "checkout" && gitArgs[1] === "-b") {
+    if (gitArgs[0] === "show-ref" && gitArgs[1] === "--verify" && gitArgs[2] === "--quiet") {
+      const remoteBranch = gitArgs[3]?.replace("refs/remotes/origin/", "")
+      return this.remoteBranches.has(remoteBranch ?? "") ? commandResult(0) : commandResult(1)
+    }
+
+    if (gitArgs[0] === "checkout" && (gitArgs[1] === "-b" || gitArgs[1] === "-B")) {
       const branch = gitArgs[2]
       if (!branch) throw new Error("git checkout -b needs a branch")
       branches.add(branch)
@@ -146,17 +150,29 @@ describe("WorkspaceManager.prepare", () => {
     })
     expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
     expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(`${expectedPath}.preparing`), "checkout", "-b", "mohist/run-wr-1", "origin/master"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(`${expectedPath}.preparing`), "checkout", "-B", "mohist/run-wr-1", "origin/master"])
     expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
-      issueNumber: 9,
       workflowRunId: "wr-1",
-      projectId: "project-1",
-      repositoryName: "master",
-      baseBranch: "master",
       runBranch: "mohist/run-wr-1",
-      remoteFingerprint: fingerprintGitRemote("https://example.test/mohist.git")!.remoteFingerprint,
-      remoteIdentityVersion: "git-remote-url/v1",
     }, null, 2))
+  })
+
+  it("MissingWorkspace_RestoresExistingRemoteRunBranch", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    gitRunner.remoteBranches.add("mohist/run-wr-restore")
+
+    await new WorkspaceManager(runnerRoot).prepare(work("wr-restore"), new AbortController().signal)
+
+    const workspacePath = issueWorkspacePath(runnerRoot, "wr-restore")
+    expect(gitRunner.commandArgs()).toContainEqual([
+      "-C",
+      managedPath(`${workspacePath}.preparing`),
+      "checkout",
+      "-B",
+      "mohist/run-wr-restore",
+      "origin/mohist/run-wr-restore",
+    ])
   })
 
   it.runIf(process.platform === "linux")("ChildProcessPath_ReferencesTheRunnerProcessDirectoryHandle", async () => {
@@ -364,7 +380,7 @@ describe("WorkspaceManager.prepare", () => {
     expect(processModule.exists(path)).toBe(true)
 
     await manager.prepare(item, new AbortController().signal)
-    expect(registry.get(item.workflowRunId)).toMatchObject({ workspacePath: path, workflowRunId: item.workflowRunId, repositoryName: "master" })
+    expect(registry.get(item.workflowRunId)).toMatchObject({ workspacePath: path, workflowRunId: item.workflowRunId })
   })
 })
 
@@ -417,14 +433,8 @@ describe("DefaultCleanupRunner", () => {
     const entry = cleanupEntry(workspacePath, workflowRunId)
     await mkdir(join(workspacePath, ".mohist"), { recursive: true })
     await writeFile(join(workspacePath, ".mohist", "workspace.json"), JSON.stringify({
-      issueNumber: entry.issueNumber,
       workflowRunId,
-      projectId: entry.projectId,
-      repositoryName: entry.repositoryName,
-      baseBranch: entry.baseBranch,
       runBranch: entry.runBranch,
-      remoteFingerprint: entry.remoteFingerprint,
-      remoteIdentityVersion: entry.remoteIdentityVersion,
     }))
     await mkdir(outside, { recursive: true })
     let swapped = false
@@ -469,7 +479,7 @@ function work(workflowRunId: string, baseBranch = "master") {
       mohist: { runId: workflowRunId },
       issue: { number: 9 },
       project: { id: "project-1", name: "Mohist Local" },
-      repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch, remoteFingerprint: fingerprintGitRemote("https://example.test/mohist.git")!.remoteFingerprint, remoteIdentityVersion: "git-remote-url/v1" },
+      repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch },
       openspecChangeDir: "openspec/changes/issue-9",
     },
   }
@@ -488,12 +498,7 @@ function cleanupEntry(workspacePath: string, workflowRunId: string): WorkspaceRe
     issueNumber: 9,
     workflowRunId,
     workspacePath,
-    projectId: "project-1",
-    repositoryName: "master",
-    baseBranch: "master",
     runBranch: `mohist/run-${workflowRunId}`,
-    remoteFingerprint: fingerprintGitRemote("https://example.test/mohist.git")!.remoteFingerprint,
-    remoteIdentityVersion: "git-remote-url/v1",
     phase: "eligible",
     materializedAt: "2026-01-01T00:00:00.000Z",
     terminalAt: "2026-01-02T00:00:00.000Z",
