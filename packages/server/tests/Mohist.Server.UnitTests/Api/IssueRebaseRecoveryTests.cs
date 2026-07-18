@@ -12,9 +12,7 @@ public class IssueRebaseRecoveryTests
         var repository = new WorkflowRepositoryContext(
             Name: "secondary",
             GitUrl: "git@secondary.example:repo.git",
-            BaseBranch: "release",
-            RemoteFingerprint: "abc",
-            RemoteIdentityVersion: "git-remote-url/v1");
+            BaseBranch: "release");
 
         var input = IssueRoutes.BuildRebaseTaskWith("release", repository);
 

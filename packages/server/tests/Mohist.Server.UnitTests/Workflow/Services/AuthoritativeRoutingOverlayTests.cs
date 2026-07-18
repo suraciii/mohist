@@ -21,9 +21,7 @@ public class AuthoritativeRoutingOverlayTests
         var repository = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
             Name: "web",
             GitUrl: "git@web.example:repo.git",
-            BaseBranch: "develop",
-            RemoteFingerprint: "abc",
-            RemoteIdentityVersion: "git-remote-url/v1");
+            BaseBranch: "develop");
         var workspace = new Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity(
             Path: "/run/workspaces/wr_x",
             Branch: "mohist/run-wr_x",
@@ -46,8 +44,6 @@ public class AuthoritativeRoutingOverlayTests
         Assert.Equal("web", repo.GetProperty("name").GetString());
         Assert.Equal("git@web.example:repo.git", repo.GetProperty("gitUrl").GetString());
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
-        Assert.Equal("abc", repo.GetProperty("remoteFingerprint").GetString());
-        Assert.Equal("git-remote-url/v1", repo.GetProperty("remoteIdentityVersion").GetString());
 
         var ws = root["workspace"];
         Assert.Equal("/run/workspaces/wr_x", ws.GetProperty("path").GetString());
@@ -92,16 +88,7 @@ public class AuthoritativeRoutingOverlayTests
         var overlayRepository = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
             Name: "web",
             GitUrl: "git@web.example:repo.git",
-            BaseBranch: "develop",
-            RemoteFingerprint: "fingerprint-1",
-            RemoteIdentityVersion: "git-remote-url/v1");
-
-        var overlay = AuthoritativeRoutingOverlay.Build(
-            "wr_x",
-            overlayRepository,
-            workspace: null,
-            projectId: null,
-            issueNumber: null);
+            BaseBranch: "develop");
 
         // A "rogue" configurable layer that sets a different
         // repository. VariableBundle.Patch applies overlay
@@ -120,13 +107,19 @@ public class AuthoritativeRoutingOverlayTests
                 }
                 """));
 
-        var merged = VariableBundle.Patch(rogueBundle, overlay);
+        var merged = AuthoritativeRoutingOverlay.Apply(
+            rogueBundle.Vars,
+            "wr_x",
+            overlayRepository,
+            workspace: null,
+            projectId: null,
+            issueNumber: null);
 
         var root = merged.Vars!.Value;
         var repository = root.GetProperty("repository");
 
         Assert.Equal("web", repository.GetProperty("name").GetString());
-        Assert.Equal("fingerprint-1", repository.GetProperty("remoteFingerprint").GetString());
+        Assert.False(repository.TryGetProperty("remoteFingerprint", out _));
         Assert.Equal("git@web.example:repo.git", repository.GetProperty("gitUrl").GetString());
 
         // The authoritative runId replaces the configurable one.
@@ -138,7 +131,7 @@ public class AuthoritativeRoutingOverlayTests
     public void Apply_AfterStageMerge_ReplacesCompleteRoutingRoots()
     {
         var repository = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
-            "web", "git@web.example:repo.git", "develop", "fingerprint-1", "git-remote-url/v1");
+            "web", "git@web.example:repo.git", "develop");
         var workspace = new Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity(
             "/run/workspaces/wr_x", "mohist/run-wr_x", "/openspec/changes/issue-417");
         var layered = JSON.DeserializeElement("""

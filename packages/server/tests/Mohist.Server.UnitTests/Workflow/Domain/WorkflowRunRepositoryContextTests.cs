@@ -34,9 +34,7 @@ public class WorkflowRunRepositoryContextTests
         new(
             Name: name,
             GitUrl: $"git@{name}.example:repo.git",
-            BaseBranch: "develop",
-            RemoteFingerprint: "abc",
-            RemoteIdentityVersion: "git-remote-url/v1");
+            BaseBranch: "develop");
 
     private static WorkspaceIdentity SampleWorkspace(string wrId = "wr_xyz") =>
         new(
@@ -74,8 +72,6 @@ public class WorkflowRunRepositoryContextTests
         Assert.NotNull(run.Repository);
         Assert.Equal("web", run.Repository!.Name);
         Assert.Equal("develop", run.Repository.BaseBranch);
-        Assert.Equal("abc", run.Repository.RemoteFingerprint);
-        Assert.Equal("git-remote-url/v1", run.Repository.RemoteIdentityVersion);
         Assert.NotNull(run.Workspace);
         Assert.Equal(workspace.Path, run.Workspace!.Path);
     }
@@ -208,8 +204,6 @@ public class WorkflowRunRepositoryContextTests
         Assert.Equal(repository.Name, reloaded.Repository!.Name);
         Assert.Equal(repository.GitUrl, reloaded.Repository.GitUrl);
         Assert.Equal(repository.BaseBranch, reloaded.Repository.BaseBranch);
-        Assert.Equal(repository.RemoteFingerprint, reloaded.Repository.RemoteFingerprint);
-        Assert.Equal(repository.RemoteIdentityVersion, reloaded.Repository.RemoteIdentityVersion);
     }
 
     [Fact]
