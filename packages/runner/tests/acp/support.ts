@@ -390,7 +390,7 @@ export function createSharedSessionFixture(
 }
 
 export class FakeServerConnection {
-  readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string }> = []
+  readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string; sessionId?: string }> = []
   nextEnsureWorkflowAgentSession: { runtimeSessionId?: string; runtime?: string | null; workDir?: string; model?: string | null } = { runtimeSessionId: "shared-session-1", runtime: "opencode", workDir: "D:/fake/work" }
   private readonly livenessProbeStarted = deferred<void>()
 
@@ -429,6 +429,25 @@ export class FakeServerConnection {
       this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
       if (event.type === "session.liveness" && (event.payload as { status?: string }).status === "probing") this.livenessProbeStarted.resolve()
     }
+  }
+
+  async getAgentSession(_projectId: string, sessionId: string) {
+    this.calls.push({ event: "getAgentSession", sessionId })
+    return null
+  }
+
+  async openAgentSession(_projectId: string, sessionId: string, body: unknown) {
+    this.calls.push({ event: "openAgentSession", sessionId, body })
+    return { runtimeSessionId: "shared-session-1", runtime: "opencode", workDir: "D:/fake/work" }
+  }
+
+  async attachAgentSession(_projectId: string, sessionId: string, body: unknown) {
+    this.calls.push({ event: "attachAgentSession", sessionId, body })
+  }
+
+  async agentSessionRuntimeEvents(_projectId: string, sessionId: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
+    const events = payload?.events ?? payload?.runtimeEvents ?? []
+    for (const event of events) this.calls.push({ event: "agentSessionRuntimeEvents", sessionId, type: event.type, payload: event.payload })
   }
 }
 

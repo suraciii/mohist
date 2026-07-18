@@ -3,6 +3,9 @@ import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
+import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+
+const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -75,10 +78,6 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/runtime/opencode-models.js", () => ({
-  discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
-}))
-
 vi.mock("../src/actions/registry.js", () => ({
   createDefaultRegistry: () => ({
     resolve: (uses?: string | null) => uses === "test/block" || uses === "test/log" ? blockingAction : undefined,
@@ -100,6 +99,7 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
 }))
 
 beforeEach(() => {
+  installReadyRuntimeFactory()
   createSharedAcpConnection.mockResolvedValue({
     connection: {
       prompt: vi.fn(),
@@ -156,6 +156,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     setExecutorGitRunnerForTest(nonGitRunner)
   })
   afterEach(() => {
+    clearOpenCodeRuntimeFactoryForTest()
     vi.useRealTimers()
     setExecutorGitRunnerForTest(null)
   })

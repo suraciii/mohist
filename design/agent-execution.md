@@ -173,7 +173,17 @@ Session 空闲且 expected binding 仍为 current 时替换绑定。API 与 CLI 
 `sessionId`，wire 以 `runtime` + `runtimeSessionId` 表示物理绑定；当前 Runtime Session
 缺失时，命令明确失败并提示 Reset。
 
-OpenCode adapter 替换仍是实装差距：`GenericAgentSession` 术语尚未收敛，AgentJob 仍默认
-使用由 Workflow 拥有的 `mohist/acp-agent` Action，ACP Action 自身还按两种所有者分支。
-issue-409 需要让 AgentJob 走由 Agent 拥有的 execution request，同时让两条路径共享
-`OpenCodeRuntime`。
+issue-409 已为 Workflow 来源落地 Native OpenCode Runtime：Workflow 来源的回合执行
+改为 `OpenCodeRuntime.runTurn`，不再走 `mohist/acp-agent` 或 ACP bridge；Workflow 来源
+的 Session state、命令请求 / 结果与用户可见诊断不再暴露 `acpSessionId` 或 ACP Action
+身份。Runner 为 AgentJob 路径保留 `mohist/acp-agent` 注册直至 issue-410 完成 Agent
+launch 来源的迁移；本 issue 不为 Workflow 来源引入 feature flag、compatibility alias
+或 ACP fallback。
+
+issue-409 范围之外、当前仍未实装：
+
+- AgentJob 执行仍默认 `mohist/acp-agent` 并按 Workflow / AgentJob 两种所有者分支；
+  issue-410 把 Agent launch 来源迁到由 Agent 拥有的 execution request 并完成 ACP
+  依赖的最终移除。
+- Workflow 来源的 Session 命令（Follow-up / Compact / Reset / Cancel）的 Runtime
+  替换按 T-005 推进；T-005 落地后该路径同样不再暴露 ACP 身份。

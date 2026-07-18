@@ -200,7 +200,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 100,
-    }, undefined, shared.context())), async (action) => {
+    }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })), async (action) => {
       await shared.agent.waitForPrompt()
       await vi.advanceTimersByTimeAsync(100)
       return action
