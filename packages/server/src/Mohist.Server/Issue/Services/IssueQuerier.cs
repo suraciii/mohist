@@ -104,6 +104,57 @@ public class IssueQuerier : IScopedService
     }
 
     /// <summary>
+    /// Loads the children snapshot the parent grain needs to drive
+    /// composite advancement. Returns each child's <see cref="IssueStatus"/>,
+    /// draft state, prerequisite numbers, currently-bound workflow run id,
+    /// and target repository name. Filters out archived children (archive
+    /// is its own lifecycle, separate from composite advancement) and
+    /// orders by issue number for deterministic fan-out. Used by:
+    /// <list type="bullet">
+    /// <item><c>IssueGrain.StartCompositeAsync</c> — to enumerate startable
+    /// children after the parent's aggregate transition.</item>
+    /// <item><c>IssueGrain.RecomputeCompositeStatusAsync</c> — to decide
+    /// the parent's aggregated status and to fan-out newly-unlocked children.</item>
+    /// </list>
+    /// <para>
+    /// The <see cref="IssueRow.State"/> JSON is deserialized to recover the
+    /// domain-level fields (status, is-draft, prerequisites, workflow run
+    /// id, repository ref) since the read-model projection strips some
+    /// attributes that the parent grain needs for startability checks.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<IssueChildCompositeInfo>> ListChildrenForCompositeAsync(string projectId, int parentNumber)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Issues.AsNoTracking()
+            .Where(r => r.ProjectId == projectId
+                && r.ParentIssueNumber == parentNumber
+                && r.IsArchived != true)
+            .OrderBy(r => r.Number)
+            .Select(r => new { r.ProjectId, r.Number, r.State })
+            .ToListAsync();
+
+        var children = new List<IssueChildCompositeInfo>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (row.Number is null) continue;
+            var issue = string.IsNullOrEmpty(row.State) ? null : IssueStore.Deserialize(row.State);
+            if (issue is null) continue;
+            children.Add(new IssueChildCompositeInfo(
+                Number: issue.Number,
+                Status: issue.Status,
+                IsDraft: issue.IsDraft,
+                PrerequisiteNumbers: issue.PrerequisiteNumbers,
+                WorkflowRunId: issue.WorkflowRunId,
+                RepositoryRef: issue.RepositoryRef));
+        }
+        return children;
+    }
+
+    /// <summary>
     /// Reverse lookup that returns the human-numbered handle plus the
     /// title of the issue bound to <paramref name="workflowRunId"/>, or
     /// <c>null</c> when no issue row is bound. Used by
@@ -553,7 +604,6 @@ public class IssueQuerier : IScopedService
         bool hasChildren)
     {
         if (issue.IsDraft) return new IssueStartBlocker.Draft();
-        if (hasChildren) return new IssueStartBlocker.ParentHasChildren();
         if (undeliveredPrerequisites.Count == 0) return null;
         foreach (var number in issue.PrerequisiteNumbers)
         {
@@ -566,3 +616,20 @@ public class IssueQuerier : IScopedService
 }
 
 public sealed record IssueWorkflowRef(string ProjectId, int Number);
+
+/// <summary>
+/// Child-issue snapshot used by composite-advancement decisions on the
+/// parent grain. The fields mirror what <c>Issue.LoadIssueSummaryAsync</c>
+/// returns for prerequisites, plus the per-child workflow run id and
+/// repository ref used by the child <c>StartWorkAsync</c> path. None of
+/// these are projections: they are read from the persisted IssueState JSON
+/// so the values are transactional with the child's last save.
+/// </summary>
+[GenerateSerializer]
+public sealed record IssueChildCompositeInfo(
+    [property: Id(0)] int Number,
+    [property: Id(1)] IssueStatus Status,
+    [property: Id(2)] bool IsDraft,
+    [property: Id(3)] int[] PrerequisiteNumbers,
+    [property: Id(4)] string? WorkflowRunId,
+    [property: Id(5)] string? RepositoryRef);

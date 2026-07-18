@@ -162,7 +162,6 @@ public sealed partial class Issue
         bool hasChildren = false)
     {
         if (_isDraft) return new IssueStartBlocker.Draft();
-        if (hasChildren) return new IssueStartBlocker.ParentHasChildren();
         if (undeliveredPrerequisites is { Count: > 0 })
         {
             foreach (var number in _prerequisiteNumbers)
@@ -198,8 +197,6 @@ public sealed partial class Issue
             throw new IssueStartBlockedException(blocker, $"Issue #{Number} is still a draft and cannot be started");
         if (blocker is IssueStartBlocker.WaitingFor waiting)
             throw new IssueStartBlockedException(blocker, $"Issue #{Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
-        if (blocker is IssueStartBlocker.ParentHasChildren)
-            throw new IssueStartBlockedException(blocker, $"Issue #{Number} has children and cannot be started directly");
 
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");

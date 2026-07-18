@@ -24,3 +24,28 @@
 - Did NOT touch `IssueStartBlocker.ParentHasChildren` — T-002 removes it. `mo issue start <parent>` still returns the `is_parent` blocker (regression-free).
 - Did NOT add `Close(snapshot, reason)` or `ArchiveForced` — those belong to T-003 with the lifecycle grain/API wiring.
 - Full `dotnet test Mohist.sln` (5,471 tests) green; full `npm test` (server, CLI, runner, web — 8,900+ tests) green.
+
+## T-002
+
+- Removed `IssueStartBlocker.ParentHasChildren` (domain + read-model + DTO `IssueStartBlockerDto.ParentHasChildrenBlocker`); updated `IssueRoutes.Lifecycle.cs` so `POST /start` on a parent no longer maps the `is_parent` code.
+- `IssueGrain.StartWorkAsync` now branches inside the existing entry point: when `hasChildren` is true, calls `StartCompositeAsync` (loads children snapshot → `MarkCompositeStarted` → fan-out via `Task.WhenAll` of per-child `StartWorkAsync`); otherwise runs the unchanged per-issue start path.
+- Added `IssueGrain.StartCompositeAsync` (Backlog → InProgress without workflow run, fan-out to every currently-startable child in parallel; per-child failures swallowed + logged so siblings still start).
+- Added `IssueGrain.RecomputeCompositeStatusAsync` (load fresh children snapshot → `RecomputeCompositeStatus` → apply matching transition if needed → fan-out only when `target == InProgress`). Fan-out is gated on InProgress per design D6 step 4: attaching a child to a still-Backlog parent must NOT pre-empt the user's explicit `mo issue start`. The fan-out was originally unconditional; an early test failure in `IssueCompositeAdvancementApiSpecs.StartIssue_OnParentWithAllChildrenBlocked_StillAggregatesToInProgress` (attaching then adding prereq — recompute fired before prereq landed) surfaced this and the fix was to gate on the target status.
+- Added `IssueQuerier.ListChildrenForCompositeAsync` (projectId + parent → list of `(Number, Status, IsDraft, PrerequisiteNumbers, WorkflowRunId, RepositoryRef)` for each non-archived child, ordered by number).
+- Added `IssueChildCompositeInfo` record at the bottom of `IssueQuerier.cs` (mirrors what the parent grain needs for startability + status aggregation).
+- New durable handlers in `packages/server/src/Mohist.Server/Events/Subscriptions/IssueCompositeHandlers.cs`:
+  - `IssueCompositeChildStartedHandler` on `com.mohist.issue.work-started` → recompute parent.
+  - `IssueCompositeChildCompletedHandler` on `com.mohist.issue.completed` → recompute parent.
+  - `IssueCompositeChildCancelledHandler` on `com.mohist.issue.cancelled` → recompute parent.
+  - `IssueCompositeChildReopenedHandler` on `com.mohist.issue.reopened` → recompute parent (Done → InProgress flip on a Done parent).
+  - `IssueCompositeParentChangedHandler` on `com.mohist.issue.parent-changed` → recompute both previous + new parent (one will be null on attach/detach).
+  - Shared `ParentCompositeRecomputeDispatcher` for the four child-event handlers; the parent-changed handler dispatches both ends itself.
+- Exposed `StartCompositeAsync` on `IIssueGrain` for direct grain-level tests.
+- All `IIssueGrain` test fakes (in Epic + IssueCompositeHandlersSpecs + IssueWorkflowCompletionHandlerTestSupport) extended with `StartCompositeAsync` to keep them compiling.
+- New `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCompositeAdvancementGrainSpecs.cs` (15 tests: start fan-out, draft parent throws, zero children no-op, prereq-blocked skip, draft-child skip, parent never owns workflow run, recompute idempotency across redeliveries, all-terminal-Done aggregates Done, mixed-Done/Cancelled aggregates Done, no fan-out on Backlog parent, recompute on zero-children no-op, normal-issue start path unchanged, parent start routes into composite, restart after activation loss recovers, fan-out failure isolation).
+- Updated `packages/server/tests/Mohist.Server.SpecTests/spec-file-size-baseline.json` to whitelist the two new over-24K files (IssueCompositeHandlersSpecs.cs and IssueCompositeAdvancementGrainSpecs.cs).
+- Removed a debug `LogInformation` line that was left over from investigating the test failure noted above (`IsStartableForComposite` no longer logs the full child decision).
+- Full `dotnet test Mohist.sln` (5,512 tests) green; full `npm test` (server, CLI, runner, web — 11,479 tests) green.
+- `mo issue start <parent>` now succeeds and fans out startable children in parallel; the parent never acquires a workflow run; the parent's `WorkflowRunId` remains null at every observation.
+- The acceptance criterion "Per-child runner-dispatch capacity is not bypassed" is satisfied trivially because `Task.WhenAll(childGrain.StartWorkAsync())` reuses each child's existing per-issue start path, which already goes through runner capacity admission (no new project-wide cap introduced).
+- Did NOT wire the parent-aware `/close`, `/reopen`, `/archive` routes — those belong to T-003 alongside `Issue.Close(snapshot, reason)`, `Issue.ArchiveForced()`, and the synchronous archive cascade.

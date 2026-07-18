@@ -28,6 +28,28 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartReadiness> GetStartReadinessAsync();
+
+    /// <summary>
+    /// issue-419 T-002 (D2): composite advancement entry point. Marks
+    /// the parent <c>Backlog → InProgress</c> without minting a workflow
+    /// run, then fans out <c>StartWorkAsync</c> to every currently
+    /// startable child in parallel. Invoked from <c>StartWorkAsync</c>
+    /// when the issue has one or more children; exposed on the interface
+    /// for direct test/spec invocation.
+    /// </summary>
+    Task StartCompositeAsync();
+
+    /// <summary>
+    /// issue-419 T-002 (D1, D6): idempotent recompute of the parent's
+    /// aggregated status from a fresh children snapshot, with optional
+    /// fan-out of newly-unlocked startable children. Dispatched by the
+    /// durable handlers on child <c>started</c>, <c>completed</c>,
+    /// <c>cancelled</c>, <c>reopened</c>, and <c>parent-changed</c>
+    /// events. When the issue has no children (last detach has
+    /// occurred) the call no-ops; the next direct <c>StartWorkAsync</c>
+    /// on the now-empty parent uses the normal single-issue path.
+    /// </summary>
+    Task RecomputeCompositeStatusAsync();
     Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
 

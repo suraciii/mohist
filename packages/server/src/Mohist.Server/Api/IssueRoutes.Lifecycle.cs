@@ -36,7 +36,6 @@ public static partial class IssueRoutes
                 var code = ex.Blocker switch
                 {
                     IssueStartBlocker.Draft => "draft",
-                    IssueStartBlocker.ParentHasChildren => "is_parent",
                     IssueStartBlocker.WaitingFor => "waiting_for_prerequisite",
                     _ => "start_blocked",
                 };
