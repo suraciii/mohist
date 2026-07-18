@@ -387,7 +387,12 @@ public class ProjectEventTailApiSpecs
             });
 
             var pipe = new Pipe();
-            var initialCount = _source.ActiveSubscriptionCount;
+            var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var openedObserver = _source.ObserveSubscriptionOpened(projectId =>
+            {
+                if (projectId == _projectId)
+                    opened.TrySetResult();
+            });
 
             var httpContext = new DefaultHttpContext
             {
@@ -409,21 +414,12 @@ public class ProjectEventTailApiSpecs
                 }
                 finally
                 {
+                    openedObserver.Dispose();
                     pipe.Writer.Complete();
                 }
-            }, cts.Token);
+            });
 
-            // EventTailSource.Open is synchronous under lock; the
-            // subscription count must be observable by the time
-            // source.Open returns, so this spin resolves in microseconds.
-            while (_source.ActiveSubscriptionCount <= initialCount)
-            {
-                if (handler.IsCompleted && handler.IsFaulted)
-                    throw new InvalidOperationException(
-                        "Handler faulted before subscription registration.",
-                        handler.Exception);
-                Thread.Yield();
-            }
+            opened.Task.GetAwaiter().GetResult();
 
             var reader = Task.Run(async () =>
             {
@@ -449,7 +445,7 @@ public class ProjectEventTailApiSpecs
                 {
                     lines.Writer.TryComplete();
                 }
-            }, cts.Token);
+            });
 
             _cts = cts;
             _lines = lines;

@@ -612,6 +612,40 @@ describe("mohist/openspec-tasks", () => {
       }],
     })
   })
+
+  it("OpenSpecTaskWithExecutorStyleSplitContext_UsesRawWithTaskSubtreePlaceholders", async () => {
+    const workDir = await createTestTempDir("mohist-openspec-")
+    const tasksPath = join(workDir, "tasks.json")
+    await writeFile(tasksPath, JSON.stringify({
+      tasks: [
+        {
+          id: "T-001",
+          title: "Implement workflow recovery",
+        },
+      ],
+    }))
+
+    const resolvedAgent = { type: "opencode", model: "model-a" }
+    const addTasks = vi.fn()
+
+    const ctx = context(workDir, {
+      path: tasksPath,
+      task: { with: { options: resolvedAgent } },
+    }, addTasks)
+
+    ctx.rawWith = {
+      path: tasksPath,
+      task: { with: { options: "${{ vars.agent }}" } },
+    } as never
+
+    const result = await openspecTasksAction(ctx)
+    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedWith = loadedTasks[0]?.with ?? {}
+
+    expect(result.status).toBe("success")
+    expect(loadedWith.options).toBe("${{ vars.agent }}")
+    expect(loadedWith.options).not.toEqual(resolvedAgent)
+  })
 })
 
 afterEach(() => {
@@ -628,6 +662,7 @@ function context(workDir: string, withInput: Record<string, unknown>, addTasks: 
     title: "Load build tasks",
     uses: "mohist/openspec-tasks",
     with: withInput as never,
+    rawWith: withInput as never,
     variables: variables as never,
     workDir,
     signal: new AbortController().signal,

@@ -101,7 +101,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   const sourceTasks = Array.isArray(root.tasks) ? root.tasks.filter(isObject) : []
   if (!Array.isArray(root.tasks)) return { status: "failure", message: "tasks.json must contain a tasks array" }
 
-  const taskDefaults = objectInput(context.with, "task")
+  const taskDefaults = objectInput(context.rawWith ?? context.with, "task")
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(context.with, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH

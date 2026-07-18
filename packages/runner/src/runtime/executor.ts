@@ -137,6 +137,7 @@ export class WorkExecutor {
       const result = await action({
         ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log),
         with: renderedWith,
+        rawWith: work.with,
         workDir,
       })
       // stripRunnerPrivateFacts drops ActionResult.turnFact from the wire.
