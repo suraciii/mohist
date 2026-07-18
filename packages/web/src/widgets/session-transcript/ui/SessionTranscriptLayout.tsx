@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { useNow } from '../model/use-now'
+import { selectActiveToolCall } from '../model/select-active-tool-call'
 import type { TurnRefsMap } from '../model/turn-refs'
 import { TurnList } from './TurnList'
 import { CopyFullTextButton } from './CopyFullTextButton'
+import { CurrentActivityBar } from './CurrentActivityBar'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -69,6 +71,7 @@ export function SessionTranscriptLayout({
 
   const liveNow = useNow({ intervalMs: 1000, enabled: isRunning, now: providedNow })
   const now = liveNow
+  const activeTool = isRunning ? selectActiveToolCall(turns) : null
 
   return (
     <div className="px-4 py-6 min-w-0" data-scrollable="">
@@ -82,6 +85,13 @@ export function SessionTranscriptLayout({
           <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} now={now} />
           {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
           {isRunning && isStreaming && <StreamingIndicator />}
+          {activeTool && now !== undefined && scrollContainerRef && (
+            <CurrentActivityBar
+              activeTool={activeTool}
+              now={now}
+              scrollContainerRef={scrollContainerRef}
+            />
+          )}
         </div>
       )}
     </div>
