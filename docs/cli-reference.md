@@ -45,7 +45,7 @@ mo repo         仓库
 mo issue        工作项
 mo epic         产品目标
 mo workflow     工作流执行（WorkflowRun）
-mo event        事件投递运维
+mo events       事件投递运维与实时观察
 mo agent        智能体
 mo label        标签
 mo runner       执行器
@@ -93,14 +93,17 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 `get` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
 
-## Event（事件投递运维）
+## Events（事件投递运维与实时观察）
 
 事件投递失败并耗尽自动重试后进入 dead letter。运维入口只连接本机 Mohist 服务，查询结果默认显示恢复状态，避免把正在重投的记录误当成可再次重试的记录。
 
 | 命令 | 作用 |
 |---|---|
-| `mo event dead-letter list [--handler <处理者>] [--limit <1-500>] [-o table\|json]` | 列出尚未解决的 dead letter；table 包含 `status`、尝试次数和安全摘要 |
-| `mo event dead-letter redeliver <id> [-o table\|json]` | 只重投该记录中失败的处理者；成功后将记录标为已解决 |
+| `mo events tail [--match <expr>]` | 实时观察当前（或 `--project` / `--project-id` 指定）项目的 canonical 事件流；一行一个 NDJSON envelope，Ctrl-C 干净退出 |
+| `mo events dead-letter list [--handler <处理者>] [--limit <1-500>] [-o table\|json]` | 列出尚未解决的 dead letter；table 包含 `status`、尝试次数和安全摘要 |
+| `mo events dead-letter redeliver <id> [-o table\|json]` | 只重投该记录中失败的处理者；成功后将记录标为已解决 |
+
+`mo events tail` 把 `--match` 透传给服务端，服务端是表达式编译的唯一权威：语法错误会得到位置化的 400 诊断，CLI 在 stream 打开前向 stderr 输出位置并以非零状态退出。无 `--match` 时每个项目事件都打印一行 NDJSON envelope。Tail 不会重放订阅前发生的事件；按下 Ctrl-C 时立刻取消请求并释放订阅。
 
 服务端与 `mo` 共用同一 operator credential，按以下顺序解析：
 
