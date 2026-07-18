@@ -115,7 +115,34 @@ describe('ModelSelect popover selection', () => {
     fireEvent.click(trigger)
   }
 
-  it('calls onChange when a model option receives a native pointerdown (mouse click)', async () => {
+  it('calls onChange on click and closes popover', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-model-id="opencode-go/minimax-m3"]')
+      if (!el) throw new Error('option not rendered yet')
+      return el as HTMLElement
+    })
+
+    fireEvent.click(option)
+
+    expect(onChange).toHaveBeenCalledWith('opencode-go/minimax-m3')
+    await waitFor(() => {
+      expect(document.querySelector('[data-model-id]')).toBeNull()
+    })
+  })
+
+  it('does NOT select on pointerdown alone', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -136,10 +163,36 @@ describe('ModelSelect popover selection', () => {
 
     fireEvent.pointerDown(option)
 
-    expect(onChange).toHaveBeenCalledWith('opencode-go/minimax-m3')
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('updates the trigger to show the selected model name and full id after a pointerdown selection', async () => {
+  it('does NOT invoke onChange on press-move-release (no-select scenario)', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-model-id="opencode-go/minimax-m3"]')
+      if (!el) throw new Error('option not rendered yet')
+      return el as HTMLElement
+    })
+
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(document.body)
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-model-id]')).toBeTruthy()
+  })
+
+  it('updates the trigger to show the selected model name and full id after a click selection', async () => {
     const onChange = vi.fn()
     const Wrapper = ({ value }: { value: string | null }) => (
       <ModelSelect
@@ -159,7 +212,7 @@ describe('ModelSelect popover selection', () => {
       return el as HTMLElement
     })
 
-    fireEvent.pointerDown(option)
+    fireEvent.click(option)
 
     expect(onChange).toHaveBeenCalledWith('opencode/minimax-m3-free')
 
@@ -171,7 +224,7 @@ describe('ModelSelect popover selection', () => {
     })
   })
 
-  it('uses event delegation: pointerdown on a child span of a model option still triggers onChange', async () => {
+  it('selects by clicking a child element of the option via cmd event bubbling', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -193,12 +246,12 @@ describe('ModelSelect popover selection', () => {
     const childSpan = option.querySelector('span') as HTMLElement
     expect(childSpan).toBeTruthy()
 
-    fireEvent.pointerDown(childSpan)
+    fireEvent.click(childSpan)
 
     expect(onChange).toHaveBeenCalledWith('minimax-coding-plan/minimax-m3')
   })
 
-  it('still triggers onChange via keyboard Enter on the highlighted model option', async () => {
+  it('selects the first highlighted model via keyboard Enter', async () => {
     const onChange = vi.fn()
     render(
       <ModelSelect
@@ -212,13 +265,14 @@ describe('ModelSelect popover selection', () => {
     openPopover()
 
     const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    expect(search).toBeTruthy()
 
     fireEvent.keyDown(search, { key: 'Enter' })
 
     expect(onChange).toHaveBeenCalledWith('minimax-coding-plan/minimax-m3')
   })
 
-  it('still filters the model list when typing in the search input', async () => {
+  it('filters the model list when typing in the search input', async () => {
     render(
       <ModelSelect
         value={null}
@@ -241,7 +295,7 @@ describe('ModelSelect popover selection', () => {
     })
   })
 
-  it('still calls onClear when the X clear button is clicked', () => {
+  it('calls onClear when the X clear button is clicked', () => {
     const onChange = vi.fn()
     const onClear = vi.fn()
     render(
@@ -261,152 +315,180 @@ describe('ModelSelect popover selection', () => {
     expect(onClear).toHaveBeenCalledTimes(1)
     expect(onChange).not.toHaveBeenCalled()
   })
+
+  it('closes without selecting when Escape is pressed', async () => {
+    const onChange = vi.fn()
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={onChange}
+      />,
+    )
+
+    openPopover()
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    fireEvent.keyDown(search, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Search models...')).toBeNull()
+    })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('keyboard Home/End jump to first/last filtered option', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />,
+    )
+
+    openPopover()
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+
+    fireEvent.keyDown(search, { key: 'End' })
+
+    await waitFor(() => {
+      const items = document.querySelectorAll('[cmdk-item]')
+      expect(items.length).toBe(3)
+      const lastItem = items[items.length - 1]
+      expect(lastItem.getAttribute('aria-selected')).toBe('true')
+      expect(lastItem.getAttribute('data-model-id')).toBe('opencode/minimax-m3-free')
+    })
+
+    fireEvent.keyDown(search, { key: 'Home' })
+
+    await waitFor(() => {
+      const items = document.querySelectorAll('[cmdk-item]')
+      const firstItem = items[0]
+      expect(firstItem.getAttribute('aria-selected')).toBe('true')
+      expect(firstItem.getAttribute('data-model-id')).toBe('minimax-coding-plan/minimax-m3')
+    })
+  })
 })
 
-describe('ModelSelect inline variant chips', () => {
+describe('ModelSelect accessibility', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
   })
 
   const models = ['anthropic/claude', 'openai/gpt-4']
-  const modelVariants = { 'anthropic/claude': ['low', 'medium', 'high', 'max'] }
 
-  function renderVariantSelect(props: Partial<React.ComponentProps<typeof ModelSelect>> = {}) {
-    const onChange = vi.fn()
-    const onChangeVariant = vi.fn()
-    const view = render(
-      <ModelSelect
-        id="test-model"
-        value={props.value ?? null}
-        valueVariant={props.valueVariant}
-        placeholder="Opencode default"
-        models={models}
-        modelVariants={modelVariants}
-        onChange={onChange}
-        onChangeVariant={onChangeVariant}
-        size={props.size}
-      />,
-    )
-    return { ...view, onChange, onChangeVariant }
-  }
-
-  async function openVariantSelect() {
-    fireEvent.click(screen.getByRole('button', { name: /Opencode default|claude/i }))
-    return await waitFor(() => screen.getByPlaceholderText('Search models...'))
-  }
-
-  it('renders chips only on variant-capable rows and preserves them after search', async () => {
-    renderVariantSelect()
-    const search = await openVariantSelect()
-
-    expect(screen.getByTestId('test-model-row-anthropic/claude-variant-low')).toBeTruthy()
-    expect(screen.queryByTestId('test-model-row-openai/gpt-4-variant-low')).toBeNull()
-
-    fireEvent.change(search, { target: { value: 'claude' } })
-    await waitFor(() => {
-      expect(screen.getByTestId('test-model-row-anthropic/claude-variant-high')).toBeTruthy()
-      expect(document.querySelector('[data-model-id="openai/gpt-4"]')).toBeNull()
-    })
-  })
-
-  it('selects model and variant on chip click and clears variant on body click', async () => {
-    const { onChange, onChangeVariant } = renderVariantSelect({ value: 'anthropic/claude', valueVariant: 'high' })
-    await openVariantSelect()
-
-    fireEvent.click(screen.getByTestId('test-model-row-anthropic/claude-variant-medium'))
-    expect(onChange).toHaveBeenCalledWith('anthropic/claude')
-    expect(onChangeVariant).toHaveBeenCalledWith('medium')
-
-    fireEvent.click(screen.getByRole('button', { name: /claude/i }))
-    const row = await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
-    fireEvent.pointerDown(row)
-    expect(onChangeVariant).toHaveBeenCalledWith(null)
-  })
-
-  it('uses only the atomic callback for chip selection when provided', async () => {
-    const onChange = vi.fn()
-    const onChangeVariant = vi.fn()
-    const onChangeModelVariant = vi.fn()
+  it('option list exposes listbox role and options expose option role', async () => {
     render(
       <ModelSelect
-        id="test-model"
         value={null}
         placeholder="Opencode default"
         models={models}
-        modelVariants={modelVariants}
-        onChange={onChange}
-        onChangeVariant={onChangeVariant}
-        onChangeModelVariant={onChangeModelVariant}
-      />,
+        onChange={() => {}}
+      />
     )
-    await openVariantSelect()
 
-    fireEvent.click(screen.getByTestId('test-model-row-anthropic/claude-variant-medium'))
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
 
-    expect(onChangeModelVariant).toHaveBeenCalledTimes(1)
-    expect(onChangeModelVariant).toHaveBeenCalledWith('anthropic/claude', 'medium')
-    expect(onChange).not.toHaveBeenCalled()
-    expect(onChangeVariant).not.toHaveBeenCalled()
+    await waitFor(() => {
+      const listbox = document.querySelector('[role="listbox"]')
+      expect(listbox).toBeTruthy()
+    })
+
+    const options = document.querySelectorAll('[role="option"]')
+    expect(options.length).toBe(2)
   })
 
-  it('marks the active variant and leaves chips inactive when no variant is selected', async () => {
-    const { rerender } = render(
+  it('selected option has aria-selected true and others have false', async () => {
+    render(
       <ModelSelect
-        id="test-model"
         value="anthropic/claude"
-        valueVariant="medium"
         placeholder="Opencode default"
         models={models}
-        modelVariants={modelVariants}
         onChange={() => {}}
-        onChangeVariant={() => {}}
-      />,
+      />
     )
-    await openVariantSelect()
-    expect(screen.getByTestId('test-model-row-anthropic/claude-variant-medium').getAttribute('data-variant-active')).toBe('true')
 
-    rerender(
+    fireEvent.click(screen.getByRole('button', { name: /claude/i }))
+
+    await waitFor(() => {
+      const claudeOption = document.querySelector('[data-model-id="anthropic/claude"]')
+      expect(claudeOption?.getAttribute('aria-selected')).toBe('true')
+    })
+
+    const gptOption = document.querySelector('[data-model-id="openai/gpt-4"]')
+    expect(gptOption?.getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('combobox input has aria-controls and aria-expanded', async () => {
+    render(
       <ModelSelect
-        id="test-model"
-        value="anthropic/claude"
-        valueVariant={null}
+        value={null}
         placeholder="Opencode default"
         models={models}
-        modelVariants={modelVariants}
         onChange={() => {}}
-        onChangeVariant={() => {}}
-      />,
+      />
     )
-    expect(screen.getByTestId('test-model-row-anthropic/claude-variant-medium').getAttribute('data-variant-active')).toBe('false')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
+
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
+    expect(search.getAttribute('aria-expanded')).toBe('true')
+    expect(search.getAttribute('aria-controls')).toBeTruthy()
   })
 
-  it('moves keyboard focus into chips and selects the focused chip with Enter', async () => {
-    const { onChange, onChangeVariant } = renderVariantSelect()
-    const search = await openVariantSelect()
+  it('aria-activedescendant updates when active option changes', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={models}
+        onChange={() => {}}
+      />
+    )
 
-    fireEvent.keyDown(search, { key: 'ArrowRight' })
-    await waitFor(() => expect(screen.getByTestId('test-model-row-anthropic/claude-variant-low')).toHaveFocus())
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
 
-    fireEvent.keyDown(screen.getByTestId('test-model-row-anthropic/claude-variant-low'), { key: 'ArrowRight' })
-    await waitFor(() => expect(screen.getByTestId('test-model-row-anthropic/claude-variant-medium')).toHaveFocus())
+    const search = await waitFor(() => screen.getByPlaceholderText('Search models...'))
 
-    fireEvent.keyDown(screen.getByTestId('test-model-row-anthropic/claude-variant-medium'), { key: 'Enter' })
-    expect(onChange).toHaveBeenCalledWith('anthropic/claude')
-    expect(onChangeVariant).toHaveBeenCalledWith('medium')
+    const input = search
+    const initialDescendant = input.getAttribute('aria-activedescendant')
+
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+
+    await waitFor(() => {
+      const updatedDescendant = input.getAttribute('aria-activedescendant')
+      expect(updatedDescendant).toBeTruthy()
+      expect(updatedDescendant).not.toBe(initialDescendant)
+    })
   })
 
-  it('supports Tab into chips, Escape close, and compact 44px tap targets', async () => {
-    renderVariantSelect({ size: 'compact' })
-    const search = await openVariantSelect()
+  it('CommandList has overscroll-y-contain and CommandGroup heading has sticky classes', async () => {
+    render(
+      <ModelSelect
+        value={null}
+        placeholder="Opencode default"
+        models={['anthropic/claude', 'openai/gpt-4']}
+        onChange={() => {}}
+      />
+    )
 
-    fireEvent.keyDown(search, { key: 'Tab' })
-    const lowChip = await waitFor(() => screen.getByTestId('test-model-row-anthropic/claude-variant-low'))
-    expect(lowChip).toHaveFocus()
-    expect(lowChip.className).toContain('min-h-11')
-    expect(lowChip.className).toContain('min-w-11')
+    fireEvent.click(screen.getByRole('button', { name: 'Opencode default' }))
 
-    fireEvent.keyDown(lowChip, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByPlaceholderText('Search models...')).toBeNull())
+    await waitFor(() => {
+      const list = document.querySelector('[role="listbox"]')
+      expect(list).toBeTruthy()
+      expect(list!.className).toContain('overscroll-y-contain')
+
+      const group = document.querySelector('[data-slot="command-group"]')
+      expect(group).toBeTruthy()
+      expect(group!.className).toContain('[[cmdk-group-heading]]:sticky')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:top-0')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:z-10')
+      expect(group!.className).toContain('[[cmdk-group-heading]]:bg-muted')
+    })
   })
 })

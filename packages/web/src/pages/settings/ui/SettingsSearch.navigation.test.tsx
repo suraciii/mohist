@@ -42,7 +42,7 @@ describe('SettingsSearch navigation', () => {
     renderSettingsSearchWithLocationSpy('/settings/agent')
     openSettingsSearch()
     await user.type(await screen.findByTestId('settings-search-input'), 'plan stage model')
-    await user.click(screen.getByTestId('settings-search-result-settings-stage-model-plan'))
+    await user.keyboard('{Enter}')
     await waitFor(() => expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'mohist:settings:reveal-stage-model-overrides' })))
   })
 
