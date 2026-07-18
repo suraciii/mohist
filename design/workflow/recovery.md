@@ -110,9 +110,3 @@ result.completed
 result.failed
   → mark task failed → stage failed → workflow failed
 ```
-
-## Status
-
-现状差距，收敛后删：
-
-- `${{ failure.* }}` 展开未实装。

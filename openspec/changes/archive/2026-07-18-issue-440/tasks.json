@@ -1,0 +1,30 @@
+{
+  "project": "mohist-local",
+  "description": "Expand ${{ failure.* }} references in recovery task prompts and inputs at recovery construction time",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expand ${{ failure.* }} in recovery tasks at construction time",
+      "spec": "specs/recovery-failure-context/spec.md",
+      "description": "Implement runner-side expansion of ${{ failure.* }} references in recovery handler tasks using the triggering task's structured output. Add a targeted expandFailureReferences primitive that substitutes only failure.* refs (leaving every other template namespace literal), integrate it into tryRecovery by extending the signature to accept variables, pre-render ${{ prompts.<key> }} bodies with failure.* expanded against the triggering output (inlining the body into the handler task's field), walk both `with` and `expect`, and fail recovery construction with a named diagnostic when any failure.* path is unresolvable. Update the executor call site, extend recovery tests, add a focused unit test for the primitive, and remove the Status gap note from design/workflow/recovery.md.",
+      "acceptanceCriteria": [
+        "${{ failure.output.<field> }} references in a recovery task's `with` field resolve to the corresponding field of the triggering action's structured output; when the reference occupies the whole field value, the JSON type (object / array / number / boolean) is preserved.",
+        "${{ failure.* }} references inside a ${{ prompts.<key> }} body that a recovery task references are expanded against the triggering output before the recovery task is returned; the recovery task reaching the engine carries the expanded prompt body inline, with no residual ${{ prompts.<key> }} reference and no residual ${{ failure.* }} text in any field including the prompt body.",
+        "Other template references in recovery handler tasks (vars.*, workspace.*, stage.*, repository.*, and non-failure usage of prompts.<key>) pass through the failure-context pass byte-for-byte unchanged, so they continue to resolve at dispatch/execution time under the existing rules.",
+        "When any recovery handler task references a ${{ failure.* }} path that is absent from the failure context — whether the reference occupies a whole field value or is embedded inside a larger string — tryRecovery returns a failed WorkItemResult whose message names the unresolvable path and the recovery task id, and returns no addTasks carrying literal ${{ failure.* }} text.",
+        "When the triggering action emitted no structured output (missing, null, non-JSON, or a JSON scalar), every ${{ failure.* }} reference in any recovery handler task is treated as unresolvable and fails per the prior criterion; recovery handler tasks that reference no ${{ failure.* }} still construct normally.",
+        "The retrySelf clone of the triggering task is excluded from the failure-context pass: its `with` is unchanged, and any ${{ failure.* }} text in it (which is a definition-validation violation) is neither expanded nor reported by this pass.",
+        "Non-recovery task rendering is unchanged: ordinary stage tasks, approval-feedback tasks, runtime-generated subtasks, and retry-self attempts do not receive a failure context, ${{ failure.* }} does not resolve in their rendering, and embedded unresolved references under other namespaces continue to pass through as literal text per the pre-existing tolerance rule.",
+        "packages/runner `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass; new unit test for expandFailureReferences covers whole-string type preservation, embedded substitution, and unresolved-path throwing; new executor-recovery.spec.ts cases cover happy-path expansion (direct with field and prompt-body), unresolved-path failure diagnostic, missing-structured-output failure, and non-recovery isolation.",
+        "design/workflow/recovery.md Status section no longer lists the ${{ failure.* }} 展开未实装 gap (the section is removed entirely if it becomes empty); design/workflow/task-dispatch.md is unchanged because its prose already describes the target behavior."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/recovery.ts (tryRecovery signature change + failure-context pass), packages/runner/src/core/template.ts or recovery.ts (expandFailureReferences primitive), packages/runner/src/runtime/executor.ts (call-site update passing variables), packages/runner/tests/executor-recovery.spec.ts (extended), packages/runner unit test for expandFailureReferences, design/workflow/recovery.md (Status gap note removed)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design.md Decision 1: change signature tryRecovery(work, result) -> tryRecovery(work, result, variables). `variables` is already computed in executor.executeOne at line 138 and is in scope at the line 166 call site. Use variables.prompts[key] for body resolution; if variables.prompts is missing or the key is absent, fail loudly with a diagnostic (do not inline an empty body). Walk both `with` and `expect`; leave artifacts / setVars / recovery / recoveryRemaining untouched. Exclude the retrySelf clone (Decision 6). Diagnostic voice should mirror formatUnresolvedError in executor.ts:460 — name the path and the recovery task id. No server / DTO / protocol change; the triggering task's output already reaches tryRecovery via WorkItemResult.output."
+    }
+  ]
+}

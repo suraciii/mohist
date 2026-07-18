@@ -1,4 +1,4 @@
-import type { AddTaskInput, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, safeParseObject } from "../core/json.js"
 
 interface RecoveryHandler {
@@ -12,9 +12,17 @@ interface RecoveryConfig {
   handlers: RecoveryHandler[]
 }
 
+export class UnresolvedFailureReferenceError extends Error {
+  constructor(message: string, readonly path: string, readonly recoveryTaskId: string) {
+    super(message)
+    this.name = "UnresolvedFailureReferenceError"
+  }
+}
+
 export function tryRecovery(
   work: RenderedWorkItem,
   result: WorkItemResult,
+  variables?: JsonObject | null,
 ): WorkItemResult | null {
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
@@ -33,7 +41,21 @@ export function tryRecovery(
   const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
   if (!handler) return null
 
-  const addTasks: AddTaskInput[] = [...handler.tasks]
+  const failureContext: JsonObject = output
+  const effectiveVariables = variables ?? work.variables ?? null
+  const renderedHandlerTasks: AddTaskInput[] = []
+  for (const task of handler.tasks) {
+    try {
+      renderedHandlerTasks.push(renderRecoveryTask(task, failureContext, effectiveVariables))
+    } catch (error) {
+      if (error instanceof UnresolvedFailureReferenceError) {
+        return failureResult(work, formatFailureDiagnostic(task.id, error.path))
+      }
+      throw error
+    }
+  }
+
+  const addTasks: AddTaskInput[] = [...renderedHandlerTasks]
 
   if (handler.retrySelf) {
     const retryId = work.workId.includes(".")
@@ -116,6 +138,171 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
     tasks.push(task)
   }
   return tasks
+}
+
+/**
+ * Walks a JSON value and substitutes only `${{ failure.* }}` references
+ * against the failure context. Every other `${{ }}` namespace passes
+ * through byte-for-byte unchanged — those references continue to follow
+ * the dispatch-time and execution-time rules in `task-dispatch.md`.
+ *
+ * Behavior per spec (`specs/recovery-failure-context/spec.md`):
+ * - Whole-string `${{ failure.output }}` or `${{ failure.output.X }}`
+ *   preserves the resolved JSON type (object / array / number /
+ *   boolean) rather than coercing to a serialized string.
+ * - Embedded `... ${{ failure.output.X }} ...` resolves via plain
+ *   string substitution.
+ * - Unresolvable `${{ failure.* }}` paths throw
+ *   {@link UnresolvedFailureReferenceError}; the catch site turns that
+ *   into a failed `WorkItemResult`.
+ *
+ * The `${{ failure.* }}` matcher intentionally duplicates the
+ * `REFERENCE_PATTERN` from `core/template.ts` rather than reusing it,
+ * because the broader renderer's "embedded unresolved → leave literal"
+ * rule is exactly what we must NOT apply here for the failure
+ * namespace.
+ */
+export function expandFailureReferences(value: JsonValue, failureContext: JsonObject): JsonValue {
+  return expandFailureValue(value, failureContext)
+}
+
+function expandFailureValue(value: JsonValue, failureContext: JsonObject): JsonValue {
+  if (typeof value === "string") return expandFailureString(value, failureContext)
+  if (Array.isArray(value)) return value.map((item) => expandFailureValue(item, failureContext))
+  if (isObject(value)) {
+    const result: JsonObject = {}
+    for (const [key, child] of Object.entries(value)) {
+      result[key] = expandFailureValue(child, failureContext)
+    }
+    return result
+  }
+  return value
+}
+
+const FAILURE_REFERENCE_PATTERN = /\$\{\{\s*(failure(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}/g
+const FAILURE_WHOLE_STRING_PATTERN = /^\s*\$\{\{\s*(failure(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$/
+
+function expandFailureString(value: string, failureContext: JsonObject): JsonValue {
+  const whole = value.match(FAILURE_WHOLE_STRING_PATTERN)
+  if (whole) {
+    const path = whole[1]
+    const resolved = resolveFailurePath(failureContext, path)
+    if (resolved === undefined) {
+      throw new UnresolvedFailureReferenceError(
+        `Recovery task references unresolved failure path '${path}'`,
+        path,
+        "",
+      )
+    }
+    return resolved
+  }
+  const next = value.replace(FAILURE_REFERENCE_PATTERN, (match, path: string) => {
+    const resolved = resolveFailurePath(failureContext, path)
+    if (resolved === undefined) {
+      throw new UnresolvedFailureReferenceError(
+        `Recovery task references unresolved failure path '${path}'`,
+        path,
+        "",
+      )
+    }
+    return failureStringify(resolved)
+  })
+  return next
+}
+
+function failureStringify(value: JsonValue): string {
+  if (value === null) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return JSON.stringify(value)
+}
+
+function resolveFailurePath(failureContext: JsonObject, path: string): JsonValue | undefined {
+  const parts = path.split(".")
+  if (parts[0] !== "failure") return undefined
+  const remainder = parts.slice(1)
+  if (remainder.length === 0) return failureContext
+  if (remainder[0] !== "output") return undefined
+  let current: JsonValue = failureContext
+  for (const part of remainder.slice(1)) {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    current = (current as JsonObject)[part]
+  }
+  return current
+}
+
+const PROMPT_REFERENCE_PATTERN = /^\s*\$\{\{\s*prompts\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}\s*$/
+
+function renderRecoveryTask(
+  task: AddTaskInput,
+  failureContext: JsonObject,
+  variables: JsonObject | null,
+): AddTaskInput {
+  const renderedWith = task.with ? renderFieldMap(task.with, failureContext, variables) : task.with ?? null
+  const renderedExpect = task.expect ? renderFieldMap(task.expect, failureContext, variables) : task.expect ?? null
+  return {
+    ...task,
+    with: renderedWith,
+    expect: renderedExpect,
+  }
+}
+
+function renderFieldMap(
+  input: JsonObject,
+  failureContext: JsonObject,
+  variables: JsonObject | null,
+): JsonObject {
+  const result: JsonObject = {}
+  for (const [key, value] of Object.entries(input)) {
+    result[key] = renderFieldValue(value, failureContext, variables)
+  }
+  return result
+}
+
+function renderFieldValue(value: JsonValue, failureContext: JsonObject, variables: JsonObject | null): JsonValue {
+  if (typeof value === "string") {
+    return renderFieldString(value, failureContext, variables)
+  }
+  if (Array.isArray(value)) return value.map((item) => renderFieldValue(item, failureContext, variables))
+  if (isObject(value)) return renderFieldMap(value, failureContext, variables)
+  return value
+}
+
+function renderFieldString(
+  value: string,
+  failureContext: JsonObject,
+  variables: JsonObject | null,
+): JsonValue {
+  const promptMatch = value.match(PROMPT_REFERENCE_PATTERN)
+  if (promptMatch) {
+    const key = promptMatch[1]
+    const body = resolvePromptBody(variables, key)
+    if (body === undefined) {
+      throw new Error("Recovery task references ${{ prompts." + key + " }} but the prompt body is not available in the dispatch context")
+    }
+    return expandFailureValue(body, failureContext)
+  }
+  return expandFailureString(value, failureContext)
+}
+
+function resolvePromptBody(variables: JsonObject | null, key: string): JsonValue | undefined {
+  if (!variables) return undefined
+  const prompts = variables["prompts"]
+  if (!isObject(prompts)) return undefined
+  const body = prompts[key]
+  return body ?? undefined
+}
+
+function formatFailureDiagnostic(recoveryTaskId: string, path: string): string {
+  return `recovery task '${recoveryTaskId}' references unresolved failure path '${path}'. Ensure the triggering action emits the referenced field in its structured output.`
+}
+
+function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {
+  const label = work.title?.trim() || work.uses || work.workId
+  return {
+    status: "failed",
+    message: `${label}: ${message}`,
+  }
 }
 
 function clampRemaining(value: number, budget: number): number {
