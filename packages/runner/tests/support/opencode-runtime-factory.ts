@@ -34,7 +34,7 @@ export class FakeRuntimeSubscription implements RuntimeEventSubscription {
 
 export interface FakeRuntimeHandles {
   subscription: FakeRuntimeSubscription
-  catalogList: ReturnType<typeof vi.fn>
+  catalogList: ReturnType<typeof vi.fn<() => Promise<RuntimeModelCatalog>>>
   client: {
     health: ReturnType<typeof vi.fn>
   }
@@ -87,7 +87,7 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
   }
   const handles: FakeRuntimeHandles = {
     subscription,
-    catalogList: vi.fn(async () => seed),
+    catalogList: vi.fn<() => Promise<RuntimeModelCatalog>>(async () => seed),
     client: { health },
     server,
     lastRuntime: null,
@@ -96,7 +96,7 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
     const catalogClient = {
       async list(): Promise<RuntimeModelCatalog> {
         if (args.failCatalog) throw new Error("catalog boom")
-        return handles.catalogList() as Promise<RuntimeModelCatalog>
+        return handles.catalogList()
       },
     }
     const runtime = new OpenCodeRuntime({
@@ -110,7 +110,6 @@ export function installFakeOpenCodeRuntimeFactory(args: InstallFakeRuntimeArgs =
       ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
     })
     handles.lastRuntime = runtime
-    void runtime.start()
     return runtime
   })
   return handles
