@@ -36,6 +36,8 @@ function AlertDialog({
   onConfirm,
   "data-testid": testId = "alert-dialog",
 }: AlertDialogProps) {
+  const cancelButtonRef = React.useRef<HTMLButtonElement>(null)
+
   const handleConfirm = () => {
     if (loading) return
     onConfirm()
@@ -54,6 +56,7 @@ function AlertDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
+        initialFocus={cancelButtonRef}
         data-testid={testId}
         data-tone={tone}
       >
@@ -61,6 +64,7 @@ function AlertDialog({
         {description != null && <DialogDescription>{description}</DialogDescription>}
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
+            ref={cancelButtonRef}
             variant="outline"
             size="sm"
             onClick={() => handleOpenChange(false)}
