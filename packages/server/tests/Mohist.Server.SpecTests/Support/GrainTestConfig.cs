@@ -64,6 +64,13 @@ public static class GrainTestConfig
         // exercises the full Migrate() path.
         db.Database.Migrate();
         ApplyWorkflowRunsStatusSchemaFix(db);
+        try
+        {
+            db.Database.ExecuteSqlRaw("ALTER TABLE \"Issues\" ADD COLUMN \"ParentIssueNumber\" INTEGER NULL;");
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.Ordinal))
+        {
+        }
     }
 
     /// <summary>

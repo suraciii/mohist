@@ -507,6 +507,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         string[]? attachmentIds,
         string? workflowProfileId,
         int[]? prerequisiteNumbers,
+        int? parentIssueNumber,
         string commandId,
         long? expectedRevision)
     {
@@ -546,13 +547,14 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             throw new UnknownWorkflowProfileException(workflowProfileId);
         }
 
+        var parent = await ResolveParentAsync(parentIssueNumber, number, requireTargetHasNoChildren: false);
         var issue = Domain.Issue.Create(
             projectId,
             number,
             title,
             body,
             labels,
-            priority ?? "p2",
+            priority ?? parent?.Priority ?? "p2",
             canonicalName,
             risk,
             isDraft,
@@ -577,6 +579,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
                     _issue!.AddPrerequisite(prerequisiteNumber);
                 }
             }
+            if (parent is not null)
+                _issue!.AssignParent(parent.Number);
         }
         catch
         {
@@ -626,6 +630,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasIsDraft = present.Contains(nameof(command.IsDraft));
         var hasAttachments = present.Contains(nameof(command.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(command.WorkflowProfileId));
+        var hasParent = present.Contains(nameof(command.ParentIssueNumber));
 
         if (hasWorkflowProfile && _issue.WorkflowRunId is not null)
         {
@@ -653,6 +658,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasIsDraft && command.IsDraft.HasValue)
             _issue.ValidateDraftTransition();
 
+        var parent = hasParent && command.ParentIssueNumber is not null
+            ? await ResolveParentAsync(command.ParentIssueNumber, _issue.Number, requireTargetHasNoChildren: true)
+            : null;
+
         // Every potentially failing PATCH input has been validated before
         // this point, so the repository transition and sibling aggregate
         // fields are committed together or not at all.
@@ -679,6 +688,14 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasWorkflowProfile)
         {
             _issue.ReplaceWorkflowProfile(command.WorkflowProfileId);
+        }
+
+        if (hasParent)
+        {
+            if (command.ParentIssueNumber is null)
+                _issue.RemoveParent();
+            else
+                _issue.AssignParent(parent!.Number);
         }
 
         await SaveIssueAsync();
@@ -737,6 +754,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
         var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(UpdateIssueData.WorkflowProfileId));
+        var hasParent = present.Contains(nameof(UpdateIssueData.ParentIssueNumber));
 
         var title = hasTitle ? data.Title : null;
         var body = hasBody ? data.Body : null;
@@ -757,6 +775,10 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         {
             throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
         }
+
+        var parent = hasParent && data.ParentIssueNumber is not null
+            ? await ResolveParentAsync(data.ParentIssueNumber, _issue!.Number, requireTargetHasNoChildren: true)
+            : null;
 
         // For labels, the grain honors three-state semantics:
         //  - absent (hasLabels = false): leave labels untouched
@@ -784,6 +806,14 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             // a known profile; the aggregate's ReplaceWorkflowProfile
             // normalizes whitespace to null.
             _issue.ReplaceWorkflowProfile(data.WorkflowProfileId);
+        }
+
+        if (hasParent)
+        {
+            if (data.ParentIssueNumber is null)
+                _issue.RemoveParent();
+            else
+                _issue.AssignParent(parent!.Number);
         }
 
         await SaveIssueAsync();
@@ -824,7 +854,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             wfStatus);
     }
 
-    public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
+    public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null)
     {
         var key = ParseIssueKey();
         EnsureIdentityMatches(key, projectId, number);
@@ -841,13 +871,14 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             throw new UnknownWorkflowProfileException(workflowProfileId);
         }
 
+        var parent = await ResolveParentAsync(parentIssueNumber, key.IssueNumber, requireTargetHasNoChildren: false);
         var issue = Domain.Issue.Create(
             key.ProjectId,
             key.IssueNumber,
             title,
             body,
             labels,
-            priority ?? "p2",
+            priority ?? parent?.Priority ?? "p2",
             resolvedRef,
             risk,
             isDraft,
@@ -882,6 +913,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
                     _issue!.AddPrerequisite(prerequisiteNumber);
                 }
             }
+            if (parent is not null)
+                _issue!.AssignParent(parent.Number);
         }
         catch
         {
@@ -1075,6 +1108,28 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
     }
 
+    private async Task<Domain.Issue?> ResolveParentAsync(int? parentNumber, int targetNumber, bool requireTargetHasNoChildren)
+    {
+        if (parentNumber is null) return null;
+        if (parentNumber == targetNumber) throw new IssueSelfParentException(targetNumber);
+        var parent = await LoadIssueByNumberAsync(parentNumber.Value);
+        if (parent is null) throw new IssueParentNotFoundException(parentNumber.Value);
+        if (parent.ParentIssueNumber is not null) throw new IssueParentIsChildException(parent.Number);
+        if (parent.Status != IssueStatus.Backlog || parent.HasWorkflowStarted)
+            throw new IssueParentIneligibleException(parent.Number);
+        if (requireTargetHasNoChildren && await HasChildrenAsync(targetNumber))
+            throw new IssueHasChildrenCannotBecomeChildException(targetNumber);
+        return parent;
+    }
+
+    private async Task<bool> HasChildrenAsync(int issueNumber)
+    {
+        if (_issue is null) return false;
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Issues.AsNoTracking().AnyAsync(x =>
+            x.ProjectId == _issue.ProjectId && x.ParentIssueNumber == issueNumber);
+    }
+
     private IssueKey ParseIssueKey()
     {
         ScopedGrainKeyCodec.Parse(GrainKey, out var projectId, out var issueNumber);
@@ -1123,5 +1178,6 @@ public record UpdateIssueData(
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null,
     [property: Id(6)] IReadOnlySet<string>? PresentFields = null,
-    [property: Id(7)] string? WorkflowProfileId = null
+    [property: Id(7)] string? WorkflowProfileId = null,
+    [property: Id(8)] int? ParentIssueNumber = null
 );

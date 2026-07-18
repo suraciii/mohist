@@ -15,6 +15,7 @@ public sealed partial class Issue
     private DateTime? _completedAt;
     private string? _workflowRunId;
     private int? _epicNumber;
+    private int? _parentIssueNumber;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
@@ -96,6 +97,12 @@ public sealed partial class Issue
     {
         get => _epicNumber;
         init => _epicNumber = value is > 0 ? value : null;
+    }
+
+    public int? ParentIssueNumber
+    {
+        get => _parentIssueNumber;
+        init => _parentIssueNumber = value is > 0 ? value : null;
     }
 
     public IssueStatus Status

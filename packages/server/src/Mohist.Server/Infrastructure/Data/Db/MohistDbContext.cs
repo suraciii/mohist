@@ -314,6 +314,7 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.repositoryRef'), json_extract(State, '$.RepositoryRef'))", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.Number });
+            entity.HasIndex(e => new { e.ProjectId, e.ParentIssueNumber, e.Number });
             entity.HasIndex(e => e.WorkflowRunId);
             entity.HasIndex(e => e.Status);
             // issue-417 T-002 / D3: deletion-blocker + list filter index.

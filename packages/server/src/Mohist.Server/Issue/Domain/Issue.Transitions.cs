@@ -219,6 +219,8 @@ public sealed partial class Issue
     {
         if (epicNumber <= 0)
             throw new ArgumentOutOfRangeException(nameof(epicNumber));
+        if (_parentIssueNumber is not null)
+            throw new IssueChildCannotJoinEpicException(Number);
         return ChangeEpic(epicNumber, now);
     }
 
@@ -236,6 +238,31 @@ public sealed partial class Issue
         _epicNumber = epicNumber;
         Touch(now);
         RecordEvent(new IssueEpicChanged(previous, epicNumber));
+        return true;
+    }
+
+    public bool AssignParent(int parentIssueNumber, DateTime? now = null)
+    {
+        if (parentIssueNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(parentIssueNumber));
+        if (parentIssueNumber == Number)
+            throw new IssueSelfParentException(Number);
+        if (_epicNumber is not null)
+            throw new IssueEpicMemberCannotBecomeChildException(Number, _epicNumber.Value);
+        if (_status != IssueStatus.Backlog || _hasWorkflowStarted)
+            throw new IssueCannotBecomeChildException(Number, _status, _hasWorkflowStarted);
+        return ChangeParent(parentIssueNumber, now);
+    }
+
+    public bool RemoveParent(DateTime? now = null) => ChangeParent(null, now);
+
+    private bool ChangeParent(int? parentIssueNumber, DateTime? now)
+    {
+        if (_parentIssueNumber == parentIssueNumber) return false;
+        var previous = _parentIssueNumber;
+        _parentIssueNumber = parentIssueNumber;
+        Touch(now);
+        RecordEvent(new IssueParentChanged(previous, parentIssueNumber));
         return true;
     }
 

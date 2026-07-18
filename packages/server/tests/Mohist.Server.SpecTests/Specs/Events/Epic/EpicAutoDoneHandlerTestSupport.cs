@@ -315,7 +315,7 @@ public abstract class EpicAutoDoneHandlerTestSupport
             _issueId = issueId;
         }
 
-        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null) => throw new NotSupportedException();
 
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
         {
@@ -349,7 +349,7 @@ public abstract class EpicAutoDoneHandlerTestSupport
         }
 
         public Task<string?> GetActiveWorkflowRunIdAsync() => throw new NotImplementedException();
-        public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, string commandId, long? expectedRevision) => throw new NotImplementedException();
+        public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, int? parentIssueNumber, string commandId, long? expectedRevision) => throw new NotImplementedException();
         public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(Mohist.Server.Issue.Grains.IssueChangeRepositoryCommand command, string commandId, long? expectedRevision) => throw new NotImplementedException();
         public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(string commandId, long? expectedRevision) => throw new NotImplementedException();
         public Task<long> GetRepositoryBindingRevisionAsync() => throw new NotImplementedException();

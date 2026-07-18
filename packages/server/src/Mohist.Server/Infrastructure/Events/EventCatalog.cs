@@ -52,6 +52,7 @@ public static class EventCatalog
         ReverseDns.IssuePrerequisiteRemoved,
         ReverseDns.IssueWorkflowProfileChanged,
         ReverseDns.IssueEpicChanged,
+        ReverseDns.IssueParentChanged,
         ReverseDns.IssueArchived,
         ReverseDns.IssueUnarchived,
         ReverseDns.IssueReopened,
@@ -165,6 +166,7 @@ public static class EventCatalog
         public const string IssuePrerequisiteRemoved = "com.mohist.issue.prerequisite-removed";
         public const string IssueWorkflowProfileChanged = "com.mohist.issue.workflow-profile-changed";
         public const string IssueEpicChanged = "com.mohist.issue.epic-changed";
+        public const string IssueParentChanged = "com.mohist.issue.parent-changed";
         public const string IssueArchived = "com.mohist.issue.archived";
         public const string IssueUnarchived = "com.mohist.issue.unarchived";
         public const string IssueReopened = "com.mohist.issue.reopened";

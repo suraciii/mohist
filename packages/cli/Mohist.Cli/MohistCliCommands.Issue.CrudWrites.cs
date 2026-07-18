@@ -15,6 +15,7 @@ internal static partial class IssueCommands
         var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read issue body from stdin (mutually exclusive with --body and --body-file)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
+        var parentOpt = new Option<int?>("--parent") { Description = "Parent issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
@@ -30,6 +31,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(parentOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
@@ -49,6 +51,7 @@ internal static partial class IssueCommands
             var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var parent = ctx.GetValue(parentOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
@@ -125,11 +128,12 @@ internal static partial class IssueCommands
                     ["title"] = title,
                     ["body"] = effectiveBody,
                     ["labels"] = labelMap,
-                    ["priority"] = priority ?? "p2",
+                    ["priority"] = priority,
                     ["model"] = model,
                     ["modelVariant"] = modelVariant,
                     ["risk"] = effectiveRisk,
                     ["isDraft"] = isDraft,
+                    ["parentIssueNumber"] = parent,
                 };
                 if (workflowProfileProvided || effectiveWorkflow is not null)
                     payload["workflowProfileId"] = workflowProfileProvided
@@ -208,6 +212,7 @@ internal static partial class IssueCommands
         var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read new body from stdin (mutually exclusive with --body and --body-file)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
+        var parentOpt = new Option<string?>("--parent") { Description = "Parent issue number or none" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
@@ -223,6 +228,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(parentOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
@@ -242,6 +248,7 @@ internal static partial class IssueCommands
             var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var parent = ctx.GetValue(parentOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
@@ -258,6 +265,7 @@ internal static partial class IssueCommands
             var bodyStdinProvided = IsOptionProvided(ctx, bodyStdinOpt);
             var labelsProvided = ctx.GetResult(labelOpt) is not null;
             var priorityProvided = ctx.GetResult(priorityOpt) is not null;
+            var parentProvided = ctx.GetResult(parentOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
@@ -305,6 +313,18 @@ internal static partial class IssueCommands
                     payload["body"] = resolvedBody;
                 if (priorityProvided)
                     payload["priority"] = priority;
+                if (parentProvided)
+                {
+                    if (string.Equals(parent, "none", StringComparison.OrdinalIgnoreCase))
+                        payload["parentIssueNumber"] = null;
+                    else if (int.TryParse(parent, out var parentNumber) && parentNumber > 0)
+                        payload["parentIssueNumber"] = parentNumber;
+                    else
+                    {
+                        api.Error.WriteLine("--parent expects a positive issue number or none");
+                        return 1;
+                    }
+                }
                 if (modelProvided)
                     payload["model"] = model;
                 if (repositoryProvided)

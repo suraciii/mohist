@@ -68,7 +68,7 @@ internal sealed class RecordingIssueGrain : IIssueGrain
 
     public string IssueId { get; }
 
-    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CancelAsync() => throw new NotSupportedException();
@@ -99,7 +99,7 @@ internal sealed class RecordingIssueGrain : IIssueGrain
     public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
 
     public Task<string?> GetActiveWorkflowRunIdAsync() => throw new NotImplementedException();
-    public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, string commandId, long? expectedRevision) => throw new NotImplementedException();
+    public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, int? parentIssueNumber, string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(Mohist.Server.Issue.Grains.IssueChangeRepositoryCommand command, string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<long> GetRepositoryBindingRevisionAsync() => throw new NotImplementedException();
@@ -135,7 +135,7 @@ internal sealed class ThrowingAffiliationGrainFactory : IGrainFactory
 
 internal sealed class ThrowingIssueGrain : IIssueGrain
 {
-    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CancelAsync() => throw new NotSupportedException();
@@ -158,7 +158,7 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
         Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
 
     public Task<string?> GetActiveWorkflowRunIdAsync() => throw new NotImplementedException();
-    public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, string commandId, long? expectedRevision) => throw new NotImplementedException();
+    public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> CreateWithReceiptAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, int? parentIssueNumber, string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ChangeRepositoryWithReceiptAsync(Mohist.Server.Issue.Grains.IssueChangeRepositoryCommand command, string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<Mohist.Server.Issue.Grains.Coordinator.IssueBindingParticipantOutcome> ReopenWithReceiptAsync(string commandId, long? expectedRevision) => throw new NotImplementedException();
     public Task<long> GetRepositoryBindingRevisionAsync() => throw new NotImplementedException();
