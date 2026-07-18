@@ -122,6 +122,7 @@
 
 ## 支撑主题
 
+- [repositories.md](repositories.md) — Repository 执行：Project 资源权威、Issue 绑定、dispatch 实时解析与最小 workspace identity（**WIP**）。
 - [hermes-webhook.md](hermes-webhook.md) — Hermes 通知网关：事件类型、payload、签名与投递可靠性。
 - [issue-breakdown.md](issue-breakdown.md) — 复合 Issue / 子 Issue 设计（**已定稿，待实装**）：父子模型、状态汇总、复合推进、与 Epic 的隔离约束；多仓库资源见 `docs/repositories.md`。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
