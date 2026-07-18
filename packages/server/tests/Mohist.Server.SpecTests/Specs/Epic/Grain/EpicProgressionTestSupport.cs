@@ -204,7 +204,10 @@ public abstract class EpicProgressionTestSupport
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();
+        public Task CloseCompositeAsync() => throw new NotSupportedException();
+        public Task ReopenCompositeAsync() => throw new NotSupportedException();
         public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task ArchiveForParentCascadeAsync() => throw new NotSupportedException();
         public Task UnarchiveAsync() => throw new NotSupportedException();
         public Task ReopenAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();

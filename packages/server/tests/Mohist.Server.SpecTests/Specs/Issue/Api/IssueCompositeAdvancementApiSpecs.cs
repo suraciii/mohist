@@ -15,6 +15,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
@@ -209,6 +210,99 @@ public class IssueCompositeAdvancementApiSpecs
         var compositeStartedCount = events.Count(e =>
             string.Equals(e.Envelope.Type, EventCatalog.ReverseDns.IssueCompositeStarted, StringComparison.Ordinal));
         Assert.Equal(1, compositeStartedCount);
+    }
+
+    [Fact]
+    public async Task CloseParent_WithNonTerminalChild_ReturnsTypedConflict_WithoutCascade()
+    {
+        var projectId = await CreateProjectAsync();
+        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
+        var child = await CreateIssueAsync(projectId, "Child", isDraft: false);
+        await AttachChildAsync(projectId, child, parent.Number);
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{parent.Number}/close", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("parent_has_non_terminal_children", body.RootElement.GetProperty("code").GetString());
+        Assert.Equal("backlog", (await GetIssueReadModelAsync(projectId, child.Number))!.Status);
+    }
+
+    [Fact]
+    public async Task ReopenParent_ReturnsToBacklog_AndCanAttachAndStartNewChild()
+    {
+        var projectId = await CreateProjectAsync();
+        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
+        var existing = await CreateIssueAsync(projectId, "Existing", isDraft: false);
+        await AttachChildAsync(projectId, existing, parent.Number);
+        await _grains.GetGrain<IIssueGrain>(existing.IssueKey).CancelAsync();
+        await _grains.GetGrain<IIssueGrain>(parent.IssueKey).RecomputeCompositeStatusAsync();
+
+        using (var response = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{parent.Number}/reopen", null))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        Assert.Equal("backlog", (await GetIssueReadModelAsync(projectId, parent.Number))!.Status);
+        Assert.Equal("cancelled", (await GetIssueReadModelAsync(projectId, existing.Number))!.Status);
+
+        var added = await CreateIssueAsync(projectId, "Added", isDraft: false);
+        await AttachChildAsync(projectId, added, parent.Number);
+        using var start = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{parent.Number}/start", null);
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
+        Assert.Equal("in_progress", (await GetIssueReadModelAsync(projectId, added.Number))!.Status);
+    }
+
+    [Fact]
+    public async Task ArchiveParent_CascadesToDoneAndCancelledChildren()
+    {
+        var projectId = await CreateProjectAsync();
+        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
+        var done = await CreateIssueAsync(projectId, "Done", isDraft: false);
+        var cancelled = await CreateIssueAsync(projectId, "Cancelled", isDraft: false);
+        await AttachChildAsync(projectId, done, parent.Number);
+        await AttachChildAsync(projectId, cancelled, parent.Number);
+        var parentGrain = _grains.GetGrain<IIssueGrain>(parent.IssueKey);
+        var doneGrain = _grains.GetGrain<IIssueGrain>(done.IssueKey);
+        var cancelledGrain = _grains.GetGrain<IIssueGrain>(cancelled.IssueKey);
+        await parentGrain.StartCompositeAsync();
+        await doneGrain.CompleteWorkAsync((await doneGrain.GetActiveWorkflowRunIdAsync())!);
+        var cancelledWorkflowRunId = (await cancelledGrain.GetActiveWorkflowRunIdAsync())!;
+        await _grains.GetGrain<IWorkflowGrain>(cancelledWorkflowRunId).StopAsync("test-cancel");
+        await cancelledGrain.CancelAsync();
+        await parentGrain.RecomputeCompositeStatusAsync();
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{parent.Number}/archive", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull((await GetIssueReadModelAsync(projectId, parent.Number))!.ArchivedAt);
+        Assert.NotNull((await GetIssueReadModelAsync(projectId, done.Number))!.ArchivedAt);
+        Assert.NotNull((await GetIssueReadModelAsync(projectId, cancelled.Number))!.ArchivedAt);
+    }
+
+    [Fact]
+    public async Task DetachingDoneChild_FromDoneParent_RecomputesAgainstRemainingChild()
+    {
+        var projectId = await CreateProjectAsync();
+        var parent = await CreateIssueAsync(projectId, "Parent", isDraft: false);
+        var first = await CreateIssueAsync(projectId, "First", isDraft: false);
+        var second = await CreateIssueAsync(projectId, "Second", isDraft: false);
+        await AttachChildAsync(projectId, first, parent.Number);
+        await AttachChildAsync(projectId, second, parent.Number);
+        var parentGrain = _grains.GetGrain<IIssueGrain>(parent.IssueKey);
+        var firstGrain = _grains.GetGrain<IIssueGrain>(first.IssueKey);
+        var secondGrain = _grains.GetGrain<IIssueGrain>(second.IssueKey);
+        await parentGrain.StartCompositeAsync();
+        await firstGrain.CompleteWorkAsync((await firstGrain.GetActiveWorkflowRunIdAsync())!);
+        await secondGrain.CompleteWorkAsync((await secondGrain.GetActiveWorkflowRunIdAsync())!);
+        await parentGrain.RecomputeCompositeStatusAsync();
+
+        await DetachChildAsync(projectId, second.Number);
+
+        Assert.Equal("done", (await GetIssueReadModelAsync(projectId, parent.Number))!.Status);
     }
 
     private async Task<string> CreateProjectAsync()

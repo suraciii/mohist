@@ -443,6 +443,12 @@ public sealed partial class Issue
     {
         if (_status != IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
+        ArchiveForced(now);
+    }
+
+    public void ArchiveForced(DateTime? now = null)
+    {
+        if (_archivedAt is not null) return;
         var archivedAt = now ?? DateTime.UtcNow;
         _archivedAt = archivedAt;
         Touch(archivedAt);
@@ -455,6 +461,24 @@ public sealed partial class Issue
         _archivedAt = null;
         Touch(now);
         if (wasArchived) RecordEvent(new IssueUnarchived());
+    }
+
+    public void Close(
+        IReadOnlyCollection<ChildSnapshot> childrenSnapshot,
+        string? reason = null,
+        DateTime? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(childrenSnapshot);
+        if (childrenSnapshot.Count == 0)
+            throw new IssueEmptyCompositeSnapshotException(Number);
+        var nonTerminalChildNumbers = childrenSnapshot
+            .Where(child => child.Status is IssueStatus.Backlog or IssueStatus.InProgress)
+            .Select(child => child.Number)
+            .Order()
+            .ToArray();
+        if (nonTerminalChildNumbers.Length > 0)
+            throw new IssueParentHasNonTerminalChildrenException(Number, nonTerminalChildNumbers);
+        Close(reason, now);
     }
 
     public void Close(string? reason = null, DateTime? now = null)

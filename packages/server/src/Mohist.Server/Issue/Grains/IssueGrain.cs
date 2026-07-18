@@ -441,7 +441,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
     }
 
-    private async Task<IReadOnlyList<IssueChildCompositeInfo>> LoadCompositeChildrenAsync()
+    private async Task<IReadOnlyList<IssueChildCompositeInfo>> LoadCompositeChildrenAsync(bool includeArchived = false)
     {
         var projectId = _issue!.ProjectId;
         var parentNumber = _issue.Number;
@@ -449,7 +449,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var rows = await db.Issues.AsNoTracking()
             .Where(r => r.ProjectId == projectId
                 && r.ParentIssueNumber == parentNumber
-                && r.IsArchived != true)
+                && (includeArchived || r.IsArchived != true))
             .OrderBy(r => r.Number)
             .Select(r => new { r.State })
             .ToListAsync();
@@ -465,7 +465,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
                 IsDraft: issue.IsDraft,
                 PrerequisiteNumbers: issue.PrerequisiteNumbers,
                 WorkflowRunId: issue.WorkflowRunId,
-                RepositoryRef: issue.RepositoryRef));
+                RepositoryRef: issue.RepositoryRef,
+                IsArchived: issue.ArchivedAt is not null));
         }
         return children;
     }
@@ -675,10 +676,43 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         await SaveIssueAsync();
     }
 
+    public async Task CloseCompositeAsync()
+    {
+        EnsureIssue();
+        var children = await LoadCompositeChildrenAsync(includeArchived: true);
+        var snapshot = ChildSnapshotFromComposite(children);
+        _issue!.Close(snapshot, "user-cancelled");
+        await SaveIssueAsync();
+    }
+
+    public async Task ReopenCompositeAsync()
+    {
+        EnsureIssue();
+        if (!_issue!.ReopenComposite()) return;
+        await SaveIssueAsync();
+    }
+
     public async Task ArchiveAsync()
     {
         EnsureIssue();
+        var children = await LoadCompositeChildrenAsync(includeArchived: true);
         _issue!.Archive();
+        await SaveIssueAsync();
+
+        foreach (var child in children)
+        {
+            if (child.IsArchived) continue;
+            var childGrain = GrainFactory.GetGrain<IIssueGrain>(
+                new IssueKey(_issue.ProjectId, child.Number).ToGrainKeyString());
+            await childGrain.ArchiveForParentCascadeAsync();
+        }
+    }
+
+    public async Task ArchiveForParentCascadeAsync()
+    {
+        EnsureIssue();
+        if (_issue!.ArchivedAt is not null) return;
+        _issue.ArchiveForced();
         await SaveIssueAsync();
     }
 

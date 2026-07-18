@@ -149,7 +149,8 @@ public class IssueQuerier : IScopedService
                 IsDraft: issue.IsDraft,
                 PrerequisiteNumbers: issue.PrerequisiteNumbers,
                 WorkflowRunId: issue.WorkflowRunId,
-                RepositoryRef: issue.RepositoryRef));
+                RepositoryRef: issue.RepositoryRef,
+                IsArchived: issue.ArchivedAt is not null));
         }
         return children;
     }
@@ -632,4 +633,5 @@ public sealed record IssueChildCompositeInfo(
     [property: Id(2)] bool IsDraft,
     [property: Id(3)] int[] PrerequisiteNumbers,
     [property: Id(4)] string? WorkflowRunId,
-    [property: Id(5)] string? RepositoryRef);
+    [property: Id(5)] string? RepositoryRef,
+    [property: Id(6)] bool IsArchived);

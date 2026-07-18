@@ -49,3 +49,14 @@
 - `mo issue start <parent>` now succeeds and fans out startable children in parallel; the parent never acquires a workflow run; the parent's `WorkflowRunId` remains null at every observation.
 - The acceptance criterion "Per-child runner-dispatch capacity is not bypassed" is satisfied trivially because `Task.WhenAll(childGrain.StartWorkAsync())` reuses each child's existing per-issue start path, which already goes through runner capacity admission (no new project-wide cap introduced).
 - Did NOT wire the parent-aware `/close`, `/reopen`, `/archive` routes — those belong to T-003 alongside `Issue.Close(snapshot, reason)`, `Issue.ArchiveForced()`, and the synchronous archive cascade.
+
+## T-003
+
+- Added `Issue.Close(childrenSnapshot, reason)` with `IssueParentHasNonTerminalChildrenException`; it rejects Backlog/InProgress child numbers before invoking the existing close transition, so there is no child mutation or cascade.
+- Added idempotent `Issue.ArchiveForced()`. Normal `Archive()` retains the Done-only guard and delegates to the forced transition only after validation.
+- Added `IIssueGrain.CloseCompositeAsync`, `ReopenCompositeAsync`, and `ArchiveForParentCascadeAsync`; updated the existing `IIssueGrain` test fakes with explicit unsupported/no-op implementations.
+- `IssueGrain.ArchiveAsync` now validates and saves the parent first, then synchronously archives every non-archived child in issue-number order. Its lifecycle snapshot includes archived children so they are skipped explicitly rather than omitted.
+- Lifecycle routes branch from `IssueReadModel.ChildIssuesSummary.HasChildren`: parent close/reopen bypass the repository coordinator, while non-parent reopen remains coordinator-routed. Parent archive bypasses the executable-repository precheck because a composite parent has no workflow target.
+- Domain tests cover composite close guards and force archive from every status. Grain/API specs cover typed close rejection, reopen without child mutation, attach/start after reopen, Done+Cancelled archive cascade, already-archived idempotency, and detach recompute with remaining Done children.
+- The first full `npm test` exposed the C# 24KB test-file ratchet after lifecycle grain specs were appended to `IssueCompositeAdvancementGrainSpecs`; moved them into `IssueCompositeLifecycleGrainSpecs` instead of raising that baseline. Updating the required `IIssueGrain` fake in the already-baselined `IssueCompositeHandlersSpecs` added 205 bytes, so its existing allowance was updated from 26,361 to 26,566.
+- Focused lifecycle tests and full `npm test` are green: UnitTests 1,223; SpecTests 2,875; ArchTests 30; CLI 1,397; Web 4,820; Runner 1,147.

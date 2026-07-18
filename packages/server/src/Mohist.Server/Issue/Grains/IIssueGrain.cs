@@ -12,7 +12,10 @@ public interface IIssueGrain : IGrainWithStringKey
     Task CancelAsync();
     Task UpdateAsync(string title, string? body);
     Task UpdateFullAsync(UpdateIssueData data);
+    Task CloseCompositeAsync();
+    Task ReopenCompositeAsync();
     Task ArchiveAsync();
+    Task ArchiveForParentCascadeAsync();
     Task UnarchiveAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
 

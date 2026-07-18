@@ -528,7 +528,10 @@ public class IssueCompositeHandlersSpecs
         public Task CancelAsync() => Task.CompletedTask;
         public Task UpdateAsync(string title, string? body) => Task.CompletedTask;
         public Task UpdateFullAsync(UpdateIssueData data) => Task.CompletedTask;
+        public Task CloseCompositeAsync() => Task.CompletedTask;
+        public Task ReopenCompositeAsync() => Task.CompletedTask;
         public Task ArchiveAsync() => Task.CompletedTask;
+        public Task ArchiveForParentCascadeAsync() => Task.CompletedTask;
         public Task UnarchiveAsync() => Task.CompletedTask;
         public Task ReopenAsync() => Task.CompletedTask;
         public Task<IssueWorkflowStatus?> GetWorkflowStatusAsync() => Task.FromResult<IssueWorkflowStatus?>(null);

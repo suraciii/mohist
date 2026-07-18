@@ -5,7 +5,7 @@
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 33599,
   "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicLifecycleSpecs.cs": 32966,
   "Mohist.Server.SpecTests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs": 41100,
-  "Mohist.Server.SpecTests/Specs/Events/Issue/IssueCompositeHandlersSpecs.cs": 26361,
+  "Mohist.Server.SpecTests/Specs/Events/Issue/IssueCompositeHandlersSpecs.cs": 26566,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueArchivedDetailApiSpecs.cs": 25181,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueCreationSpecs.cs": 36623,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueFeedbackApiSpecs.cs": 28929,

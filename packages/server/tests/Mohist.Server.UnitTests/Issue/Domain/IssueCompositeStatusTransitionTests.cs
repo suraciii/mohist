@@ -337,6 +337,91 @@ public class IssueCompositeStatusTransitionTests
     }
 
     [Fact]
+    public void CloseComposite_RejectsNonTerminalChildren_WithoutMutation()
+    {
+        var parent = CreateParent();
+        parent.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+        parent.ClearPendingEvents();
+
+        var exception = Assert.Throws<IssueParentHasNonTerminalChildrenException>(() =>
+            parent.Close(
+                Children(IssueStatus.InProgress, IssueStatus.Done, IssueStatus.Backlog),
+                "user-cancelled",
+                Now.AddMinutes(2)));
+
+        Assert.Equal([100, 102], exception.NonTerminalChildNumbers);
+        Assert.Equal(IssueStatus.InProgress, parent.Status);
+        Assert.Empty(parent.PendingEvents);
+    }
+
+    [Fact]
+    public void CloseComposite_AcceptsAllTerminalSnapshot_ThenAppliesNormalCloseGuard()
+    {
+        var parent = CreateParent();
+        parent.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+
+        parent.Close(
+            Children(IssueStatus.Done, IssueStatus.Cancelled),
+            "user-cancelled",
+            Now.AddMinutes(2));
+
+        Assert.Equal(IssueStatus.Cancelled, parent.Status);
+        Assert.Contains(parent.PendingEvents, evt => evt is IssueCancelled);
+    }
+
+    [Fact]
+    public void CloseComposite_WithAllTerminalChildren_StillRejectsDoneParent()
+    {
+        var parent = CreateParent();
+        parent.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+        parent.MarkCompositeDone(Children(IssueStatus.Done), Now.AddMinutes(2));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            parent.Close(Children(IssueStatus.Done), "user-cancelled", Now.AddMinutes(3)));
+    }
+
+    [Fact]
+    public void ArchiveForced_ArchivesFromEveryStatus_AndIsIdempotent()
+    {
+        foreach (var status in Enum.GetValues<IssueStatus>())
+        {
+            var issue = CreateParent((int)status + 1);
+            switch (status)
+            {
+                case IssueStatus.Backlog:
+                    break;
+                case IssueStatus.InProgress:
+                    issue.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+                    break;
+                case IssueStatus.Done:
+                    issue.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+                    issue.MarkCompositeDone(Children(IssueStatus.Done), Now.AddMinutes(2));
+                    break;
+                case IssueStatus.Cancelled:
+                    issue.MarkCompositeStarted(Children(IssueStatus.Backlog), Now.AddMinutes(1));
+                    issue.MarkCompositeCancelled(Children(IssueStatus.Cancelled), Now.AddMinutes(2));
+                    break;
+            }
+            issue.ClearPendingEvents();
+
+            issue.ArchiveForced(Now.AddMinutes(3));
+            issue.ArchiveForced(Now.AddMinutes(4));
+
+            Assert.Equal(Now.AddMinutes(3), issue.ArchivedAt);
+            Assert.Single(EventsOfType<IssueArchived>(issue));
+        }
+    }
+
+    [Fact]
+    public void Archive_DirectPathStillRequiresDone()
+    {
+        var issue = CreateParent();
+
+        Assert.Throws<InvalidOperationException>(() => issue.Archive(Now.AddMinutes(1)));
+        Assert.Null(issue.ArchivedAt);
+    }
+
+    [Fact]
     public void CompositeTransitions_DoNotTouchRepositoryBindingRevision()
     {
         var parent = CreateParent();
