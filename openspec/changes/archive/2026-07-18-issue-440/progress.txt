@@ -1,0 +1,43 @@
+## Codebase Patterns
+
+- `tryRecovery(work, result)` returns a `WorkItemResult` (or null). `result.output` is a JSON string; `safeParseObject(result.output)` parses it; if `output` is missing/non-object/null/scalar, `output = null` and recovery short-circuits.
+- `WorkItemResult.output` carries the triggering task's structured output. `matchesWhen(h.when, output)` does `String(output[field]) === expected`.
+- Handler tasks are constructed by `readAddTasks(rawTasks)` in `recovery.ts:92-119`. They preserve `id`, `title`, `uses`, `with`, `expect`, `artifacts`, `setVars`, `recovery`. `recoveryRemaining` is set when the handler task has its own nested `recovery`.
+- `renderTemplate` (template.ts:31-34) recursively renders `with`/`expect`/etc. against `variables`. Whole-string `${{ X }}` throws on unresolvable. Embedded `${{ X }}` (e.g. `... ${{ X }} ...`) leaves literal. `\${{ X }}` escapes to literal `${{ X }}`.
+- `variables` for the executor is `{ ...userVariables, runner: mergedRunner, workspace }`. Critically, the **server-rendered `variables` already contains `prompts.<key>: body`** (see WorkflowItemTranslator.cs:83-89), so when the executor's `renderTemplate` processes `${{ prompts.fix-pr-checks }}` against a normal task's `with.prompt`, it expands to the body inline. For recovery, this means by the time the recovery task reaches `renderTemplate` at dispatch time the prompt body is already expanded — except `${{ failure.* }}` inside it. That's exactly the gap.
+- `with.prompt` for `mohist/opencode` flows through `resolvePrompt(context.with?.prompt, ...)` in actions/opencode.ts:62. By the time the action reads it, dispatch-time `renderTemplate` has already expanded `${{ prompts.<key> }}`. So if `tryRecovery` pre-expands `${{ prompts.<key> }}` → body-with-`${{ failure.* }}` and then expands those `failure.*` references, the recovery task's `with.prompt` reaches `resolvePrompt` as a literal string and is returned verbatim.
+- Diagnostic voice in executor.ts:460-465 (`formatUnresolvedError`): `Task <workId> (<label>) references undefined variable(s): '<ref>'. Add the variable ...` — recovery diagnostic should mirror that voice: `recovery task '<taskId>' references unresolved failure path '<path>'. ...`.
+- Spec says the failure context is sourced from `WorkItemResult.output` (already a parsed object via `safeParseObject`). Triggering action emitting no `output` (or a non-object scalar) ⇒ `output = null` ⇒ empty failure context ⇒ every `${{ failure.* }}` unresolvable.
+- Walk both `with` and `expect` per Decision 5; leave `artifacts` / `setVars` / `recovery` / `recoveryRemaining` untouched.
+- Exclude retrySelf clone (Decision 6).
+
+## Key Design Decisions Recap
+
+- `tryRecovery(work, result, variables)` — new signature. `variables` is already in scope in executor.executeOne at the call site (line 166).
+- `expandFailureReferences(value, failureContext)` — new primitive. Walks a JsonValue; only `${{ failure.* }}` is expanded. Other refs pass through byte-for-byte (including `${{ vars.* }}`, `${{ workspace.* }}`, `${{ prompts.<key> }}`, etc.).
+- Whole-string `${{ failure.output.X }}` → preserves JSON type (object/array/number/boolean) — NOT coerced to string.
+- Embedded `... ${{ failure.output.X }} ...` → string substitution.
+- Unresolvable `${{ failure.* }}` → throw with diagnostic naming the path.
+- `${{ prompts.<key> }}` whole-string → fetch body from `variables.prompts[key]`, expand failure refs inside, inline expanded body as literal string in the field.
+- Diagnostic on unresolvable → tryRecovery returns a *failed* WorkItemResult whose message names the path AND the recovery task id, AND no addTasks.
+
+## T-001 Implementation Notes
+
+- Implementation lives in `packages/runner/src/runtime/recovery.ts`. New public surface: `expandFailureReferences(value, failureContext)` (the primitive) + `tryRecovery(work, result, variables?)` (extended signature). `UnresolvedFailureReferenceError` is the typed throw carrying the bad path.
+- Path resolution treats `failure.output` as a magic prefix: `${{ failure.output }}` → the whole output, `${{ failure.output.X }}` → `output.X`. Anything else under `failure.*` (e.g. `${{ failure.errorCode }}`) is unresolved — only `failure.output.<...>` is documented as a real path.
+- Whole-string matches preserve JSON type: returning `42` (number) not `"42"`, returning `{ ok: true }` (object) not the serialized form. The `expandFailureString` whole-string branch returns the resolved `JsonValue` directly.
+- Embedded `... ${{ failure.X }} ...` goes through `String.replace` and stringifies each match via `failureStringify` (number → `String(n)`, boolean → `String(b)`, null → `""`, object → `JSON.stringify`).
+- `${{ prompts.<key> }}` whole-string is the one cross-namespace special case: detect with `PROMPT_REFERENCE_PATTERN`, look up body in `variables.prompts[key]`, recurse `expandFailureValue` on the body. If the body itself contains `${{ failure.* }}`, those get expanded; other `${{ }}` refs in the body pass through (no double-expansion of vars/workspace/stage).
+- `variables` is optional in the signature for backward compat (tests pass it explicitly when they want prompt-body resolution, but the executor call site passes the actual variables; recovery also falls back to `work.variables` for test convenience).
+- `tryRecovery` wraps the per-task render loop in a try/catch: an `UnresolvedFailureReferenceError` short-circuits to a failed `WorkItemResult` with a diagnostic that names both the path and the recovery task id (mirroring `formatUnresolvedError` voice in executor.ts:460). Other errors propagate.
+- Excluded from the pass: `artifacts`, `setVars`, `recovery`, `recoveryRemaining`, the retrySelf clone's `with`. The retrySelf clone is appended after the failure-context pass, so it carries the original (untouched) `work.with` and is never visited by `renderRecoveryTask`.
+
+## Tests
+
+- New unit test file: `packages/runner/tests/expand-failure-references.spec.ts` (15 cases). Covers whole-string type preservation (number, boolean, array, object, null), embedded substitution, walk-into-object/array, byte-identical pass-through for non-failure namespaces (vars/workspace/stage/repository/prompts/docs/escape), mixed strings (failure + vars), unresolved whole-string + embedded (both throw `UnresolvedFailureReferenceError`), empty failure context treats every ref as unresolvable but leaves non-ref text alone.
+- Extended `packages/runner/tests/executor-recovery.spec.ts` end-to-end (5 new cases in `WorkExecutor recovery` block) + integration (4 new cases in `tryRecovery` block). End-to-end cases go through `WorkExecutor.execute` to verify the full executor → tryRecovery → addTasks flow; integration cases call `tryRecovery` directly to lock the failure-context-pass contract.
+
+## Verification
+
+- `npm run typecheck -w packages/runner` clean.
+- `npm test -w packages/runner` → 95 files, 1172 tests pass (was 94 files / 1147 before; +1 file / +25 tests). No regressions.
