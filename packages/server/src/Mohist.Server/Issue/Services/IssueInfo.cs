@@ -79,6 +79,7 @@ public class IssuePrerequisiteSummary
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(IssueStartBlockerDto.DraftBlocker), "draft")]
+[JsonDerivedType(typeof(IssueStartBlockerDto.ParentHasChildrenBlocker), "parent-has-children")]
 [JsonDerivedType(typeof(IssueStartBlockerDto.WaitingForBlocker), "waiting-for")]
 [GenerateSerializer]
 public abstract class IssueStartBlockerDto
@@ -87,12 +88,16 @@ public abstract class IssueStartBlockerDto
     public string Kind => this switch
     {
         DraftBlocker => "draft",
+        ParentHasChildrenBlocker => "parent-has-children",
         WaitingForBlocker => "waiting-for",
         _ => string.Empty,
     };
 
     [GenerateSerializer]
     public sealed class DraftBlocker : IssueStartBlockerDto;
+
+    [GenerateSerializer]
+    public sealed class ParentHasChildrenBlocker : IssueStartBlockerDto;
 
     [GenerateSerializer]
     public sealed class WaitingForBlocker : IssueStartBlockerDto
@@ -104,6 +109,7 @@ public abstract class IssueStartBlockerDto
     {
         null => null,
         IssueStartBlocker.Draft => new DraftBlocker(),
+        IssueStartBlocker.ParentHasChildren => new ParentHasChildrenBlocker(),
         IssueStartBlocker.WaitingFor waiting => new WaitingForBlocker
         {
             Issue = new IssuePrerequisiteRefDto
@@ -120,6 +126,7 @@ public abstract class IssueStartBlockerDto
     {
         if (blocker is null) return null;
         if (blocker is IssueStartBlocker.Draft) return new DraftBlocker();
+        if (blocker is IssueStartBlocker.ParentHasChildren) return new ParentHasChildrenBlocker();
         if (blocker is IssueStartBlocker.WaitingFor waiting)
         {
             var summary = summariesByNumber is not null && summariesByNumber.TryGetValue(waiting.PrerequisiteNumber, out var s)

@@ -151,25 +151,29 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
         var repo = resolution.Repository!;
         var undeliveredPrerequisites = await LoadUndeliveredPrerequisiteNumbersAsync();
-        ThrowIfStartBlocked(undeliveredPrerequisites);
+        var hasChildren = await HasChildrenAsync(_issue!.Number);
+        ThrowIfStartBlocked(undeliveredPrerequisites, hasChildren);
         var wrId = $"wr_{Guid.NewGuid():N}";
-        return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites);
+        return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites, hasChildren);
     }
 
-    private void ThrowIfStartBlocked(IReadOnlySet<int>? undeliveredPrerequisites)
+    private void ThrowIfStartBlocked(IReadOnlySet<int>? undeliveredPrerequisites, bool hasChildren)
     {
-        var blocker = _issue!.StartBlocker(undeliveredPrerequisites);
+        var blocker = _issue!.StartBlocker(undeliveredPrerequisites, hasChildren);
         if (blocker is IssueStartBlocker.Draft)
             throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is still a draft and cannot be started");
         if (blocker is IssueStartBlocker.WaitingFor waiting)
             throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
+        if (blocker is IssueStartBlocker.ParentHasChildren)
+            throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} has children and cannot be started directly");
     }
 
     private async Task<string> StartWorkflowAsync(
         WorkflowProjectContext? project,
         string wrId,
         RepositoryInfo repo,
-        IReadOnlySet<int>? undeliveredPrerequisites)
+        IReadOnlySet<int>? undeliveredPrerequisites,
+        bool hasChildren)
     {
         var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
 
@@ -197,7 +201,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
                 workspace.Path,
                 workspace.Branch,
                 workspace.ChangeDir),
-            context: issueContext);
+            context: issueContext,
+            hasChildren: hasChildren);
         try
         {
             await SaveIssueAsync();
@@ -971,7 +976,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         var summariesByNumber = summaries.ToDictionary(s => s.Number);
         var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
-        var blocker = _issue!.StartBlocker(undelivered);
+        var blocker = _issue!.StartBlocker(undelivered, await HasChildrenAsync(_issue.Number));
         var blockerDto = IssueStartBlockerDto.FromDomain(blocker, summariesByNumber);
         return new IssueStartReadiness(
             IsDraft: _issue.IsDraft,

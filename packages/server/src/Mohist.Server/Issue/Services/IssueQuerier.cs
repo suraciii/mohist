@@ -370,7 +370,9 @@ public class IssueQuerier : IScopedService
             issue.Prerequisites = summaries;
             var summariesByNumber = summaries.ToDictionary(s => s.Number);
             var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
-            var blocker = ComputeBlockerForReadModel(issue, undelivered);
+            var hasChildren = await db.Issues.AsNoTracking().AnyAsync(row =>
+                row.ProjectId == projectId && row.ParentIssueNumber == issue.Number);
+            var blocker = ComputeBlockerForReadModel(issue, undelivered, hasChildren);
             issue.Blocker = IssueStartBlockerDto.FromDomain(blocker, summariesByNumber);
             issue.CanStart = blocker is null;
         }
@@ -512,9 +514,13 @@ public class IssueQuerier : IScopedService
         return null;
     }
 
-    private static IssueStartBlocker? ComputeBlockerForReadModel(IssueReadModel issue, IReadOnlySet<int> undeliveredPrerequisites)
+    private static IssueStartBlocker? ComputeBlockerForReadModel(
+        IssueReadModel issue,
+        IReadOnlySet<int> undeliveredPrerequisites,
+        bool hasChildren)
     {
         if (issue.IsDraft) return new IssueStartBlocker.Draft();
+        if (hasChildren) return new IssueStartBlocker.ParentHasChildren();
         if (undeliveredPrerequisites.Count == 0) return null;
         foreach (var number in issue.PrerequisiteNumbers)
         {

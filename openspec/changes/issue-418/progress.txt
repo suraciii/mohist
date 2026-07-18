@@ -10,3 +10,10 @@
 - Parent eligibility is checked in `IssueGrain` using the durable `HasWorkflowStarted` flag and Backlog status; children are queried from the projection column.
 - CLI create omits priority when absent so server-side parent priority inheritance remains effective; update maps `none` to explicit JSON null.
 - Focused pre-change tests passed: 24 server unit, 85 server spec, and 28 CLI tests. Server and CLI production builds pass after implementation.
+
+## T-002
+
+- Added `IssueStartBlocker.ParentHasChildren`; draft remains the highest-priority blocker, followed by the derived child count, then prerequisites.
+- `IssueGrain` checks `IssueRow.ParentIssueNumber` through its projection query before both `StartWorkAsync` and `GetStartReadinessAsync`; no parent-role flag is persisted.
+- The API maps the new blocker to `is_parent` and serializes it as `parent-has-children`; detaching the last child removes the derived blocker and permits normal start checks.
+- Focused domain tests pass and the server builds. API/full spec execution is currently blocked by the existing T-001 SQLite migration/template mismatch: `ParentIssueNumber` is absent from the migrated test schema, causing initialization failures before these specs run.
