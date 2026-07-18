@@ -2,13 +2,16 @@ import '@testing-library/jest-dom'
 import { fireEvent, screen, waitFor } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { useMswServer } from '../../../../tests/support/msw'
 import {
+  aiSettingsSectionHandlers,
   arrangeLoaded,
   patchCaptures,
   renderSection,
   resetAiSettingsSectionTestState,
 } from './AiSettingsSectionTestSupport'
 
+useMswServer(...aiSettingsSectionHandlers)
 beforeEach(resetAiSettingsSectionTestState)
 
 describe('AiSettingsSection default-model row click', () => {

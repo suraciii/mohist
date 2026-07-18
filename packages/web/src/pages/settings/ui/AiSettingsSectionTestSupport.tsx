@@ -1,7 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import { vi } from 'vitest'
 import { render } from '../../../../tests/test-utils'
-import { useMswServer } from '../../../../tests/support/msw'
 import { AiSettingsSection } from './AiSettingsSection'
 
 let opencodeRuntime: { mode: string; command: string; model: string | null; note: string } = {
@@ -17,7 +16,7 @@ let availableModels: { models: string[]; modelVariants: Record<string, string[]>
 let workflowVariables: Record<string, unknown> = { vars: null, stages: null }
 export const patchCaptures: Array<Record<string, unknown>> = []
 
-useMswServer(
+export const aiSettingsSectionHandlers = [
   http.get('/api/opencode/runtime', () =>
     HttpResponse.json({ success: true, data: opencodeRuntime }),
   ),
@@ -32,7 +31,7 @@ useMswServer(
     patchCaptures.push(body as Record<string, unknown>)
     return HttpResponse.json({ success: true, data: body })
   }),
-)
+]
 
 export function renderSection() {
   return render(<AiSettingsSection />)
