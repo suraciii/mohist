@@ -12,7 +12,7 @@
  */
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { RuntimeDiagnostic, RuntimeModelCatalog, RuntimeModelDescriptor } from "./types.js"
+import type { RuntimeModelCatalog, RuntimeModelDescriptor } from "./types.js"
 
 export interface CatalogClient {
   list(): Promise<RuntimeModelCatalog>
@@ -33,12 +33,4 @@ export function createCatalogClient(client: OpencodeClient): CatalogClient {
       return { models: descriptors, fetchedAt: Date.now() }
     },
   }
-}
-
-export function mergeCatalogDiagnostics(failures: Array<{ stage: string; error: unknown }>): RuntimeDiagnostic[] {
-  return failures.map(({ stage, error }) => ({
-    severity: "error" as const,
-    code: `catalog-${stage}-failed`,
-    message: error instanceof Error ? error.message : String(error),
-  }))
 }
