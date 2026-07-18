@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- `discoverOpencodeModels` now always invokes the injected command runner; retry pacing and empty-result retention belong to the host rather than this module.
+- `opencodeModelSetsEqual` compares copied sorted arrays, preserving caller-owned model and variant ordering.
+
+## T-001
+
+- Removed the discovery TTL cache, wall-clock read, and cache reset test seam.
+- Added order-insensitive model/variant set equality and focused coverage for ordering, additions, and removals.
+- Verification: `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass (99 files, 1178 tests).
+- Baseline focused test could not run before `npm ci` because workspace dependencies were absent; after installation the full suite passed.

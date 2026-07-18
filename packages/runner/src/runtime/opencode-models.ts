@@ -6,10 +6,6 @@ export interface DiscoveredOpencodeModels {
   variants: Record<string, string[]>
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000
-
-let cached: { result: DiscoveredOpencodeModels; fetchedAt: number } | null = null
-
 type ModelsCommandRunner = (command: string, args: string[], signal: AbortSignal) => Promise<string>
 
 let runModelsCommand: ModelsCommandRunner = execFileText
@@ -19,26 +15,32 @@ export function setModelsCommandRunnerForTest(runner: ModelsCommandRunner | null
 }
 
 export async function discoverOpencodeModels(signal: AbortSignal): Promise<DiscoveredOpencodeModels> {
-  const now = Date.now()
-  if (cached !== null && now - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.result
-  }
-
   const command = process.env.MOHIST_AGENT_MODELS_COMMAND ?? process.env.MOHIST_AGENT_COMMAND ?? "opencode"
 
-  let result: DiscoveredOpencodeModels
   try {
     const stdout = await runModelsCommand(command, ["models", "--verbose"], signal)
-    result = parseOpencodeModelsVerbose(stdout)
+    return parseOpencodeModelsVerbose(stdout)
   } catch (error) {
     console.error("failed to discover opencode models", error)
-    result = { models: [], variants: {} }
+    return { models: [], variants: {} }
   }
+}
 
-  if (result.models.length > 0) {
-    cached = { result, fetchedAt: now }
-  }
-  return result
+export function opencodeModelSetsEqual(a: DiscoveredOpencodeModels, b: DiscoveredOpencodeModels): boolean {
+  if (!stringSetsEqual(a.models, b.models)) return false
+
+  const aVariantKeys = Object.keys(a.variants)
+  const bVariantKeys = Object.keys(b.variants)
+  if (!stringSetsEqual(aVariantKeys, bVariantKeys)) return false
+
+  return aVariantKeys.every((key) => stringSetsEqual(a.variants[key] ?? [], b.variants[key] ?? []))
+}
+
+function stringSetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, index) => value === sortedB[index])
 }
 
 export function parseOpencodeModelsVerbose(stdout: string): DiscoveredOpencodeModels {
@@ -125,10 +127,6 @@ function collectBalancedJson(lines: string[], startIndex: number): string | null
 function countConsumedLines(jsonText: string): number {
   if (jsonText.length === 0) return 0
   return jsonText.split(/\r?\n/).length
-}
-
-export function clearOpencodeModelsCacheForTesting(): void {
-  cached = null
 }
 
 // opencode streams its models output asynchronously, and the async execFile
