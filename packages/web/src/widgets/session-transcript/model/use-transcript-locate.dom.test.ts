@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useTranscriptLocate } from './use-transcript-locate'
@@ -25,4 +24,3 @@ describe('useTranscriptLocate', () => {
     vi.useRealTimers()
   })
 })
-
