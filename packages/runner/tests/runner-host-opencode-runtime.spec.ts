@@ -418,20 +418,93 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("AgentJob path receives the ACP connection but NOT the OpenCode runtime handle", async () => {
+  it("AgentJob path drives the AgentJobExecutor, not the action registry", async () => {
     installReadyOpenCodeRuntimeFactory({
       models: [{ providerID: "openai", modelID: "gpt-5", variants: [] }],
       fetchedAt: 0,
     })
-    let observed: { acpConnection: unknown; openCodeRuntime: unknown } | null = null
-    const actionStarted = deferred<void>()
-    const actionRelease = deferred<void>()
-    blockingAction.mockReset().mockImplementation(async (context: { openCodeRuntime?: unknown; acpConnection?: unknown }) => {
-      observed = { acpConnection: context.acpConnection, openCodeRuntime: context.openCodeRuntime }
-      actionStarted.resolve()
-      await actionRelease.promise
-      return { status: "success", message: "ok" }
+    // Verify the source-keyed dispatch wiring at the executor
+    // boundary directly: an AgentJob ownerKind resolves through
+    // the AgentJobExecutor entry instead of the action registry.
+    // The full run-loop wiring is exercised by
+    // `tests/agent-job-executor.spec.ts`; here we just need to
+    // confirm the executor branches on owner-kind BEFORE the
+    // action registry is consulted.
+    let registryInvoked = false
+    blockingAction.mockReset().mockImplementation(async () => {
+      registryInvoked = true
+      return { status: "success", message: "should-not-reach" }
     })
+    // Use the WorkExecutor directly so we don't drive the run loop.
+    const { WorkExecutor } = await import("../src/runtime/executor.js")
+    const { AgentJobExecutor } = await import("../src/runtime/agent-job-executor.js")
+    const fakeRuntime = {
+      ready: () => true,
+      diagnostic: () => null,
+      async runTurn() {
+        return {
+          ok: true,
+          value: {
+            facts: { finalAssistantText: "agent done", runtimeSessionId: "ses_x", workDir: "/tmp/agent-job" },
+            diagnostics: [],
+          },
+          diagnostics: [],
+        }
+      },
+    } as never
+    const executor = new WorkExecutor(
+      {
+        resolve: (uses?: string | null) => {
+          if (uses === "test/observe") return blockingAction
+          return undefined
+        },
+      } as never,
+      {
+        async prepare() {
+          return { path: "/tmp/agent-job", branch: null, changeDir: null }
+        },
+      } as never,
+      {
+        async attachAgentSession() {
+          return undefined
+        },
+        async getAgentSession() {
+          return null
+        },
+      } as never,
+      {} as never,
+      null,
+      "/tmp/agent-job",
+      undefined,
+      fakeRuntime,
+      new AgentJobExecutor({} as never, fakeRuntime),
+    )
+    const result = await executor.execute(
+      {
+        workflowRunId: "",
+        workId: "aj-1",
+        workType: "task",
+        ownerKind: "agent-job",
+        agentJobId: "aj-1",
+        with: { prompt: "do the agent-job thing" },
+        variables: { workspace: { path: "/tmp/agent-job", branch: null, changeDir: null } },
+      },
+      new AbortController().signal,
+    )
+    expect(result.status).toBe("completed")
+    expect(registryInvoked).toBe(false)
+  })
+
+  it("the readiness gate pauses AgentJob claim while runtime is not ready", async () => {
+    // Use a long rebuild delay so the gate stays closed throughout
+    // the post-flip observation window — we want to verify pollOnce
+    // is skipped during the not-ready window, not that rebuild races
+    // the assertion. The poll mock returns the AgentJob dispatch
+    // exactly once followed by empty arrays so the dispatch loop
+    // can't tight-loop on the same work key (#410 T-001: the
+    // AgentJobExecutor closes the work within a few microtasks, so
+    // awaitingAck is empty before the next poll tick).
+    const installedHandles = installFakeOpenCodeRuntimeFactory({ rebuildDelayMs: 60_000 })
     poll.mockResolvedValueOnce([{
       workflowRunId: "",
       workId: "work-agent-job",
@@ -441,48 +514,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       agentJobId: "aj-1",
       variables: { workspace: { path: "/tmp/mohist-runner-host-opencode-runtime" } },
     }]).mockResolvedValue([])
-    const controller = new AbortController()
-    const host = new RunnerHost(hostOptions())
-    const run = host.run(controller.signal)
-    try {
-      await actionStarted.promise
-      const observedNonNull = observed as { acpConnection: unknown; openCodeRuntime: unknown } | null
-      expect(observedNonNull).not.toBeNull()
-      expect(observedNonNull?.acpConnection).not.toBeNull()
-      // AgentJob path receives `openCodeRuntime = null` even though
-      // the runner host has the runtime handle — the source-keyed
-      // dispatch in `baseContext` deliberately nulls it. This is the
-      // transitional AgentJob ACP path (#410) and the Workflow-only
-      // OpenCodeRuntime seam (T-003).
-      expect(observedNonNull?.openCodeRuntime).toBeNull()
-    } finally {
-      controller.abort()
-      actionRelease.resolve()
-      await run.catch(() => undefined)
-    }
-  })
-
-  it("transitional AgentJob gating: the readiness gate pauses AgentJob claim while runtime is not ready", async () => {
-    // Use a long rebuild delay so the gate stays closed throughout
-    // the post-flip observation window — we want to verify pollOnce
-    // is skipped during the not-ready window, not that rebuild races
-    // the assertion.
-    const installedHandles = installFakeOpenCodeRuntimeFactory({ rebuildDelayMs: 60_000 })
-    let pollCalls = 0
-    let gateFlipped = false
-    poll.mockImplementation(async () => {
-      pollCalls += 1
-      if (gateFlipped) return []
-      return [{
-        workflowRunId: "",
-        workId: "work-agent-job",
-        workType: "task",
-        uses: "test/observe",
-        ownerKind: "agent-job",
-        agentJobId: "aj-1",
-        variables: { workspace: { path: "/tmp/mohist-runner-host-opencode-runtime" } },
-      }]
-    })
     blockingAction.mockReset().mockResolvedValue({ status: "success", message: "ok" })
     const controller = new AbortController()
     const host = new RunnerHost(hostOptions())
@@ -499,13 +530,13 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       const callsBeforeFlip = poll.mock.calls.length
       expect(callsBeforeFlip).toBeGreaterThan(0)
       // Flip the runtime to not-ready. The gate closes for both
-      // Workflow AND AgentJob claims under the one-gate transitional
-      // rule (design D3). The subscription lives on the fake handles
-      // returned by `installFakeOpenCodeRuntimeFactory` — not on the
-      // runtime instance itself, which only stores it as private state.
+      // Workflow AND AgentJob claims under the one-gate rule (design
+      // D3, #410 T-001 D4). The subscription lives on the fake
+      // handles returned by `installFakeOpenCodeRuntimeFactory` — not
+      // on the runtime instance itself, which only stores it as
+      // private state.
       installedHandles.subscription.emit({ type: "server.disconnected", payload: {} })
       expect(installedHandles.lastRuntime?.ready()).toBe(false)
-      gateFlipped = true
       // Drive timers for a few intervals; with the gate closed the
       // poll mock would not be called even though it would return
       // work — proving the gate blocks AgentJob claim too.

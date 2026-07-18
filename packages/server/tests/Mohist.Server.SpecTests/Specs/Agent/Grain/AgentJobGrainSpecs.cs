@@ -346,6 +346,12 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId));
         await job.AssignRunnerAsync("runner-a", "work-a");
         Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+        // Repeat of the same runtimeSessionId is idempotent — the
+        // runner may re-report the binding after a reconnect, and
+        // the grain must accept it as a no-op (no state mutation, no
+        // lineage append). Mismatched values on a repeat report are
+        // rejected (#410 T-001 AC).
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
         Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-b"));
 
         await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));

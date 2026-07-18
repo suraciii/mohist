@@ -22,7 +22,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task SubmitAsync_WithAgentDefinition_ComposesInstructionsConfigAndPrompt_OnDispatchEnvelope()
+    public async Task SubmitAsync_WithAgentDefinition_EmitsFlatPromptInstructionsModel_OnDispatchEnvelope()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-agent-source-runner-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-agent-source-{Guid.NewGuid():N}";
@@ -55,16 +55,32 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
 
         Assert.False(string.IsNullOrWhiteSpace(polled.With));
         var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
-        var promptValue = with.GetProperty("prompt");
-        Assert.Equal(JsonValueKind.Object, promptValue.ValueKind);
 
-        var agentLaunch = promptValue.GetProperty("agent-launch");
-        Assert.Equal(instructions, agentLaunch.GetProperty("instructions").GetString());
-        Assert.Equal("openai/gpt-5.5", agentLaunch.GetProperty("config").GetProperty("model").GetString());
-        Assert.Equal("summarize the diff", agentLaunch.GetProperty("prompt").GetString());
-
+        // New flat Agent-owned payload: prompt / instructions / model are
+        // sibling string fields; no `agent-launch` envelope, no `agent`
+        // field (design D2, #410 T-001 AC).
+        Assert.Equal(JsonValueKind.String, with.GetProperty("prompt").ValueKind);
+        Assert.Equal("summarize the diff", with.GetProperty("prompt").GetString());
+        Assert.Equal(instructions, with.GetProperty("instructions").GetString());
         Assert.Equal("openai/gpt-5.5", with.GetProperty("model").GetString());
-        Assert.Equal("openai/gpt-5.5", with.GetProperty("agent").GetProperty("model").GetString());
+        Assert.False(with.TryGetProperty("agent", out _));
+        Assert.False(with.TryGetProperty("agent-launch", out _));
+    }
+
+    [Fact]
+    public async Task SubmitAsync_WithAgentDefinition_NoLongerCarriesAcpAgentUses_OnDispatchEnvelope()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-no-acp-uses-runner-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-no-acp-uses-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("raw prompt", projectId, "/tmp/agent-job-no-acp-uses"));
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+
+        Assert.NotNull(polled);
+        Assert.Null(polled!.Uses);
     }
 
     [Fact]

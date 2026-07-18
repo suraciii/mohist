@@ -91,8 +91,7 @@ public static class AgentJobController
             Prompt: body.Prompt!.Trim(),
             Model: string.IsNullOrWhiteSpace(body.Model) ? null : body.Model.Trim(),
             WorkspacePath: body.Workspace?.Path,
-            ProjectId: body.Workspace?.ProjectId,
-            Uses: string.IsNullOrWhiteSpace(body.Uses) ? null : body.Uses.Trim());
+            ProjectId: body.Workspace?.ProjectId);
 
         try
         {

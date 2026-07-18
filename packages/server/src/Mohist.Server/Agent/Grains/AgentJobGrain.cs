@@ -305,10 +305,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
         && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
         && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
-        && string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)
         && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
         && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
+        && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
@@ -318,10 +318,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Model, right.Model, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Model));
         if (!string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspacePath));
         if (!string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ProjectId));
-        if (!string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Uses));
         if (!string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentId));
         if (!string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentInstructions));
         if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
+        if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         return string.Join(", ", fields);
     }
@@ -509,16 +509,19 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             : JSON.Serialize(payload);
 
         var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        ComposePromptWithEntry(with, input);
+        with["prompt"] = JSON.SerializeToElement(input.Prompt);
+        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
+            with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
         if (!string.IsNullOrWhiteSpace(input.Model))
             with["model"] = JSON.SerializeToElement(input.Model);
-        ApplyAgentRuntimeConfig(with, input.AgentConfig, input.Model);
+        if (!string.IsNullOrWhiteSpace(input.Variant))
+            with["variant"] = JSON.SerializeToElement(input.Variant);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
             WorkflowRunId: string.Empty,
             WorkId: workId,
-            Uses: string.IsNullOrWhiteSpace(input.Uses) ? "mohist/acp-agent" : input.Uses,
+            Uses: null,
             With: withJson,
             Variables: variablesJson,
             WorkType: "agent-job",
@@ -528,60 +531,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentJobId: Key,
             ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
             AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId);
-    }
-
-    /// <summary>
-    /// Populates the <c>with.prompt</c> entry on the dispatch envelope. When
-    /// an Agent profile is supplied, the Agent's <c>Instructions</c> and
-    /// <c>AgentConfig</c> snapshot are composed with the caller's prompt
-    /// into a single execution input so the installed external agent
-    /// receives the composed bytes rather than the bare prompt. When no
-    /// Agent profile is supplied (raw-prompt-only AgentJob), the caller's
-    /// prompt is passed through unchanged.
-    /// </summary>
-    internal static void ComposePromptWithEntry(
-        Dictionary<string, JsonElement?> with,
-        AgentJobInput input)
-    {
-        var hasAgent = !string.IsNullOrWhiteSpace(input.AgentId)
-            || !string.IsNullOrWhiteSpace(input.AgentInstructions)
-            || input.AgentConfig is not null;
-
-        if (!hasAgent)
-        {
-            with["prompt"] = JSON.SerializeToElement(input.Prompt);
-            return;
-        }
-
-        var composed = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
-            composed["instructions"] = input.AgentInstructions;
-        if (input.AgentConfig is { ValueKind: not JsonValueKind.Undefined } configElement)
-            composed["config"] = configElement.Clone();
-        composed["prompt"] = input.Prompt;
-
-        with["prompt"] = JSON.SerializeToElement(
-            new Dictionary<string, object?> { ["agent-launch"] = composed });
-    }
-
-    private static void ApplyAgentRuntimeConfig(
-        Dictionary<string, JsonElement?> with,
-        JsonElement? agentConfig,
-        string? modelOverride)
-    {
-        if (agentConfig is not { ValueKind: JsonValueKind.Object } config)
-            return;
-
-        if (string.IsNullOrWhiteSpace(modelOverride))
-        {
-            with["agent"] = config.Clone();
-            return;
-        }
-
-        var agent = JSON.Deserialize<Dictionary<string, JsonElement>>(config.GetRawText())
-            ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        agent["model"] = JSON.SerializeToElement(modelOverride);
-        with["agent"] = JSON.SerializeToElement(agent);
     }
 
     private async Task ScheduleNextDispatchAsync()

@@ -3,11 +3,14 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
+import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
+import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
+import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | "report"> {
@@ -465,34 +468,68 @@ describe("WorkExecutor artifact capture", () => {
     expect(result.artifactUploadIds).toBeUndefined()
   })
 
-  it("uploadsArtifactsForAgentJobWorkUsingAgentJobOwner", async () => {
-    await writeFile(join(workDir, "review.md"), "looks good", "utf8")
+  it("AgentJob dispatches drive the AgentJobExecutor and never reach the action registry", async () => {
+    // After #410 T-001, an AgentJob dispatch is routed to the
+    // AgentJobExecutor (which drives `OpenCodeRuntime.runTurn`
+    // directly) — it never reaches the action registry. Stand up a
+    // fake runtime that returns a `completed` turn so the executor's
+    // result-report flow runs against the AgentJob owner identity.
     const connection = new FakeServerConnection()
+    const fakeRuntime = makeFakeRuntimeReturningCompleted()
+    let registryInvoked = false
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ output: "agent done" })),
+      makeRegistry(async () => {
+        registryInvoked = true
+        return { output: "should-not-reach" }
+      }),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,
       workDir,
+      undefined,
+      fakeRuntime as never,
+      new AgentJobExecutor(connection as never, fakeRuntime as never),
     )
 
     const work = buildWork({ files: [{ path: "review.md" }] })
     work.workflowRunId = ""
     work.ownerKind = "agent-job"
     work.agentJobId = "agent-job-1"
+    work.with = { prompt: "review this" }
 
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(result.output).toBe("agent done")
-    expect(result.artifactUploadIds).toEqual(["artup_1"])
-    expect(connection.uploads).toHaveLength(1)
-    expect(connection.uploads[0]).toMatchObject({
-      ownerId: "agent-job-1",
-      ownerKind: "agent-job",
-      workId: "work-1",
-      path: "review.md",
-    })
+    expect(registryInvoked).toBe(false)
+    // The AgentJob path does not upload declared artifacts through
+    // the work-executor artifact pipeline — the AgentJobExecutor
+    // owns the runtime turn and reports the result directly. The
+    // legacy test (uploadsArtifactsForAgentJobWorkUsingAgentJobOwner)
+    // existed because the ACP Action ran the executor's artifact
+    // tail; the new path short-circuits before that.
+    expect(connection.uploads).toHaveLength(0)
   })
 })
+
+function makeFakeRuntimeReturningCompleted(): OpenCodeRuntime {
+  const runtime: Partial<OpenCodeRuntime> = {
+    ready: () => true,
+    diagnostic: () => null,
+    async runTurn(_request, _signal): Promise<RuntimeResult<RuntimeTurnResult>> {
+      return {
+        ok: true,
+        value: {
+          facts: {
+            finalAssistantText: "agent done",
+            runtimeSessionId: "ses_fake",
+            workDir: workDir,
+          },
+          diagnostics: [],
+        },
+        diagnostics: [],
+      }
+    },
+  }
+  return runtime as OpenCodeRuntime
+}

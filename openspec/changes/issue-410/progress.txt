@@ -1,0 +1,59 @@
+# issue-410 build progress
+
+## T-001: Migrate AgentJob execution to the shared OpenCodeRuntime via an Agent-owned runner entry
+
+### Codebase patterns observed
+- The `OpenCodeRuntime` deep module (from #409) already exposes `runTurn`, `ready`, `diagnostic`, `createSession`. T-001 only needs `runTurn` (with `runtimeSessionId` null → new physical Session, non-null → restored Session) and the readiness gate.
+- `WorkExecutor` already threads `openCodeRuntime` into `ActionContext` for Workflow work. The AgentJob path previously received `null` via the source-keyed `runtimeHandle = ownerKind === 'agent-job' ? null : openCodeRuntime` gate; #410 T-001 lifts that gate so both sources share the runtime handle uniformly.
+- `WorkDispatch.OwnerKind` is the canonical discriminator: `OwnerKind: WorkDispatchOwnerKinds.AgentJob` ("agent-job") is what the new `executeOne` branches on BEFORE Action resolution.
+- `AgentJobInput` is the launch-time snapshot — `prompt`, `instructions?`, `model?`, `variant?` are captured into `AgentJobGrain.State.Input` at `SubmitAsync`, so editing the Agent definition cannot mutate an in-flight job. The runner reads `work.with` only; the executor never looks up the Agent definition.
+- `ServerConnection.attachAgentSession` (`/api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/attach`) is the existing wire the runner uses to report the runtime-session binding back to the server. `RecordRuntimeSessionBindingAsync` (already idempotent + reject-mismatch) is the server-side sink.
+- The `ActionContext` `openCodeRuntime` field stays for any future Workflow Action that needs the runtime handle; the new AgentJob path doesn't go through `ActionContext` at all — `AgentJobExecutor` is owned by `WorkExecutor` and bypasses the registry.
+
+### Implementation notes
+- New `packages/runner/src/runtime/agent-job-executor.ts` houses the `AgentJobExecutor` class. Constructor: `(connection: ServerConnection, runtime: OpenCodeRuntime | null)`. The host wires it on the per-host `WorkExecutor` AND on the per-work-item fallback `WorkExecutor`.
+- `executeOne` in `executor.ts` checks `work.ownerKind === 'agent-job'` FIRST, dispatches to `AgentJobExecutor.execute`, and never reaches `this.actions.resolve(work.uses)`. Failure (no executor wired) returns a `{ status: 'failed' }` so the report flow still drains.
+- `baseContext` in `executor.ts` no longer nulls `openCodeRuntime` for agent-job dispatches — the runtime handle reaches `ActionContext` uniformly. The source-keyed gate comment is removed.
+- `RunnerHost` constructs `AgentJobExecutor` in `initializeSharedConnection` and the per-work-item ephemeral fallback; the transitional AgentJob readiness-gate caveat at host.ts:513 is rewritten to "one gate covers both Workflow and AgentJob work".
+- The AgentJob `with` envelope is the flat `{ prompt, instructions?, model?, variant? }` shape from `AgentJobGrain.BuildDispatch`. The legacy `{ "agent-launch": {...} }` envelope and `with.agent` blob are gone; `ComposePromptWithEntry`/`ApplyAgentRuntimeConfig` are deleted.
+- `AgentJobInput.Uses` is removed (was always `mohist/acp-agent`); `AgentJobInput.Variant` is added so the launch-time variant is captured into the snapshot.
+- `AgentLauncher.ResolveModelAndVariant` reads `model` and `variant` from the Agent `AgentConfig` JSON element so the launch-time snapshot is complete. `Uses` is no longer threaded through `AgentJobController` (the validation endpoint now builds `AgentJobInput` without `Uses`).
+- The runner preserves workspace-prep skip for agent-job work and reads `work.variables.workspace.path` via `workspaceFromVariables` (unchanged).
+
+### Gotchas / regressions watched for
+- `runner-host-opencode-runtime.spec.ts > "transitional AgentJob gating"` relied on the Action path taking long enough that `awaitingAck` still held the work between polls. With #410 T-001, `AgentJobExecutor.execute` closes the work within a few microtasks (`readPrompt` → `failureResult` when `with.prompt` is missing), so `awaitingAck` empties before the next poll tick and the run loop would tight-poll the same work key. Updated the spec to use `mockResolvedValueOnce([...]).mockResolvedValue([])` so the dispatch loop has nothing to re-dispatch; the gate-close assertion (`poll.mock.calls.length === callsBeforeFlip`) is preserved.
+- `ServerConnection` is mocked in `runner-host-opencode-runtime.spec.ts`; it does NOT expose `attachAgentSession` or `getAgentSession`. The new `AgentJobExecutor.resolveBinding` short-circuits when `work.agentSessionId` is null (returns `{ alreadyRecorded: true }`), so the test's mock-less `ServerConnection` is never asked for `attachAgentSession` — no mock gap surfaces.
+- `executor.ts` `updateAcpConnection` mutator and `acpConnection` field stay (T-001 deliberately does not touch the ACP Action); `WorkExecutor` adds the `agentJobExecutor` constructor argument as the LAST parameter so the call sites that don't pass it default to `null` (workflow-only tests stay unchanged).
+- The runner-host task-log spec (`runner-host-task-log.spec.ts`) used `ownerKind: 'agent-job'` for what is actually a workflow-style flush test. After #410 T-001, AgentJob work bypasses the action registry and the work-executor artifact pipeline (the AgentJobExecutor owns the runtime turn and reports directly). Updated the spec to use a `test/log` Action through the Workflow path so the flush lifecycle (terminal/incremental batches) keeps being exercised through the same channel.
+- `AgentJobGrain.BuildDispatch` no longer writes `payload["workspace"]` into the dispatch `variables` JSON — the runner's `workspaceFromVariables` reads it from `work.variables.workspace.path` which the server populates on the existing wire (`Runner/Services/RunnerGrain.cs` from #407). The dispatch `variables` payload now only carries `workspace: { path }` if `input.WorkspacePath` is non-empty; that is unchanged behaviour.
+- `AgentJobController.HandleValidateAsync` now builds the `AgentJobInput` without `Uses`. `AgentJobValidationRequest.Uses` field stays (parser tolerates it for back-compat) but the grain ignores the value.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅
+- `npm run test:run -w packages/runner` ✅ 1166 / 1166 (95 test files)
+- `npm run build` (root: dotnet + workspaces) ✅
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` ✅ 5425 / 5425 (server unit + spec + arch + cli)
+- `npm run test:run -w packages/web` ✅ 4735 / 4735
+- `agent-job-executor.spec.ts` ✅ 18 / 18 (new file: AgentJobExecutor drives OpenCodeRuntime directly)
+- `runner-host-opencode-runtime.spec.ts` ✅ 7 / 7 (the "AgentJob path drives the AgentJobExecutor, not the action registry" test was rewritten; "the readiness gate pauses AgentJob claim while runtime is not ready" was retitled and re-mocked)
+- `AgentJobDispatchEnvelopeSpecs.cs` ✅ (asserts `prompt`/`instructions`/`model` siblings, no `agent-launch`, no `agent`, no `Uses`)
+- `AgentJobGrainSpecs.cs` ✅ (added idempotency assertion for `RecordRuntimeSessionBindingAsync`)
+- `AgentJobGrainPersistenceSpecs.cs` ✅ (asserts persistence shape matches the new flat payload)
+
+### What T-002 will need to thread
+- Issue-level `agentConfig` DTOs and validators are unchanged by T-001 — `Uses: 'mohist/acp-agent'` is no longer written, but the field `agentConfig` itself is still persisted and read. T-002 can independently reject the `type`/`livenessQuietThresholdMs`/`probeTimeoutMs`/`sessionStartTimeoutMs` keys without touching the AgentJob execution path.
+- The `AgentLaunchContext` shape stays — `AgentLauncher.ResolveModelAndVariant` reads the Agent's `AgentConfig` JSON element at launch time, captures `model` + `variant` into `AgentJobInput`. T-002's write-side whitelist must allow `{model, variant}` on the issue-level `agentConfig` so this read path stays populated; T-002's read-back filter must surface only `{model, variant}` so the Web form stays in sync with the persisted keys.
+
+### What T-003 will need to thread
+- `FollowupTarget` still holds `connection: ClientSideConnection`; T-003 must replace it with a runtime-targeted shape and rework `followup-handler`/`cancel-handler`/`followup-failure-outbox`. T-001 only changes the AgentJob **execution** path — Follow-up/Cancel/outbox are out of scope.
+- `OpenCodeRuntime` does NOT yet expose `followup` or `cancel` as public methods after #409. T-003 must promote them with the same Mohist-owned request/result shape as `runTurn` (per design D3). T-001 only relies on `runTurn` + `ready` + `diagnostic`, all already public.
+
+### What T-004 will need to thread
+- T-004 deletes the `mohist/acp-agent` Action, the entire `actions/acp/` tree, the ACP runtime modules, and `@agentclientprotocol/sdk`. T-001 leaves them in place (dead but compiling) so the change stays self-contained — T-004's deletion will not conflict with any T-001 surface.
+- T-004 collapses `IsInlineAgentUses` to `mohist/opencode` only and adds an actionable error for `mohist/acp-agent` dispatches. T-001 already drops `Uses: 'mohist/acp-agent'` from `AgentJobGrain.BuildDispatch`, so the actionable error path is only reachable for stale `WorkflowRun`s persisted before the cutover (D6).
+- T-004 will need to remove the `AgentJobExecutor` constructor argument from `WorkExecutor` callsites in `host.ts` (the per-host and per-work-item fallback paths) once the gate removal is no longer required by anything — but the AgentJobExecutor stays in place after T-001; T-004 only removes the *old* ACP path, not the AgentJobExecutor.
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections and aligns `docs/actions/opencode.md` and `docs/agents.md` to the post-ACP state. T-001's flat `with` payload and the unified launch pipeline (manual + subscription) is the new state T-005 must describe; the doc gap sections previously deferred to #410 should be closeable after T-004 lands.

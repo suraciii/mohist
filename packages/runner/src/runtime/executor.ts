@@ -24,6 +24,7 @@ import {
   promiseValue,
   type CompletionEvaluation,
 } from "../actions/expectations.js"
+import type { AgentJobExecutor } from "./agent-job-executor.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -63,15 +64,18 @@ export class WorkExecutor {
      */
     private readonly now: () => Date = () => new Date(),
     /**
-     * Shared OpenCode runtime handle for the Workflow Inline Agent
-     * path. Set by the runner host after `OpenCodeRuntime.start()`
-     * passes readiness; cleared when the runtime exits and rebuilds.
-     * The AgentJob path keeps the ACP connection above; only Workflow
-     * work receives this handle via `ActionContext.openCodeRuntime`.
-     * Hosts may swap it through {@link updateOpenCodeRuntime} when the
-     * runtime rebuilds after a server exit.
+     * Shared OpenCode runtime handle. Set by the runner host after
+     * `OpenCodeRuntime.start()` passes readiness; cleared when the
+     * runtime exits and rebuilds. Both Workflow and AgentJob work
+     * receive this handle through `ActionContext.openCodeRuntime`
+     * (the source-keyed gate was removed in #410 T-001). The
+     * AgentJob path additionally dispatches through
+     * {@link agentJobExecutor} so it never reaches the Action
+     * registry. Hosts may swap it through {@link updateOpenCodeRuntime}
+     * when the runtime rebuilds after a server exit.
      */
     private openCodeRuntime: OpenCodeRuntime | null = null,
+    private readonly agentJobExecutor: AgentJobExecutor | null = null,
   ) {}
 
   updateAcpConnection(acp: SharedAcpConnection | null) {
@@ -123,6 +127,24 @@ export class WorkExecutor {
   }
 
   private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
+    // The AgentJob path is owned by the AgentJobExecutor: it drives the
+    // shared OpenCodeRuntime directly and never resolves an Action
+    // (no `mohist/opencode` contract, no `mohist/acp-agent`, no
+    // `mohist/agent`). Branch BEFORE Action resolution so the
+    // registry never sees the dispatch, and so a future refactor
+    // that strips the `Uses` field from AgentJob dispatches doesn't
+    // surface as "No action found".
+    if (work.ownerKind === "agent-job") {
+      if (!this.agentJobExecutor) {
+        return failure(work, "AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor")
+      }
+      try {
+        return await this.agentJobExecutor.execute(work, signal)
+      } catch (error) {
+        return failure(work, errorMessage(error))
+      }
+    }
+
     const action = this.actions.resolve(work.uses)
     if (!action) return failure(work, `No action found for '${work.uses}'`)
 
@@ -368,14 +390,7 @@ function baseContext(
   log: TaskLogger | null = null,
   openCodeRuntime: OpenCodeRuntime | null = null,
 ): Omit<ActionContext, "with" | "workDir"> {
-  // The OpenCode runtime handle reaches the Workflow Inline Agent path
-  // only. The AgentJob path keeps the ACP connection above until #410
-  // migrates it. This is the same source-keyed dispatch the host uses
-  // for the readiness gate (T-003 AC: "runtime handle reaches
-  // ActionContext for Workflow work; the AgentJob path still receives
-  // the ACP connection").
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-  const runtimeHandle = ownerKind === "agent-job" ? null : openCodeRuntime
   return {
     workflowRunId: work.workflowRunId,
     workId: work.workId,
@@ -395,7 +410,7 @@ function baseContext(
     acpSessionManager: sessionManager,
     acpConnection,
     serverConnection: connection,
-    openCodeRuntime: runtimeHandle,
+    openCodeRuntime,
     log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }

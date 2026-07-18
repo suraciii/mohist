@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -89,16 +90,17 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ? $"agent-job-launch-{Guid.NewGuid():N}"
             : StableId("agent-job-trigger", triggerIdentity);
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var jobInput = new AgentJobInput(
             Prompt: trimmedPrompt,
-            Model: null,
+            Model: resolvedModel,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
-            Uses: "mohist/acp-agent",
             AgentId: agent.Id,
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
-            AgentSessionId: sessionId);
+            AgentSessionId: sessionId,
+            Variant: resolvedVariant);
         if (triggerIdentity is null)
             await jobGrain.SubmitAsync(jobInput);
         else
@@ -160,4 +162,32 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         metadata.Merge(new AgentSessionMetadata(
             Labels: triggerLabels,
             Annotations: null));
+
+    /// <summary>
+    /// Reads the <c>model</c> and <c>variant</c> fields out of the Agent
+    /// <c>AgentConfig</c> JSON element so they can be captured into the
+    /// launch-time snapshot on <see cref="AgentJobInput"/>. Editing the
+    /// Agent definition while a job is in flight therefore cannot change
+    /// the resolved model/variant — they were copied at launch time
+    /// (design D2, #410 T-001 AC).
+    /// </summary>
+    internal static (string? Model, string? Variant) ResolveModelAndVariant(JsonElement? agentConfig)
+    {
+        if (agentConfig is not { ValueKind: JsonValueKind.Object } config)
+            return (null, null);
+
+        var model = TryReadString(config, "model");
+        var variant = string.IsNullOrWhiteSpace(model) ? null : TryReadString(config, "variant");
+        return (model, variant);
+    }
+
+    private static string? TryReadString(JsonElement obj, string propertyName)
+    {
+        if (!obj.TryGetProperty(propertyName, out var value))
+            return null;
+        if (value.ValueKind != JsonValueKind.String)
+            return null;
+        var raw = value.GetString();
+        return string.IsNullOrWhiteSpace(raw) ? null : raw;
+    }
 }

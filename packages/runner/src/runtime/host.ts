@@ -14,6 +14,7 @@ import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
+import { AgentJobExecutor } from "./agent-job-executor.js"
 import { TaskLogCollector } from "./task-log.js"
 import {
   getOpenCodeRuntimeFactory,
@@ -471,6 +472,7 @@ export class RunnerHost {
         undefined,
         undefined,
         this.openCodeRuntime,
+        new AgentJobExecutor(this.connection, this.openCodeRuntime),
       )
       console.log("runner ACP connection established (per-host, shared across work items)")
     } catch (error) {
@@ -510,8 +512,9 @@ export class RunnerHost {
       // readiness diagnostic — but it still drains `awaitingAck`
       // reports (the line above) and respects the existing poll
       // cadence so a recovered runtime resumes claiming on the next
-      // tick. One gate also pauses AgentJob work still on ACP until
-      // #410 (design D3, transitional scope).
+      // tick. One gate covers both Workflow and AgentJob work; the
+      // AgentJob path now drives the same `OpenCodeRuntime` directly
+      // (#410 T-001) so the transitional caveat is gone.
       if (!this.isOpenCodeReadyForClaim()) {
         const diagnostic = this.openCodeReadinessDiagnostic()
         const now = Date.now()
@@ -844,6 +847,7 @@ export class RunnerHost {
         undefined,
         undefined,
         this.openCodeRuntime,
+        new AgentJobExecutor(this.connection, this.openCodeRuntime),
       )
       const fallback = await createSharedAcpConnection(process.cwd())
       try {

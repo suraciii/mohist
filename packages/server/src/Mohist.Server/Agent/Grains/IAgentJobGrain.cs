@@ -53,10 +53,10 @@ public enum AgentJobStatus
 /// <summary>
 /// Input snapshot for a standalone AgentJob. When the launch resolves a
 /// project-scoped <c>Agent</c> profile, the resolved snapshot (id,
-/// instructions, and config) is captured here so the executed bytes are
-/// stable for the lifetime of the job — even if the Agent is edited
-/// concurrently. A raw-prompt-only AgentJob remains supported: when
-/// <see cref="AgentId"/> is null, the runner receives the bare
+/// instructions, model, and variant) is captured here so the executed
+/// bytes are stable for the lifetime of the job — even if the Agent is
+/// edited concurrently. A raw-prompt-only AgentJob remains supported:
+/// when <see cref="AgentId"/> is null, the runner receives the bare
 /// <see cref="Prompt"/>.
 /// </summary>
 [GenerateSerializer]
@@ -65,7 +65,6 @@ public sealed record AgentJobInput(
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkspacePath = null,
     [property: Id(3)] string? ProjectId = null,
-    [property: Id(4)] string? Uses = null,
     /// <summary>
     /// Resolved Agent profile identity captured at launch time. Carried
     /// through to dispatch for traceability. Null when the job is a
@@ -74,16 +73,16 @@ public sealed record AgentJobInput(
     [property: Id(5)] string? AgentId = null,
     /// <summary>
     /// Resolved Agent <c>Instructions</c> snapshot captured at launch
-    /// time. The dispatch composes this with the caller prompt and
-    /// AgentConfig so the runner sees a single composed execution
-    /// input. Null when no Agent definition was supplied.
+    /// time. The AgentJob executor composes this with the caller
+    /// prompt and emits the single composed execution input. Null
+    /// when no Agent definition was supplied.
     /// </summary>
     [property: Id(6)] string? AgentInstructions = null,
     /// <summary>
     /// Resolved Agent <c>AgentConfig</c> snapshot captured at launch
-    /// time. Composed into the dispatch with the Agent instructions
-    /// and the caller's prompt. Null when no Agent definition was
-    /// supplied or the Agent has no config.
+    /// time. Carried for audit/traceability; the AgentJob executor
+    /// projects this into a flat Agent-owned payload. Null when no
+    /// Agent definition was supplied or the Agent has no config.
     /// </summary>
     [property: Id(7)] JsonElement? AgentConfig = null,
     /// <summary>
@@ -93,7 +92,14 @@ public sealed record AgentJobInput(
     /// unset (workflow-shaped path or a raw-prompt-only validation
     /// dispatch).
     /// </summary>
-    [property: Id(8)] string? AgentSessionId = null);
+    [property: Id(8)] string? AgentSessionId = null,
+    /// <summary>
+    /// Resolved Agent <c>variant</c> snapshot captured at launch time.
+    /// Surfaced in the dispatch envelope so the runner can apply the
+    /// launch-time variant to the runtime turn. Null when no Agent
+    /// definition supplied a variant or the launch did not pin one.
+    /// </summary>
+    [property: Id(9)] string? Variant = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

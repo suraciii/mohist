@@ -98,6 +98,13 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
   createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
 }))
 
+vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
+  return { ...actual, WorkspaceManager: class {
+    async prepare() { return { path: "/tmp/mohist-runner-host-task-log", branch: "main", changeDir: null } }
+    async verify() { return { path: "/tmp/mohist-runner-host-task-log", branch: "main", changeDir: null } }
+  } }
+})
 beforeEach(() => {
   installReadyRuntimeFactory()
   createSharedAcpConnection.mockResolvedValue({
@@ -138,15 +145,26 @@ function buildHost() {
 }
 
 function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string }> = {}) {
+  const workflowRunId = overrides.workflowRunId ?? "wf-336"
+  // After #410 T-001 the AgentJob path drives the AgentJobExecutor
+  // and never reaches the action registry, so these specs use a
+  // Workflow dispatch through `test/log` to keep the action shim in
+  // play. The flush lifecycle is owner-id-keyed; Workflow + AgentJob
+  // share the same channel.
   return {
-    workflowRunId: "wf-336",
-    workId: "work-336",
+    workflowRunId,
+    workId: overrides.workId ?? "work-336",
     workType: "task",
-    uses: "test/log",
-    ownerKind: "agent-job",
-    agentJobId: "aj-336",
-    variables: { workspace: { path: "/tmp/mohist-runner-host-task-log" } },
-    ...overrides,
+    uses: overrides.uses ?? "test/log",
+    ownerKind: overrides.ownerKind ?? "workflow",
+    agentJobId: overrides.agentJobId ?? "aj-336",
+    variables: {
+      workspace: { path: "/tmp/mohist-runner-host-task-log" },
+      repository: { gitUrl: "https://example.test/repository.git", baseBranch: "main", name: "master", remoteFingerprint: "fake-fingerprint", remoteIdentityVersion: "1" },
+      project: { id: "project-1", name: "Mohist Local" },
+      issue: { number: 1 },
+      mohist: { runId: workflowRunId },
+    },
   }
 }
 
@@ -393,7 +411,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     await expect(run).resolves.toBeUndefined()
 
     const uploadCall = uploadTaskLog.mock.calls[0] as [string, string, { entries: Array<{ source: string; text: string }>; truncated: boolean }]
-    expect(uploadCall[0]).toBe("aj-336")
+    expect(uploadCall[0]).toBe("wf-336")
     expect(uploadCall[1]).toBe("work-336")
     expect(report).toHaveBeenCalledTimes(1)
     // The flush call must precede the report call so the verdict
