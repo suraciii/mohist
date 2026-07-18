@@ -1,11 +1,12 @@
 import '@testing-library/jest-dom'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { TurnList } from './TurnList'
 import type {
   DisplayTurn,
   DisplayPrompt,
   DisplayAssistantPart,
+  DisplayToolPart,
 } from '../model/session-transcript-display'
 import { promptKindLabel } from '../model/prompt-kind-labels'
 
@@ -19,6 +20,23 @@ function makePrompt(overrides: Partial<DisplayPrompt> = {}): DisplayPrompt {
   }
 }
 
+function makeTool(overrides: Partial<DisplayToolPart> = {}): DisplayToolPart {
+  return {
+    id: 'tool-1',
+    partType: 'tool',
+    toolCallId: 'call-1',
+    normalizedName: 'bash',
+    toolName: 'bash',
+    status: 'completed',
+    input: JSON.stringify({ command: 'printf hello' }),
+    output: 'hello',
+    startedAt: '2024-05-15T10:01:00.000Z',
+    completedAt: '2024-05-15T10:01:01.000Z',
+    hasError: false,
+    isContextTool: false,
+    ...overrides,
+  }
+}
 function makeTurn(overrides: {
   id?: string
   startedAt: string
@@ -26,6 +44,7 @@ function makeTurn(overrides: {
   prompt?: Partial<DisplayPrompt>
   assistantParts?: DisplayAssistantPart[]
   state?: DisplayTurn['state']
+  changedFiles?: DisplayTurn['changedFiles']
 }): DisplayTurn {
   return {
     id: overrides.id ?? 'turn-1',
@@ -33,7 +52,7 @@ function makeTurn(overrides: {
     completedAt: overrides.completedAt ?? null,
     prompt: makePrompt({ sentAt: overrides.startedAt, ...overrides.prompt }),
     assistantParts: overrides.assistantParts ?? [],
-    changedFiles: [],
+    changedFiles: overrides.changedFiles ?? [],
     state: overrides.state ?? 'idle',
   }
 }
@@ -203,6 +222,63 @@ describe('TurnList divider duration derivation', () => {
     const durations = container.querySelectorAll('[data-turn-duration]')
     expect(durations).toHaveLength(1)
     expect(durations[0].textContent).toBe('15.0s')
+  })
+})
+
+describe('TurnList lazy rendering strategy', () => {
+  it('applies lazy rendering to each turn rather than the transcript container', () => {
+    const turns: DisplayTurn[] = [
+      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' }),
+      makeTurn({ id: 't2', startedAt: '2024-05-15T10:30:00.000Z' }),
+    ]
+
+    const { container } = render(<TurnList turns={turns} />)
+    const log = container.querySelector('[role="log"]')
+    const items = container.querySelectorAll('[data-turn-ref]')
+
+    expect(log).toBeTruthy()
+    expect(log).not.toHaveStyle({ contentVisibility: 'auto' })
+    expect(items).toHaveLength(2)
+    for (const item of Array.from(items)) {
+      expect(item).toHaveStyle({ contentVisibility: 'auto' })
+      expect(item).toHaveStyle({ containIntrinsicSize: '3rem' })
+    }
+  })
+
+  it('keeps turn and nested tool anchors queryable for every turn', () => {
+    const turns: DisplayTurn[] = [
+      makeTurn({
+        id: 'off-screen',
+        startedAt: '2024-05-15T10:00:00.000Z',
+        assistantParts: [makeTool({ toolCallId: 'off-screen-call', status: 'failed' })],
+      }),
+      makeTurn({ id: 'on-screen', startedAt: '2024-05-15T10:30:00.000Z' }),
+    ]
+
+    const { container } = render(<TurnList turns={turns} />)
+    const log = container.querySelector('[role="log"]')!
+    const offScreenTurn = log.querySelector('[data-turn-id="off-screen"]')
+
+    expect(offScreenTurn).toBeTruthy()
+    expect(offScreenTurn?.querySelector('[data-turn-index="1"]')).toBeTruthy()
+    expect(offScreenTurn?.querySelector('[data-tool-call-id="off-screen-call"]')).toBeTruthy()
+    expect(offScreenTurn?.querySelector('[data-tool-state="failed"]')).toBeTruthy()
+  })
+
+  it('preserves typed tool expansion content regardless of turn visibility strategy', () => {
+    const turn = makeTurn({
+      id: 'off-screen',
+      startedAt: '2024-05-15T10:00:00.000Z',
+      assistantParts: [makeTool()],
+    })
+
+    const { container } = render(<TurnList turns={[turn]} />)
+    const row = container.querySelector('[data-tool-call-id="call-1"]')!
+    const button = row.querySelector('button')!
+
+    expect(row.querySelector('[data-testid="tool-row-detail"]')).toBeNull()
+    fireEvent.click(button)
+    expect(row.querySelector('[data-testid="tool-row-detail"]')).toHaveTextContent('hello')
   })
 })
 

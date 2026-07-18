@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart } from '../model/session-transcript-display'
+import type { ExpansionRegistry, HighlightRegistry } from '../model/use-transcript-locate'
 import { ToolRowView, ContextGroupView } from './tool-views'
 import { TranscriptMarkdown } from './TranscriptMarkdown'
 
@@ -122,9 +123,11 @@ interface AssistantPartsProps {
   parts: DisplayAssistantPart[]
   isRunning?: boolean
   now?: number
+  expansionRegistry?: ExpansionRegistry
+  highlightRegistry?: HighlightRegistry
 }
 
-export function AssistantParts({ parts, isRunning, now }: AssistantPartsProps) {
+export function AssistantParts({ parts, isRunning, now, expansionRegistry, highlightRegistry }: AssistantPartsProps) {
   return (
     <div className="space-y-2">
       {parts.map((part) => {
@@ -135,10 +138,10 @@ export function AssistantParts({ parts, isRunning, now }: AssistantPartsProps) {
             return <ReasoningPartView key={part.id} text={part.text} startedAt={part.startedAt} />
           case 'tool': {
             const isInProgress = part.status === 'running' || part.status === 'pending'
-            return <ToolRowView key={part.id} part={part} now={isInProgress ? now : undefined} />
+            return <ToolRowView key={part.id} part={part} now={isInProgress ? now : undefined} highlightRegistry={highlightRegistry} />
           }
           case 'context-group':
-            return <ContextGroupView key={part.id} title={part.title} tools={part.tools} hasError={part.hasError} now={now} />
+            return <ContextGroupView key={part.id} id={part.id} title={part.title} tools={part.tools} hasError={part.hasError} now={now} expansionRegistry={expansionRegistry} highlightRegistry={highlightRegistry} />
           case 'error':
             return <ErrorPartView key={part.id} message={part.message} kind={part.kind} at={part.at} />
           case 'divider':

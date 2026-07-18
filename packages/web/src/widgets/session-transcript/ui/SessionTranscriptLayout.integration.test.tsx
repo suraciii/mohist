@@ -69,6 +69,41 @@ describe('SessionTranscriptLayout — flat single-column timeline', () => {
       expect(copyButtons).toHaveLength(1)
       expect((copyButtons[0] as HTMLButtonElement).disabled).toBe(false)
     })
+
+    it('renders a mini-timeline rail that is hidden below xl and visible at xl+', () => {
+      const turns: DisplayTurn[] = [
+        makeTurn({ id: 'a' }),
+        makeTurn({ id: 'b' }),
+      ]
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
+      )
+
+      const rail = container.querySelector('[data-mini-timeline]') as HTMLElement
+      expect(rail).not.toBeNull()
+      expect(rail.className).toContain('hidden')
+      expect(rail.className).toContain('xl:flex')
+    })
+
+    it('mounts the mini-timeline as a sibling of the transcript column inside a flex-row root at xl', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      const { container } = render(
+        <SessionTranscriptLayout turns={turns} isRunning={false} />,
+      )
+
+      const root = container.querySelector('[data-scrollable]') as HTMLElement
+      expect(root).not.toBeNull()
+      expect(root.className).toContain('xl:flex-row')
+
+      const rail = root.querySelector(':scope > [data-mini-timeline]')
+      expect(rail).not.toBeNull()
+      const transcriptColumn = root.querySelector(':scope > [data-mini-timeline] + div')
+      expect(transcriptColumn).not.toBeNull()
+      expect(transcriptColumn!.className).toContain('flex-1')
+
+      const turnList = transcriptColumn!.querySelector('[role="log"]')
+      expect(turnList).not.toBeNull()
+    })
   })
 
   describe('turn divider bar — ordinal, kind label, start time, duration', () => {
