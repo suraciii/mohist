@@ -15,7 +15,7 @@ import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./clean
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { TaskLogCollector } from "./task-log.js"
-import { discoverOpencodeModels } from "./opencode-models.js"
+import { discoverOpencodeModels, opencodeModelSetsEqual } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
@@ -92,6 +92,7 @@ export class RunnerHost {
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
+  private readonly modelRediscoveryIntervalMs: number
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
@@ -122,6 +123,7 @@ export class RunnerHost {
   constructor(private readonly options: RunnerOptions) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
+    this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash)
@@ -326,6 +328,7 @@ export class RunnerHost {
       const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
       const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
       const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
+      const rediscoveryTimer = setInterval(() => void this.runModelRediscoveryOnce(signal).catch((error) => console.error("model rediscovery fire failed", error)), this.modelRediscoveryIntervalMs)
       try {
         await this.runWorkerPool(signal)
       } finally {
@@ -333,6 +336,7 @@ export class RunnerHost {
         clearInterval(selfCheck)
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
+        clearInterval(rediscoveryTimer)
         await this.shutdownSharedConnection()
         await this.shutdownConnection()
       }
@@ -348,6 +352,15 @@ export class RunnerHost {
       // Convergence is best-effort; the next tick or reconnect retries.
       console.error("workspace cleanup convergence pass failed:", error)
     }
+  }
+
+  private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
+    const discovered = await discoverOpencodeModels(signal)
+    if (discovered.models.length === 0) return
+    if (opencodeModelSetsEqual(discovered, { models: this.coderModels, variants: this.coderModelVariants })) return
+    this.coderModels = discovered.models
+    this.coderModelVariants = discovered.variants
+    await this.sendImmediateHeartbeat()
   }
 
   private async runCleanupOnce(signal: AbortSignal): Promise<void> {

@@ -9,3 +9,14 @@
 - Added order-insensitive model/variant set equality and focused coverage for ordering, additions, and removals.
 - Verification: `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass (99 files, 1178 tests).
 - Baseline focused test could not run before `npm ci` because workspace dependencies were absent; after installation the full suite passed.
+
+## T-002
+
+- Wired the periodic rediscovery timer into `RunnerHost.run()` next to the existing heartbeat / self-check / convergence / cleanup timers; cleared in the same `finally` block.
+- Added `RunnerOptions.modelRediscoveryIntervalMs` with the existing `Math.max(60_000, …)` clamp, defaulting to 30 minutes; the 60s floor lets tests drive the timer deterministically via `vi.useFakeTimers()`.
+- New private `runModelRediscoveryOnce(signal)` early-returns on empty set, no-ops on order-insensitive equality with `opencodeModelSetsEqual`, and otherwise updates local state then calls `sendImmediateHeartbeat` (existing change-gated uplink channel; no new transport).
+- Timer callback wraps the fire in `void … .catch((error) => console.error("model rediscovery fire failed", error))` so thrown discovery errors do not bubble to unhandled rejection; the next tick still fires.
+- New spec `packages/runner/tests/runner-host-model-rediscovery.spec.ts` covers the six required scenarios (interval boundary, no-change, change, empty, thrown, abort) using hoisted `discoverOpencodeModels` mock plus `vi.importActual` to keep `opencodeModelSetsEqual` real.
+- Gotcha: setting `heartbeatIntervalMs` and `modelRediscoveryIntervalMs` to the same value makes the heartbeat timer fire at the same fake-time as the rediscovery timer, so the "no heartbeat on no-change" assertion cannot distinguish cause; set `heartbeatIntervalMs` much larger (e.g. 600_000) to isolate.
+- Gotcha: `discover.mockReset()` inside a test wipes the bootstrap-time `connectRunner` call from history; assertions should use literal expected counts (`1`, `2`, `3`) keyed off the specific timer fires, not a captured "startup" baseline.
+- Verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm test` (whole repo) pass (4735 tests across all packages; runner 100 files, 1184 tests including the 6 new ones).
