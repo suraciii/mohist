@@ -163,7 +163,7 @@ export class WorkExecutor {
       const completion = await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
       const projected = projectTaskOutput(work, publicActionResult, completion)
       const normalized = normalize(work, projected)
-      const recoveryResult = tryRecovery(work, normalized)
+      const recoveryResult = tryRecovery(work, normalized, variables)
       if (recoveryResult) return recoveryResult
       // For `mohist/opencode`, the public Action Output is the minimal
       // `null | { promise }` shape — branch-stability evidence and
