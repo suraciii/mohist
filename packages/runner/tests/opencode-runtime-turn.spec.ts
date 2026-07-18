@@ -9,6 +9,8 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtim
 import type { RuntimeModelCatalog } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 
+const DEFAULT_SESSION_ID = "ses_/tmp/projA"
+
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
   closed = false
@@ -73,11 +75,11 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
 
   const sessionCreate = vi.fn(async (params: { directory?: string; model?: unknown }) => {
     if (args.failCreate) throw new Error("create boom")
-    const id = args.createId ? args.createId(params) : `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}`
+    const id = args.createId ? args.createId(params) : DEFAULT_SESSION_ID
     return { data: { id } }
   })
 
-  const sessionPrompt = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+  const sessionPrompt = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.failPrompt) throw new Error("prompt boom")
     if (args.promptResult !== undefined) return args.promptResult
     return {
@@ -88,13 +90,13 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     }
   })
 
-  const sessionPromptAsync = vi.fn(async (_params: { path: { id: string }; body?: unknown }) => {
+  const sessionPromptAsync = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.failPromptAsync) throw new Error("promptAsync boom")
     if (args.promptAsyncResult !== undefined) return args.promptAsyncResult
     return { data: true }
   })
 
-  const sessionAbort = vi.fn(async (_params: { path: { id: string } }) => ({ data: true }))
+  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: true }))
 
   const sessionMessages = vi.fn(async () => ({ data: [] }))
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
@@ -169,12 +171,12 @@ describe("OpenCodeRuntime.runTurn — happy path + turn fact", () => {
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
     expect(client.sessionAbort).not.toHaveBeenCalled()
-    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { path: { id: string }; body: { model?: unknown; parts: unknown[]; system?: string }; query: { directory: string } }
-    expect(promptArg.path.id).toMatch(/^ses_/)
-    expect(promptArg.query.directory).toBe("/tmp/projA")
-    expect(promptArg.body.model).toEqual({ providerID: "openai", modelID: "gpt-5" })
-    expect(promptArg.body.system).toBe("[mohist variant:high]")
-    expect(promptArg.body.parts).toEqual([{ type: "text", text: "do the work" }])
+    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { sessionID: string; directory: string; model?: unknown; parts: unknown[]; system?: string }
+    expect(promptArg.sessionID).toMatch(/^ses_/)
+    expect(promptArg.directory).toBe("/tmp/projA")
+    expect(promptArg.model).toEqual({ providerID: "openai", modelID: "gpt-5" })
+    expect(promptArg.system).toBe("[mohist variant:high]")
+    expect(promptArg.parts).toEqual([{ type: "text", text: "do the work" }])
   })
 
   it("Returns a null finalAssistantText when the prompt has no text parts", async () => {
@@ -217,9 +219,9 @@ describe("OpenCodeRuntime.runTurn — model/variant non-rotation", () => {
     expect(second.value.facts.runtimeSessionId).toBe(firstSessionId)
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
-    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { body: { model?: unknown; system?: string } }
-    expect(secondPrompt.body.model).toEqual({ providerID: "anthropic", modelID: "claude-sonnet-4" })
-    expect(secondPrompt.body.system).toBeUndefined()
+    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { model?: unknown; system?: string }
+    expect(secondPrompt.model).toEqual({ providerID: "anthropic", modelID: "claude-sonnet-4" })
+    expect(secondPrompt.system).toBeUndefined()
   })
 
   it("Variant change reuses the same physical Session id and updates only the system marker", async () => {
@@ -244,8 +246,8 @@ describe("OpenCodeRuntime.runTurn — model/variant non-rotation", () => {
     if (!second.ok) return
     expect(second.value.facts.runtimeSessionId).toBe(sessionId)
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
-    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { body: { system?: string } }
-    expect(secondPrompt.body.system).toBe("[mohist variant:low]")
+    const secondPrompt = client.sessionPrompt.mock.calls[1]?.[0] as { system?: string }
+    expect(secondPrompt.system).toBe("[mohist variant:low]")
   })
 })
 
@@ -265,8 +267,8 @@ describe("OpenCodeRuntime.runTurn — input validation", () => {
     }, new AbortController().signal)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { body: { model?: unknown } }
-    expect(promptArg.body.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
+    const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as { model?: unknown }
+    expect(promptArg.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
   })
 
   it("Unknown option keys are surfaced as info diagnostics and do not fail the turn", async () => {
@@ -454,11 +456,15 @@ describe("OpenCodeRuntime.runTurn — provider-error failure policy", () => {
     if (result.ok) return
     expect(result.error.kind).toBe("turn-failed")
     expect(result.error.diagnostics.some((d) => /OpenAI quota/.test(d.message))).toBe(true)
-    expect(result.error.diagnostics.some((d) => d.code === "provider-non-recoverable")).toBe(true)
+    expect(result.error.diagnostics.some((d) => d.code === "provider-quota-exhausted")).toBe(true)
     expect(client.sessionAbort).toHaveBeenCalledTimes(1)
+    expect(client.sessionAbort).toHaveBeenCalledWith(
+      { sessionID: "ses_/tmp/projA", directory: "/tmp/projA" },
+      { throwOnError: true },
+    )
   })
 
-  it("Chinese wording ('额度已用完') triggers first-occurrence failure", async () => {
+  it("The provider wording from the failed workflow triggers first-occurrence failure", async () => {
     const { deps, client, subscription } = buildRuntime()
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
@@ -474,7 +480,12 @@ describe("OpenCodeRuntime.runTurn — provider-error failure policy", () => {
       sessionID: "ses_/tmp/projA",
       payload: {
         sessionID: "ses_/tmp/projA",
-        status: { type: "retry", attempt: 1, message: "账户额度已用完", next: 1000 },
+        status: {
+          type: "retry",
+          attempt: 1,
+          message: "您已达到每周/每月使用上限，您的限额将在 2026-07-19 11:32:48 重置。",
+          next: 1000,
+        },
       },
     })
 
@@ -482,6 +493,129 @@ describe("OpenCodeRuntime.runTurn — provider-error failure policy", () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.kind).toBe("turn-failed")
+    expect(result.error.diagnostics.some((d) => d.code === "provider-quota-exhausted")).toBe(true)
+
+    client.sessionGet.mockResolvedValueOnce({ data: { id: "ses_/tmp/projA" } })
+    const next = await runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: "ses_/tmp/projA", workDir: "/tmp/projA" },
+      prompt: "continue with another model",
+      options: { model: { providerID: "openai", modelID: "gpt-5" }, variant: null },
+    }, new AbortController().signal)
+    expect(next.ok).toBe(true)
+    expect(client.sessionCreate).toHaveBeenCalledTimes(1)
+    expect(client.sessionPrompt.mock.calls[1]?.[0]).toMatchObject({
+      sessionID: "ses_/tmp/projA",
+      model: { providerID: "openai", modelID: "gpt-5" },
+    })
+  })
+
+  it("A quota retry for another Session does not abort the current turn", async () => {
+    const { deps, client, subscription } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    let resolvePrompt: (value: unknown) => void = () => {}
+    client.sessionPrompt.mockImplementationOnce(() => new Promise((resolve) => { resolvePrompt = resolve }))
+    const turnPromise = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+    }, new AbortController().signal)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    subscription.emit({
+      type: "session.status", sessionID: DEFAULT_SESSION_ID, directory: "/tmp/other-project",
+      payload: { sessionID: DEFAULT_SESSION_ID, status: { type: "retry", attempt: 1, message: "quota exceeded" } },
+    })
+    subscription.emit({
+      type: "session.status",
+      sessionID: "ses_other",
+      payload: {
+        sessionID: "ses_other",
+        status: { type: "retry", attempt: 1, message: "quota exceeded", next: 1000 },
+      },
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(client.sessionAbort).not.toHaveBeenCalled()
+    resolvePrompt({ data: { parts: [{ type: "text", text: "done" }] } })
+    expect((await turnPromise).ok).toBe(true)
+  })
+
+  it("An unconfirmed abort reports abort-unconfirmed instead of a stopped turn", async () => {
+    const { deps, client, subscription } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+    client.sessionAbort.mockResolvedValueOnce({ data: false })
+    const turnPromise = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+    }, new AbortController().signal)
+    await new Promise((resolve) => setImmediate(resolve))
+    subscription.emit({
+      type: "session.status",
+      sessionID: "ses_/tmp/projA",
+      payload: {
+        sessionID: "ses_/tmp/projA",
+        status: { type: "retry", attempt: 1, message: "quota exceeded", next: 1000 },
+      },
+    })
+
+    const result = await turnPromise
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.diagnostics.some((d) => d.code === "abort-unconfirmed")).toBe(true)
+    expect(result.error.diagnostics.some((d) => d.code === "provider-quota-exhausted")).toBe(true)
+  })
+
+  it("A Session that remains busy after abort reports abort-unconfirmed", async () => {
+    const { deps, client, subscription } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+    const turnPromise = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+    }, new AbortController().signal)
+    await new Promise((resolve) => setImmediate(resolve))
+    client.sessionStatus.mockResolvedValueOnce({ data: { "ses_/tmp/projA": { type: "busy" } } })
+    subscription.emit({
+      type: "session.status",
+      sessionID: "ses_/tmp/projA",
+      payload: { sessionID: "ses_/tmp/projA", status: { type: "retry", attempt: 1, message: "quota exceeded" } },
+    })
+
+    const result = await turnPromise
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.diagnostics.some((d) => d.code === "abort-unconfirmed")).toBe(true)
+  })
+
+  it("A reconnected event stream restores a quota verdict from session.status", async () => {
+    const { deps, client, subscription } = buildRuntime()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+    const turnPromise = runtime.runTurn({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+      prompt: "do",
+    }, new AbortController().signal)
+    await new Promise((resolve) => setImmediate(resolve))
+    client.sessionStatus.mockResolvedValueOnce({
+      data: {
+        "ses_/tmp/projA": {
+          type: "retry",
+          attempt: 1,
+          message: "Token Plan usage limit reached",
+          next: 1000,
+        },
+      },
+    })
+    subscription.emit({ type: "server.connected", payload: {} })
+
+    const result = await turnPromise
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.diagnostics.some((d) => d.code === "provider-quota-exhausted")).toBe(true)
+    expect(client.sessionAbort).toHaveBeenCalledTimes(1)
   })
 
   it("A recoverable transient error that completes within N retries continues", async () => {

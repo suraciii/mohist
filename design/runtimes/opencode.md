@@ -113,8 +113,8 @@ Mohist 能力，由模块决定使用哪些 SDK operation 和状态核对步骤�
 
 每个 Runner 进程拥有一个 OpenCode Server 和一个 Client，由所有 OpenCode Session
 共享。使用官方 `createOpencodeServer()` 与 `createOpencodeClient()` API，不直接 spawn
-或解析 OpenCode 进程。每次 SDK 调用显式传递 Session 工作目录，不为每个 Action 创建
-独立进程。
+或解析 OpenCode 进程。每次 Session SDK 调用显式传递工作目录，并启用
+`throwOnError` 让失败进入统一错误规范化；不为每个 Action 创建独立进程。
 
 Mohist 认为物理 Session 的 directory 不可变。工作目录变化时创建新的物理 Session，
 不移动现有 Session。
@@ -228,7 +228,11 @@ transcript、tool、usage、model、status 与 compaction 事实；未知 OpenCo
 实时 event 只优化展示延迟，不作为持久化执行协议：
 
 - 使用 OpenCode message ID 与 part ID 保证投影幂等；
-- 重连后读取 `session.status()` 以及相关 `session.get/messages()` snapshot；
+- event stream 在仍有订阅者时断开，订阅层重新建立唯一的 global event stream；
+- 新 stream 连接后，运行中回合按自己的 Session ID 与 directory 读取
+  `session.status()`，并与相关 `session.get/messages()` snapshot 核对；
+- 一个回合只消费属于自己 Session ID 的 retry 事实，其他 Session 的事件不能改变其
+  provider 错误判定；
 - Prompt 完成后，如 event 缺失或需要确认最终用户可见 transcript，再核对 messages。
 
 Mohist 不保存 V2 history cursor、aggregate sequence 或 event replay state。Workflow
@@ -239,12 +243,13 @@ recovery 语义判断 Workflow 成功；AgentJob 是否完成由其 executor 独
 
 provider 错误仅当判为不可恢复时让回合失败；可恢复错误（瞬时 429、5xx、网络抖动）交
 OpenCode 重试，Mohist 不主动失败。失败信号来自 `session.status` 事件（`type:"retry"`，
-携带 `attempt`、`message`、`next`）与回合最终的 prompt reject，不扫描日志。两类不可
-恢复判定都归一到 abort 回合并失败：
+携带 `attempt`、`message`、`action`、`next`）、重连后的 status snapshot 与回合最终的
+prompt reject，不扫描日志。两类不可恢复判定都归一到 abort 回合并失败：
 
-- 按性质不可恢复：retry 事件 `message` 命中额度/credit/billing 等模式（OpenCode 会把
-  这类错误误判为可恢复限流而持续重试），命中即 abort+失败。默认模式集覆盖常见 provider
-  的额度措辞（含中文），runner 级可配置追加。
+- 按性质不可恢复：优先使用 retry status 的结构化 `action.reason`；没有可用分类时，
+  `message` 命中 quota、credit、billing、usage limit、额度、余额、使用上限或重置限额等
+  模式即 abort+失败。普通 rate limit / too many requests 不因文案兜底在首次出现时失败。
+  默认模式集覆盖常见 provider 的中英文额度措辞，runner 级可配置追加。
 - 按证据不可恢复：可恢复错误连续重试，`attempt` 达到阈值 N（默认 5，runner 级可配置）
   而回合仍未完成，重新判为不可恢复，abort+失败。
 
@@ -252,13 +257,17 @@ OpenCode 重试，Mohist 不主动失败。失败信号来自 `session.status` �
 （auth、invalid-request、context-overflow、content-policy）由 OpenCode 直接 reject
 prompt，Mohist 不额外处理。连 retry 事件都不产生的静默卡死仍由 executor 期限兜底。
 
-计数直接用 retry 事件的 `attempt` 字段（OpenCode 维护、每回合重置）；runner 重启后用
-`session.status()` snapshot 恢复，不另建状态。命中或超阈值时调用
-`client.session.abort()`，向调用者返回带原始 provider message 的失败事实。
+计数直接用 retry 事件的 `attempt` 字段（OpenCode 维护、每回合重置）；runner 重启或
+event stream 重连后用 `session.status()` snapshot 恢复，不另建状态。命中或超阈值时，
+Runtime 使用当前锁定 SDK 的类型化调用面执行
+`client.session.abort({ sessionID, directory }, { throwOnError: true })`。只有 abort 返回
+`data: true`，且同一 directory 的 status snapshot 中该 Session 不存在或为 idle，才算
+确认停止；随后向调用者返回带原始 provider message 的失败事实。AgentSession 与物理
+Session 绑定保持不变，不提示 Reset。
 
-上游差距（不阻塞）：OpenCode 流式重试路径不使用 `QuotaExceeded` 分类（分类正则为英文
-only），且在「有响应头但无 retry-after」时退避无上限；修复后 Mohist 可逐步去掉按
-`message` 匹配的兜底，改用结构化分类。
+abort 请求失败、返回值不确认成功，或 status 仍为 busy/retry 时，Runtime 返回
+`abort-unconfirmed` 诊断，不声称回合已经停止。OpenCode 是第三方依赖；Mohist 不修改其
+重试实现，因此结构化分类不足时长期保留 message 兜底与 Mohist 自己的重试上限。
 
 ## Session 命令
 

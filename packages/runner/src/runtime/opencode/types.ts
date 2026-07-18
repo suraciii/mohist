@@ -100,10 +100,11 @@ export interface RuntimeTurnResult {
 /**
  * Configuration for the runtime's provider-error failure policy.
  *
- * - `nonRecoverablePatterns` are matched (case-insensitive) against
- *   the `message` of a `session.status` retry event; a match on
- *   first occurrence aborts the turn with a `turn-failed` result
- *   carrying the provider message as diagnostics.
+ * - A known structured `action.reason` is authoritative. Otherwise,
+ *   `nonRecoverablePatterns` are matched against the `message` of a
+ *   `session.status` retry event; a match on first occurrence aborts
+ *   the turn with a `turn-failed` result carrying the provider message
+ *   as diagnostics.
  * - `consecutiveRetryThreshold` is the maximum `attempt` value on
  *   a recoverable retry event after which the runtime aborts the
  *   turn (`turn-failed`). A recoverable retry sequence that

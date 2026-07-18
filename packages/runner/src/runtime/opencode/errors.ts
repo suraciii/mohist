@@ -26,13 +26,24 @@ const DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS: readonly RegExp[] = [
   /quota/i,
   /credit/i,
   /billing/i,
+  /usage[ -]?limit(?:\s+(?:reached|exceeded))?/i,
   /payment[ -]required/i,
   /insufficient[ _-]?balance/i,
   /额度/i,
   /余额/i,
   /计费/i,
   /欠费/i,
+  /使用上限/i,
+  /已达到[^。]*(?:限额|上限)/i,
+  /限额[^。]*(?:重置|恢复)/i,
 ]
+
+const NON_RECOVERABLE_ACTION_REASONS = new Set([
+  "account_rate_limit",
+  "free_tier_limit",
+  "quota_exhausted",
+  "usage_limit",
+])
 
 export const DEFAULT_PROVIDER_ERROR_POLICY = {
   nonRecoverablePatterns: DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
@@ -41,6 +52,15 @@ export const DEFAULT_PROVIDER_ERROR_POLICY = {
 
 export function isNonRecoverableProviderMessage(message: string, patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS): boolean {
   return patterns.some((pattern) => pattern.test(message))
+}
+
+export function isNonRecoverableProviderRetry(
+  retry: { readonly message: string; readonly action?: { readonly reason?: string } },
+  patterns: readonly RegExp[] = DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
+): boolean {
+  const reason = retry.action?.reason?.toLowerCase()
+  return (reason !== undefined && NON_RECOVERABLE_ACTION_REASONS.has(reason))
+    || isNonRecoverableProviderMessage(retry.message, patterns)
 }
 
 export function normalizePermissionRequired(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
@@ -133,6 +153,17 @@ export function normalizeTurnFailed(raw: RawSdkError | string, diagnostics: read
     diagnostics: [
       ...diagnostics,
       { severity: "error", code: "turn-failed", message, details: typeof raw === "string" ? undefined : { ...raw } },
+    ],
+  }
+}
+
+export function normalizeAbortUnconfirmed(message: string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
+  return {
+    kind: "turn-failed",
+    message: "OpenCode turn could not be confirmed stopped",
+    diagnostics: [
+      ...diagnostics,
+      { severity: "error", code: "abort-unconfirmed", message },
     ],
   }
 }
