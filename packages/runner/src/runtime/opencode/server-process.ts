@@ -17,6 +17,8 @@
 
 import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import { Agent } from "undici"
+import type { Dispatcher } from "undici"
 
 export interface OpencodeServerHandle {
   readonly url: string
@@ -27,15 +29,25 @@ export interface OpencodeServerHandle {
 
 export type OpencodeServerFactory = (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
 
+export function createOpenCodeFetch(dispatcher: Dispatcher, fetchImpl: typeof fetch = fetch): typeof fetch {
+  return (input, init) => fetchImpl(input, { ...init, dispatcher } as RequestInit)
+}
+
 export const createSpawnedOpencodeServer: OpencodeServerFactory = async (directory, signal) => {
   const server = await createOpencodeServer({ signal })
-  const client = createOpencodeClient({ baseUrl: server.url, directory })
+  const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+  const client = createOpencodeClient({
+    baseUrl: server.url,
+    directory,
+    fetch: createOpenCodeFetch(dispatcher),
+  })
   return {
     url: server.url,
     directory,
     client,
     async close() {
       server.close()
+      await dispatcher.close()
     },
   }
 }

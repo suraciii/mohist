@@ -107,9 +107,15 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
         },
         context.signal,
       )
+      if (opened.workDir && opened.workDir !== context.workDir) {
+        return {
+          status: "failure",
+          message: "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying",
+        }
+      }
       binding = {
         runtimeSessionId: opened.runtimeSessionId ?? null,
-        workDir: opened.workDir ?? context.workDir,
+        workDir: context.workDir,
       }
     } catch (error) {
       return {

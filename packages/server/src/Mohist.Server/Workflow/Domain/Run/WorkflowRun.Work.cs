@@ -137,7 +137,7 @@ public static partial class WorkflowRunExtensions
 
             foreach (var task in tasks)
             {
-                var newTask = TaskRun.MakeTask(current.Tasks, task, causedByFeedbackId);
+                var newTask = TaskRun.MakeTask(current.Tasks, task, current.Attempt, causedByFeedbackId);
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;
             }
@@ -178,8 +178,8 @@ public static partial class WorkflowRunExtensions
             foreach (var task in tasks)
             {
                 var newTask = task.RecoveryRemaining is { } remaining
-                    ? TaskRun.MakeContinuationTask(current.Tasks, task.Definition, remaining)
-                    : TaskRun.MakeTask(current.Tasks, task.Definition);
+                    ? TaskRun.MakeContinuationTask(current.Tasks, task.Definition, current.Attempt, remaining)
+                    : TaskRun.MakeTask(current.Tasks, task.Definition, current.Attempt);
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;
             }

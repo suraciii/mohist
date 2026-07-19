@@ -153,20 +153,22 @@ public static class TaskRunExtensions
         internal static TaskRun MakeTask(
             IEnumerable<TaskRun> existing,
             TaskDefinition input,
+            int stageAttempt,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
-            => MakeTask(existing, input, recoveryRemaining: null, causedByFeedbackId, causedByFailedTaskId);
+            => MakeTask(existing, input, stageAttempt, recoveryRemaining: null, causedByFeedbackId, causedByFailedTaskId);
 
         internal static TaskRun MakeContinuationTask(
             IEnumerable<TaskRun> existing,
             TaskDefinition input,
+            int stageAttempt,
             int recoveryRemaining,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
         {
             ValidateContinuation(input, recoveryRemaining);
 
-            return MakeTask(existing, input, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
+            return MakeTask(existing, input, stageAttempt, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
         }
 
         internal static void ValidateContinuation(TaskDefinition input, int recoveryRemaining)
@@ -181,6 +183,7 @@ public static class TaskRunExtensions
         private static TaskRun MakeTask(
             IEnumerable<TaskRun> existing,
             TaskDefinition input,
+            int stageAttempt,
             int? recoveryRemaining,
             string? causedByFeedbackId,
             string? causedByFailedTaskId)
@@ -194,7 +197,7 @@ public static class TaskRunExtensions
             var classification = DeriveClassification(input.Uses, requiredFiles);
             return new TaskRun
             {
-                Id = $"{input.Id}.{attempt}",
+                Id = TaskRunId(input.Id, stageAttempt, attempt),
                 DefinitionId = input.Id,
                 Attempt = attempt,
                 Title = input.Title,
@@ -212,6 +215,11 @@ public static class TaskRunExtensions
                 CausedByFailedTaskId = causedByFailedTaskId
             };
         }
+
+        private static string TaskRunId(string definitionId, int stageAttempt, int taskAttempt) =>
+            stageAttempt == 1
+                ? $"{definitionId}.{taskAttempt}"
+                : $"{definitionId}.s{stageAttempt}.{taskAttempt}";
     }
 
     public static TaskDefinition ToDefinition(this TaskRun task) => new(
