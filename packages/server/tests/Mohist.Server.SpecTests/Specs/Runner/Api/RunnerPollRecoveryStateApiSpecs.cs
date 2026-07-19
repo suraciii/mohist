@@ -25,7 +25,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
-    public async Task Poll_PreservesExplicitNullAndNumericRecoveryState()
+    public async Task Poll_PreservesCompletionContractAndRecoveryState()
     {
         var projectId = $"runner-recovery-{Guid.NewGuid():N}";
         var workflowRunId = $"wr-poll-recovery-{Guid.NewGuid():N}";
@@ -43,6 +43,10 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             var fresh = await PollAsync(runnerId);
             Assert.True(fresh.TryGetProperty("recoveryRemaining", out var freshState));
             Assert.Equal(JsonValueKind.Null, freshState.ValueKind);
+            using var expectJson = JsonDocument.Parse(fresh.GetProperty("expect").GetString()!);
+            var marker = expectJson.RootElement.GetProperty("markers")[0];
+            Assert.Equal("review.md", marker.GetProperty("path").GetString());
+            Assert.Equal("<promise>FAIL</promise>", marker.GetProperty("failIf").GetString());
 
             using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
@@ -150,9 +154,21 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
     private async Task SeedWorkflowAsync(string projectId, string workflowRunId, RecoveryDefinition recovery)
     {
+        var expect = new Dictionary<string, JsonElement?>
+        {
+            ["markers"] = JsonSerializer.SerializeToElement(new[]
+            {
+                new
+                {
+                    path = "review.md",
+                    oneOf = new[] { "<promise>PASS</promise>", "<promise>FAIL</promise>" },
+                    failIf = "<promise>FAIL</promise>",
+                },
+            }),
+        };
         var definition = new WorkflowDefinition(
             "spec/recovery-poll",
-            [new StageDefinition("check", [new TaskDefinition("review", "Review", "spec/review", Recovery: recovery)], [])]);
+            [new StageDefinition("check", [new TaskDefinition("review", "Review", "spec/review", Expect: expect, Recovery: recovery)], [])]);
         var factory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using (var db = await factory.CreateDbContextAsync())
         {
