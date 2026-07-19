@@ -135,7 +135,8 @@ public static class RunnerRoutes
                     work.AgentJobId,
                     AgentSessionId: work.AgentSessionId,
                     Recovery: work.Recovery,
-                    RecoveryRemaining: work.RecoveryRemaining)).ToList()));
+                    RecoveryRemaining: work.RecoveryRemaining,
+                    Expect: work.Expect)).ToList()));
         });
 
         // Dedicated runner config channel. Separate from /poll so runner-side
@@ -677,7 +678,8 @@ public record WorkDispatchResponse(
     /// </summary>
     string? AgentSessionId = null,
     string? Recovery = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
+    string? Expect = null);
 
 /// <summary>
 /// Poll response carrying zero or more dispatches. Replaces the old single-
