@@ -124,7 +124,7 @@ public static partial class WorkflowRoutes
             IGrainFactory grains,
             WorkflowQuerier reader) =>
         {
-            if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
+            if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.Stop) is { } failure)
                 return failure;
             try
             {
