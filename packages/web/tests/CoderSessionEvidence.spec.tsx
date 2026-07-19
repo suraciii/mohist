@@ -230,7 +230,7 @@ afterEach(() => {
   queryClients.length = 0
 })
 describe('Coder Session evidence view — region contract', () => {
-  it('renders the task-identity and current-status region above the transcript scroll container', async () => {
+  it('renders the task-identity and current-status region at the top of the transcript scroll container', async () => {
     const { container } = renderPage('/issues/123/workflow/sessions/build')
 
     await waitFor(() => {
@@ -243,7 +243,7 @@ describe('Coder Session evidence view — region contract', () => {
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(header).not.toBeNull()
     expect(scrollContainer).not.toBeNull()
-    expect(header!.compareDocumentPosition(scrollContainer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(scrollContainer!.firstElementChild).toBe(header)
   })
 
   it('omits the errors region when no failure evidence is present', async () => {
@@ -336,7 +336,7 @@ describe('Coder Session evidence view — region contract', () => {
     expect(errorsRegion!.getAttribute('data-tool-error-count')).toBe('0')
   })
 
-  it('places the errors region between usage summary and transcript scroll container', async () => {
+  it('places the errors region after the usage summary inside the transcript scroll container', async () => {
     mocks.metadata = baseCompletedMetadata({
       status: 'failed',
       statusKind: 'failed',
@@ -366,7 +366,7 @@ describe('Coder Session evidence view — region contract', () => {
     expect(header).not.toBeNull()
 
     expect(usage!.compareDocumentPosition(errorsRegion!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(errorsRegion!.compareDocumentPosition(scrollContainer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(scrollContainer!.contains(errorsRegion!)).toBe(true)
     expect(header!.textContent).not.toContain('tokens')
   })
 
@@ -439,7 +439,7 @@ describe('Coder Session evidence view — region contract', () => {
     expect(errorsRegion).toBeNull()
     expect(scrollContainer).not.toBeNull()
 
-    expect(header!.compareDocumentPosition(scrollContainer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(scrollContainer!.firstElementChild).toBe(header)
   })
 
   it('keeps the errors region above the transcript even when no usage summary is present', async () => {
@@ -480,7 +480,7 @@ describe('Coder Session evidence view — region contract', () => {
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(errorsRegion).not.toBeNull()
     expect(scrollContainer).not.toBeNull()
-    expect(errorsRegion!.compareDocumentPosition(scrollContainer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(scrollContainer!.contains(errorsRegion!)).toBe(true)
   })
 })
 
