@@ -58,6 +58,18 @@ attempt。哪些字段构成「定义」在 `ToDefinition()` 一处收敛，执�
 `recoveryRemaining` 显式为 `null`，runner 按声明的 `budget` 初始化本轮，自动恢复循环
 重新可用。失败的 attempt 及其已消耗的数值状态保持不变。
 
+## Stage 重跑不复用 TaskRun 身份
+
+`TaskRun` 的执行身份由 definition id、Stage attempt 与 task attempt 组成。首个 Stage
+attempt 保持现有的 `{definitionId}.{taskAttempt}` 格式；从第二次起使用
+`{definitionId}.s{stageAttempt}.{taskAttempt}`。例如首次 build task 是 `T-001.1`；同一
+Stage 内人工 retry 是 `T-001.2`；重跑 build 后的首次 task 是 `T-001.s2.1`。
+
+`rerun-from-stage` 丢弃旧 Stage 的可见 task 历史，但不能让 Stage attempt 倒退或让新的
+TaskRun 复用旧 identity。这样默认以 Work ID 命名的 Workflow AgentSession 总是一个新的
+逻辑 Session，不会继承已失效 attempt 的 physical binding 或工作目录。显式 `session`
+名称仍由 workflow 定义负责其复用语义。
+
 ## Runner executor 流程
 
 ```
