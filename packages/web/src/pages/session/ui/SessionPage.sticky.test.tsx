@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -27,6 +27,65 @@ const mocks = {
     isThinking: false,
     isStreaming: false,
   },
+}
+
+interface IntersectionObserverRecord {
+  callback: IntersectionObserverCallback
+  options: IntersectionObserverInit
+  observer: IntersectionObserverStub
+}
+
+let intersectionObserverRecords: IntersectionObserverRecord[] = []
+
+class IntersectionObserverStub {
+  readonly root: Element | Document | null
+  readonly rootMargin: string
+  readonly thresholds: readonly number[]
+  readonly observedTargets: Element[] = []
+  disconnected = false
+
+  constructor(callback: IntersectionObserverCallback, options: IntersectionObserverInit = {}) {
+    this.root = options.root ?? null
+    this.rootMargin = options.rootMargin ?? '0px'
+    this.thresholds = Array.isArray(options.threshold)
+      ? options.threshold
+      : [options.threshold ?? 0]
+    intersectionObserverRecords.push({ callback, options, observer: this })
+  }
+
+  observe(target: Element) {
+    this.observedTargets.push(target)
+  }
+
+  unobserve(target: Element) {
+    const index = this.observedTargets.indexOf(target)
+    if (index >= 0) this.observedTargets.splice(index, 1)
+  }
+
+  disconnect() {
+    this.disconnected = true
+    this.observedTargets.length = 0
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+}
+
+function getIntersectionObserverRecord() {
+  const record = intersectionObserverRecords[0]
+  if (!record) throw new Error('IntersectionObserver was not registered')
+  return record
+}
+
+function reportHeaderIntersection(target: Element, intersectionRatio: number) {
+  const record = getIntersectionObserverRecord()
+  act(() => {
+    record.callback(
+      [{ target, intersectionRatio } as IntersectionObserverEntry],
+      record.observer as unknown as IntersectionObserver,
+    )
+  })
 }
 
 const sessionPageDependencies: SessionPageDependencies = {
@@ -214,6 +273,8 @@ function setupDefaultMocks() {
 describe('SessionPage sticky recovery bar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    intersectionObserverRecords = []
+    vi.stubGlobal('IntersectionObserver', IntersectionObserverStub)
     setupDefaultMocks()
   })
 
@@ -276,37 +337,74 @@ describe('SessionPage sticky recovery bar', () => {
     expect(reset).not.toBeNull()
   })
 
-  it('renders the sticky title strip with identity and status inside the scroll container', async () => {
+  it('does not render the sticky title before the first observer callback', async () => {
+    const { container, unmount } = await renderPage()
+    const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
+    expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid="session-status-badge"]')).toHaveLength(1)
+
+    const record = getIntersectionObserverRecord()
+    expect(record.options.root).toBe(scrollContainer)
+    expect(record.options.threshold).toBe(0)
+    expect(record.observer.observedTargets).toEqual([header])
+
+    unmount()
+    expect(record.observer.disconnected).toBe(true)
+  })
+
+  it('mounts the sticky title with identity, status, and turns when the observer reports the header out of view', async () => {
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
     expect(scrollContainer).not.toBeNull()
-
+    expect(header).not.toBeNull()
     await waitFor(() => {
-      const title = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
-      if (!title) throw new Error('sticky title not rendered yet')
-      if (!title.textContent?.includes('2 turns')) throw new Error('turn count not resolved yet')
+      expect(container.querySelector('[data-testid="session-header-turn-count"]')?.getAttribute('data-turn-count')).toBe('2')
     })
+
+    reportHeaderIntersection(header!, 0)
 
     const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
     expect(stickyTitle).not.toBeNull()
-
-    const className = stickyTitle!.className
-    expect(className).toContain('sticky')
-    expect(className).toContain('top-0')
-    expect(className).toContain('bg-background')
-
+    expect(stickyTitle!.className).toContain('sticky')
+    expect(stickyTitle!.className).toContain('top-0')
+    expect(stickyTitle!.className).toContain('bg-background')
     expect(stickyTitle!.textContent).toContain('session-1')
     expect(stickyTitle!.textContent).toContain('Completed')
     expect(stickyTitle!.textContent).toContain('2 turns')
-    expect(stickyTitle!.textContent).not.toContain('tokens')
-    expect(stickyTitle!.textContent).not.toContain('ctx')
+    expect(stickyTitle!.querySelectorAll('[data-testid="session-status-badge"]')).toHaveLength(1)
+    expect(stickyTitle!.querySelector('button')).toBeNull()
+    expect(stickyTitle!.querySelector('[data-testid^="session-header-"]')).toBeNull()
+  })
+
+  it('unmounts the sticky title when the observer reports the header has re-entered', async () => {
+    const { container } = await renderPage()
+    const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
+    expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+
+    reportHeaderIntersection(header!, 0)
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).not.toBeNull()
+
+    reportHeaderIntersection(header!, 0.5)
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).toBeNull()
+
+    reportHeaderIntersection(header!, 0)
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).not.toBeNull()
   })
 
   it('keeps the outer session header non-sticky — only the title strip and recovery bar are sticky inside the scroll container', async () => {
     const { container } = await renderPage()
 
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
     expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+    reportHeaderIntersection(header!, 0)
 
     const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
     expect(stickyTitle).not.toBeNull()
@@ -338,7 +436,10 @@ describe('SessionPage sticky recovery bar', () => {
   it('the sticky title strip is the first child of the transcript scroll container and the recovery bar is offset below it', async () => {
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
     expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+    reportHeaderIntersection(header!, 0)
 
     const children = Array.from(scrollContainer!.children)
     expect(children.length).toBeGreaterThan(0)
@@ -371,7 +472,10 @@ describe('SessionPage sticky recovery bar', () => {
 
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
     expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+    reportHeaderIntersection(header!, 0)
 
     const recoveryBar = scrollContainer!.querySelector('[data-testid="session-recovery-bar"]')
     const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')

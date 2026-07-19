@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon } from 'lucide-react'
 import {
@@ -192,6 +192,7 @@ export function SessionDetailShell({
 
   // ── All hooks must be before any early return ──
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const { locate } = useTranscriptLocate({ scrollContainerRef })
   const failedTools = selectFailedToolCalls(displayTurns)
@@ -388,6 +389,7 @@ export function SessionDetailShell({
       siblingNav={siblingNav}
       isRunning={isRunning}
       cancel={cancel}
+      headerRef={headerRef}
     />
   )
 
@@ -404,7 +406,9 @@ export function SessionDetailShell({
           className="flex-1 overflow-y-auto min-w-0 min-h-[120px] md:min-h-0"
           data-testid="session-transcript-scroll-container"
         >
-          <StickySessionTitle
+          <ScrollEngagedStickyTitle
+            headerRef={headerRef}
+            scrollContainerRef={scrollContainerRef}
             meta={meta}
             statusKind={displayStatusKind}
             turnCount={displayTurnCount}
@@ -559,6 +563,7 @@ function SessionHeader({
   siblingNav,
   isRunning,
   cancel,
+  headerRef,
 }: {
   backPath: string
   backLabel: string
@@ -571,6 +576,7 @@ function SessionHeader({
   siblingNav?: React.ReactNode
   isRunning: boolean
   cancel: SessionDataSourceResult['cancel']
+  headerRef: RefObject<HTMLDivElement | null>
 }) {
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
@@ -610,6 +616,7 @@ function SessionHeader({
 
   return (
     <div
+      ref={headerRef}
       data-testid="session-header"
       className="border-b border-border bg-background px-4 py-2 md:py-3 shrink-0 min-w-0"
     >
@@ -772,6 +779,47 @@ function SessionHeader({
       )}
 
     </div>
+  )
+}
+
+function ScrollEngagedStickyTitle({
+  headerRef,
+  scrollContainerRef,
+  meta,
+  statusKind,
+  turnCount,
+}: {
+  headerRef: RefObject<HTMLDivElement | null>
+  scrollContainerRef: RefObject<HTMLDivElement | null>
+  meta: import('../../../entities/coder-session').SessionMetadata
+  statusKind: StatusKind
+  turnCount: number
+}) {
+  const [engaged, setEngaged] = useState(false)
+
+  useEffect(() => {
+    const header = headerRef.current
+    const scrollContainer = scrollContainerRef.current
+    if (!header || !scrollContainer || typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setEngaged(entry.intersectionRatio < 0.001)
+    }, {
+      root: scrollContainer,
+      threshold: 0,
+    })
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [headerRef, scrollContainerRef])
+
+  if (!engaged) return null
+
+  return (
+    <StickySessionTitle
+      meta={meta}
+      statusKind={statusKind}
+      turnCount={turnCount}
+    />
   )
 }
 

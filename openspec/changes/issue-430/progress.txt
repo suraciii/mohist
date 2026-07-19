@@ -105,6 +105,129 @@ Downstream notes:
   `useNow`-backed local in the call site — the helper's `now` argument
   already accepts whatever value the caller provides.
 
+## T-003 — Sticky identity strip scroll-engaged via IntersectionObserver wrapper (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Added a second ref `headerRef: RefObject<HTMLDivElement | null>` alongside the
+    existing `scrollContainerRef`, and threaded it through `<SessionHeader
+    headerRef={...}>` so the outer header element (the `<div
+    data-testid="session-header">`) is directly observable from the wrapper.
+  - Introduced `ScrollEngagedStickyTitle` (just above `StickySessionTitle` in
+    the same file, not exported — the DI seam `SessionDetailShellComponents`
+    only swaps the inner `SessionTranscriptLayout`/etc.). It owns the `engaged`
+    boolean (`useState(false)`) and an `IntersectionObserver` registered on the
+    header with `root: scrollContainerRef.current`, `threshold: 0`. On each
+    callback it sets `engaged = entry.intersectionRatio < 0.001`. Cleanup is
+    `observer.disconnect()` (we never call `observe`/`unobserve` against more
+    than one element, so `disconnect` is the simplest correct teardown).
+  - When `engaged === false` the wrapper returns `null` (no DOM, no layout
+    contribution). When `engaged === true` it renders the existing
+    `StickySessionTitle` with the same three props the call site previously
+    passed (`meta`, `statusKind`, `turnCount`). The inner component itself is
+    untouched — its signature, its `data-testid="session-sticky-title"`, its
+    classes (`sticky top-0 z-20 bg-background ...`) and its visible content
+    (session name + status + turn count) are exactly the same.
+  - The wrapper degrades gracefully when `IntersectionObserver` is unavailable
+    on the runtime (`typeof IntersectionObserver === 'undefined'` short-circuit)
+    — it just renders `null`. This isn't reachable in our targets (Chromium +
+    the scroll-engaged prod path) but it keeps jsdom out of trouble if any
+    future refactor drops the polyfill.
+- `packages/web/src/pages/session/ui/SessionPage.sticky.test.tsx`:
+  - Installed a tiny `vi.stubGlobal('IntersectionObserver', IntersectionObserverStub)`
+    in `beforeEach`. The stub class:
+    - Records `(callback, options, observer)` into a per-test array and
+      appends observed targets.
+    - Implements `observe`, `unobserve`, `disconnect`, `takeRecords` so the
+      wrapper's teardown assertions stay honest (`observer.disconnected === true`
+      after unmount).
+  - New helper `reportHeaderIntersection(header, ratio)` wraps `act(() => …)`
+    around the recorded callback so the React state update driven by the
+    observer stays within react-testing-library's batching.
+  - Three replacement / new scenarios per the task brief:
+    - `does not render the sticky title before the first observer callback`
+      asserts that with no callback fired yet, the
+      `[data-testid="session-sticky-title"]` element is absent from the scroll
+      container and only one `session-status-badge` (the outer header's) is in
+      the document. Also asserts the observer was registered with `root ===
+      scrollContainer` and `threshold === 0`, observed `[header]`, and that
+      `disconnect()` ran on unmount.
+    - `mounts the sticky title with identity, status, and turns when the
+      observer reports the header out of view` reports `intersectionRatio: 0`
+      and asserts the strip now mounts inside the scroll container, carries
+      `sticky top-0 bg-background` classes, contains `session-1`, `Completed`,
+      `2 turns`, exactly one status badge, and no `<button>` or
+      `session-header-*` children (closing the spec's "only name, status,
+      turns" invariant at the structural level too).
+    - `unmounts the sticky title when the observer reports the header has
+      re-entered` flips `ratio` between `0` and `0.5` to verify the wrapper's
+      `engaged` boolean (de-)mounts in lockstep with the observer.
+  - The pre-existing `keeps the outer session header non-sticky`,
+    `the sticky title strip is the first child of the transcript scroll
+    container`, and `keeps the recovery bar visible … (scroll-stick)` tests
+    needed `reportHeaderIntersection(header, 0)` injected before their
+    DOM-shape assertions to flip `engaged` to true — otherwise the strip is
+    correctly hidden by this task's spec contract and the older assertions
+    couldn't find it. The injected callback respects the same wrapper, just
+    forward-runs the scroll-engaged state to make those assertions check the
+    mounted DOM shape rather than re-assert the spec invariant.
+- `packages/web/tests/CoderSessionCompactViewport.spec.tsx` and
+  `packages/web/tests/CoderSessionEvidence.spec.tsx`:
+  - Both contained a "sticky title is inside the scroll container" assertion
+    that was pinning on the always-mounted strip shape. Replaced with a
+    matching "sticky title is NOT in the DOM on first render" assertion
+    driven by the same T-003 invariant. The
+    `preserves all existing region anchors` test in
+    `CoderSessionCompactViewport.spec.tsx` had `session-sticky-title` in the
+    expected regions list — removed (it no longer belongs to the always-on
+    region-anchor contract; the strip is a scroll-engaged consequence of the
+    header being out of view).
+
+Decisions / gotchas for downstream tasks:
+
+- The wrapper deliberately does NOT receive the
+  `ScrollEngagedStickyTitle`-side callback as a passive "engaged" prop — T-002
+  owns the metadata row, T-004 owns Cancel, T-006 owns sibling nav. None of
+  them need to know about scroll engagement; the strip is a self-contained
+  sub-region of the scroll container. Don't add an "engaged" prop to
+  `StickySessionTitle` later; the wrapper stays the engagement owner.
+- The wrapper's effect captures `headerRef.current` and
+  `scrollContainerRef.current` once via closure. They are stable across renders
+  (both are `useRef`), so the effect's dependency array
+  (`[headerRef, scrollContainerRef]`) only re-fires when the refs' identity
+  changes — which never happens for the lifetime of `SessionDetailShell`. No
+  re-registration needed even if the header's height changes (IntersectionObserver
+  sees a new `intersectionRatio` automatically; no ResizeObserver required,
+  per design D2's "defer ResizeObserver" note).
+- `IntersectionObserver` is not available in jsdom without a polyfill. We stub
+  it per-test (`vi.stubGlobal('IntersectionObserver', IntersectionObserverStub)`)
+  in `beforeEach`. Vitest's auto-restore in `afterEach` (per `design/testing.md`)
+  restores the global, so no manual cleanup is needed.
+- `vi.stubGlobal` does NOT need a corresponding `vi.unstubGlobals` because
+  Vitest's `unstubGlobals: true` global config (per
+  `design/testing.md` "Restore stubs: vitest auto-restore") does that
+  automatically. Don't add redundant `vi.unstubGlobals()` calls in this file
+  or in any future sticky / intersection-observer spec.
+- The "first render -> strip not in DOM" invariant holds because the wrapper's
+  initial state is `false` and the observer's callback only fires AFTER the
+  effect runs (mounted, observed, then async intersection dispatch). No
+  `display: none` / `visibility: hidden` heuristic is needed; the node truly is
+  not in the DOM tree. `querySelector('[data-testid="session-sticky-title"]')`
+  returns `null` until the callback arrives, which is what the new sticky tests
+  assert.
+- The existing `keeps the outer session header non-sticky` test now also
+  calls `reportHeaderIntersection` because it wants to check the strip's
+  `sticky` class — the class is on a node that only exists post-engagement.
+  This is the right test surface for a non-sticky-header invariant now that
+  the strip is conditional.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4902 tests, was 4900).
+  `npm run check:fsd` and `npm run check:test-boundaries` both pass.
+  No tests were deleted; the two CoderSessionCompactViewport/CoderSessionEvidence
+  tests were edited in place (replacement of the obsolete expectation with the
+  matching new one), keeping the test count moved across the boundary.
+
 ## T-002 — SessionHeader single-row metadata rewrite + copy-on-click session id (done)
 
 What landed:

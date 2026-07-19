@@ -461,7 +461,6 @@ describe('Coder Session compact viewport — structural contract', () => {
     const expected = [
       'session-header',
       'session-transcript-scroll-container',
-      'session-sticky-title',
       'session-recovery-bar',
       'session-recovery-compact',
       'session-recovery-reset',
@@ -509,17 +508,16 @@ describe('Coder Session compact viewport — structural contract', () => {
     expect(recoveryBar).not.toBeNull()
   })
 
-  it('keeps the sticky title inside the transcript scroll container (region order preserved)', async () => {
+  it('does not render the sticky title before scroll engagement', async () => {
     const { container } = renderPage()
 
     await waitFor(() => {
-      if (!container.querySelector('[data-testid="session-sticky-title"]')) {
+      if (!container.querySelector('[data-testid="session-transcript-scroll-container"]')) {
         throw new Error('not ready yet')
       }
     })
 
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]') as HTMLElement
-    const stickyTitle = scrollContainer.querySelector('[data-testid="session-sticky-title"]')
-    expect(stickyTitle).not.toBeNull()
+    expect(scrollContainer.querySelector('[data-testid="session-sticky-title"]')).toBeNull()
   })
 })

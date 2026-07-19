@@ -757,18 +757,17 @@ describe('Coder Session evidence view — action preservation', () => {
     expect(recoveryBar).not.toBeNull()
   })
 
-  it('keeps the sticky title inside the transcript scroll container', async () => {
+  it('does not render the sticky title before scroll engagement', async () => {
     const { container } = renderPage('/issues/123/workflow/sessions/build')
 
     await waitFor(() => {
-      if (!container.querySelector('[data-testid="session-sticky-title"]')) {
+      if (!container.querySelector('[data-testid="session-transcript-scroll-container"]')) {
         throw new Error('not ready yet')
       }
     })
 
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
-    const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
-    expect(stickyTitle).not.toBeNull()
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).toBeNull()
   })
 })
 
