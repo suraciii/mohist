@@ -146,10 +146,15 @@ expectation 明细保存在各自所属模型中，不复制到 Action output。
 `mohist/create-github-pr`、`mark-github-pr-ready`、`push`、`merge-github-pr` 都是普通
 Workflow Action。
 
-- `create-github-pr`：推送 Workflow branch，创建或更新 draft PR，输出稳定 PR 身份。
+- `push`：唯一负责把当前 workspace 的已提交 HEAD 发布到远端 workflow branch。workflow
+  branch 由一个 WorkflowRun 独占，因此 Profile 使用强制更新，不依赖 remote-tracking ref。
+- `create-github-pr`：只创建或更新 draft PR，输出稳定 PR 身份；它不执行 Git 操作，也不
+  决定哪个提交应被发布。
 - `mark-github-pr-ready`：把 draft PR 标记为 ready；已经 ready 时保持幂等。
-- `push`：把本地 branch 同步到远端 PR head，可以使用 `forceWithLease`。
 - `merge-github-pr`：以 squash 方式合并 PR；执行 merge 前必须等待 PR checks。
+
+发布、PR 元数据和 merge 是三个独立 task，因此失败边界也独立：push 失败只重试 push，
+PR 操作失败只重试 PR，merge 恢复只处理 merge 自己的失败。
 
 等待 PR checks 是 merge Action 的内部前置条件，不是 stage-level check。它轮询
 `gh pr view --json statusCheckRollup`。checks 为空时在 120 秒 grace window 内等待；

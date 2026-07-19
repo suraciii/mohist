@@ -18,7 +18,7 @@ Workflow Definition 是 Workflow Profile 的核心内容：声明阶段、任务
 
 ```text
 WorkflowDefinition(Approval?, Stages[])
-Approval(FeedbackTask: Task)
+Approval(FeedbackTasks: Task[])
 Stage(Name, RequiresApproval = false, LockBehavior?, Resources[], Tasks[], Checks[])
 Task(Id, Uses, Title?, With?, Expect?, Artifacts?, SetVars?, Recovery?)
 Expect(Files[]: FileExpectation(Path),
@@ -32,7 +32,8 @@ Check(Id, Uses, Title?, With?)
   （JSON blob），内部结构由各 Action 契约定义，definition 层不校验。
 - `Expect` 是一等构造，位于 task 顶层，不进入 `With`。执行分工（executor 验证、合成
   promise output）见 [`actions.md`](actions.md) 与 [`task-dispatch.md`](task-dispatch.md)。
-- 审批反馈任务就是 `Task`，不设独立类型。
+- 审批反馈任务就是有序的 `Task[]`，不设独立类型。全部完成后，当前 stage 的 checks
+  重新执行。
 
 ### 不属于模型的
 
@@ -68,6 +69,7 @@ stages[1].tasks[0].recovery.handlers[0]: handler 需要声明 tasks 或 retrySel
 | 位置 | 规则 |
 |---|---|
 | 顶层 | 只允许 `approval`、`stages`；`stages` 非空 |
+| approval.feedback | `tasks` 非空；每项遵守 task 规则 |
 | stage | `stage` 名非空且在 definition 内唯一；`tasks` 非空 |
 | stage | `lockBehavior` 仅允许 `sequential`，且必须与非空 `resources` 同时出现；`resources` 不得单独出现 |
 | task | `id` 非空且在所属任务列表内唯一；`uses` 必填；`title` 可选 |
