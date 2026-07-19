@@ -212,3 +212,58 @@
   classifier (`widgets/issue-workflow/ui/milestones.ts`) still uses
   `isAcpAgentTask` — T-002 did not touch that file, but T-004's class
   rename (or T-005's spec rename) will.
+
+## T-001 verification rerun
+
+This rerun was triggered to:
+1. Plumb the launch-time model/variant snapshot from `AgentLauncher` to
+   `AgentJobInput` (the existing T-001 code had `Model: null` hard-coded
+   in `AgentLauncher.cs:94` — the snapshot was incomplete). Added
+   `AgentLauncher.ResolveModelAndVariant(JsonElement? agentConfig)` which
+   reads `{model, variant}` from the Agent `AgentConfig` JSON element;
+   `Variant` is only emitted when `Model` is also present (the same
+   model-bound invariant the read-back applies).
+2. Add `packages/runner/tests/agent-job-executor.spec.ts` covering the
+   runtime-stubbed ACs:
+   - runTurn is called directly with a flat Agent-owned request (target,
+     composed prompt, options.model, options.variant)
+   - the legacy `{kind, status, runtimeSessionId, model, variant, text,
+     error}` envelope is preserved on success and failure
+   - dispatch.payload is the launch-time snapshot — executor never reads
+     the Agent definition; a second call with a different dispatch uses
+     the new snapshot
+   - attachAgentSession is called once on success with the new
+     runtimeSessionId, workDir, workId, agentJobId
+   - the existing binding (from getAgentSession) becomes the
+     `target.runtimeSessionId` on a follow-up dispatch; the runtime does
+     not fabricate a new physical Session
+   - attach failure is best-effort (the runtime turn already settled)
+   - missing-session result carries `hint: "reset"`
+   - non-agent-job dispatch is rejected without calling runTurn
+   - prompt/model/workspace.path validation rejects malformed payloads
+3. The `AgentJobExecutor` reads `getAgentSession` via the existing
+   `ServerConnection.getAgentSession` (already wired in #407) — no new
+   RPC, no new wire. The test fake connection returns a camelCase
+   `runtimeSessionId` to match `AgentSession` (the runner-side type uses
+   camelCase; the server HTTP response is serialized via the same shape).
+
+### Gotchas / regressions watched for
+- The new test for "attaches the runtimeSessionId from an existing
+  binding on a follow-up dispatch" asserts `runtimeSessionId: "ses_existing"`
+  reaches `runTurn.target`. The first attempt failed because the test
+  fake connection returned PascalCase keys (`AgentSessionId`/
+  `RuntimeSessionId`); the executor accesses `opened?.runtimeSessionId`
+  (camelCase, matches `AgentSession` type). Fixed the fake.
+- `runner-host-opencode-runtime.spec.ts > "AgentJob path drives the
+  AgentJobExecutor, not the action registry"` previously asserted that
+  the registry was NOT invoked. The current implementation matches that
+  expectation; the existing rewrite is preserved.
+- `npm run typecheck -w packages/runner` and
+  `npm run typecheck:tests -w packages/runner` both pass.
+- `packages/runner/tests/workflow-profile.spec.ts` and
+  `packages/runner/tests/external-process-guard.test.ts` are
+  pre-existing failures unrelated to T-001 (verified by stash/rerun).
+  workflow-profile's `process.cwd()`-relative path resolves to
+  `workspaces/server/...` instead of `workspaces/issue-410/server/...`;
+  external-process-guard's spawn-opencode assertion fails because
+  `opencode` is not on the path of the CI runner.
