@@ -100,6 +100,39 @@ public class IssueQuerierSpecs
     }
 
     [Fact]
+    public async Task Reads_CanBeParentFromTheAuthoritativeRelationshipRule()
+    {
+        var project = NewProject("parent-eligibility");
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await SeedIssueAsync(db, project.Id, 1, "Eligible");
+        await SeedIssueAsync(db, project.Id, 2, "Started", workflowRunId: "wr_started");
+        await SeedIssueAsync(db, project.Id, 3, "Child", parentIssueNumber: 1);
+        var started = db.Issues.Single(row => row.ProjectId == project.Id && row.Number == 2);
+        var startedIssue = IssueStore.Deserialize(started.State)!;
+        started.State = IssueStore.Serialize(new DomainIssue
+        {
+            ProjectId = startedIssue.ProjectId,
+            Number = startedIssue.Number,
+            Title = startedIssue.Title,
+            Status = startedIssue.Status,
+            Priority = startedIssue.Priority,
+            CreatedAt = startedIssue.CreatedAt,
+            UpdatedAt = startedIssue.UpdatedAt,
+            WorkflowRunId = startedIssue.WorkflowRunId,
+            HasWorkflowStarted = true,
+            Labels = new Dictionary<string, string>(startedIssue.Labels, StringComparer.Ordinal),
+        });
+        await db.SaveChangesAsync();
+
+        var issues = await scope.ServiceProvider.GetRequiredService<IssueQuerier>().ListAsync(project.Id, project);
+
+        Assert.True(issues.Single(issue => issue.Number == 1).CanBeParent);
+        Assert.False(issues.Single(issue => issue.Number == 2).CanBeParent);
+        Assert.False(issues.Single(issue => issue.Number == 3).CanBeParent);
+    }
+
+    [Fact]
     public async Task ChildIssuesSummary_ComputesPerStatusBreakdownFromSameGroupBy()
     {
         var project = NewProject("status-breakdown");

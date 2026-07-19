@@ -63,6 +63,23 @@ describe('KanbanBoard - repository filter reachability', () => {
       expect(repoFilter.value).toBe('')
     })
 
+    it('lists declared repositories even when no issue is assigned to one yet', () => {
+      const issues = [makeIssue({ number: 1, repositoryName: 'web' })]
+      renderBoard(
+        <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />,
+        [
+          { name: 'web', gitUrl: 'git@x:web.git', baseBranch: 'main', isDefault: true },
+          { name: 'infra', gitUrl: 'git@x:infra.git', baseBranch: 'main', isDefault: false },
+        ],
+      )
+
+      const repoFilter = within(getDesktopFilterBar()).getByTestId<HTMLSelectElement>('repository-filter')
+      expect(Array.from(repoFilter.options, (option) => option.value)).toEqual(['', 'infra', 'web'])
+
+      fireEvent.change(repoFilter, { target: { value: 'infra' } })
+      expect(screen.queryByText('#1')).not.toBeInTheDocument()
+    })
+
     it('hides the repository filter when no issues carry a persisted repository', () => {
       const issues = [
         makeIssue({ number: 1, repository: null, repositoryName: null }),

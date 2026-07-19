@@ -1,4 +1,4 @@
-import { IssueStatus, type Issue } from '../../../entities/issue'
+import type { Issue } from '../../../entities/issue'
 import type { Repository } from '../../../entities/project'
 import { ApiError } from '../../../shared/api/client'
 
@@ -11,13 +11,8 @@ const ASSIGNMENT_ERROR_CODES = [
 
 export type CreateIssueAssignmentErrorCode = (typeof ASSIGNMENT_ERROR_CODES)[number]
 
-export function isTerminalIssueStatus(status: IssueStatus): boolean {
-  return status === IssueStatus.Done || status === IssueStatus.Cancelled
-}
-
-export function isEligibleParentCandidate(issue: Pick<Issue, 'status' | 'parentIssueRef'>): boolean {
-  if (issue.parentIssueRef != null) return false
-  return !isTerminalIssueStatus(issue.status)
+export function isEligibleParentCandidate(issue: Pick<Issue, 'canBeParent'>): boolean {
+  return issue.canBeParent === true
 }
 
 export function deriveEligibleParentCandidates(issues: Issue[] | null | undefined): Issue[] {

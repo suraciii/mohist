@@ -91,6 +91,7 @@ function makeBaseIssue(overrides: Partial<Issue> = {}): Issue {
     updatedAt: '2026-01-01T00:00:00Z',
     isDraft: false,
     canStart: true,
+    canBeParent: true,
     blocker: null,
     ...overrides,
   }
@@ -329,7 +330,7 @@ describe('CreateIssueDialog non-assignment regression coverage', () => {
     await user.selectOptions(parentSelect, '5')
     expect(parentSelect.value).toBe('5')
 
-    setIssues([makeBaseIssue({ number: 5, title: 'Transitional parent', status: IssueStatus.Done })])
+    setIssues([makeBaseIssue({ number: 5, title: 'Transitional parent', status: IssueStatus.Done, canBeParent: false })])
     await queryClient.refetchQueries({ queryKey: ['issues'] })
 
     await waitFor(() => {

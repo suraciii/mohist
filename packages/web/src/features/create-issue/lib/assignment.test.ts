@@ -6,7 +6,6 @@ import {
   deriveEligibleParentCandidates,
   findDefaultRepository,
   isEligibleParentCandidate,
-  isTerminalIssueStatus,
   mapCreateIssueError,
   pickInitialRepositoryName,
 } from './assignment'
@@ -23,57 +22,33 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     updatedAt: '2026-01-01T00:00:00Z',
     isDraft: false,
     canStart: true,
+    canBeParent: true,
     blocker: null,
     ...overrides,
   }
 }
 
-describe('isTerminalIssueStatus', () => {
-  it('identifies Done and Cancelled as terminal', () => {
-    expect(isTerminalIssueStatus(IssueStatus.Done)).toBe(true)
-    expect(isTerminalIssueStatus(IssueStatus.Cancelled)).toBe(true)
-  })
-
-  it('treats Backlog and InProgress as non-terminal', () => {
-    expect(isTerminalIssueStatus(IssueStatus.Backlog)).toBe(false)
-    expect(isTerminalIssueStatus(IssueStatus.InProgress)).toBe(false)
-  })
-})
-
 describe('isEligibleParentCandidate', () => {
-  it('accepts an active backlog issue with no parent', () => {
-    expect(isEligibleParentCandidate({ status: IssueStatus.Backlog, parentIssueRef: null })).toBe(true)
+  it('accepts an issue the server marks as eligible', () => {
+    expect(isEligibleParentCandidate({ canBeParent: true })).toBe(true)
   })
 
-  it('rejects issues that are themselves children', () => {
-    expect(isEligibleParentCandidate({
-      status: IssueStatus.Backlog,
-      parentIssueRef: { number: 7, title: 'Parent' },
-    })).toBe(false)
-  })
-
-  it('rejects terminal issues even when they have no parent', () => {
-    expect(isEligibleParentCandidate({ status: IssueStatus.Done, parentIssueRef: null })).toBe(false)
-    expect(isEligibleParentCandidate({ status: IssueStatus.Cancelled, parentIssueRef: null })).toBe(false)
+  it('rejects an issue the server marks as ineligible', () => {
+    expect(isEligibleParentCandidate({ canBeParent: false })).toBe(false)
   })
 })
 
 describe('deriveEligibleParentCandidates', () => {
-  it('excludes terminal and child issues and sorts the remainder ascending by number', () => {
+  it('excludes server-ineligible issues and sorts the remainder ascending by number', () => {
     const candidates = deriveEligibleParentCandidates([
-      makeIssue({ number: 5, status: IssueStatus.Done }),
-      makeIssue({ number: 2, status: IssueStatus.Backlog }),
-      makeIssue({
-        number: 9,
-        status: IssueStatus.Backlog,
-        parentIssueRef: { number: 1, title: 'Parent of 9' },
-      }),
-      makeIssue({ number: 7, status: IssueStatus.Cancelled }),
-      makeIssue({ number: 4, status: IssueStatus.InProgress }),
-      makeIssue({ number: 1, status: IssueStatus.Backlog }),
+      makeIssue({ number: 5, canBeParent: false }),
+      makeIssue({ number: 2, canBeParent: true }),
+      makeIssue({ number: 9, canBeParent: false }),
+      makeIssue({ number: 4, canBeParent: false }),
+      makeIssue({ number: 1, canBeParent: true }),
     ])
 
-    expect(candidates.map((issue) => issue.number)).toEqual([1, 2, 4])
+    expect(candidates.map((issue) => issue.number)).toEqual([1, 2])
   })
 
   it('returns an empty array when the input is null, undefined, or empty', () => {

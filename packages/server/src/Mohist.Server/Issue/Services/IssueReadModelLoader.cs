@@ -148,6 +148,9 @@ public class IssueReadModelLoader : IScopedService
             WorkflowProfileId = resolvedProfileId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
+            CanBeParent = issue.Status == Domain.IssueStatus.Backlog
+                && !issue.HasWorkflowStarted
+                && issue.ParentIssueNumber is null,
             RepositoryName = issue.RepositoryRef,
             Repository = resolution.Repository,
             RepositoryProblem = resolution.Problem,
@@ -188,6 +191,7 @@ public class IssueReadModelLoader : IScopedService
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         IsDraft = issue.IsDraft,
         CanStart = issue.CanStart,
+        CanBeParent = issue.CanBeParent,
         Blocker = issue.Blocker,
         RepositoryName = issue.RepositoryName,
         Repository = issue.Repository,

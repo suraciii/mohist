@@ -90,6 +90,7 @@ function makeBaseIssue(overrides: Partial<Issue> = {}): Issue {
     updatedAt: '2026-01-01T00:00:00Z',
     isDraft: false,
     canStart: true,
+    canBeParent: true,
     blocker: null,
     ...overrides,
   }
@@ -202,14 +203,14 @@ describe('CreateIssueDialog repository assignment', () => {
 })
 
 describe('CreateIssueDialog parent assignment happy path', () => {
-  it('offers the eligible parent issues and excludes terminal and child issues', async () => {
+  it('offers only parent candidates marked eligible by the server', async () => {
     setRepositories([{ name: 'main', isDefault: true }])
     setIssues([
-      makeBaseIssue({ number: 1, title: 'Done parent', status: IssueStatus.Done }),
-      makeBaseIssue({ number: 2, title: 'Cancelled parent', status: IssueStatus.Cancelled }),
-      makeBaseIssue({ number: 3, title: 'Child of another', parentIssueRef: { number: 9, title: 'Outer' } }),
+      makeBaseIssue({ number: 1, title: 'Done parent', status: IssueStatus.Done, canBeParent: false }),
+      makeBaseIssue({ number: 2, title: 'Started parent', canBeParent: false }),
+      makeBaseIssue({ number: 3, title: 'Child of another', parentIssueRef: { number: 9, title: 'Outer' }, canBeParent: false }),
       makeBaseIssue({ number: 4, title: 'Eligible parent', status: IssueStatus.Backlog }),
-      makeBaseIssue({ number: 5, title: 'In-progress parent', status: IssueStatus.InProgress }),
+      makeBaseIssue({ number: 5, title: 'Another eligible parent', status: IssueStatus.Backlog }),
     ])
     renderAssignmentDialog()
 
@@ -219,7 +220,7 @@ describe('CreateIssueDialog parent assignment happy path', () => {
       expect(labels).toEqual([
         'No parent (ordinary issue)',
         '#4 · Eligible parent',
-        '#5 · In-progress parent',
+        '#5 · Another eligible parent',
       ])
     })
   })

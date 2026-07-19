@@ -133,6 +133,7 @@ export interface Issue {
   prerequisites?: IssuePrerequisiteSummary[]
   isDraft: boolean
   canStart: boolean
+  canBeParent?: boolean
   blocker: IssueStartBlocker | null
   drift?: BaseDriftInfo | null
   primaryEpic?: { number: number | null; title: string; status: string; priority: string } | null

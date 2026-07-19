@@ -34,6 +34,7 @@ public class IssueInfo
     public int[] PrerequisiteNumbers { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
+    public bool CanBeParent { get; set; }
     public IssueStartBlockerDto? Blocker { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;

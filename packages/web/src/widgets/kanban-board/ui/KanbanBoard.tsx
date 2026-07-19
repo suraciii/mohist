@@ -24,7 +24,7 @@ import {
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
-import { useProjectPath } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../model/stage-colors'
 
@@ -580,8 +580,15 @@ export function KanbanBoard({
   archivedCount = 0,
   runnerSummaryHook = useRunnerSummary,
 }: Props) {
+  const { projectId, projects } = useProject()
+  const project = projects?.find((candidate) => candidate.id === projectId)
   const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
-  const repositoryOptions = useMemo(() => deriveRepositoryOptions(issues), [issues])
+  const repositoryOptions = useMemo(
+    () => project?.repositories.length
+      ? project.repositories.map((repository) => repository.name).sort((a, b) => a.localeCompare(b))
+      : deriveRepositoryOptions(issues),
+    [issues, project],
+  )
 
   const queryState = useMemo(() => parseBoardQuery(getSearchParams()), [])
 
