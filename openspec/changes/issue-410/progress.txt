@@ -283,3 +283,67 @@ This rerun was triggered to:
   tests, and Server AgentJob/Launcher specs passed after the completion pass.
 - Final `npm test` passed: Server/CLI 5477 tests, Web 4738 tests, and
   Runner 1167 tests. `npm run build` also completed successfully.
+
+## T-002 verification rerun
+
+The workflow runner resumed T-002 on a fresh `mohist/run-…` workspace
+after a stale WorkflowRun snapshot from a pre-cutover workspace was
+rejected. The T-002 commit `d6a134340 T-002: converge issue-level
+AgentConfig surface to model and variant` is already present on this
+branch (1 commit ahead of `origin/mohist/run-…`) and contains every
+acceptance-criteria change. This rerun only re-verifies the landed state
+on the fresh workspace.
+
+### Re-verification observations
+- `packages/server/src/Mohist.Server/Infrastructure/AgentConfigSchema.cs`
+  holds the converged `{model, variant}` whitelist and the
+  `{type, livenessQuietThresholdMs, probeTimeoutMs, sessionStartTimeoutMs, compaction}`
+  reject set, plus `Validate`, `Project`, and `Filter` helpers used by
+  both the API boundary and the write/read-in chokepoints.
+- `IssueModelMetadata.ValidateAgentConfig` is the single helper invoked
+  by both `IssueRoutes.Crud` (POST + PATCH) and `AgentDefinitionRoutes`
+  (POST + PATCH) — the error wording stays identical across both
+  surfaces.
+- `IssueQuerier.ReadAgentConfig` projects the persisted `vars.agent`
+  through `AgentConfigSchema.Filter` so legacy keys already in storage
+  never reach the API response (acceptance: GET surfaces
+  `{model, variant}` only).
+- `IssueVariableBuilder.ProjectAgentBlocksToConvergedSurface` walks
+  every `vars.agent` / `stages.<stage>.vars.agent` after
+  `MergeAll(global, project, issue)` and re-projects the result, so any
+  legacy key carried in via the deep-merge path is dropped on the
+  dispatch side.
+- `MohistIssueWorkflowProfileBase.MergeAgentConfig` / `MergeStageAgent`
+  and `IssueWorkflowProfileStorageIntegrity.FoldAgentDataIntoBundle`
+  also route the agent block through `Filter` — the storage write path
+  no longer persists legacy keys.
+- `ConfigService.GetAgentConfigAsync` filters the agent config dict
+  before returning, so the runtime/build paths only see the converged
+  shape.
+- `ProjectWorkflowProfileManager.SetVariablesAsync` /
+  `PatchVariablesAsync` route the bundle through
+  `ProjectVariablesFilter.Sanitize`, projecting both root and per-stage
+  agent blocks down to `{model, variant}` on the project write path.
+- `packages/web/src/entities/settings/api/client.ts`
+  `updateOpencodeModel` (line 63) and `setStageModel` (line 199) write
+  `{model, variant?}` only — the `type: 'opencode'` stamping is gone.
+- `packages/web/src/entities/agent/api/client.ts`
+  `writeAgentModelAndVariant` (line 106) returns `{model, variant?}` or
+  `null` without ever spreading the previous config — legacy keys are
+  dropped before the API request.
+- `packages/web/src/pages/agent-detail/ui/AgentDetailPage.tsx` no
+  longer derives `agentType`; the Agent Config card shows Model and
+  Variant only.
+- The `mohist/opencode` `unknownKeys` diagnostic path (covered by the
+  #409 fake-runtime tests) is unchanged — legacy persisted keys still
+  surface as diagnostics when they reach an execution request.
+
+### Re-verification commands run
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build`:
+  UnitTests 1202, SpecTests 2849, ArchTests 30, Cli 1396 = 5477 passed, 0 failed.
+- `npm run typecheck -w packages/web && npm run test:run -w packages/web`:
+  340 test files, 4738 tests, 0 failed.
+- `npm run typecheck -w packages/runner && npm run test:run -w packages/runner`:
+  95 test files, 1167 tests, 0 failed.
+- No new acceptance-criteria code change was required for T-002; the
+  rerun only re-confirms the landed state on the fresh workspace.
