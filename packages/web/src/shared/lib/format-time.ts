@@ -38,3 +38,100 @@ export function formatLogTime(time: string | null): string {
     return time
   }
 }
+
+/**
+ * Status kinds the time helper recognises. Mirrors the union used by the
+ * session UI without dragging the session entity type into the shared layer
+ * (FSD: `shared/lib` cannot depend on `entities/*`).
+ */
+export type SessionTimeStatusKind =
+  | 'loading'
+  | 'live'
+  | 'finalizing'
+  | 'probing'
+  | 'completed'
+  | 'failed'
+  | 'stale'
+
+const TERMINAL_STATUS_KINDS: ReadonlySet<SessionTimeStatusKind> = new Set([
+  'completed',
+  'failed',
+  'stale',
+])
+
+const ABSOLUTE_FORMAT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+const ABSOLUTE_RELATIVE_THRESHOLD_MS = 60 * 60 * 1000
+
+export interface FormatSessionTimeInput {
+  /** The anchor timestamp being formatted. May be an ISO string, epoch ms, or Date. */
+  date: string | number | Date
+  /** Session status; controls terminal-vs-live branch. */
+  statusKind: SessionTimeStatusKind
+  /** Reference clock (epoch ms). The helper does not call `Date.now()` itself. */
+  now: number
+}
+
+export interface FormatSessionTimeOutput {
+  /** What to render inline. */
+  primary: string
+  /** What to expose via hover/focus tooltip (the complementary form). */
+  secondary: string
+}
+
+/**
+ * Status-aware absolute/relative time formatter for session views.
+ *
+ * Branches per `session-time-display/spec.md`:
+ * - Terminal (`completed` / `failed` / `stale`) past the 1-hour threshold:
+ *   primary = absolute, secondary = relative.
+ * - Terminal within the 1-hour threshold: primary = relative, secondary = absolute.
+ * - Non-terminal (`live` / `finalizing` / `probing`) at any threshold:
+ *   primary = relative, secondary = absolute.
+ *
+ * The helper is pure: it never reads the system clock; all clock input flows
+ * through the `now` argument so unit tests can vary the branch without
+ * `vi.useFakeTimers`.
+ */
+export function formatSessionTime({
+  date,
+  statusKind,
+  now,
+}: FormatSessionTimeInput): FormatSessionTimeOutput {
+  const dateMs = toEpochMs(date)
+  const absolute = ABSOLUTE_FORMAT.format(new Date(dateMs))
+  const relative = formatRelativeForSessionTime(dateMs, now)
+
+  const isTerminal = TERMINAL_STATUS_KINDS.has(statusKind)
+  const pastThreshold = now - dateMs >= ABSOLUTE_RELATIVE_THRESHOLD_MS
+
+  if (isTerminal && pastThreshold) {
+    return { primary: absolute, secondary: relative }
+  }
+  return { primary: relative, secondary: absolute }
+}
+
+/** `Intl.DateTimeFormat` instance used to render the absolute arm. */
+export const sessionTimeAbsoluteFormatter = ABSOLUTE_FORMAT
+
+function toEpochMs(date: string | number | Date): number {
+  if (date instanceof Date) return date.getTime()
+  if (typeof date === 'number') return date
+  const parsed = Date.parse(date)
+  if (!Number.isFinite(parsed)) return NaN
+  return parsed
+}
+
+function formatRelativeForSessionTime(dateMs: number, now: number): string {
+  const diffMs = Math.max(0, now - dateMs)
+  if (diffMs < 60_000) return 'just now'
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`
+  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`
+  return `${Math.floor(diffMs / 86_400_000)}d ago`
+}

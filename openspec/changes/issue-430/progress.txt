@@ -1,0 +1,104 @@
+# Issue #430 — Build progress
+
+## Codebase Patterns
+
+- `packages/web/src/shared/lib/` is the bottom FSD layer; it cannot import from
+  `entities/`, `features/`, `widgets/`, `pages/`, `app/`. Cross-layer type
+  unions (e.g. `StatusKind`) get duplicated as a focused local alias when
+  needed inside a `shared/lib` helper.
+- Web tests run under Vitest's two projects (`node` env for `*.test.ts`,
+  `jsdom` env for `*.test.tsx` and `*.spec.tsx`). The `node`-project tests
+  cannot reach DOM APIs.
+- Web tests cannot read source files via `node:fs` (`no-web-node-fs-source-read`
+  rule from `scripts/check-node-test-boundaries.ts`). Static inspection is a
+  human responsibility; runtime guarantees must come from behaviour assertions.
+- Tests under `packages/web/src/shared/lib/` follow the pure-logic convention:
+  no fake timers unless the helper owns its own `Date.now()`; for helper-level
+  determinism, all clock input flows through arguments and tests assert by
+  comparing to a formatter the test reuses (the production formatter, not a
+  separately hand-written expected string).
+- `useNow({ now })` is the established clock-injection seam in
+  `widgets/session-transcript/model/use-now.ts`. For non-React helpers (pure
+  functions) we just take `now: number` directly.
+
+## T-001 — Time formatter extraction (done)
+
+What landed:
+
+- `packages/web/src/shared/lib/format-time.ts` now exports:
+  - `formatSessionTime({ date, statusKind, now })` returning
+    `{ primary, secondary }`. Status branches per `session-time-display/spec.md`
+    matrix: terminal past-1h → absolute primary / relative secondary; terminal
+    within-1h → relative primary / absolute secondary; non-terminal at any
+    threshold → relative primary / absolute secondary.
+  - `SessionTimeStatusKind` union (locally defined so `shared/lib` does not
+    have to depend on `entities/coder-session`).
+  - `sessionTimeAbsoluteFormatter` (re-exports the frozen `Intl.DateTimeFormat`)
+    used by tests to compute expected absolute strings without depending on
+    a hand-written `Aug 17, 09:52` literal (which would break across TZs).
+- `packages/web/src/shared/lib/format-time.test.ts` extended with a new
+  `describe('formatSessionTime')` block: 18 tests covering all six matrix rows,
+  determinism (same inputs → same output; ISO string / epoch ms / Date inputs
+  are equivalent), threshold flip on changing `now` (terminal crosses the
+  1-hour boundary; live does NOT cross), the probing indicator invariant
+  (probing stays relative at any threshold), sub-minute "just now", and a
+  `vi.spyOn(Date, 'now')` clock-isolation assertion. The original four
+  `formatTime` / `formatTimeAgo` / `formatElapsedTimeAgo` / `formatLogTime`
+  describe blocks remain unchanged.
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Removed the private `formatRelativeTime`.
+  - Imported `formatSessionTime` from `@/shared/lib/format-time`.
+  - Added a small private `sessionTimeAnchorMs(meta, statusKind)` that returns
+    `max(lastActivityAt, completedAt)` for terminal statuses and
+    `lastActivityAt` directly otherwise. The helper itself never sees two
+    timestamps — the consumer computes the anchor.
+  - The `last activity` indicator now renders
+    `formatSessionTime(...).primary` inline with `secondary` as the `title`
+    attribute. The probing `Checking since <relative>` indicator now uses
+    `formatSessionTime({ date: probeSentAt, statusKind: 'probing', ... }).primary`
+    — `probing` always resolves to relative primary per the matrix, which is
+    exactly the preserved invariant from `session-time-display` requirement 3.
+
+Decisions / gotchas for downstream tasks:
+
+- The helper takes ONE timestamp (`date`). Anchor logic
+  (`max(completedAt, lastActivityAt)` for terminal) lives in the consumer —
+  do not push it into the helper. T-007 (followup composer) reuses the
+  helper, so it just passes `endedAt` directly without any max computation.
+- `SessionTimeStatusKind` intentionally includes `'loading'` even though it
+  is not in the spec matrix — `displayStatusKind` from `SessionDetailShell`
+  can be `'loading'`, and dropping it would force the consumer to special-case
+  it. `loading` behaves as non-terminal (relative primary).
+- Tests compute expected absolute strings by re-running the helper's own
+  `Intl.DateTimeFormat` against the same `Date` — this is TZ-stable within
+  the test run (production code and test run share the same TZ) without
+  freezing the global `process.env.TZ`. Vitest tests run in whatever TZ the
+  CI / dev machine has, so any literal "Jun 17, 09:52" expectation would be
+  brittle; computing via the formatter sidesteps the issue.
+- All 18 new tests pass without `vi.useFakeTimers` (the helper is pure);
+  the determinism / threshold-flip / no-`Date.now` invariants are all
+  asserted under real-time. The existing `formatTimeAgo` block in the same
+  file does install fake timers, but that's an unrelated existing block.
+- `npm run typecheck -w packages/web` passes. `npm run test:run -w packages/web`
+  passes (4895 tests, was 4896 before removing one test that violated the
+  `no-web-node-fs-source-read` rule — runtime spy test fully covers the
+  "no `Date.now()` internally" invariant). `npm run check:fsd` and
+  `npm run check:test-boundaries` both pass.
+- No data-testid was added to the last-activity / probing spans — those
+  belong to T-002's `data-testid` migration (`session-header-last-activity`,
+  `session-header-probing-since`). T-001 keeps the markup identical to the
+  pre-existing DOM shape (just text and `title` differ by branch).
+
+Downstream notes:
+
+- T-002 (header single-row rewrite) should preserve the `hidden md:inline`
+  wrappers and the `text-muted-foreground/40` `·` dividers around the
+  `lastActivityTime` / `probeTime` spans unchanged — only restyle / rewrap.
+- T-007 (followup composer three states) will call
+  `formatSessionTime({ date: endedAt, statusKind: 'completed', now }).primary`
+  to produce the relative "Session ended <relative>" copy. No new coupling
+  required — just import the helper the same way `SessionDetailShell` does.
+- If any future task wants the absolute arm to live-format as the clock
+  advances (a future dogfooding request), the cleanest seam is a small
+  `useNow`-backed local in the call site — the helper's `now` argument
+  already accepts whatever value the caller provides.

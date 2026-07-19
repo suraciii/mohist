@@ -13,6 +13,7 @@ import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecov
 import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as DefaultCompactionLineageLink } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
+import { formatSessionTime } from '@/shared/lib/format-time'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
@@ -448,20 +449,25 @@ export function SessionDetailShell({
 
 // ── Sub-components ──
 
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return 'never'
-  const date = new Date(dateStr)
-  const now = Date.now()
-  const diff = now - date.getTime()
-  if (diff < 60000) return 'just now'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  return date.toLocaleDateString()
-}
-
 function getStageLabel(stage: string | null): string {
   if (!stage) return 'Session'
   return stage.charAt(0).toUpperCase() + stage.slice(1)
+}
+
+function sessionTimeAnchorMs(
+  meta: import('../../../entities/coder-session').SessionMetadata,
+  statusKind: StatusKind,
+): number | null {
+  const lastActivityMs = meta?.lastActivityAt ? new Date(meta.lastActivityAt).getTime() : null
+  const completedMs = meta?.completedAt ? new Date(meta.completedAt).getTime() : null
+  const isTerminal = statusKind === 'completed' || statusKind === 'failed' || statusKind === 'stale'
+  if (isTerminal) {
+    if (lastActivityMs != null && completedMs != null) return Math.max(lastActivityMs, completedMs)
+    if (lastActivityMs != null) return lastActivityMs
+    if (completedMs != null) return completedMs
+    return null
+  }
+  return lastActivityMs
 }
 
 const sessionStatusPresentation: Record<StatusKind, { label: string; className: string; dotClassName?: string; withDot?: boolean }> = {
@@ -588,6 +594,20 @@ function SessionHeader({
   const stageLower = (meta?.stage ?? '').toLowerCase()
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
 
+  const lastActivityAnchorMs = sessionTimeAnchorMs(meta, statusKind)
+  const lastActivityTime = lastActivityAnchorMs == null ? null : formatSessionTime({
+    date: lastActivityAnchorMs,
+    statusKind,
+    now: Date.now(),
+  })
+  const probeTime = (statusKind === 'probing' && meta?.probeSentAt)
+    ? formatSessionTime({
+        date: meta.probeSentAt,
+        statusKind: 'probing',
+        now: Date.now(),
+      }).primary
+    : null
+
   return (
     <div
       data-testid="session-header"
@@ -655,19 +675,19 @@ function SessionHeader({
           <span className="hidden md:inline text-muted-foreground/40">·</span>
           <span className="hidden md:inline">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
 
-          {meta?.lastActivityAt && (
+          {lastActivityTime && (
             <>
               <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline" title={`Last activity: ${meta.lastActivityAt}`}>
-                {formatRelativeTime(meta.lastActivityAt)}
+              <span className="hidden md:inline" title={lastActivityTime.secondary}>
+                {lastActivityTime.primary}
               </span>
             </>
           )}
-          {statusKind === 'probing' && meta?.probeSentAt && (
+          {probeTime !== null && (
             <>
               <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline text-warning" title={`Probe sent: ${meta.probeSentAt}`}>
-                Checking since {formatRelativeTime(meta.probeSentAt)}
+              <span className="hidden md:inline text-warning">
+                Checking since {probeTime}
               </span>
             </>
           )}
