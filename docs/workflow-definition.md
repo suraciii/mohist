@@ -14,14 +14,16 @@ definition 顶层只有两个部分：
 ```yaml
 approval:      # 可选。审批驳回后的反馈修复任务
   feedback:
-    task: <Task>
+    tasks:       # 有序任务列表
+      - <Task>
 
 stages:        # 必填。有序阶段列表
   - <Stage>
 ```
 
-审批驳回时，Mohist 执行 `approval.feedback.task` 声明的任务来应用反馈。它延续被驳回
-阶段的会话，修复因此保有该阶段的上下文。
+审批驳回时，Mohist 按顺序执行 `approval.feedback.tasks` 来应用反馈。第一个任务通常延续
+被驳回阶段的会话；之后的任务可以把修复后的成果发布出去。全部完成后，阶段检查重新执行，
+审批者看到的是已发布的当前成果。
 
 ## Stage
 
@@ -180,6 +182,13 @@ stages:
         artifacts:
           files:
             - path: docs/proposal.md
+      - id: publish-plan
+        uses: mohist/push
+        with:
+          source: HEAD
+          target: ${{ workspace.branch }}
+          remote: origin
+          force: true
       - id: open-draft-pr
         uses: mohist/create-github-pr
         with:

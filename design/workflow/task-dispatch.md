@@ -31,6 +31,10 @@ resource。`with` 内部不再做 same-key deep-merge，配置进入 Action 只�
 `expect` 单独展开并随 dispatch 发送，作为 Workflow 拥有的 task 完成契约。它不进入
 `with`，也不属于 Runtime-specific Action Input。
 
+Runner 为每个 WorkItem 只解析一次 workspace，并把结果作为 `ActionContext.workDir` 交给
+Action。Action 不得从 `variables.workspace.path` 重新选择工作目录；后者只是 dispatch
+context 的可见事实，不是第二个执行入口。
+
 持久 WorkItem 的 `uses` / `with` 若违反所选 Action 的静态输入契约，属于不可重试的
 dispatch 拒绝。工作一旦 claim，DispatchService 必须用精确的 `workerId + workId` 让
 WorkflowRun 将该 TaskRun 记为 Failed；只有普通渲染故障继续通过 poll redelivery 重试。

@@ -47,15 +47,29 @@ Recovery 机制本身见 [`recovery.md`](recovery.md)，action 契约见 [`actio
 
 经 GitHub PR 交付：plan 结束时开 draft PR，check 审批后标记 ready，integrate 时 squash merge。要求 runner host 装有 `gh` CLI 且已对目标仓库 `gh auth login`。
 
+workspace 是可重建的执行副本；远程 workflow branch 是阶段间恢复点；PR 只是该 branch
+的审核投影。任何会修改仓库的 stage 在把成果交给下一阶段、审批或 PR 操作前，都必须以
+显式 `push` 把当前 HEAD 发布到 workflow branch。Profile 决定这些 task 的顺序，Runner
+只执行并报告事实；不设置隐式 stage hook。
+
 ### PR 身份与元数据
 
-- `open-draft-pr` 是 plan 的最后一个 task：创建或复用 draft PR，`setVars` 把 `output.prNumber` / `output.prUrl` 写入 `vars.github.pr.{number,url}`。PR 身份进 workflow runtime variables，后续 stage 只读引用，不重复开 PR。
+- plan 在 self-review 后先 `push`，再 `open-draft-pr`。后者只创建或复用 draft PR，`setVars`
+  把 `output.prNumber` / `output.prUrl` 写入 `vars.github.pr.{number,url}`。PR 身份进 workflow
+  runtime variables，后续 stage 只读引用，不重复开 PR。
 - PR title/body 不从 workflow metadata 读取：`titleFrom: issue.title`、`bodyFrom: issue.body` 指示 `mohist/create-github-pr` 在运行时取 issue 数据创建或更新 PR。
 
 ### Check 与 Integrate
 
-- **check**：`ai-review` 通过后 `push`（`forceWithLease: true`，允许 rebase 后 head history 重写）→ `mark-pr-ready`（幂等：只读 `vars.github.pr.number`，PR 已 ready 时直接成功；不更新 title/body、不推代码）。stage check `github-pr-status` 只读确认 PR 状态。
+- **build**：`verify` 通过后 `push`，使下一个 stage 即使在新 Runner 上重建 workspace 也能取得
+  已验证的成果。
+- **check**：`ai-review` 通过后 `push` → `mark-pr-ready`（幂等：只读
+  `vars.github.pr.number`，PR 已 ready 时直接成功；不更新 title/body、不推代码）。stage check
+  `github-pr-status` 只读确认 PR 状态。
 - **integrate**：`archive-change` → `push` → `merge-pr`（`mohist/merge-github-pr`：等待 GitHub PR checks，squash merge，重新查询确认 `state=MERGED`）。stage check `merge-verified` 用 `github-pr-status` 的 `expect: merged` 做只读确认。
+
+审批反馈是有序任务：先由 agent 应用反馈，再 `push` 当前 HEAD，随后重跑 stage checks。
+这样重新进入审批时，PR 和可恢复 branch 都包含反馈成果。
 
 ### merge-pr 的恢复
 
@@ -68,7 +82,7 @@ Recovery 机制本身见 [`recovery.md`](recovery.md)，action 契约见 [`actio
 ### 不变量
 
 - PR checks 是 merge action 的内部前置条件，不是 stage check。
-- 所有 PR 副作用都是显式 task，没有隐式 stage 边界钩子。
+- 所有发布与 PR 副作用都是显式 task，没有隐式 stage 边界钩子。
 - `push` 不声明业务 recovery：push 失败意味着权限/网络问题或远程 branch 被外部写入，应作为普通 task failure 暴露。
 - 恢复 agent 的职责边界：`recover:resolve-rebase-conflicts` 解冲突并完成 rebase；`recover:fix-pr-checks` 只修 checks——push 一律由后续显式 `recover:push` 承担。
 

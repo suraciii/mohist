@@ -122,11 +122,18 @@ Project 中配置；Issue 不提供 Prompt override。Project 没有配置某个
 `mohist/github-pr` 与 `mohist/local` 使用相同的 Plan → Build → Check → Integrate 主干和
 审批点，但交付方式不同：
 
-- Plan 自审通过后创建或复用 draft PR；
-- Check 通过后把 PR 标记为 ready；
-- Integrate 等待 PR checks，通过后 squash merge；
+- 远程 workflow branch 是每个阶段之间可恢复的成果；Runner 的 workspace 可以重建，
+  不承担保存已完成工作的责任；
+- Plan 自审通过后先发布当前成果，再创建或复用 draft PR；
+- Build 验证通过后发布当前成果；
+- Check 的修复完成后发布当前成果，再把 PR 标记为 ready；
+- Integrate 的归档成果发布后，等待 PR checks 并 squash merge；
 - base branch 前进时自动 rebase，PR checks 失败时按 Profile 声明执行恢复；
 - 自动恢复耗尽后停止并暴露失败原因，由用户处理后 retry。
+
+PR 是已发布 workflow branch 的审核入口，不负责发布代码。发布失败时只重试发布；PR
+创建或更新失败时远程成果保持不变，只重试 PR 操作。审批反馈修改成果后，也会在再次进入
+审批前发布。
 
 Runner 所在机器需要安装 GitHub CLI，并登录目标仓库。
 
