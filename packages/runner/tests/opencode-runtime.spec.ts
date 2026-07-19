@@ -231,10 +231,11 @@ describe("error normalization", () => {
     expect(error.diagnostics.some((d) => d.message.toLowerCase().includes("reset"))).toBe(true)
   })
 
-  it("normalizePermissionRequired is the only outcome of an unsatisfiable permission request — no auto-approve", () => {
+  it("normalizePermissionRequired gives a retryable failure when the headless reply cannot complete", () => {
     const error = normalizePermissionRequired()
     expect(error.kind).toBe("permission-required")
-    expect(error.diagnostics.some((d) => /approve|grant|out-of-band/i.test(d.message))).toBe(true)
+    expect(error.message).toMatch(/headless runtime/i)
+    expect(error.diagnostics.some((d) => /restore.*retry/i.test(d.message))).toBe(true)
   })
 
   it("normalizeUnavailableRuntime carries a recovery diagnostic", () => {

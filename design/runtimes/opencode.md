@@ -82,6 +82,7 @@ OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
 | 压缩 context | `client.session.summarize()` |
 | 读取 Session 状态 | `client.session.get()`、`client.session.messages()`、`client.session.status()` |
 | 接收实时事件 | `client.global.event()` |
+| 回应一次性权限 | `client.permission.reply()` |
 | 读取 model catalog | `client.v2.model.list()`、`client.v2.provider.list()` |
 
 依赖仍然是 `@opencode-ai/sdk/v2`。选择成熟 Session namespace 是隐藏在
@@ -334,9 +335,19 @@ Reset 替换 Runtime 绑定。API 响应形状与 CLI 文案不得再表述为"�
 
 ## 权限与错误
 
-OpenCode 原生 permission 配置是权威。Mohist 不自动批准请求，也不把 OpenCode
-permission prompt 转成 Workflow Approval。Headless turn 出现无法完成的交互式
-permission request 时，abort 当前回合并返回可操作错误。
+OpenCode 原生 permission 配置是权威。它已经允许的操作由 OpenCode 直接执行，明确
+拒绝的操作保持拒绝。`ask` 表示 OpenCode 将本次操作的选择交给调用方；对属于当前
+headless turn 的 `permission.asked`，`OpenCodeRuntime` 使用
+`client.permission.reply({ requestID, directory, reply: "once" })` 回应。
+
+这个回应只影响该 permission request，不写入 OpenCode 配置或 Session permission
+规则，也不建立 Workflow Approval。事件必须按当前物理 Session ID 路由；event 携带
+directory 时还必须与当前 workDir 一致。相同 request ID 在同一 turn 最多回应一次。
+
+回应调用抛错或未确认成功时，Runtime 立即 abort 当前回合并在确认停止后返回
+`permission required`；不能把 permission request 留到 executor deadline 才显示为
+`interrupted`。OpenCode 负责单个工具的 timeout 与 retry；Mohist 只保留回合 deadline
+和 abort 确认。
 
 在 `OpenCodeRuntime` 边界把 SDK error 规范化为少量 Mohist result：`invalid input`、
 `unavailable runtime`、`missing Session`、`incompatible runtime`、
@@ -370,7 +381,7 @@ variant catalog，Server 与 Web 将它用于配置辅助，但它不是最终�
 - 全局 event routing、duplicate suppression 与 snapshot reconciliation；
 - Prompt completion、interruption、uncertain admission 与 no-replay 行为；
 - async Follow-up、原生 summarize、Reset、restart routing 与 stale-binding rejection；
-- permission、missing Session、compatibility 与 process-loss failure；
+- permission 一次性回应、重复 suppression、回应失败、missing Session、compatibility 与 process-loss failure；
 - 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
 - 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时回合
   开始即警告、期限到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动。

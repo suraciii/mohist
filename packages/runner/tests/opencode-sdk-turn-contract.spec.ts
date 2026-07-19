@@ -83,4 +83,53 @@ describe("OpenCode SDK turn contract", () => {
       parts: [{ type: "text", text: "do" }],
     })
   })
+
+  it("uses the typed permission reply endpoint for the active Session", async () => {
+    const requests: Request[] = []
+    const fetch: typeof globalThis.fetch = async (input, init): Promise<Response> => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      requests.push(request.clone())
+      const url = new URL(request.url)
+      if (request.method === "GET" && url.pathname === "/session/ses_permission") {
+        return jsonResponse({ id: "ses_permission" })
+      }
+      if (request.method === "GET" && url.pathname === "/session/status") {
+        return jsonResponse({})
+      }
+      if (request.method === "POST" && url.pathname === "/permission/perm_contract/reply") {
+        return jsonResponse(true)
+      }
+      if (request.method === "POST" && url.pathname === "/session/ses_permission/abort") {
+        return jsonResponse(true)
+      }
+      if (request.method === "POST" && url.pathname === "/session/ses_permission/message") {
+        return new Promise<Response>(() => {})
+      }
+      return new Response("not found", { status: 404 })
+    }
+    const client = createOpencodeClient({ baseUrl: "http://opencode.test", fetch })
+    const events = new FakeSubscription()
+    const controller = new AbortController()
+    const resultPromise = runTurn({
+      target: { runtime: "opencode", runtimeSessionId: "ses_permission", workDir: "/tmp/projA" },
+      prompt: "do",
+    }, { client, events }, controller.signal)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    events.emit({
+      type: "permission.asked",
+      sessionID: "ses_permission",
+      directory: "/tmp/projA",
+      payload: { id: "perm_contract", sessionID: "ses_permission" },
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const reply = requests.find((request) => new URL(request.url).pathname === "/permission/perm_contract/reply")
+    expect(reply).toBeDefined()
+    expect(new URL(reply!.url).searchParams.get("directory")).toBe("/tmp/projA")
+    expect(await reply!.json()).toEqual({ reply: "once" })
+
+    controller.abort()
+    expect((await resultPromise).ok).toBe(false)
+  })
 })

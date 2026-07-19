@@ -7,8 +7,9 @@
  * field. The runtime does not introduce a global Workflow error enum
  * (see design D8 / `specs/opencode-runtime/spec.md`).
  *
- * The runtime is authoritative on permissions: it never auto-approves
- * and never creates a Workflow Approval.
+ * OpenCode is authoritative on permissions. The runtime responds once to
+ * requests that OpenCode classifies as ask, and never creates a Workflow
+ * Approval or changes saved OpenCode permission rules.
  */
 
 import type { RuntimeDiagnostic, RuntimeError, RuntimeErrorKind } from "./types.js"
@@ -76,13 +77,13 @@ export function isNonRecoverableProviderRetry(
 export function normalizePermissionRequired(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
     kind: "permission-required",
-    message: "OpenCode interactive permission request cannot be satisfied in a headless Workflow turn",
+    message: "OpenCode permission request could not be answered by the headless runtime",
     diagnostics: [
       ...diagnostics,
       {
         severity: "error",
         code: "permission-required",
-        message: "Approve the request in the OpenCode configuration or grant the permission out-of-band, then retry",
+        message: "Restore OpenCode connectivity, then retry the task",
       },
     ],
   }
