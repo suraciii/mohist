@@ -20,13 +20,14 @@ let sessionsData: unknown[] = []
 let sessionsLoading = false
 let metadata: AgentSessionMetadata | null = null
 let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
+let transcriptVersion = 0
 const followupMutateAsync = vi.fn(async () => ({ status: 'sent' }))
 
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
     useSessionTranscript: () => ({
       turns: transcript.turns,
-      transcriptVersion: 0,
+      transcriptVersion,
       scrollToBottom: vi.fn(),
       newContentAvailable: false,
       setIsNearBottom: vi.fn(),
@@ -57,8 +58,9 @@ beforeEach(() => {
   issueData = null
   sessionsData = []
   sessionsLoading = false
-  metadata = null
-  transcript = { turns: [], partCount: 0, lastActivityAt: null }
+    metadata = null
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+    transcriptVersion = 0
   followupMutateAsync.mockClear()
   setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
@@ -229,7 +231,7 @@ describe('SessionPage followup composer integration', () => {
     const composer = screen.getByTestId('session-followup-composer')
     expect(composer).toHaveAttribute('data-disabled', 'true')
     expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
-    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
   })
 
   it('hides the composer input when the session is failed', async () => {
@@ -275,5 +277,41 @@ describe('SessionPage followup composer integration', () => {
     })
     expect(screen.getByTestId('session-followup-input')).toBeInTheDocument()
     expect(screen.getByTestId('session-followup-send')).toBeInTheDocument()
+  })
+
+  it('keeps a submitted followup queued until new transcript content arrives', async () => {
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({ status: 'active', statusKind: 'live', completedAt: null })
+    transcript = { turns: [makeTurn()], partCount: 1, lastActivityAt: '2024-01-01T10:00:01.000Z' }
+
+    const page = renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    await waitFor(() => expect(screen.getByTestId('session-followup-input')).toBeInTheDocument())
+    fireEvent.change(screen.getByTestId('session-followup-input'), { target: { value: 'Continue with tests' } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('session-followup-send'))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+    })
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+
+    transcriptVersion = 1
+    page.rerender(
+      <QueryClientProvider client={queryClients[queryClients.length - 1]}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={[`/issues/${ISSUE}/workflow/sessions/${SESSION}`]}>
+            <Routes>
+              <Route path="/issues/:number/workflow/sessions/:sessionName" element={<SessionPage dependencies={sessionPageDependencies} />} />
+            </Routes>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
+    })
   })
 })

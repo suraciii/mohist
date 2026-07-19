@@ -200,6 +200,7 @@ export function SessionDetailShell({
   const failedGroupIds = selectToolCallGroupIds(displayTurns)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
+  const [queuedFollowupVersion, setQueuedFollowupVersion] = useState<number | null>(null)
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = meta?.turnCount ?? turns.length
@@ -335,6 +336,22 @@ export function SessionDetailShell({
   }, [isRunning, meta?.status])
 
   useEffect(() => {
+    if (queuedFollowupVersion !== null && transcriptVersion > queuedFollowupVersion) {
+      setQueuedFollowupVersion(null)
+    }
+  }, [queuedFollowupVersion, transcriptVersion])
+
+  const handleFollowupSend = useCallback(async (text: string) => {
+    setQueuedFollowupVersion(transcriptVersion)
+    try {
+      await sendFollowup(text)
+    } catch (error) {
+      setQueuedFollowupVersion(null)
+      throw error
+    }
+  }, [sendFollowup, transcriptVersion])
+
+  useEffect(() => {
     if (!isRunning) return
     const container = scrollContainerRef.current
     if (!container) return
@@ -437,9 +454,11 @@ export function SessionDetailShell({
         {(hasTurns || canFollowup) && (
           <div data-testid="session-followup-composer-region">
             <SessionFollowupComposer
-              onSend={sendFollowup}
+              onSend={handleFollowupSend}
               isSending={followupIsPending}
               disabled={!canFollowup}
+              endedAt={meta.completedAt}
+              hasQueuedFollowup={queuedFollowupVersion !== null}
               className="py-0.5"
             />
           </div>
