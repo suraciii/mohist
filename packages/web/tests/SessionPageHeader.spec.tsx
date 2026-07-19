@@ -667,7 +667,7 @@ describe('SessionPage header and states', () => {
       expect(issueLink.className).toContain('shrink-0')
     })
 
-    it('main branch session header metadata cluster stacks vertically below sm', async () => {
+    it('main branch session header metadata cluster renders on a single flex-wrap row', async () => {
       const turns = [makeTurn({ id: 'turn-1' })]
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
@@ -683,12 +683,15 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #123')
 
-      // The metadata cluster lives inside the SessionHeader and is the second flex child.
-      // It must declare the mobile vertical stack AND the sm+ horizontal row layout
-      // so it never wraps/overlaps on narrow viewports.
-      const metadataCluster = screen.getByText('Build').parentElement as HTMLElement
-      expect(metadataCluster.className).toContain('flex-col')
-      expect(metadataCluster.className).toContain('sm:flex-row')
+      // The metadata cluster lives inside the SessionHeader as a single flex-wrap row
+      // (data-testid="session-header-metadata-row"); it must NOT declare the legacy
+      // flex-col / sm:flex-row split that stacked name and metadata vertically on narrow
+      // viewports — wrap to a second row is the responsive behavior.
+      const metadataCluster = screen.getByTestId('session-header-metadata-row')
+      expect(metadataCluster.className).toContain('flex')
+      expect(metadataCluster.className).toContain('flex-wrap')
+      expect(metadataCluster.className).not.toMatch(/\bflex-col\b/)
+      expect(metadataCluster.className).not.toMatch(/\bsm:flex-row\b/)
     })
 
     it('main branch session header issue title truncates with min-w-0', async () => {

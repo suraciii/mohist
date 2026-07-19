@@ -251,7 +251,7 @@ afterEach(() => {
 })
 
 describe('Coder Session compact viewport — structural contract', () => {
-  it('hides nonessential SessionHeader metadata items below md via hidden md:inline class', async () => {
+  it('renders all session header metadata items on a single flex-wrap row without hidden md:inline dividers', async () => {
     const { container } = renderPage()
 
     await waitFor(() => {
@@ -263,29 +263,38 @@ describe('Coder Session compact viewport — structural contract', () => {
     const header = container.querySelector('[data-testid="session-header"]') as HTMLElement
 
     const hiddenBelowMd = Array.from(header.querySelectorAll('.hidden.md\\:inline'))
-    expect(hiddenBelowMd.length, 'nonessential metadata should carry hidden md:inline').toBeGreaterThan(0)
-
-    const modelNode = hiddenBelowMd.find((node) => node.textContent?.trim() === 'minimax/MiniMax-M3')
-    expect(modelNode, 'model should be hidden below md').toBeDefined()
-
-    const fileSummaryNode = hiddenBelowMd.find(
-      (node) => node.textContent?.trim() === '1 file changed',
+    const metadataHidden = hiddenBelowMd.filter((node) =>
+      node.closest('[data-testid="session-header-metadata-row"]') !== null,
     )
-    expect(fileSummaryNode, '1 file changed should be hidden below md').toBeDefined()
+    expect(metadataHidden.length, 'metadata row should not contain hidden md:inline items').toBe(0)
 
-    const sessionIdNode = hiddenBelowMd.find((node) => node.textContent?.trim() === 'agent-se')
-    expect(sessionIdNode, 'session id should be hidden below md').toBeDefined()
+    const metadataRow = container.querySelector('[data-testid="session-header-metadata-row"]') as HTMLElement
+    expect(metadataRow).not.toBeNull()
+    expect(metadataRow.className).toContain('flex')
+    expect(metadataRow.className).toContain('flex-wrap')
 
-    const separators = hiddenBelowMd.filter((node) => node.textContent?.trim() === '·')
-    expect(separators.length, 'separator dots should be hidden below md').toBeGreaterThan(0)
-
-    const lastActivityNodes = hiddenBelowMd.filter((node) =>
-      node.textContent?.trim().match(/ago|just now|never/),
+    const separatorDots = Array.from(metadataRow.querySelectorAll('span')).filter(
+      (node) => node.textContent?.trim() === '·',
     )
-    expect(lastActivityNodes.length, 'last-activity text should be present and hidden below md').toBeGreaterThan(0)
+    expect(separatorDots.length, 'metadata row should not contain · separators').toBe(0)
+
+    const modelNode = metadataRow.querySelector('[data-testid="session-header-model"]') as HTMLElement
+    expect(modelNode).not.toBeNull()
+    expect(modelNode.textContent?.trim()).toBe('minimax/MiniMax-M3')
+
+    const fileSummaryNode = metadataRow.querySelector('[data-testid="session-header-file-summary"]') as HTMLElement
+    expect(fileSummaryNode?.textContent?.trim()).toBe('1 file changed')
+
+    const sessionIdNode = metadataRow.querySelector('[data-testid="session-header-session-id"]') as HTMLElement
+    expect(sessionIdNode).not.toBeNull()
+    expect(sessionIdNode.getAttribute('data-session-id')).toBe('agent-session-12345678')
+
+    const lastActivityNode = metadataRow.querySelector('[data-testid="session-header-last-activity"]') as HTMLElement
+    expect(lastActivityNode).not.toBeNull()
+    expect(lastActivityNode.textContent?.trim().length ?? 0).toBeGreaterThan(0)
   })
 
-  it('hides the duration span below md on a terminal session', async () => {
+  it('renders the duration span on a terminal session via session-header-duration testid (visible at all widths)', async () => {
     _metadataData = makeMockMetadata({
       status: 'completed',
       statusKind: 'completed',
@@ -303,15 +312,15 @@ describe('Coder Session compact viewport — structural contract', () => {
     const { container } = renderPage()
 
     await waitFor(() => {
-      if (!container.querySelector('[data-testid="session-header"]')) {
-        throw new Error('not ready yet')
+      if (!container.querySelector('[data-testid="session-header-duration"]')) {
+        throw new Error('duration span not rendered yet')
       }
     })
 
-    const header = container.querySelector('[data-testid="session-header"]') as HTMLElement
-    const hiddenBelowMd = Array.from(header.querySelectorAll('.hidden.md\\:inline'))
-    const durationNode = hiddenBelowMd.find((node) => node.textContent?.trim() === '1h 00m')
-    expect(durationNode, 'duration should be hidden below md on terminal session').toBeDefined()
+    const durationNode = container.querySelector('[data-testid="session-header-duration"]') as HTMLElement
+    expect(durationNode).not.toBeNull()
+    expect(durationNode.textContent?.trim()).toBe('1h 00m')
+    expect(durationNode.className).not.toMatch(/\bhidden\b/)
   })
 
   it('keeps the session name (h1), StatusBadge, and stage chip visible without hidden class', async () => {
@@ -331,7 +340,7 @@ describe('Coder Session compact viewport — structural contract', () => {
     const statusBadge = container.querySelector('[data-testid="session-status-badge"]') as HTMLElement
     expect(statusBadge.className).not.toMatch(/\bhidden\b/)
 
-    const stageChip = container.querySelector('[data-testid="session-stage-chip"]') as HTMLElement
+    const stageChip = container.querySelector('[data-testid="session-header-stage"]') as HTMLElement
     expect(stageChip.className).not.toMatch(/\bhidden\b/)
   })
 
@@ -467,19 +476,23 @@ describe('Coder Session compact viewport — structural contract', () => {
     }
   })
 
-  it('keeps the desktop metadata cluster layout classes unchanged (flex-col sm:flex-row)', async () => {
+  it('renders metadata items on a single flex-wrap row whose parent is session-header-metadata-row', async () => {
     const { container } = renderPage()
 
     await waitFor(() => {
-      if (!container.querySelector('[data-testid="session-header"]')) {
+      if (!container.querySelector('[data-testid="session-header-metadata-row"]')) {
         throw new Error('not ready yet')
       }
     })
 
-    const stageChip = container.querySelector('[data-testid="session-stage-chip"]') as HTMLElement
-    const cluster = stageChip.parentElement as HTMLElement
-    expect(cluster.className).toContain('flex-col')
-    expect(cluster.className).toContain('sm:flex-row')
+    const metadataRow = container.querySelector('[data-testid="session-header-metadata-row"]') as HTMLElement
+    expect(metadataRow.className).toContain('flex')
+    expect(metadataRow.className).toContain('flex-wrap')
+    expect(metadataRow.className).not.toMatch(/\bflex-col\b/)
+    expect(metadataRow.className).not.toMatch(/\bsm:flex-row\b/)
+
+    const stageChip = container.querySelector('[data-testid="session-header-stage"]') as HTMLElement
+    expect(stageChip.parentElement).toBe(metadataRow)
   })
 
   it('keeps the recovery bar inside the transcript scroll container (region order preserved)', async () => {

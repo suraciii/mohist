@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon } from 'lucide-react'
 import {
   SessionTranscriptLayout as DefaultSessionTranscriptLayout,
   formatDuration,
@@ -646,85 +646,99 @@ function SessionHeader({
         )}
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <h1 className="text-lg font-semibold text-foreground truncate">
-            {meta.sessionName ?? 'Session'}
-          </h1>
-        </div>
+      <div
+        data-testid="session-header-metadata-row"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground min-w-0"
+      >
+        <h1
+          data-testid="session-header-name"
+          className="text-lg font-semibold text-foreground truncate"
+        >
+          {meta.sessionName ?? 'Session'}
+        </h1>
+        <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
+        <span
+          data-testid="session-header-stage"
+          data-stage={meta?.stage ?? ''}
+          className={`px-2 py-0.5 rounded-full border font-medium ${stageClassName}`}
+        >
+          {getStageLabel(meta?.stage ?? null)}
+        </span>
 
-        <div className="flex flex-col gap-2 text-xs text-muted-foreground max-md:flex-row max-md:flex-wrap max-md:items-center sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
-          <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
+        {meta?.model && eventSummary?.resolvedModel && meta.model !== eventSummary.resolvedModel ? (
           <span
-            data-testid="session-stage-chip"
-            data-stage={meta?.stage ?? ''}
-            className={`px-2 py-0.5 rounded-full border font-medium self-start sm:self-auto ${stageClassName}`}
+            data-testid="session-header-model"
+            data-model={meta.model}
+            className="text-muted-foreground"
           >
-            {getStageLabel(meta?.stage ?? null)}
+            {meta.model} <span className="text-muted-foreground/40">→</span>{' '}
+            <span className="text-info">{eventSummary.resolvedModel}</span>
           </span>
+        ) : meta?.model ? (
+          <span
+            data-testid="session-header-model"
+            data-model={meta.model}
+          >
+            {meta.model}
+          </span>
+        ) : null}
 
-          {meta?.model && eventSummary?.resolvedModel && meta.model !== eventSummary.resolvedModel ? (
-            <span className="hidden md:inline text-muted-foreground">
-              {meta.model} <span className="text-muted-foreground/40">→</span>{' '}
-              <span className="text-info">{eventSummary.resolvedModel}</span>
-            </span>
-          ) : meta?.model ? (
-            <span className="hidden md:inline">{meta.model}</span>
-          ) : null}
+        <span
+          data-testid="session-header-turn-count"
+          data-turn-count={turnCount}
+        >
+          {turnCount} turn{turnCount !== 1 ? 's' : ''}
+        </span>
 
-          <span className="hidden md:inline text-muted-foreground/40">·</span>
-          <span className="hidden md:inline">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
-
-          {lastActivityTime && (
-            <>
-              <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline" title={lastActivityTime.secondary}>
-                {lastActivityTime.primary}
-              </span>
-            </>
-          )}
-          {probeTime !== null && (
-            <>
-              <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline text-warning">
-                Checking since {probeTime}
-              </span>
-            </>
-          )}
-          {fileSummary && (
-            <>
-              <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline">{fileSummary}</span>
-            </>
-          )}
-          {isTerminal && (
-            <>
-              <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className={`hidden md:inline ${statusKind === 'failed' ? 'text-danger' : ''}`}>
-                {formatDuration(duration)}
-              </span>
-            </>
-          )}
-          {meta?.sessionId && (
-            <>
-              <span className="hidden md:inline text-muted-foreground/40">·</span>
-              <span className="hidden md:inline font-mono text-muted-foreground text-xs">{meta.sessionId.slice(0, 8)}</span>
-            </>
-          )}
-          {showCancelControl && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setCancelDialogOpen(true)}
-              data-testid="session-cancel-trigger"
-              aria-label="Cancel session"
-              type="button"
-            >
-              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-              Cancel session
-            </Button>
-          )}
-        </div>
+        {lastActivityTime && (
+          <span
+            data-testid="session-header-last-activity"
+            data-last-activity={lastActivityTime.primary}
+            title={lastActivityTime.secondary}
+          >
+            {lastActivityTime.primary}
+          </span>
+        )}
+        {probeTime !== null && (
+          <span
+            data-testid="session-header-probing-since"
+            data-probing-since={probeTime}
+            className="text-warning"
+          >
+            Checking since {probeTime}
+          </span>
+        )}
+        {fileSummary && (
+          <span data-testid="session-header-file-summary">{fileSummary}</span>
+        )}
+        {isTerminal && (
+          <span
+            data-testid="session-header-duration"
+            data-duration-ms={duration}
+            className={statusKind === 'failed' ? 'text-danger' : ''}
+          >
+            {formatDuration(duration)}
+          </span>
+        )}
+        {meta?.sessionId && (
+          <SessionIdCopyButton
+            sessionId={meta.sessionId}
+            truncated={meta.sessionId.slice(0, 8)}
+          />
+        )}
+        {showCancelControl && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setCancelDialogOpen(true)}
+            data-testid="session-cancel-trigger"
+            aria-label="Cancel session"
+            type="button"
+          >
+            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            Cancel session
+          </Button>
+        )}
       </div>
 
       {showCancelControl && cancel && (
@@ -774,6 +788,89 @@ function StickySessionTitle({ meta, statusKind, turnCount }: {
         <span className="text-muted-foreground text-xs">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
       </div>
     </div>
+  )
+}
+
+const SESSION_ID_COPY_RESET_MS = 1500
+
+function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; truncated: string }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [tooltipPinnedOpen, setTooltipPinnedOpen] = useState(false)
+
+  useEffect(() => {
+    if (copyState === 'idle' && !tooltipPinnedOpen) return
+    const timer = window.setTimeout(() => {
+      setCopyState('idle')
+      setTooltipPinnedOpen(false)
+    }, SESSION_ID_COPY_RESET_MS)
+    return () => window.clearTimeout(timer)
+  }, [copyState, tooltipPinnedOpen])
+
+  const handleClick = () => {
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+    if (!clipboard?.writeText) {
+      setCopyState('failed')
+      setTooltipPinnedOpen(true)
+      return
+    }
+    clipboard.writeText(sessionId).then(
+      () => {
+        setCopyState('copied')
+        setTooltipPinnedOpen(false)
+      },
+      () => {
+        setCopyState('failed')
+        setTooltipPinnedOpen(true)
+      },
+    )
+  }
+
+  const showTooltip = tooltipPinnedOpen
+  const ariaLabel = copyState === 'copied'
+    ? 'Copied!'
+    : `Copy session id ${sessionId}`
+  const visibleLabel = copyState === 'copied'
+    ? 'Copied!'
+    : copyState === 'failed'
+      ? 'Copy unavailable'
+      : truncated
+
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        type="button"
+        data-testid="session-header-session-id"
+        data-session-id={sessionId}
+        data-copy-state={copyState}
+        data-tooltip-pinned={showTooltip ? 'true' : 'false'}
+        aria-label={ariaLabel}
+        title={sessionId}
+        onClick={handleClick}
+        className={`inline-flex items-center gap-1 rounded font-mono text-xs ${
+          copyState === 'copied'
+            ? 'text-success'
+            : copyState === 'failed'
+              ? 'text-danger'
+              : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <span>{visibleLabel}</span>
+        {copyState === 'copied' ? (
+          <CheckIcon className="h-3 w-3" aria-hidden="true" />
+        ) : (
+          <CopyIcon className="h-3 w-3" aria-hidden="true" />
+        )}
+      </button>
+      {showTooltip && (
+        <span
+          role="tooltip"
+          data-testid="session-header-session-id-tooltip"
+          className="absolute bottom-full left-0 z-50 mb-1 max-w-[420px] break-all rounded-md border bg-popover px-2 py-1 font-mono text-[11px] text-popover-foreground shadow-md"
+        >
+          {sessionId}
+        </span>
+      )}
+    </span>
   )
 }
 

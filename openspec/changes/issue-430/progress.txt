@@ -91,9 +91,11 @@ Decisions / gotchas for downstream tasks:
 
 Downstream notes:
 
-- T-002 (header single-row rewrite) should preserve the `hidden md:inline`
-  wrappers and the `text-muted-foreground/40` `·` dividers around the
-  `lastActivityTime` / `probeTime` spans unchanged — only restyle / rewrap.
+- T-002 (header single-row rewrite) explicitly **removes** the `hidden md:inline`
+  wrappers and the `text-muted-foreground/40` `·` dividers per design D3 — the
+  metadata row becomes one `flex flex-wrap items-center gap-x-2 gap-y-1` row,
+  no dividers, no per-item responsive breakpoints. The downstream hint above
+  ("preserve them unchanged") is superseded by the actual T-002 brief.
 - T-007 (followup composer three states) will call
   `formatSessionTime({ date: endedAt, statusKind: 'completed', now }).primary`
   to produce the relative "Session ended <relative>" copy. No new coupling
@@ -102,3 +104,150 @@ Downstream notes:
   advances (a future dogfooding request), the cleanest seam is a small
   `useNow`-backed local in the call site — the helper's `now` argument
   already accepts whatever value the caller provides.
+
+## T-002 — SessionHeader single-row metadata rewrite + copy-on-click session id (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - The two-row `flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3`
+    metadata block is gone. The new `<div
+    data-testid="session-header-metadata-row" className="flex flex-wrap
+    items-center gap-x-2 gap-y-1 ...">` carries every metadata item on one
+    row that wraps to a second row at narrow widths without dropping items.
+  - All `hidden md:inline` wrappers and `text-muted-foreground/40` `·`
+    dividers are removed. No `·` glyphs anywhere in the metadata row.
+  - Stable `data-testid` + `data-*` per design D3:
+    - `session-header-name` (the `<h1>` — was previously un-targeted)
+    - `session-status-badge` (existing, now carries `data-status-kind` —
+      was already there, kept)
+    - `session-header-stage` with `data-stage` (was `session-stage-chip`,
+      renamed for the row contract; existing tests that picked the old
+      testid were migrated)
+    - `session-header-model` with `data-model`
+    - `session-header-turn-count` with `data-turn-count`
+    - `session-header-last-activity` with `data-last-activity` (the value
+      attribute carries the primary form; `title` keeps the secondary)
+    - `session-header-duration` with `data-duration-ms` (terminal only;
+      uses the same `formatDuration(duration)` helper as before)
+    - `session-header-session-id` with `data-session-id={meta.sessionId}`
+      (the full value, not the 8-char prefix)
+    - Added `session-header-probing-since` (only when probing) and
+      `session-header-file-summary` (only when `changedFiles` > 0) — both
+      follow the same single-row shape.
+  - The Cancel button keeps its existing
+    `data-testid="session-cancel-trigger"` and stays in the metadata row.
+    Its `variant="destructive"` is **not** touched — that demotion is owned
+    by T-004, fenced out by T-002's acceptance criterion 5.
+  - The `siblingNav` slot in the context breadcrumb row above is unchanged;
+    T-006 owns the wide-viewport removal.
+  - New sub-component `SessionIdCopyButton` (defined in
+    `SessionDetailShell.tsx`, not exported — no need to surface it on the
+    `SessionDetailShellComponents` DI seam because nothing else consumes
+    it today):
+    - Truncated 8-char prefix (`meta.sessionId.slice(0, 8)`) plus a copy
+      icon, with the full id always exposed via `aria-label` and
+      `title={sessionId}` (browser tooltip fallback for users who hover but
+      don't activate).
+    - On click: `navigator.clipboard?.writeText?.(sessionId)`. Three
+      states:
+      - **idle** — default. Shows truncated prefix + copy icon.
+      - **copied** — writes succeed. Transient state for 1500 ms, then
+        resets. Shows "Copied!" + check icon, swaps the
+        `aria-label` to `"Copied!"`.
+      - **failed** — `navigator.clipboard.writeText` missing or rejects.
+        Pinned tooltip with the full id renders open
+        (`role="tooltip"`, `data-testid="session-header-session-id-tooltip"`)
+        so the user can copy manually; no silent failure. The same 1500 ms
+        reset clears the pinned tooltip.
+    - Local `data-copy-state` and `data-tooltip-pinned` attributes on the
+      button make every state machine transition individually targetable.
+    - The 1500 ms reset uses `window.setTimeout`/`clearTimeout` directly;
+      tests drive it via `vi.useFakeTimers()` + `vi.advanceTimersByTime`.
+- `packages/web/tests/CoderSessionCompactViewport.spec.tsx` — 4 tests
+  migrated. The old assertions were pinned on the deleted
+  `hidden md:inline` + `flex-col sm:flex-row` shape:
+  - `hides nonessential SessionHeader metadata items below md via hidden
+    md:inline class` → replaced by an assertion that the metadata row
+    contains zero `hidden md:inline` items, zero `·` glyphs, carries the
+    new stable `data-testid`s for model / file summary / session id / last
+    activity, and that the row itself uses `flex flex-wrap`.
+  - `hides the duration span below md on a terminal session` → replaced
+    by an assertion that the duration span is reachable via
+    `data-testid="session-header-duration"`, has no `hidden` class, and
+    carries the `1h 00m` text on a completed session.
+  - `keeps the session name (h1), StatusBadge, and stage chip visible
+    without hidden class` → stage-chip selector migrated from
+    `session-stage-chip` to `session-header-stage` (matching the new
+    per-row testid table).
+  - `keeps the desktop metadata cluster layout classes unchanged
+    (flex-col sm:flex-row)` → replaced by an assertion that the metadata
+    row carries `flex flex-wrap` and does **not** carry `flex-col` or
+    `sm:flex-row` (the vertical-stack layout is gone).
+- `packages/web/tests/SessionPageHeader.spec.tsx` — 1 test migrated:
+  - `main branch session header metadata cluster stacks vertically below
+    sm` → renamed to `main branch session header metadata cluster
+    renders on a single flex-wrap row`. The old assertion was pinned on
+    `flex-col sm:flex-row` on the metadata cluster's parent; the new
+    assertion uses `screen.getByTestId('session-header-metadata-row')`
+    and verifies the row carries `flex flex-wrap` and no
+    `flex-col` / `sm:flex-row`.
+- `packages/web/tests/SessionHeaderSessionIdCopy.spec.tsx` — new spec
+  (5 tests) covering the copy control:
+  1. Renders the control with `data-session-id` = full id, `aria-label`
+     `Copy session id <full id>`, `title` = full id, and the visible
+     label contains the truncated 8-char prefix.
+  2. Clicking the control calls `navigator.clipboard.writeText` with the
+     full session id (clipboard spy via `setScopedValue`).
+  3. Transient `Copied!` state for ~1.5 s, then resets: tested by
+     `vi.useFakeTimers()` + `vi.advanceTimersByTime(1499)` (still
+     `copied`) + `vi.advanceTimersByTime(1)` (back to `idle`, aria-label
+     restored).
+  4. When `navigator.clipboard` is `undefined`, click pins the tooltip
+     open showing the full id (`role="tooltip"`,
+     `data-testid="session-header-session-id-tooltip"`), no
+     `writeText` call. Same 1500 ms reset clears the pinned tooltip.
+  5. When `clipboard.writeText` rejects, the same pinned-tooltip fallback
+     fires (rejection path covered in addition to the missing-API path).
+- `SessionPage.test.ts`, `SessionPage.sticky.test.tsx`,
+  `SessionPage.cancel.test.tsx` — **no source changes needed**. They
+  don't overlap with the metadata items: `SessionPage.test.ts` only
+  exercises `isCurrentSiblingSession` (pure helper), `SessionPage.sticky.test.tsx`
+  targets the sticky recovery bar / sticky title strip (not the metadata
+  row), `SessionPage.cancel.test.tsx` targets the cancel trigger /
+  AlertDialog (preserved as-is by this task). All 18 tests across the
+  three files continue to pass unchanged.
+
+Decisions / gotchas for downstream tasks:
+
+- The Cancel button is still `variant="destructive"` and still rendered
+  inline in the metadata row. **T-004 (Demote Cancel session into a
+  secondary action slot)** owns moving it to a ghost/outline variant in a
+  dedicated slot — T-004 must not regress the metadata-row testids
+  (`session-header-stage`, `session-header-turn-count`, …) since those
+  are now part of the public surface.
+- The `siblingNav` slot above the metadata row is still rendered for all
+  viewports. **T-006 (Deduplicate sibling navigation)** owns the
+  `useMediaQuery('(min-width: 1280px)')` gate that suppresses it on
+  wide viewports and keeps the narrow fallback with
+  `data-viewport="narrow"`. T-006 must keep the existing
+  `data-testid="session-sibling-navigation-slot"` on the slot wrapper for
+  the narrow fallback so the existing prev/next tests
+  (`SessionPageHeader.spec.tsx` `renders prev/next controls …`,
+  `disables the previous control …`, `disables the next control …`)
+  continue to find the controls.
+- The session-id copy control exposes the **full id** via
+  `aria-label="Copy session id <full id>"`. Any future embedder
+  re-rendering this control must keep the full id (not the truncated
+  prefix) in the accessible name — the spec scenario
+  `Session id copy control exposes the full id for accessibility` is
+  load-bearing.
+- Tests must drive the copy-state transitions through `vi.useFakeTimers`
+  *after* `findByTestId` resolves — invoking `vi.useFakeTimers()` in
+  `beforeEach` blocks the MSW-driven fetch from resolving (network
+  timers hang under fake timers). The SessionHeaderSessionIdCopy spec
+  follows that pattern; future specs that mix fake timers with
+  `SessionPage` async loading should do the same.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4900 tests, was 4895).
+  `npm run check:fsd` and `npm run check:test-boundaries` both pass.
