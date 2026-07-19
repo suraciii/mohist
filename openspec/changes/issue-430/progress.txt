@@ -659,3 +659,159 @@ Decisions / gotchas for downstream tasks:
   uses (`useNarrowViewport` from `@/shared/lib/use-narrow-viewport`). No
   new public surface; `SessionDetailShellProps` and the
   `SessionDetailShellComponents` seam are unchanged.
+
+## T-007 — Followup composer three explicit states (done)
+
+What landed:
+
+- `packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.tsx`:
+  - Three new optional props on `SessionFollowupComposerProps`:
+    - `endedAt?: string | null` — when `disabled` is true and `endedAt` is
+      provided, the closed-state copy references `endedAt` via the helper
+      from T-001 in relative form. When `endedAt` is null/undefined or
+      unparseable, the copy falls back to the existing generic phrasing
+      (no fabricated time, matching the spec's "SHALL NOT fabricate or
+      guess a time value" rule).
+    - `hasQueuedFollowup?: boolean` — when true (and the composer is not
+      `disabled`), the composer enters the queued state: input disabled,
+      submit button disabled, persistent "Queued — waiting for agent..."
+      indicator visible. Clears back to interactive when the prop flips
+      to false AND `isSending` is false.
+    - `state?: 'interactive' | 'queued' | 'closed'` — explicit override
+      that wins over derivation. The `disabled` / `isSending` /
+      `hasQueuedFollowup` signals still gate the underlying controls
+      (so `state="queued"` with empty content still produces a disabled
+      send button), but the rendered state, copy, and queued indicator
+      follow `state` directly.
+  - `data-state` attribute on `data-testid="session-followup-composer"`
+    reflects the resolved state (`interactive | queued | closed`).
+    Closed banner keeps `data-disabled="true"` for backward compat with
+    the existing assertion.
+  - State resolution rule:
+    ```ts
+    const resolvedState: ResolvedState = state ?? (
+      disabled ? 'closed'
+        : (isSending || hasQueuedFollowup) ? 'queued'
+        : 'interactive'
+    )
+    ```
+  - `canSend` now also requires `resolvedState === 'interactive'`, so
+    the send button is disabled whenever the composer is queued (even if
+    `hasQueuedFollowup` becomes true while text is in the input).
+  - Existing transient `Sent` flash is gated on `!hasQueuedFollowup` —
+    when the caller supplies the prop, the flash timer is skipped (so
+    the queued indicator, which is the persistent equivalent, is the
+    sole post-submit signal). The `data-state="sent"` on the send
+    button follows the same gate, so when `hasQueuedFollowup` is
+    supplied the button never gets `data-state="sent"`. Backward
+    compatible — every existing test that doesn't pass the new prop
+    continues to see the flash as before.
+  - Closed-state copy uses `formatSessionTime` from T-001 with
+    `statusKind: 'completed'`. The helper's branch produces absolute
+    primary past the 1-hour threshold and relative primary within; we
+    pick the relative-form field via a tiny local
+    `SESSION_TIME_RELATIVE_PATTERN = /^\d+[mhd] ago$|^just now$/`
+    guard so the closed copy is "Session ended 8h ago — not accepting
+    new followups." at any timestamp offset. Defensive
+    `Date.parse`/`Number.isFinite` keeps invalid timestamps from
+    rendering "Session ended Invalid Date — not accepting..." — they
+    fall through to the generic phrasing.
+  - The status indicator (`data-testid="session-followup-status"`) now
+    has `data-tone="queued"` and renders "Queued — waiting for agent..."
+    in `text-warning` while `isQueued` is true. The transient
+    `Sent`/`Sending` labels keep their old `data-tone` values. The
+    element is still present in the DOM in queued mode so
+    `screen.getByTestId('session-followup-status')` stays reachable.
+- `packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.test.tsx`:
+  - All 15 original tests pass unchanged (interactive path, transient
+    `Sent` flash with `data-state="sent"`, disabled banner with
+    `/no longer accepting followups/i` and `data-disabled="true"`, error
+    handling, etc.).
+  - Added 15 new specs across three new describe blocks:
+    - **three-state data-state attribute** (5 specs): default
+      `interactive`; derived `closed` from `disabled`; explicit
+      `state="closed"` overriding `disabled=false`; derived `queued`
+      from `hasQueuedFollowup`; derived `queued` from `isSending` alone.
+    - **closed-state endedAt copy** (5 specs): relative message at 8h
+      past the 1-hour threshold ("Session ended 8h ago — not accepting
+      new followups."); relative message within the 1-hour threshold
+      ("Session ended 5m ago — not accepting new followups."); generic
+      phrasing fallback when `endedAt` is absent; generic phrasing
+      fallback when `endedAt` is null; generic phrasing fallback when
+      `endedAt` is an unparseable string ("not-a-date").
+    - **queued-state persistent indicator** (5 specs): input + send
+      button disabled + queued indicator visible when
+      `hasQueuedFollowup` is true; same shape when `isSending` is true
+      alone; queued indicator persists after `isSending` flips false
+      while `hasQueuedFollowup` stays true (the spec's "persists past
+      the transient `Sent` flash window" invariant); composer returns
+      to `interactive` when `hasQueuedFollowup` flips back to false;
+      `data-state="sent"` is NOT applied to the send button when
+      `hasQueuedFollowup` is supplied.
+
+Decisions / gotchas for downstream tasks:
+
+- **`statusKind: 'completed'` + relative-pick pattern, not `'live'`.**
+  The progress note from T-001 said T-007 would call
+  `formatSessionTime({ date: endedAt, statusKind: 'completed', now }).primary`,
+  but the helper's matrix returns absolute primary past the 1-hour
+  threshold for terminal statuses. Rather than inventing a new
+  statusKind or post-processing the helper output with the
+  `SESSION_TIME_RELATIVE_PATTERN` regex, we considered both. We went
+  with `statusKind: 'completed'` (semantically correct for a closed
+  session) plus the relative-pattern pick so the call site can pass
+  any timestamp and always get "Xh/d ago" or "just now" in the
+  message. The `Date.parse` + `Number.isFinite` defensive check
+  degrades gracefully when `endedAt` is unparseable. No new coupling
+  beyond the T-001 `formatSessionTime` import.
+- **`canSend` gate is `resolvedState === 'interactive'`, not
+  `!isQueued`.** This matches the spec's "the composer MUST NOT render
+  the interactive state when the underlying send is unavailable"
+  invariant — when `state="queued"` is explicitly supplied but the
+  user has somehow typed into a (currently-disabled) input, the submit
+  button is still disabled and `submit()` still early-returns.
+- **Status indicator DOM presence is preserved across all three
+  states.** The `data-testid="session-followup-status"` element is
+  always present (not conditionally rendered), it just changes
+  `data-tone` and `text-warning` vs `text-success` vs
+  `text-transparent`. Existing tests
+  (`screen.getByTestId('session-followup-status')`,
+  `toHaveTextContent(/sent/i)`) keep working. The new queued-mode
+  text is found via `toHaveTextContent(/queued.*waiting for agent/i)`.
+- **`Sent` flash suppression is `!hasQueuedFollowup`, not
+  `isQueued`.** The flash only fires when the caller hasn't
+  opted into the queued signal. If a parent flips `hasQueuedFollowup`
+  from `false` → `true` mid-send (a race condition), the
+  post-`onSend` flash check uses the closed-over prop value, which is
+  the latest render's value (the function is recreated every render),
+  so the suppression is honored. In practice this race only matters
+  if the parent's mutation signal flips inside `await onSend`, which
+  is rare — the `submit` itself can't run when
+  `hasQueuedFollowup === true` because `canSend` is false.
+- **`state="queued"` with `disabled=false` and `hasQueuedFollowup=false`.**
+  Such a call renders the form (interactive-or-queued branch, not the
+  closed early-return), shows the queued indicator, and disables the
+  input and send button. This is the explicit-override semantic the
+  spec scenario requires: callers that have authoritative upstream
+  state (e.g. `followupIsPending || firstNewPartSince(submitAt)`) can
+  pin the composer to the right state regardless of what
+  `disabled`/`isSending`/`hasQueuedFollowup` they pass.
+- **No new FSD / layer change.** `SessionFollowupComposer.tsx` was
+  already at `widgets/coder-session/ui/` and imports from
+  `@/shared/lib/format-time` (the same shared-layer dependency pattern
+  that T-001 / T-002 / T-004 / T-006 already use). The
+  `SessionFollowupComposerProps` public surface gains three optional
+  props (`endedAt`, `hasQueuedFollowup`, `state`) but no existing prop
+  changes semantics. The existing `SessionPage.cancel.test.tsx` /
+  `SessionPage.sticky.test.tsx` / `GenericSessionPage.test.tsx` /
+  `SessionPage.lineage.test.tsx` / `GenericSessionPage.recovery.test.tsx`
+  mock patterns destructure only `disabled`, so they continue to work
+  without any source change.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4932 tests, was 4917
+  before — the 15 new specs). `npm run check:fsd -w packages/web`
+  and `npm run check:test-boundaries -w packages/web` both pass. No
+  existing tests deleted; the existing 5 describes
+  (`visibility and enabled state`, `disabled (terminal state)`,
+  `sending and success state`, `error handling`, `disabled transition
+  clears prior errors`) keep their original assertions verbatim.
