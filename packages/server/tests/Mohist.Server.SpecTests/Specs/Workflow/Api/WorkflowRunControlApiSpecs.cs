@@ -366,15 +366,16 @@ public class WorkflowRunControlApiSpecs
     [InlineData("stop")]
     public async Task CrossPath_FailedRun_AdmitsRecoveryAndStop(string verb)
     {
-        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceFailedStatusAsync(wrId);
+        var (issueProjectId, issueNumber, _, issueWrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(issueWrId);
 
-        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{verb}", content: null);
+        var issueResponse = await _client.PostAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", content: null);
         Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
 
-        await ForceFailedStatusAsync(wrId);
+        var (_, _, _, runWrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(runWrId);
 
-        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+        var runResponse = await _client.PostAsync($"/api/workflow-runs/{runWrId}/{verb}", content: null);
         Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
     }
 
