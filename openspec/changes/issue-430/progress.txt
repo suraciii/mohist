@@ -512,3 +512,150 @@ Decisions / gotchas for downstream tasks:
   (e.g. `pages/settings/ui/AgentSettingsSection.tsx`). No new public
   surface: `SessionRecoveryActionsProps` and `SessionRecoveryActions`
   exports are unchanged.
+
+## T-006 — Deduplicate sibling navigation (done)
+
+What landed:
+
+- `packages/web/src/shared/lib/use-media-query.ts` (new) exports:
+  - `useMediaQuery(query: string): boolean` — a tiny React hook with two
+    state slots: `override` (from the module-level seam) and `liveMatches`
+    (from `window.matchMedia(query).matches`). The hook returns the
+    override when the seam is active, otherwise the live matchMedia value.
+    - Initial state is `false` (SSR-safe) — both slots seed to `false` on
+      mount and the effect then syncs to the actual matchMedia value (or
+      subscribes to the seam). This is the same shape `use-narrow-viewport.ts`
+      uses, plus the seam.
+    - The live matchMedia effect returns early when `override !== null`, so
+      when the seam is active we never even register a `matchMedia` listener.
+    - The seam's listener subscription is keyed off `override`; whenever the
+      seam flips, both the listener fan-out and the `liveMatches` effect's
+      dep list are re-evaluated. This makes "widen then narrow then widen"
+      round-trips work without manual re-subscription.
+  - `setMatchesForTest(matches: boolean | null)` — module-level test seam.
+    Passing `null` clears the seam and lets the hook fall back to the live
+    matchMedia value; passing `true`/`false` overrides. This is the same
+    pattern as `useNow`'s `now` injection, just promoted to a global seam
+    because `matchMedia` is a window-level query rather than per-component.
+- `packages/web/src/shared/lib/use-media-query.test.tsx` (new, 9 tests):
+  - Reads the initial value from the seam when set before render.
+  - Seeds `false` when the seam is inactive.
+  - Updates on `setMatchesForTest(true)` / `setMatchesForTest(false)` flips
+    inside `await act(async () => {...})` (React 19's act queue needs the
+    async form when the update comes from a synchronous listener fan-out —
+    see gotcha below).
+  - Clears the seam via `setMatchesForTest(null)` and falls back to
+    `window.matchMedia` (asserts the live query is called with the same
+    argument and that the change listener is registered).
+  - Subscribes to `matchMedia` change events when the seam is inactive and
+    reflects the next `matches` value.
+  - Removes the `matchMedia` change listener on unmount.
+  - Does NOT call `matchMedia` at all when the seam is set.
+  - Keeps multiple subscribers in lockstep across multiple
+    `setMatchesForTest` flips without leaking listeners when one of them
+    unmounts mid-flight.
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - New import: `useMediaQuery` from `@/shared/lib/use-media-query`.
+  - Inside `SessionHeader`, a single new line right after the stage-chip
+    helper: `const isWideViewport = useMediaQuery('(min-width: 1280px)')`.
+    The slot's render condition flips from `siblingNav && (...)` to
+    `siblingNav && !isWideViewport && (...)`. When wide, the slot is not
+    rendered at all (no DOM, no layout contribution — matches the spec's
+    "SHALL NOT occupy any visible space" invariant).
+  - The slot's `<div>` carries `data-viewport="narrow"` so the narrow
+    fallback is distinguishable from the removed wide-viewport version.
+    The `data-testid="session-sibling-navigation-slot"` stays unchanged
+    so the existing `SessionPageHeader.spec.tsx` prev/next tests
+    (which fire under the default `matchMedia` mock returning `false`)
+    continue to find the slot.
+  - The `SiblingSessionsSidebar` itself is NOT modified — the same
+    CSS-driven `xl:flex-row` parent layout at `SessionDetailShell.tsx:402`
+    (`flex flex-col flex-1 min-h-0 relative xl:flex-row`) still decides
+    whether the sidebar sits beside or below the transcript. Per Occam
+    we did not add a new render gate.
+- `packages/web/tests/SessionDetailShell.sibling-nav-dedup.spec.tsx` (new,
+  3 tests) — focused on the wide/narrow contract the header row can't
+  easily express:
+  1. `omits the sibling nav slot on wide viewports and keeps the sidebar
+     CSS wired for xl+ visibility` — drives `setMatchesForTest(true)`,
+     asserts `[data-testid="session-sibling-navigation-slot"]` is absent
+     (along with the inner `session-sibling-prev` / `-next` controls);
+     asserts the scroll container's grandparent (the shell root) carries
+     `xl:flex-row` and the sidebar carries both `hidden` and `xl:flex`
+     — pinning the CSS-driven visibility contract that the sidebar stays
+     available to users when the header slot is gone.
+  2. `renders the narrow-viewport fallback slot with data-viewport=narrow
+     and keeps the sidebar CSS-hidden by default` — drives
+     `setMatchesForTest(false)`, asserts the slot is present with
+     `data-viewport="narrow"`, prev/next controls are reachable inside it,
+     and the sidebar's className still carries `hidden xl:flex` (so the
+     same data-testid is always present in the DOM — no new mechanism).
+  3. `never renders the slot in both viewport states simultaneously when
+     the seam flips` — flips wide → narrow → wide via
+     `setMatchesForTest(true|false)` inside `await act(async () => {...})`
+     and asserts the slot's presence/absence tracks the seam each time.
+- The pre-existing `CoderSessionCompactViewport.spec.tsx` test
+  `preserves all existing region anchors` continues to pass unchanged —
+  the default `matchMedia` mock in `tests/setup.ts` returns `false` for
+  `(min-width: 1280px)`, which is narrow, so the slot renders with
+  `data-viewport="narrow"` exactly as the old "no data-viewport" shape
+  satisfied the same anchor-presence contract.
+- The pre-existing `SessionPageHeader.spec.tsx` prev/next tests
+  (`renders prev/next controls …`, `disables the previous control …`,
+  `disables the next control …`, `hides the sidebar entirely … but keeps
+  prev/next always visible`) continue to pass unchanged — same reason:
+  default `matchMedia` returns narrow, slot renders, controls reachable.
+
+Decisions / gotchas for downstream tasks:
+
+- **React 19 + sync `act` does not flush listener-driven updates.** The
+  hook's `setMatchesForTest` fires listeners synchronously, which call
+  `setOverride`. React 19 schedules the resulting render as a microtask;
+  sync `act(() => setMatchesForTest(true))` exits before the render
+  commits and the framework's `console.error` spy (registered in
+  `tests/setup.ts`) treats the un-wrapped update as an unexpected
+  warning. `await act(async () => setMatchesForTest(true))` flushes the
+  queue. Specs in any future task that exercises the seam should use the
+  async form. Hook itself is fine — no setState during render.
+- **afterEach ordering.** Vitest calls afterEach hooks in registration
+  order: the setup file's `cleanup()` (unmounts React) is registered
+  FIRST, then the per-file afterEach. So a per-file
+  `afterEach(() => setMatchesForTest(null))` runs BEFORE cleanup, which
+  means it fires listeners on still-mounted components and triggers the
+  act warning. The fix is to reset the seam in `beforeEach` (where no
+  components are mounted yet) and not in `afterEach`. The
+  `use-media-query.test.tsx` file follows this pattern.
+- **`vi.stubGlobal('matchMedia', …)` is the required test-boundary
+  substitute.** `tests/setup.ts`'s `_matchMediaMock` is fine for tests that
+  don't care about a specific query result, but for the hook's own tests
+  we need to drive specific `addEventListener`/`removeEventListener`
+  spies per test. The web test-boundaries linter rejects direct
+  `window.matchMedia = …` assignment (`no-direct-shared-state-mutation`);
+  `vi.stubGlobal` is the correct replacement, with `vi.unstubAllGlobals()`
+  in `finally`. Setup's `unstubGlobals: true` vitest config restores
+  between tests, so the explicit cleanup is belt-and-suspenders.
+- **Sidebar visibility is intentionally NOT in the hook.** The spec /
+  design explicitly chose CSS-driven sidebar visibility
+  (`xl:flex-row` + `hidden xl:flex`); adding a JS gate in the hook
+  would be a new mechanism for no behavioural gain. The new spec asserts
+  the CSS classes are still present in both viewport states — that is
+  the "stable DOM/CSS attribute check" the spec author approved.
+- **Hydration-mismatch safety.** Initial state is `false` regardless of
+  the actual viewport — both `override` and `liveMatches` seed to `false`.
+  SSR HTML has the slot absent (because `isWideViewport` is `false` →
+  `!isWideViewport` is `true` → slot renders), then on the client the
+  effect runs and flips if needed. The narrow-vs-wide split is
+  handled by the CSS layout (`xl:flex-row`) — no hydration risk in
+  either direction.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4917 tests, was 4905 — the
+  9 new `useMediaQuery` specs + 3 new SessionDetailShell sibling-dedup
+  specs). `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` both pass.
+- Full monorepo `npm test` passes (server / cli / web / runner combined).
+- No FSD / layer change: `pages/session/ui/SessionDetailShell.tsx`
+  imports the new hook from `@/shared/lib/use-media-query`, which is the
+  shared-layer pattern `pages/issue-detail/ui/IssueDetailPage.tsx` already
+  uses (`useNarrowViewport` from `@/shared/lib/use-narrow-viewport`). No
+  new public surface; `SessionDetailShellProps` and the
+  `SessionDetailShellComponents` seam are unchanged.

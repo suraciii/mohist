@@ -14,6 +14,7 @@ import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as D
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
+import { useMediaQuery } from '@/shared/lib/use-media-query'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
@@ -600,6 +601,8 @@ function SessionHeader({
   const stageLower = (meta?.stage ?? '').toLowerCase()
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
 
+  const isWideViewport = useMediaQuery('(min-width: 1280px)')
+
   const lastActivityAnchorMs = sessionTimeAnchorMs(meta, statusKind)
   const lastActivityTime = lastActivityAnchorMs == null ? null : formatSessionTime({
     date: lastActivityAnchorMs,
@@ -646,8 +649,8 @@ function SessionHeader({
             <span>{workflowContextLabel}</span>
           </Link>
         )}
-        {siblingNav && (
-          <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation-slot">
+        {siblingNav && !isWideViewport && (
+          <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation-slot" data-viewport="narrow">
             {siblingNav}
           </div>
         )}
