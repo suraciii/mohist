@@ -181,6 +181,18 @@ public class WorkflowRunStatusTransitionTests
     }
 
     [Fact]
+    public void Stop_FromFailedRun_LandsOnStopped()
+    {
+        var run = BuildReadyRun();
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
+
+        run.Stop();
+
+        Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
+    }
+
+    [Fact]
     public void Stop_FromAwaitingApproval_ClearsCurrentStageApprovalGate()
     {
         var run = BuildAwaitingApprovalRun();

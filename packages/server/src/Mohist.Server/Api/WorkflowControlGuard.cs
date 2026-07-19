@@ -14,7 +14,7 @@ public static class WorkflowControlGuard
         workflowStatus switch
         {
             "stopped" or "completed" => false,
-            "failed" => action == WorkflowControlAction.RetryOrRerun,
+            "failed" => action is WorkflowControlAction.RetryOrRerun or WorkflowControlAction.Stop,
             null => false,
             _ => true,
         };
@@ -24,4 +24,5 @@ public enum WorkflowControlAction
 {
     ActiveOnly,
     RetryOrRerun,
+    Stop,
 }

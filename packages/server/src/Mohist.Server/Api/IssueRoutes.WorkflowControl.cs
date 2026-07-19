@@ -158,7 +158,7 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.Stop);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
             try

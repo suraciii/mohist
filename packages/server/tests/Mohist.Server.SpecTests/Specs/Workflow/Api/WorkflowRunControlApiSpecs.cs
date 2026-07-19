@@ -301,7 +301,6 @@ public class WorkflowRunControlApiSpecs
     [Theory]
     [InlineData("approve", "approve")]
     [InlineData("resume", "resume")]
-    [InlineData("stop", "stop")]
     [InlineData("pause", "force-stop")]
     public async Task CrossPath_ActiveOnlyAdmitDecisionMatchesIssueScopedRoute(string runVerb, string issueVerb)
     {
@@ -362,21 +361,21 @@ public class WorkflowRunControlApiSpecs
         Assert.NotNull(await LoadRunAsync(recoveredRunWrId!));
     }
 
-    [Fact]
-    public async Task CrossPath_RetryOnFailedRun_BothRoutesAdmitGuard()
+    [Theory]
+    [InlineData("retry")]
+    [InlineData("stop")]
+    public async Task CrossPath_FailedRun_AdmitsRecoveryAndStop(string verb)
     {
         var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
         await ForceFailedStatusAsync(wrId);
 
-        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", content: null);
-        var issuePayload = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
-        AssertGuardDidNotReject(issuePayload);
+        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{verb}", content: null);
+        Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
 
         await ForceFailedStatusAsync(wrId);
 
-        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/retry", content: null);
-        var runPayload = await runResponse.Content.ReadFromJsonAsync<JsonElement>();
-        AssertGuardDidNotReject(runPayload);
+        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
     }
 
     [Fact]
@@ -423,15 +422,6 @@ public class WorkflowRunControlApiSpecs
         Assert.NotNull(dynamicTask.ExpectInput);
         Assert.True(dynamicTask.ExpectInput!.ContainsKey("files"));
         Assert.True(dynamicTask.ExpectInput.ContainsKey("markers"));
-    }
-
-    private static void AssertGuardDidNotReject(JsonElement payload)
-    {
-        var hasError = payload.TryGetProperty("error", out var errorEl);
-        if (!hasError) return;
-        var message = errorEl.GetString();
-        Assert.NotEqual("Workflow is not active for this issue", message);
-        Assert.NotEqual("Workflow is not active for this run", message);
     }
 
     [Fact]
