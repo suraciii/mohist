@@ -150,6 +150,7 @@ export function SessionDetailShell({
     CompactionLineageLink,
   } = { ...defaultComponents, ...components }
   const {
+    sessionKey,
     meta,
     statusKind,
     isRunning,
@@ -200,7 +201,10 @@ export function SessionDetailShell({
   const failedGroupIds = selectToolCallGroupIds(displayTurns)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
-  const [queuedFollowupVersion, setQueuedFollowupVersion] = useState<number | null>(null)
+  const [queuedFollowup, setQueuedFollowup] = useState<{
+    sessionKey: string
+    transcriptVersion: number
+  } | null>(null)
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = meta?.turnCount ?? turns.length
@@ -336,20 +340,20 @@ export function SessionDetailShell({
   }, [isRunning, meta?.status])
 
   useEffect(() => {
-    if (queuedFollowupVersion !== null && transcriptVersion > queuedFollowupVersion) {
-      setQueuedFollowupVersion(null)
+    if (queuedFollowup?.sessionKey === sessionKey && transcriptVersion > queuedFollowup.transcriptVersion) {
+      setQueuedFollowup(null)
     }
-  }, [queuedFollowupVersion, transcriptVersion])
+  }, [queuedFollowup, sessionKey, transcriptVersion])
 
   const handleFollowupSend = useCallback(async (text: string) => {
-    setQueuedFollowupVersion(transcriptVersion)
+    setQueuedFollowup({ sessionKey, transcriptVersion })
     try {
       await sendFollowup(text)
     } catch (error) {
-      setQueuedFollowupVersion(null)
+      setQueuedFollowup((current) => current?.sessionKey === sessionKey ? null : current)
       throw error
     }
-  }, [sendFollowup, transcriptVersion])
+  }, [sendFollowup, sessionKey, transcriptVersion])
 
   useEffect(() => {
     if (!isRunning) return
@@ -458,7 +462,7 @@ export function SessionDetailShell({
               isSending={followupIsPending}
               disabled={!canFollowup}
               endedAt={meta.completedAt}
-              hasQueuedFollowup={queuedFollowupVersion !== null}
+              hasQueuedFollowup={queuedFollowup?.sessionKey === sessionKey}
               className="py-0.5"
             />
           </div>
