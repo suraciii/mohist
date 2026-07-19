@@ -127,9 +127,11 @@ recovery 规则判断后续流程。这些是 Workflow 的 task 完成要求，�
 没有 promise marker 时，Action Output 为 `null`。Session ID、模型、用量、完整文本、
 校验明细和错误详情属于 Session 或任务状态，不重复塞进 Action Output。
 
-Mohist 不自动批准 OpenCode 权限请求。若 OpenCode 的权限配置仍要求无人值守流程中
-无法完成的交互，本次 task 失败并给出可操作的错误。执行超时会中断当前回合；提交
-结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。
+OpenCode 的权限配置仍是最终判断。它已经允许的操作直接执行，明确拒绝的操作仍然拒绝。
+当 OpenCode 只要求确认时，Mohist 的无人值守执行仅允许这一次操作，不保存为以后自动
+允许，也不会创建审批或要求用户介入。若这次回应无法完成，本次 task 立即失败并给出
+可操作的错误，不等待执行期限耗尽。执行超时会中断当前回合；提交结果不确定时不会
+自动重放 Prompt，避免同一任务被执行两次。
 
 provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 OpenCode
 回合并让本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理
@@ -144,6 +146,9 @@ Reset。只有当前物理 Session 已不存在，或用户明确要求清空上
 安装者负责提供可用的 OpenCode CLI，以及配置 provider、插件和权限。Mohist 不安装、
 升级或锁定 OpenCode CLI 的精确版本；启动时只验证当前
 环境是否可用，并在不兼容时阻止 Runner 接收新工作。
+
+工具的超时和重试由 OpenCode 判断。Mohist 只负责整个回合的期限和中断确认，不为单个
+工具建立另一套超时策略。
 
 Mohist 展示的模型列表用于帮助配置。最终模型是否合法、默认模型是什么，仍由
 OpenCode 判断。

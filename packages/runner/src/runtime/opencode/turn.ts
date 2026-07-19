@@ -63,6 +63,7 @@ import {
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeMissingSession,
+  normalizePermissionRequired,
   normalizeTurnFailed,
   normalizeUnavailableRuntime,
 } from "./errors.js"
@@ -278,12 +279,12 @@ interface ExecutePromptArgs {
 type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[] } }
 type PromptFailure = {
   kind: "failure"
-  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizeAbortUnconfirmed>
+  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizePermissionRequired> | ReturnType<typeof normalizeAbortUnconfirmed>
   diagnostics: RuntimeDiagnostic[]
 }
 type PromptResult = PromptSuccess | PromptFailure
 
-type AbortReason = "provider" | "reconciliation-failed" | "signal"
+type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "signal"
 
 interface ProviderRetryStatus {
   readonly type?: string
@@ -297,7 +298,9 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
   const abortPromise = deferred<AbortReason>()
   let requestedAbort: AbortReason | null = null
   let reconciliationFailure: RuntimeDiagnostic | null = null
+  let permissionFailure: RuntimeDiagnostic | null = null
   let reconciliationInFlight: Promise<void> | null = null
+  const repliedPermissionIds = new Set<string>()
   const resolveAbort = (reason: AbortReason) => {
     if (requestedAbort !== null) return
     requestedAbort = reason
@@ -331,8 +334,30 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       if (reconciliationInFlight === pending) reconciliationInFlight = null
     })
   }
+  const respondToPermissionRequest = (event: RuntimeGlobalEvent) => {
+    const requestId = permissionRequestIdFor(event, args.sessionId, args.directory)
+    if (requestId === null || repliedPermissionIds.has(requestId)) return
+    repliedPermissionIds.add(requestId)
+    void args.client.permission.reply({
+      requestID: requestId,
+      directory: args.directory,
+      reply: "once",
+    }, { throwOnError: true }).then((response) => {
+      if (response.data !== true) {
+        throw new Error("OpenCode permission.reply did not confirm the permission was handled")
+      }
+    }).catch((cause) => {
+      permissionFailure = {
+        severity: "error",
+        code: "permission-reply-failed",
+        message: `Failed to reply to OpenCode permission request: ${errorMessage(cause, "unknown permission error")}`,
+      }
+      resolveAbort("permission-reply-failed")
+    })
+  }
   const unsubscribe = args.events.subscribe((event) => {
     if (event.type === "server.connected") startReconciliation()
+    respondToPermissionRequest(event)
     retryTracker.observe(event)
     resolveProviderAbort()
     args.onEvent?.(event)
@@ -360,7 +385,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     )
     const initialRace = await Promise.race([initialStatus, abortPromise.promise])
     if (typeof initialRace === "string") {
-      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, initialRace, reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (!initialRace.ok) {
       const diagnostic = providerStatusDiagnostic(initialRace.cause)
@@ -368,7 +393,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
     }
     if (requestedAbort !== null) {
-      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, requestedAbort, reconciliationFailure, permissionFailure, promptDiagnostics)
     }
 
     const promptCall = args.client.session.prompt({
@@ -381,7 +406,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     )
     const raced = await Promise.race([promptCall, abortPromise.promise])
     if (typeof raced === "string") {
-      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, raced, reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     promptOutcome = raced as { ok: true; response: unknown } | { ok: false; cause: unknown }
   } finally {
@@ -392,13 +417,13 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
 
   if (!promptOutcome.ok) {
     if (retryTracker.abortedDueToNonRecoverable() || retryTracker.abortedDueToThreshold()) {
-      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, "provider", reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (reconciliationFailure !== null) {
-      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (args.signal.aborted) {
-      return finishAbortedTurn(args, retryTracker, "signal", reconciliationFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, "signal", reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (isTransportFailure(promptOutcome.cause)) {
       return finishTransportFailure(args, promptOutcome.cause, promptDiagnostics)
@@ -437,6 +462,18 @@ interface RetryTracker {
   abortedDueToThreshold(): boolean
   nonRecoverableVerdict(): { message: string; diagnostics: RuntimeDiagnostic[] } | null
   thresholdVerdict(): { message: string; diagnostics: RuntimeDiagnostic[] } | null
+}
+
+function permissionRequestIdFor(
+  event: RuntimeGlobalEvent,
+  expectedSessionId: string,
+  expectedDirectory: string,
+): string | null {
+  if (event.type !== "permission.asked") return null
+  if (event.sessionID !== expectedSessionId) return null
+  if (event.directory !== undefined && event.directory !== expectedDirectory) return null
+  const requestId = event.payload?.["id"]
+  return typeof requestId === "string" && requestId.length > 0 ? requestId : null
 }
 
 function createRetryTracker(
@@ -506,12 +543,14 @@ async function finishAbortedTurn(
   retryTracker: RetryTracker,
   reason: AbortReason,
   reconciliationFailure: RuntimeDiagnostic | null,
+  permissionFailure: RuntimeDiagnostic | null,
   promptDiagnostics: RuntimeDiagnostic[],
 ): Promise<PromptFailure> {
   const providerVerdict = retryTracker.nonRecoverableVerdict() ?? retryTracker.thresholdVerdict()
   const contextDiagnostics = [
     ...(providerVerdict?.diagnostics ?? []),
     ...(reconciliationFailure ? [reconciliationFailure] : []),
+    ...(permissionFailure ? [permissionFailure] : []),
     ...promptDiagnostics,
   ]
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
@@ -540,6 +579,11 @@ async function finishAbortedTurn(
 
   if (reason === "reconciliation-failed" && reconciliationFailure) {
     const error = normalizeUnavailableRuntime([reconciliationFailure, ...promptDiagnostics])
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+
+  if (reason === "permission-reply-failed" && permissionFailure) {
+    const error = normalizePermissionRequired([permissionFailure, ...promptDiagnostics])
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }
   }
 
