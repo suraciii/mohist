@@ -1,85 +1,60 @@
-# Self-Review — Issue #430 Session Page Frame Consolidation
+# Self-Review — Issue #430 Session Page Frame Consolidation (after feedback fb_84ba3c6d)
 
-Scope reviewed: `openspec/changes/issue-430/{proposal.md, design.md, tasks.json, specs/}` against the issue body (`mo issue show 430`) and the epic-#49 / issue-#427/#428/#429 boundary.
+Scope: `openspec/changes/issue-430/{proposal.md, design.md, tasks.json, specs/}` against the feedback directive (Occam's razor; address every D-1..D-11 finding; mutual consistency across proposal/specs/design/tasks) and the issue body.
 
-## What is solid
+## Re-checked findings against D-1..D-11
 
-- **Capability coverage is complete.** All six product shapes in the issue map to a spec file, a design decision (or two), and a task. No capability is left without a normative spec, and every requirement has at least one `#### Scenario:` (sessions-header-meta-line: 4/6, session-sticky-identity: 4/6, session-action-weight: 3/9, session-sibling-nav-dedup: 3/5, session-time-display: 4/9, session-followup-state-hints: 6/11). Specs use SHALL/MUST and start directly with `### Requirement:` blocks (no `## ADDED/MODIFIED/REMOVED` headers), satisfying the spec format rules.
-- **Epic-#49 boundary is respected.** Design non-goals explicitly exclude transcript content (#427), row anchors, liveness gate (#426), live activity (#428), jump highlight (#429), sidebar content redesign, and application-wide navigation. Data model, event protocol, and `SessionDataSourceResult` contract are all pinned as untouched.
-- **Time-injection discipline is correctly internalized.** D1's `formatSessionTime` consumes `now` as an argument; T-001 acceptance criterion 4 explicitly forbids implicit `Date.now()`. The followup closed-state copy in T-007 reuses the same helper for phrasing consistency, matching spec session-followup-state-hints "the helper that produces the relative phrase MUST be the same helper used elsewhere on the page".
-- **Task DAG is valid.** `node` validation confirms acyclic deps pointing only to lower-priority IDs; T-002 and T-007 correctly depend on T-001; T-003/T-004/T-005/T-006 are independent and parallelizable. Every task is one feature module and includes its own acceptance criteria with test-related verification.
-- **Each capability closes with a "presentational only" requirement** (or equivalent in session-time-display via the "Time-format helper is deterministic under test" + "Underlying data fields are unchanged" rules), giving the implementer a clear invariant not to drift into data/protocol changes.
+| id | finding | resolution (line refs in this rev) |
+|---|---|---|
+| D-1 | `StickySessionTitle`'s `engaged` default contradicts the spec's "hidden on first render" invariant | Fixed via Occam — the wrapper owns visibility, the inner `StickySessionTitle` has no new prop at all. Wrapper starts at `engaged=false` and renders `null` until the IntersectionObserver's first callback reports the header fully out. See `design.md:62` (D2 description + alternatives) and `tasks.json` T-003 acceptance criterion 1. The `engaged=true` default option is explicitly rejected at `design.md:73`. |
+| D-2 | `formatSessionTime` signature had a redundant `anchor` parameter | Fixed — signature is now `formatSessionTime({ date, statusKind, now })`. Helper takes only one timestamp. `design.md:42`, `design.md:58` (rejected alternative), `tasks.json` T-001 description + acceptance criterion 1. The spec's "anchor timestamp" language now maps unambiguously to the `date` parameter. |
+| D-3 | `prereq` / `unknown` disabled-reason triggers had no input → reason mapping | Fixed via Occam — dropped the closed-set entirely. The only currently-known disabled trigger is `data-active="true"`, which `SessionRecoveryActions.tsx:195, 211` already exposes. The structured tooltip is keyed off that attribute; no new contract attribute is introduced. `design.md:122` (D6 description), `design.md:139` (rejected alternative), `specs/session-action-weight/spec.md` (rewritten — closed `prereq`/`unknown` scenarios removed, single "active" scenario retained), `tasks.json` T-005 description + acceptance criteria 1–3. Future reasons are deferred in `design.md:215`. |
+| D-4 | `session-cancel-trigger` testid preservation not pinned in T-002 or T-004 | Fixed — acceptance criterion 5 in T-002 fences the button out of T-002's scope ("MUST NOT alter the Cancel button's location, variant, or testid"), and acceptance criterion 1 in T-004 explicitly preserves `data-testid="session-cancel-trigger"` and `aria-label="Cancel session"` across the demotion. `tasks.json` T-002 acceptance 5 + T-004 acceptance 1. |
+| D-5 | Sidebar conditional rendering implied but not explicit | Resolved via Occam in the opposite direction — the sidebar is **not** conditionally rendered (no new render gate); it stays CSS-driven via the parent's existing `xl:flex-row` layout. The spec's `is not rendered` language is updated to `is not visible (CSS-hidden)` in `specs/session-sibling-nav-dedup/spec.md`. T-006 acceptance criteria 2 and 3 assert visibility via the parent layout, not via data-testid absence. `design.md:140` (D7 description), `design.md:151` (rejected alternative), `tasks.json` T-006. |
+| D-6 | Disabled Compact/Reset focusability was undefined | Fixed — the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) already wraps its child in a `tabIndex={0}` span with `onFocus`/`onBlur` toggling the tooltip; that primitive IS the focus mechanism. No new a11y code is added. `design.md:122` (D6 description), `tasks.json` T-005 acceptance criterion 3 makes this explicit. The Risk bullet is updated from a hedge to a confirming statement at `design.md:179`. |
+| D-7 | T-001 description referenced a non-existent sticky-strip time display | Fixed — "(when its time display lands)" parenthetical removed from `tasks.json` T-001 description. The call sites in scope are the header's `lastActivityAt` and probing indicator only. |
+| D-8 | T-002 didn't lock "leave Cancel alone" | Fixed — T-002 acceptance criterion 5 explicitly forbids modifying the Cancel button's location, variant, or testid; that work is fenced to T-004. |
+| D-9 | "all six branches of the matrix" wording | Clarified to "all six matrix rows" in `tasks.json` T-001 acceptance criterion 3. |
+| D-10 | Anchor timestamp (`lastActivityAt` vs `completedAt`) not pinned | Fixed — `tasks.json` T-001 acceptance criterion 2 pins `date = max(completedAt, lastActivityAt)` for terminal sessions, matching `specs/session-time-display/spec.md` requirement 2. |
+| D-11 | Existing Sent-flash test backward-compat not asserted in T-007 | Fixed — `tasks.json` T-007 acceptance criterion 5 explicitly asserts the existing `visibility and enabled state`, `disabled (terminal state)` (with `/no longer accepting followups/i` text), and the transient `Sent` flash spec continue to pass unchanged when no new props are supplied. |
 
-## Critical defect (must fix)
+## Mutual consistency check
 
-### D-1: `StickySessionTitle`'s `engaged` default contradicts the spec
+| invariant | proposal | spec | design | tasks | status |
+|---|---|---|---|---|---|
+| `formatSessionTime({ date, statusKind, now })` only one timestamp | `proposal.md` references the helper by name (post-fix) | `session-time-display/spec.md` uses "anchor timestamp" as a domain term mapping to `date` | `design.md:42, 58` | `tasks.json` T-001 acceptance 1 | consistent |
+| `StickySessionTitle` inner component has no new prop | `proposal.md:10` says sticky is hidden until scroll | `session-sticky-identity/spec.md` requires hidden on first render | `design.md:62-65, 73` (wrapper owns state) | `tasks.json` T-003 acceptance 2 | consistent |
+| No `data-disabled-reason` closed-set | `proposal.md:12, 40, 52` explicitly drop the closed-set rationale | `session-action-weight/spec.md` rewritten — single `active`-driven tooltip, no closed-set | `design.md:122, 133, 139, 24, 194` | `tasks.json` T-005 acceptance 1-3 | consistent |
+| Sidebar stays CSS-hidden (no new render gate) | implicit — proposal preserves sidebar | `session-sibling-nav-dedup/spec.md` updated to "is not visible" | `design.md:140-151` | `tasks.json` T-006 acceptance 2-4 | consistent |
+| `session-cancel-trigger` preserved | implicit — Cancel demoted but kept | unchanged | `design.md:114` keeps the same button id by reference | `tasks.json` T-002 acceptance 5 + T-004 acceptance 1 | consistent |
+| Anchor is `max(completedAt, lastActivityAt)` | implicit | `session-time-display/spec.md:22` defines | `design.md:42` notes | `tasks.json` T-001 acceptance 2 pins | consistent |
+| Sent-flash + closed-copy backward-compat | implicit | `session-followup-state-hints/spec.md:67` requires it | `design.md:159` discusses | `tasks.json` T-007 acceptance 5 pins | consistent |
 
-- **Where:** `design.md:63` (D2) — "a new `engaged` boolean prop (default `true` for callers that don't yet pass the new prop — backward compatibility for the existing widget public API)".
-- **Conflict:** `specs/session-sticky-identity/spec.md:1–3` requires "the sticky strip SHALL NOT occupy any visible space while the outer session header is fully or partially visible" and "the outer header is the single source of identity (session name + status) on the first screen". A default of `engaged=true` would render the strip visible on first render, directly violating the spec.
-- **Fix:** the default for the wrapper's resolved `engaged` state MUST be `false`. The "backward compatibility for the existing widget public API" rationale no longer applies — the widget's behavior is changing. The wrapper owns the initial `engaged=false` and the IntersectionObserver callback is the only thing that flips it to `true`. If a prop is exposed on `StickySessionTitle` for tests, its default must be `false`.
-- **Impact if not fixed:** T-003 will be implemented one of two ways — either the strip is initially visible (failing the first render scenario in `session-sticky-identity`) or the engineer guesses at the correct default and ships something not specifiable.
+## Capability coverage verification
 
-## Major defects (must fix before build)
+All six capabilities in the proposal's Capabilities section still have a spec file, a design decision, a task, and ≥1 `#### Scenario:`
 
-### D-2: `formatSessionTime` signature carries a redundant/unclear `anchor` parameter
+- `session-header-meta-line` — spec `reqs 4 / scenarios 6`; design D3 + D4; task T-002.
+- `session-sticky-identity` — spec `reqs 4 / scenarios 6`; design D2; task T-003.
+- `session-action-weight` — spec `reqs 3 / scenarios 7` (was 9 — two scenarios trimmed per Occam as part of D-3); design D5 + D6; tasks T-004 + T-005.
+- `session-sibling-nav-dedup` — spec `reqs 3 / scenarios 5`; design D7; task T-006.
+- `session-time-display` — spec `reqs 4 / scenarios 9`; design D1; task T-001.
+- `session-followup-state-hints` — spec `reqs 6 / scenarios 11`; design D8; task T-007.
 
-- **Where:** `design.md:42` (D1) — "the new helper is `formatSessionTime({ date, statusKind, anchor, now })`".
-- **Conflict:** the spec (`session-time-display`) talks about a single timestamp (the anchor for the threshold and the time being formatted are the same input). The matrix's `now - anchor ≥ 1h` column header is threshold semantics, not a separate parameter. An extra `anchor` parameter is either redundant with `date` or unclear about which one is which.
-- **Fix:** reduce the signature to `formatSessionTime({ date, statusKind, now })`. The helper computes the threshold internally as `now - date`. T-001's acceptance criterion 2 must match this signature.
-- **Impact if not fixed:** implementation diverges between design and tests; engineers will invent semantics.
+Net change since the previous review: 2 spec scenarios removed (the speculative `prereq` / `unknown` cases); all other counts unchanged. Every remaining scenario is testable; every acceptance criterion in `tasks.json` includes test-related verification.
 
-### D-3: `prereq` and `unknown` disabled-reason triggers are not pinned down
+## What the implementation will have to do (build-side)
 
-- **Where:** `specs/session-action-weight/spec.md:40–48`, `design.md:122–129` (D6), `tasks.json` T-005.
-- **Conflict:** the current `SessionRecoveryActions.tsx:103` derives `active` only via `recoveryAvailable === undefined ? isSessionActive(status) : !recoveryAvailable`. The spec scenarios describe `prereq` and `unknown` with examples ("prerequisite data is missing", "network or status query is pending"), but no decision rule maps an input state to either reason. The design D6 table lists the three reasons but does not say *when* each fires. T-005 acceptance criterion 1 only requires the closed-set attribute to exist, with no input→reason rule.
-- **Fix:** add a trigger table (either to D6 or as a follow-on clarification) covering at minimum:
-  - `active` — `isSessionActive(status)` is true (existing rule).
-  - `prereq` — `status` is terminal (e.g. `completed`/`failed`/`cancelled`) but `recoveryAvailable === false` for a documented prerequisite (e.g. recovery audit metadata missing).
-  - `unknown` — `status` is null/undefined and `recoveryAvailable === undefined` (status query has not resolved).
-  The spec scenario "Prerequisite reason explains what is missing" and "Unknown reason explains the temporary unavailability" should each be backed by a concrete input → reason mapping; otherwise the acceptance criterion is unmeetable without inventing conditions.
-- **Impact if not fixed:** T-005 ships with either only `active` ever firing (silently dropping the spec's two other reasons) or with three reasons wired to ad-hoc conditions that don't match the spec scenarios.
+Because this is the plan stage, there is no code to lint / test yet — the artifacts above are what the build stage will execute against. The smallest verification command the build stage will run is `npm run typecheck -w packages/web && npm run test:run -w packages/web`, which is explicit in every task's terminal acceptance criterion. The plan stage itself was verified by:
 
-### D-4: `session-cancel-trigger` testid preservation is not pinned in T-002 or T-004
-
-- **Where:** `tasks.json` T-002 and T-004 acceptance criteria.
-- **Conflict:** the existing `SessionPage.cancel.test.tsx:218` asserts `container.querySelector('[data-testid="session-cancel-trigger"]')`. Neither T-002 (header metadata rewrite) nor T-004 (Cancel demotion) explicitly requires this testid to survive. T-002's "Migrate the existing render specs" criterion is about selector rewrites for the new metadata testids; if T-002 accidentally drops the Cancel testid, the migration breaks.
-- **Fix:** add an explicit acceptance criterion to T-004: "The Cancel button preserves `data-testid="session-cancel-trigger"` and `aria-label="Cancel session"` across the demotion, so `SessionPage.cancel.test.tsx` continues to find it." (And T-002 should say "does not modify the Cancel button — its demotion is owned by T-004" to keep the split clean.)
-- **Impact if not fixed:** existing `SessionPage.cancel.test.tsx` regresses silently; the migration step "Run `npm run test:run -w packages/web` pass" will fail for a non-obvious reason.
-
-## Moderate gaps (should fix before build)
-
-### D-5: Sidebar conditional rendering is implied but not explicit
-
-- **Where:** `specs/session-sibling-nav-dedup/spec.md:17` — "On viewport widths where the `SiblingSessionsSidebar` is not rendered" and `tasks.json` T-006 acceptance criterion 4 — "the sidebar is not rendered at this width (verified by absence of its `data-testid`)".
-- **Conflict:** today the sidebar is *always* rendered and is hidden only via CSS (`xl:flex-row` on the parent at `SessionDetailShell.tsx:396`). Both the spec language ("is not rendered") and T-006's test ("absence of its `data-testid`") require conditional rendering, but design D7 only says "`SiblingSessionsSidebar` content remains untouched" — visibility vs. content is left ambiguous.
-- **Fix:** D7 should explicitly state that `SessionDetailShell` conditionally renders `{siblingSidebar}` based on `useMediaQuery('(min-width: 1280px)')` (or equivalent), not just the header slot. The "content remains untouched" guarantee is preserved (the sidebar component itself doesn't change), but the rendering gate does. Add a sentence to T-006 explicitly noting the sidebar is conditionally rendered.
-
-### D-6: Disabled Compact/Reset focusability is required by the spec but not called out in T-005
-
-- **Where:** `specs/session-action-weight/spec.md:30–33` ("WHEN a user hovers or focuses a disabled Compact or Reset button / THEN a structured tooltip SHALL render") and `design.md:174` (open question, partially mitigated).
-- **Conflict:** a `<button disabled>` is not focusable in browsers, so the "focus" path of the spec scenario cannot be triggered without making the button focusable (wrap in a focusable span, or use `aria-disabled` on an enabled `<button>` with click-guard). Design D6's mitigation says "spec ensures the disabled button remains focusable" but T-005's acceptance criteria don't pin the focusability requirement — only the existence of `data-disabled-reason` and the tooltip.
-- **Fix:** add an acceptance criterion to T-005: "When Compact or Reset is disabled, the rendered control is keyboard-focusable (either via a `tabIndex={0}` wrapper inside `Tooltip` or via `aria-disabled` on an enabled button with a click-guard), so the tooltip can be triggered by focus as well as hover, per spec scenario 'Disabled reason renders a structured tooltip'."
-
-### D-7: T-001 description references a non-existent time display on the sticky strip
-
-- **Where:** `tasks.json` T-001 description: "Replace the call sites inside `SessionHeader` (last activity, probing indicator) and `StickySessionTitle` (when its time display lands)".
-- **Conflict:** `specs/session-sticky-identity/spec.md:31` pins the strip's content to "exactly three pieces of information: the session name, the status badge, and the turn count" — no time. The current `StickySessionTitle` does not render a time. The "when its time display lands" parenthetical implies a future change that this issue does not make.
-- **Fix:** drop the parenthetical from T-001's description; the call sites to migrate are `SessionHeader.lastActivityAt` and the `Checking since {probeSentAt}` indicator only.
-
-### D-8: T-002 doesn't lock down "leave Cancel in place"
-
-- **Where:** `tasks.json` T-002 notes ("Cancel and sibling-nav slot edits land in T-004 and T-006") but no acceptance criterion pins this.
-- **Conflict:** T-002 rewrites the metadata row; if it accidentally drops or relocates the Cancel button, T-004 then has no clear before-state to demote from, and existing tests break.
-- **Fix:** add an acceptance criterion: "T-002 MUST NOT alter the Cancel button's location, variant, or `session-cancel-trigger` testid; the cancel demotion is owned by T-004."
-
-## Minor issues (nice to fix)
-
-- **D-9.** `tasks.json` T-001 description claims "all six branches of the matrix". The design matrix has six tabular rows but live/finalizing/probing collapses regardless of threshold ("any"), so there are five distinct behavior branches. Either say "all six matrix rows" or "all five distinct behaviors"; both are fine, but the current phrasing invites confusion.
-- **D-10.** `specs/session-time-display/spec.md:22` defines `absolute-relative threshold` with a `MORE RECENT OF completedAt OR lastActivityAt` rule, but neither T-001 nor T-002 currently pins which timestamp the helper should use as the anchor in the header. In practice the header currently renders `lastActivityAt`; if `completedAt` should be preferred for terminal sessions, that should be a T-001 acceptance criterion or an explicit note in the spec.
-- **D-11.** Design D8 says "The `Sent` flash behavior is preserved on the transient `isSending` window only when `hasQueuedFollowup` is not supplied (backward compatibility); when `hasQueuedFollowup` is supplied, the `Sent` flash is replaced by the persistent queued indicator." This is fine, but `SessionFollowupComposer.test.tsx` currently has a "Sent" flash spec (`expect(...).toHaveTextContent(/sent/i)`); T-007 should explicitly assert that this existing spec still passes when `hasQueuedFollowup` is unset, so the backward-compatibility guarantee is testable.
+- `node -e "require('./openspec/changes/issue-430/tasks.json')"` succeeds (JSON valid).
+- `node -e ... deps DAG check` passes (every `dependsOn` references a strictly lower priority; no cycles).
+- Cross-grep for `data-disabled-reason` returns only explanatory rationale mentions (proposal/design/spec/tasks all explaining WHY the closed-set was dropped), no stale contract assertions.
+- Cross-grep for `formatSessionTime` signature returns the consistent `{ date, statusKind, now }` form across design + tasks.
+- Cross-grep for `StickySessionTitle` confirms the inner component has no new prop; engagement is owned by the wrapper.
 
 ## Verdict
 
-The plan is well-structured, complete in capability coverage, and respects the epic-#49 boundary. But it ships **one critical defect (D-1)** — a spec/design contradiction on the sticky strip's initial visibility — and **three major defects (D-2, D-3, D-4)** — an unclear helper signature, two un-pinned disabled-reason triggers, and an unpreserved testid that would regress existing tests. These need fixing before build; the moderate and minor items are refinements the implementer can decide but would be cheaper to fix here.
+All D-1..D-11 findings are resolved in the current revision of proposal / design / specs / tasks, with mutual consistency preserved. The feedback directive ("Apply Occam's razor: remove redundant or undefined states and parameters instead of adding mechanisms") is satisfied: the helper's `anchor` parameter is dropped, the `data-disabled-reason` closed-set is dropped, the sticky `engaged` prop on the inner component is dropped (the wrapper owns visibility instead), and the sidebar's conditional-render gate is dropped (CSS-hidden is sufficient). The remaining artifacts describe the minimal mechanism set that satisfies the issue's acceptance criteria and stay within the epic-#49 boundary (no data / protocol / liveness-gate / row-anchor / live-activity / jump-highlight changes).
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
