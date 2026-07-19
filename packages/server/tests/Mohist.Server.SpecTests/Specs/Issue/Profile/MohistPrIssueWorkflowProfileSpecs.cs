@@ -173,7 +173,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var orderedIds = plan.Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(
-            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
+            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "push", "open-draft-pr" },
             orderedIds);
 
         var openDraftPr = plan.Tasks.Last();
@@ -188,6 +188,20 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(openDraftPr.SetVars);
         Assert.Equal("output.prNumber", openDraftPr.SetVars!["github.pr.number"]);
         Assert.Equal("output.prUrl", openDraftPr.SetVars!["github.pr.url"]);
+    }
+
+    [Fact]
+    public void GithubPrWorkflowDefinition_ApprovalFeedbackPublishesBeforeChecksResume()
+    {
+        var feedback = MohistWorkflow.GithubPrWorkflowDefinition.Approval!.Feedback!;
+        var tasks = feedback.Tasks!;
+
+        Assert.Equal(new[] { "apply-feedback", "publish-feedback" }, tasks.Select(task => task.Id).ToArray());
+        var publish = tasks[1];
+        Assert.Equal("mohist/push", publish.Uses);
+        Assert.Equal("HEAD", ReadStringWith(publish, "source"));
+        Assert.Equal("${{ workspace.branch }}", ReadStringWith(publish, "target"));
+        Assert.True(ReadBoolWith(publish, "force"));
     }
 
     [Fact]
@@ -270,7 +284,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var prBuild = pr.Stages.Single(s => s.Stage == "build");
         var defBuild = def.Stages.Single(s => s.Stage == "build");
 
-        Assert.Equal(new[] { "workspace-prepare", "load-tasks", "verify" }, prBuild.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "workspace-prepare", "load-tasks", "verify", "push" }, prBuild.Tasks.Select(t => t.Id).ToArray());
         var prLoad = prBuild.Tasks.Single(t => t.Id == "load-tasks");
         var defLoad = defBuild.Tasks.Single(t => t.Id == "load-tasks");
         AssertTaskWithMapsMatchExcept(prLoad, defLoad);
@@ -285,6 +299,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("errorCode=script-failed", handler.When);
         Assert.True(handler.RetrySelf);
         Assert.Equal("recover:fix-tests", Assert.Single(handler.Tasks).Id);
+        Assert.Equal("HEAD", ReadStringWith(prBuild.Tasks.Single(t => t.Id == "push"), "source"));
     }
 
     [Fact]
@@ -315,10 +330,10 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var push = check.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
-        Assert.Equal("${{ workspace.branch }}", ReadStringWith(push, "source"));
+        Assert.Equal("HEAD", ReadStringWith(push, "source"));
         Assert.Equal("${{ workspace.branch }}", ReadStringWith(push, "target"));
         Assert.Equal("origin", ReadStringWith(push, "remote"));
-        Assert.Equal(true, ReadBoolWith(push, "forceWithLease"));
+        Assert.Equal(true, ReadBoolWith(push, "force"));
 
         var markPrReady = check.Tasks.Single(t => t.Id == "mark-pr-ready");
         Assert.Equal("mohist/mark-github-pr-ready", markPrReady.Uses);
@@ -354,9 +369,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var push = integrate.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
-        Assert.Equal("${{ workspace.branch }}", ReadStringWith(push, "source"));
+        Assert.Equal("HEAD", ReadStringWith(push, "source"));
         Assert.Equal("${{ workspace.branch }}", ReadStringWith(push, "target"));
-        Assert.Equal(true, ReadBoolWith(push, "forceWithLease"));
+        Assert.Equal(true, ReadBoolWith(push, "force"));
 
         var mergePr = integrate.Tasks.Single(t => t.Id == "merge-pr");
         Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
@@ -413,7 +428,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var recoverPushBaseMoved = baseMovedTasks.Single(t => t.Id == "recover:push");
         Assert.Equal("mohist/push", recoverPushBaseMoved.Uses);
         var pushWith = recoverPushBaseMoved.With!;
-        Assert.Equal("${{ workspace.branch }}", pushWith["source"]!.Value.GetString());
+        Assert.Equal("HEAD", pushWith["source"]!.Value.GetString());
         Assert.Equal("${{ workspace.branch }}", pushWith["target"]!.Value.GetString());
         Assert.True(pushWith["force"]!.Value.GetBoolean());
         Assert.False(pushWith.ContainsKey("forceWithLease"));
@@ -429,8 +444,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var recoverPushPrChecks = prChecksTasks.Single(t => t.Id == "recover:push");
         Assert.Equal("mohist/push", recoverPushPrChecks.Uses);
-        Assert.Equal("${{ workspace.branch }}", recoverPushPrChecks.With!["source"]!.Value.GetString());
-        Assert.True(recoverPushPrChecks.With!["forceWithLease"]!.Value.GetBoolean());
+        Assert.Equal("HEAD", recoverPushPrChecks.With!["source"]!.Value.GetString());
+        Assert.True(recoverPushPrChecks.With!["force"]!.Value.GetBoolean());
 
         var protectionConflict = handlers.Single(h => h.When == "errorCode=protection-conflict");
         Assert.True(protectionConflict.RetrySelf);
@@ -535,7 +550,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var planIds = definition.Stages[0].Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(
-            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
+            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "push", "open-draft-pr" },
             planIds);
         Assert.Contains("mohist/create-github-pr", definition.Stages[0].Tasks.Select(t => t.Uses).ToArray());
 

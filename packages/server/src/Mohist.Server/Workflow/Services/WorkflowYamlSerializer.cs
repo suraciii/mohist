@@ -297,45 +297,24 @@ public static class WorkflowYamlSerializer
         if (map is null) return null;
         var feedbackMap = OptionalMap(map, "feedback");
         if (feedbackMap is null) return null;
-        return new ApprovalConfig(new ApprovalFeedbackConfig(ToFeedbackTask(OptionalMap(feedbackMap, "task"))));
-    }
-
-    private static TaskDefinition? ToFeedbackTask(Dictionary<string, object?>? map)
-    {
-        if (map is null) return null;
-        var id = String(map, "id");
-        if (string.IsNullOrWhiteSpace(id))
-            throw new InvalidOperationException("Workflow approval.feedback.task requires id");
-        var title = String(map, "title");
-        if (string.IsNullOrWhiteSpace(title))
-            throw new InvalidOperationException($"Workflow approval.feedback.task {id} requires title");
-        var uses = NullIfEmpty(String(map, "uses"));
-        var withMap = OptionalMap(map, "with");
-        var expectMap = OptionalMap(map, "expect");
-        if (withMap is not null)
-            ValidateTaskExpectations(id, uses, withMap);
-        return new TaskDefinition(
-            id,
-            title,
-            uses,
-            JsonElementMap(withMap),
-            JsonElementMap(expectMap));
+        var tasks = List(feedbackMap, "tasks").Select(ToTask).ToList();
+        if (tasks.Count == 0)
+            throw new InvalidOperationException("Workflow approval.feedback requires at least one task");
+        return new ApprovalConfig(new ApprovalFeedbackConfig(tasks));
     }
 
     private static Dictionary<string, object?>? ToApprovalMap(ApprovalConfig? approval)
     {
         if (approval is null || approval.Feedback is null) return null;
-        var feedbackMap = new Dictionary<string, object?>();
-        var taskMap = ToFeedbackTaskMap(approval.Feedback.Task);
-        if (taskMap is not null) feedbackMap["task"] = taskMap;
-        if (feedbackMap.Count == 0) return null;
-        return new Dictionary<string, object?> { ["feedback"] = feedbackMap };
-    }
-
-    private static Dictionary<string, object?>? ToFeedbackTaskMap(TaskDefinition? task)
-    {
-        if (task is null) return null;
-        return ToTaskMap(task);
+        var tasks = approval.Feedback.Tasks;
+        if (tasks is null || tasks.Count == 0) return null;
+        return new Dictionary<string, object?>
+        {
+            ["feedback"] = new Dictionary<string, object?>
+            {
+                ["tasks"] = tasks.Select(ToTaskMap).ToList()
+            }
+        };
     }
 
     private static CheckDefinition ToCheck(object? value)

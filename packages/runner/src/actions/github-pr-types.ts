@@ -32,8 +32,6 @@ export interface CreateGitHubPrOutput {
   prNumber: number | null
   prUrl: string | null
   operation: "created" | "updated" | "reused" | null
-  baseSha: string | null
-  pushed: boolean
   draft: boolean
   errorCode: GitHubPrErrorCode | null
   message: string | null

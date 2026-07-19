@@ -342,18 +342,18 @@ public class WorkflowYamlParserTests
     }
 
     [Fact]
-    public void WorkflowYamlParser_ParsesApprovalFeedbackTaskConfig()
+    public void WorkflowYamlParser_ParsesApprovalFeedbackTasksConfig()
     {
         var definition = MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              id: apply-feedback
-              title: Apply approval feedback
-              uses: mohist/opencode
-              with:
-                session: ${{ stage.name }}
-                prompt: ${{ prompts.apply-feedback }}
+            tasks:
+              - id: apply-feedback
+                title: Apply approval feedback
+                uses: mohist/opencode
+                with:
+                  session: ${{ stage.name }}
+                  prompt: ${{ prompts.apply-feedback }}
         stages:
           - stage: plan
             tasks: []
@@ -362,9 +362,8 @@ public class WorkflowYamlParserTests
 
         Assert.NotNull(definition.Approval);
         Assert.NotNull(definition.Approval!.Feedback);
-        var task = definition.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(definition.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
         Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);
@@ -393,17 +392,16 @@ public class WorkflowYamlParserTests
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              title: Apply approval feedback
-              uses: mohist/opencode
+            tasks:
+              - title: Apply approval feedback
+                uses: mohist/opencode
         stages:
           - stage: build
             tasks: []
             checks: []
         """));
 
-        Assert.Contains("approval.feedback.task", ex.Message);
-        Assert.Contains("id", ex.Message);
+        Assert.Contains("Workflow task requires id", ex.Message);
     }
 
     [Fact]
@@ -412,17 +410,16 @@ public class WorkflowYamlParserTests
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              id: apply-feedback
-              uses: mohist/opencode
+            tasks:
+              - id: apply-feedback
+                uses: mohist/opencode
         stages:
           - stage: build
             tasks: []
             checks: []
         """));
 
-        Assert.Contains("approval.feedback.task", ex.Message);
-        Assert.Contains("title", ex.Message);
+        Assert.Contains("Workflow task apply-feedback requires title", ex.Message);
     }
 
 }

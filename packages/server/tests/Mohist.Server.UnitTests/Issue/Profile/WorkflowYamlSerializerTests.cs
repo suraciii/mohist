@@ -89,7 +89,7 @@ public class WorkflowYamlSerializerTests
 
         Assert.Contains("approval:", yaml);
         Assert.Contains("feedback:", yaml);
-        Assert.Contains("task:", yaml);
+        Assert.Contains("tasks:", yaml);
         Assert.Contains("id: apply-feedback", yaml);
         Assert.Contains("title: Apply approval feedback", yaml);
         Assert.Contains("uses: mohist/opencode", yaml);
@@ -99,9 +99,8 @@ public class WorkflowYamlSerializerTests
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
         Assert.NotNull(reparsed.Approval);
         Assert.NotNull(reparsed.Approval!.Feedback);
-        var task = reparsed.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(reparsed.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("mohist/opencode", task.Uses);
     }
 

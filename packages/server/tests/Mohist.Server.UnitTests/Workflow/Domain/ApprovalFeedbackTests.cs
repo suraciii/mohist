@@ -294,9 +294,9 @@ public class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void ResolveFeedbackTask_NullConfig_ReturnsBuiltInDefault()
+    public void ResolveFeedbackTasks_NullConfig_ReturnsBuiltInDefault()
     {
-        var task = WorkflowRunExtensions.ResolveFeedbackTask(null, "check");
+        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks(null, "check"));
 
         Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
@@ -324,7 +324,7 @@ public class ApprovalFeedbackTests
             Uses: "mohist/acp-agent",
             With: customWith);
 
-        run.RequestChanges("apply with custom task", NextFeedbackId(run), DateTimeOffset.UnixEpoch, customTask);
+        run.RequestChanges("apply with custom task", NextFeedbackId(run), DateTimeOffset.UnixEpoch, [customTask]);
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -335,7 +335,35 @@ public class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void ResolveFeedbackTask_ConfigWithoutSession_FillsSessionFromStage()
+    public void RequestChanges_WithMultipleFeedbackTasks_ResolvesOnlyAfterAllTasksComplete()
+    {
+        var run = BuildAwaitingApprovalRun();
+        var feedbackId = NextFeedbackId(run);
+        run.RequestChanges("publish the correction", feedbackId, DateTimeOffset.UnixEpoch,
+        [
+            new TaskDefinition("apply-feedback", "Apply approval feedback", "mohist/opencode"),
+            new TaskDefinition("publish-feedback", "Publish approval feedback", "mohist/push"),
+        ]);
+
+        var tasks = run.CurrentStage().Tasks.Where(task => task.CausedByFeedbackId == feedbackId).ToList();
+        var apply = tasks.Single(task => task.DefinitionId == "apply-feedback");
+        var publish = tasks.Single(task => task.DefinitionId == "publish-feedback");
+
+        run.StartTask(apply.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        Assert.Null(run.ResolveFeedback(feedbackId, apply.Id, "applied", DateTimeOffset.UnixEpoch));
+
+        run.StartTask(publish.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        var resolved = run.ResolveFeedback(feedbackId, publish.Id, "published", DateTimeOffset.UnixEpoch);
+
+        Assert.NotNull(resolved);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
+        Assert.Equal(publish.Id, resolved.ResolutionTaskId);
+    }
+
+    [Fact]
+    public void ResolveFeedbackTasks_ConfigWithoutSession_FillsSessionFromStage()
     {
         var config = new TaskDefinition(
             Id: "apply-feedback",
@@ -346,7 +374,7 @@ public class ApprovalFeedbackTests
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             });
 
-        var task = WorkflowRunExtensions.ResolveFeedbackTask(config, "plan");
+        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks([config], "plan"));
 
         Assert.Equal("apply-feedback", task.Id);
         Assert.NotNull(task.With);
@@ -355,7 +383,7 @@ public class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void ResolveFeedbackTask_ConfigWithSession_PreservesConfiguredSession()
+    public void ResolveFeedbackTasks_ConfigWithSession_PreservesConfiguredSession()
     {
         var config = new TaskDefinition(
             Id: "apply-feedback",
@@ -367,7 +395,7 @@ public class ApprovalFeedbackTests
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             });
 
-        var task = WorkflowRunExtensions.ResolveFeedbackTask(config, "plan");
+        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks([config], "plan"));
 
         Assert.Equal("custom-session", task.With!["session"]?.GetString());
     }
@@ -451,6 +479,8 @@ public class ApprovalFeedbackTests
         var feedbackId = run.Feedback[0].Id;
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.DefinitionId == "apply-feedback");
+        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, "applied retry semantics", DateTimeOffset.UnixEpoch);
 
@@ -479,9 +509,12 @@ public class ApprovalFeedbackTests
         var run = BuildAwaitingApprovalRun();
         run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
         var feedbackId = run.Feedback[0].Id;
-        run.ResolveFeedback(feedbackId, "apply-feedback.1", "first summary", DateTimeOffset.UnixEpoch);
+        var feedbackTask = run.CurrentStage().Tasks.Last(t => t.DefinitionId == "apply-feedback");
+        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.ResolveFeedback(feedbackId, feedbackTask.Id, "first summary", DateTimeOffset.UnixEpoch);
 
-        var second = run.ResolveFeedback(feedbackId, "apply-feedback.1", "second summary", DateTimeOffset.UnixEpoch);
+        var second = run.ResolveFeedback(feedbackId, feedbackTask.Id, "second summary", DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(second);
         Assert.Equal("first summary", second!.ResolutionSummary);

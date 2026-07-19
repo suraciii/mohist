@@ -1,6 +1,5 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { booleanInput, stringInput } from "../core/json.js"
-import { stringAt } from "../core/json-path.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
 import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource } from "./delivery-context.js"
@@ -48,7 +47,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const force = booleanInput(context.with, "force") === true
   const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true
   const refspec = `${source}:${target}`
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const workDir = context.workDir
   const opts = sinkOptions(context)
   const networkOpts = networkOptions(context)
   const steps: GitHubPrStep[] = []

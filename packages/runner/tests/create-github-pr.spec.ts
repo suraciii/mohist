@@ -127,7 +127,7 @@ describe("mohist/create-github-pr registry", () => {
 })
 
 describe("mohist/create-github-pr action", () => {
-  it("pushes the workflow branch, opens a draft PR, and returns prNumber/prUrl for setVars", async () => {
+  it("opens a draft PR from an already-published workflow branch", async () => {
     const gitCalls: string[] = []
     const ghCalls: string[] = []
     const moCalls = installMoIssueShow()
@@ -174,11 +174,7 @@ describe("mohist/create-github-pr action", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(gitCalls).toEqual([
-      "fetch origin master",
-      "rev-parse origin/master",
-      "push --force-with-lease origin mohist/run-wr-gh-pr-1",
-    ])
+    expect(gitCalls).toEqual([])
     expect(ghCalls).toEqual([
       "gh --version",
       "gh auth status",
@@ -197,8 +193,6 @@ describe("mohist/create-github-pr action", () => {
       operation: "created",
       errorCode: null,
       message: null,
-      baseSha: "base-sha-1",
-      pushed: true,
       draft: true,
     })
   })
@@ -310,12 +304,11 @@ describe("mohist/create-github-pr action", () => {
       operation: "reused",
       prNumber: 7,
       prUrl: "https://github.com/example/repo/pull/7",
-      pushed: true,
       draft: true,
     })
   })
 
-  it("binds every git/gh invocation to the workspace path even when project.path differs", async () => {
+  it("binds every GitHub invocation to the workspace path even when project.path differs", async () => {
     const gitCalls: Array<{ workDir: string; command: string }> = []
     const ghCalls: Array<{ cwd: string; command: string }> = []
 
@@ -359,9 +352,7 @@ describe("mohist/create-github-pr action", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(gitCalls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
     expect(ghCalls.map((call) => call.cwd)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
-    expect(gitCalls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
     expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
     expect(output.prNumber).toBe(42)
   })
@@ -390,33 +381,18 @@ describe("mohist/create-github-pr action", () => {
       errorCode: "config-error",
       prNumber: null,
       prUrl: null,
-      pushed: false,
     })
     expect(output.message).toContain("Unsupported titleFrom source 'issue.summary'")
   })
 
-  it("reports base-moved when the force-with-lease push is rejected as non-fast-forward", async () => {
-    installGit((_workDir, args) => {
-      switch (args.join(" ")) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return fail("To https://example.com/repo.git\n ! [rejected]        mohist/run-wr-gh-pr-1 -> mohist/run-wr-gh-pr-1 (non-fast-forward)\nerror: failed to push some refs")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
+  it("does not invoke Git when GitHub creates the PR", async () => {
+    installGit(() => fail("create-github-pr must not invoke git"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
-      switch (full) {
-        case "gh --version":
-        case "gh auth status":
-          return ghOk("ok\n")
-        default:
-          return ghFail(`unexpected gh call: ${full}`)
-      }
+      if (full === "gh --version" || full === "gh auth status") return ghOk("ok\n")
+      if (full.startsWith("gh pr list ")) return ghOk("[]\n")
+      if (full.startsWith("gh pr create ")) return ghOk("https://github.com/example/repo/pull/42\n")
+      return ghFail(`unexpected gh call: ${full}`)
     })
 
     const result = await createGitHubPrAction(context({
@@ -428,14 +404,9 @@ describe("mohist/create-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "create-github-pr",
-      status: "failed",
-      errorCode: "base-moved",
-      branch: "mohist/run-wr-gh-pr-1",
-      pushed: false,
-    })
+    expect(result.status).toBe("success")
+    expect(gitCalls).toEqual([])
+    expect(output.operation).toBe("created")
   })
 
   it("reports config-error when the gh CLI precheck fails", async () => {
@@ -511,7 +482,7 @@ describe("mohist/create-github-pr action", () => {
     })
   })
 
-  it("NetworkCommands_AllReceiveTimeoutMs_LocalProbesDoNot", async () => {
+  it("NetworkGitHubCommands_AllReceiveTimeoutMs", async () => {
     installMoIssueShow()
     installGit((_workDir, args) => {
       const cmd = args.join(" ")
@@ -550,14 +521,6 @@ describe("mohist/create-github-pr action", () => {
       bodyFrom: "issue.body",
     }))
 
-    // Network call sites: must all receive NETWORK_COMMAND_TIMEOUT_MS.
-    for (const command of [
-      "fetch origin master",
-      "push --force-with-lease origin mohist/run-wr-gh-pr-1",
-    ]) {
-      const call = gitCalls.find((c) => c.command === command)
-      expect(call?.timeoutMs, `git call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
-    }
     for (const command of [
       "gh --version",
       "gh auth status",
@@ -568,9 +531,7 @@ describe("mohist/create-github-pr action", () => {
       expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
     }
 
-    // Local probe: rev-parse must carry no per-command timeout.
-    const revParse = gitCalls.find((c) => c.command === "rev-parse origin/master")
-    expect(revParse?.timeoutMs).toBeUndefined()
+    expect(gitCalls).toEqual([])
   })
 
   it("GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
@@ -633,59 +594,4 @@ describe("mohist/create-github-pr action", () => {
     expect(ghPrCreateStep.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
-  it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
-    installMoIssueShow()
-    installGit((_workDir, args) => {
-      const cmd = args.join(" ")
-      switch (cmd) {
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base-sha-1\n")
-        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
-          return {
-            success: false,
-            stdout: "",
-            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
-            exitCode: 124,
-            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
-            status: "timeout" as const,
-            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-          }
-        default:
-          return fail(`unexpected git call: ${cmd}`)
-      }
-    })
-    installGh((cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      switch (full) {
-        case "gh --version":
-          return ghOk("gh version 2.0.0\n")
-        case "gh auth status":
-          return ghOk("Logged in\n")
-        default:
-          return ghFail(`unexpected gh call: ${full}`)
-      }
-    })
-
-    const result = await createGitHubPrAction(context({
-      source: "mohist/run-wr-gh-pr-1",
-      target: "master",
-      remote: "origin",
-      titleFrom: "issue.title",
-      bodyFrom: "issue.body",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
-    const gitPushStep = output.steps.find((step: { name: string }) => step.name === "git-push")
-    expect(gitPushStep).toBeDefined()
-    expect(gitPushStep.command).toBe("push --force-with-lease origin mohist/run-wr-gh-pr-1")
-    expect(gitPushStep.output).toContain("timed out")
-    expect(gitPushStep.exitCode).toBe(124)
-    expect(gitPushStep.status).toBe("timeout")
-    expect(gitPushStep.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
-  })
 })

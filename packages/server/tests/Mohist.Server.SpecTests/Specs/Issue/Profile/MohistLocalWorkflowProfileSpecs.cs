@@ -1171,18 +1171,18 @@ public class MohistLocalWorkflowProfileSpecs
     }
 
     [Fact]
-    public void WorkflowYamlParser_ParsesApprovalFeedbackTaskConfig()
+    public void WorkflowYamlParser_ParsesApprovalFeedbackTasksConfig()
     {
         var definition = MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              id: apply-feedback
-              title: Apply approval feedback
-              uses: mohist/opencode
-              with:
-                session: ${{ stage.name }}
-                prompt: ${{ prompts.apply-feedback }}
+            tasks:
+              - id: apply-feedback
+                title: Apply approval feedback
+                uses: mohist/opencode
+                with:
+                  session: ${{ stage.name }}
+                  prompt: ${{ prompts.apply-feedback }}
         stages:
           - stage: plan
             tasks: []
@@ -1191,9 +1191,8 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.NotNull(definition.Approval);
         Assert.NotNull(definition.Approval!.Feedback);
-        var task = definition.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(definition.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
         Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);
@@ -1210,9 +1209,8 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.NotNull(definition.Approval);
         Assert.NotNull(definition.Approval!.Feedback);
-        var task = definition.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(definition.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
         Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);
@@ -1240,17 +1238,16 @@ public class MohistLocalWorkflowProfileSpecs
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              title: Apply approval feedback
-              uses: mohist/opencode
+            tasks:
+              - title: Apply approval feedback
+                uses: mohist/opencode
         stages:
           - stage: build
             tasks: []
             checks: []
         """));
 
-        Assert.Contains("approval.feedback.task", ex.Message);
-        Assert.Contains("id", ex.Message);
+        Assert.Contains("Workflow task requires id", ex.Message);
     }
 
     [Fact]
@@ -1259,17 +1256,16 @@ public class MohistLocalWorkflowProfileSpecs
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         approval:
           feedback:
-            task:
-              id: apply-feedback
-              uses: mohist/opencode
+            tasks:
+              - id: apply-feedback
+                uses: mohist/opencode
         stages:
           - stage: build
             tasks: []
             checks: []
         """));
 
-        Assert.Contains("approval.feedback.task", ex.Message);
-        Assert.Contains("title", ex.Message);
+        Assert.Contains("Workflow task apply-feedback requires title", ex.Message);
     }
 
     [Fact]
@@ -1279,7 +1275,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.Contains("approval:", yaml);
         Assert.Contains("feedback:", yaml);
-        Assert.Contains("task:", yaml);
+        Assert.Contains("tasks:", yaml);
         Assert.Contains("id: apply-feedback", yaml);
         Assert.Contains("title: Apply approval feedback", yaml);
         Assert.Contains("uses: mohist/opencode", yaml);
@@ -1290,9 +1286,8 @@ public class MohistLocalWorkflowProfileSpecs
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
         Assert.NotNull(reparsed.Approval);
         Assert.NotNull(reparsed.Approval!.Feedback);
-        var task = reparsed.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(reparsed.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("mohist/opencode", task.Uses);
     }
 

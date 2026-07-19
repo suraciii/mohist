@@ -11,14 +11,22 @@ variables:
 
 approval:
   feedback:
-    task:
-      id: apply-feedback
-      title: Apply approval feedback
-      uses: mohist/opencode
-      with:
-        session: ${{ stage.name }}
-        prompt: ${{ prompts.apply-feedback }}
-        options: ${{ vars.agent }}
+    tasks:
+      - id: apply-feedback
+        title: Apply approval feedback
+        uses: mohist/opencode
+        with:
+          session: ${{ stage.name }}
+          prompt: ${{ prompts.apply-feedback }}
+          options: ${{ vars.agent }}
+      - id: publish-feedback
+        title: Publish feedback
+        uses: mohist/push
+        with:
+          source: HEAD
+          target: ${{ workspace.branch }}
+          remote: origin
+          force: true
 
 stages:
   - stage: plan
@@ -111,6 +119,15 @@ stages:
           files:
             - path: ${{ openspecChangeDir }}/self-review.md
 
+      - id: push
+        title: Push
+        uses: mohist/push
+        with:
+          source: HEAD
+          target: ${{ workspace.branch }}
+          remote: origin
+          force: true
+
       - id: open-draft-pr
         title: Open draft GitHub PR
         uses: mohist/create-github-pr
@@ -171,6 +188,14 @@ stages:
                     prompt: ${{ prompts.fix-tests }}
                     options: ${{ vars.agent }}
               retrySelf: true
+      - id: push
+        title: Push
+        uses: mohist/push
+        with:
+          source: HEAD
+          target: ${{ workspace.branch }}
+          remote: origin
+          force: true
     checks: []
 
   - stage: check
@@ -214,10 +239,10 @@ stages:
         title: Push
         uses: mohist/push
         with:
-          source: ${{ workspace.branch }}
+          source: HEAD
           target: ${{ workspace.branch }}
           remote: origin
-          forceWithLease: true
+          force: true
 
       - id: mark-pr-ready
         title: Mark GitHub PR ready
@@ -255,10 +280,10 @@ stages:
         title: Push
         uses: mohist/push
         with:
-          source: ${{ workspace.branch }}
+          source: HEAD
           target: ${{ workspace.branch }}
           remote: origin
-          forceWithLease: true
+          force: true
 
       - id: merge-pr
         title: Merge GitHub PR
@@ -294,7 +319,7 @@ stages:
                   title: Push
                   uses: mohist/push
                   with:
-                    source: ${{ workspace.branch }}
+                    source: HEAD
                     target: ${{ workspace.branch }}
                     remote: origin
                     force: true
@@ -312,10 +337,10 @@ stages:
                   title: Push
                   uses: mohist/push
                   with:
-                    source: ${{ workspace.branch }}
+                    source: HEAD
                     target: ${{ workspace.branch }}
                     remote: origin
-                    forceWithLease: true
+                    force: true
               retrySelf: true
             - when: errorCode=protection-conflict
               retrySelf: true
