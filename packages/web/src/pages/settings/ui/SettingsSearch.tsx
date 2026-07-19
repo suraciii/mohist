@@ -187,6 +187,7 @@ function SettingsSearch() {
       title="Settings search"
       description="Search for a setting by label, description, or placeholder."
       className="sm:max-w-lg"
+      contentProps={{ finalFocus: false }}
     >
       <div className="sr-only" id={titleId}>
         Settings search

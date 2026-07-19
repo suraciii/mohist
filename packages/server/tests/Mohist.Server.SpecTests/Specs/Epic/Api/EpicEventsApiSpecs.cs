@@ -143,15 +143,7 @@ public class EpicEventsApiSpecs
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "Limit epic");
 
-        // Seed multiple events. Note: StartAsync emits an EpicStatusChanged
-        // event which fires the EpicRunningStatusHandler subscription
-        // asynchronously. With no linked issues, that handler's recompute
-        // can auto-mark-done the epic, racing with the priority patches
-        // below. The ?limit=1 contract is about tail selection, not which
-        // event the test produced last, so we assert against the actual
-        // tail of the recorded stream rather than a specific type.
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/start", null);
+        // Seed a stable stream without starting asynchronous status handlers.
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PatchAsJsonAsync(
             $"/api/projects/{project.Id}/epics/{epic.Number}",
