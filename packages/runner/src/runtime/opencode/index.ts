@@ -6,10 +6,16 @@
  */
 
 export type {
+  RuntimeCancelFacts,
+  RuntimeCancelRequest,
+  RuntimeCancelResult,
   RuntimeDiagnostic,
   RuntimeDiagnosticSeverity,
   RuntimeError,
   RuntimeErrorKind,
+  RuntimeFollowupFacts,
+  RuntimeFollowupRequest,
+  RuntimeFollowupResult,
   RuntimeHealthCheck,
   RuntimeModelCatalog,
   RuntimeModelDescriptor,

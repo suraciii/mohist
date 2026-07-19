@@ -490,7 +490,7 @@ describe("RunnerHost", () => {
     }
   })
 
-  it("GenericFollowupResolver_UsesPayloadProjectId_WhenRunnerProjectUnset", async () => {
+  it("GenericFollowupResolver_ProjectsBindingIntoRuntimeTarget", async () => {
     vi.clearAllMocks()
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
@@ -499,17 +499,29 @@ describe("RunnerHost", () => {
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown; sessionManager: { set(key: string, entry: unknown): void; genericKey(sessionId: string): string } }
-    const connection = { prompt: vi.fn() }
-    host.sharedAcpConnection = { connection }
-    host.sessionManager.set(host.sessionManager.genericKey("gen-1"), { sessionId: "acp-1", workDir: "/tmp/work" })
+    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
+    host.openCodeRuntime = { ready: () => true }
 
-    const resolved = capturedFollowupTargetResolver?.({ kind: "generic", projectId: "project-from-payload", sessionId: "gen-1" })
+    const resolved = capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "project-from-payload",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    })
 
-    expect(resolved).toEqual({ connection, sessionId: "acp-1", projectId: "project-from-payload" })
+    expect(resolved).toEqual({
+      runtimeSessionId: "runtime-1",
+      workDir: "/tmp/work",
+      projectId: "project-from-payload",
+    })
   })
 
-  it("GenericFollowupResolver_StartupBeforeSharedAcpInitialization_IsTemporarilyUnavailable", () => {
+  it("GenericFollowupResolver_StartupBeforeRuntimeReady_IsTemporarilyUnavailable", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -534,194 +546,100 @@ describe("RunnerHost", () => {
     expect(resolved).toEqual({ unavailable: true })
   })
 
-  it("GenericFollowupResolver_CacheMissResumesPersistedBindingOnce", async () => {
-    vi.clearAllMocks()
-    const resumeSession = vi.fn(async () => undefined)
-    const host = new RunnerHost({
+  it("GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget", () => {
+    new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown }
-    const connection = { prompt: vi.fn(), cancel: vi.fn(), resumeSession }
-    host.sharedAcpConnection = {
-      connection,
-      processPid: null,
-      setSessionHandlers: vi.fn(),
-      clearSessionHandlers: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
-    }
-    const target: SessionTarget = {
+    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
+    ;(capturedFollowupTargetResolver as unknown as { openCodeRuntime: { ready(): boolean } | null } | null)
+    // legacy ACP-bound session: the runner must report missing
+    // (per issue-410 D6 — Reset hint), not forward to the runtime
+    const resolved = capturedFollowupTargetResolver?.({
       kind: "generic",
       projectId: "project-1",
       sessionId: "gen-1",
       binding: {
-        runtime: "opencode",
+        runtime: "acp",
         runtimeSessionId: "runtime-1",
         runnerId: "runner-test",
         workDir: "/tmp/work",
       },
-    }
+    } as SessionTarget)
 
-    const first = capturedFollowupTargetResolver?.(target)
-    const second = capturedFollowupTargetResolver?.(target)
-
-    await expect(Promise.all([first, second])).resolves.toEqual([
-      { connection, sessionId: "runtime-1", projectId: "project-1" },
-      { connection, sessionId: "runtime-1", projectId: "project-1" },
-    ])
-    expect(resumeSession).toHaveBeenCalledTimes(1)
-    expect(resumeSession).toHaveBeenCalledWith({ sessionId: "runtime-1", cwd: "/tmp/work", mcpServers: [] })
+    expect(resolved).toBeNull()
   })
 
-  it("GenericFollowupResolver_RestoredSessionRoutesRuntimeUpdatesAndPermissions", async () => {
-    vi.clearAllMocks()
-    const updateHandlers = new Map<string, (notification: unknown) => Promise<void>>()
-    const permissionHandlers = new Map<string, (params: unknown) => Promise<unknown>>()
-    const resumeSession = vi.fn(async () => undefined)
-    const host = new RunnerHost({
+  it("GenericFollowupResolver_MismatchedRunnerId_IsMissingTarget", () => {
+    new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown }
-    const connection = { prompt: vi.fn(), cancel: vi.fn(), resumeSession }
-    host.sharedAcpConnection = {
-      connection,
-      processPid: null,
-      setSessionHandlers(sessionId: string, update: (notification: unknown) => Promise<void>, permission: (params: unknown) => Promise<unknown>) {
-        updateHandlers.set(sessionId, update)
-        permissionHandlers.set(sessionId, permission)
-      },
-      clearSessionHandlers: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
-    }
-    const target: SessionTarget = {
+    })
+
+    const resolved = capturedFollowupTargetResolver?.({
       kind: "generic",
       projectId: "project-1",
       sessionId: "gen-1",
       binding: {
         runtime: "opencode",
         runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/tmp/work",
-      },
-    }
-
-    await expect(Promise.resolve(capturedFollowupTargetResolver?.(target))).resolves.toEqual({
-      connection,
-      sessionId: "runtime-1",
-      projectId: "project-1",
-    })
-    const update = updateHandlers.get("runtime-1")
-    const permission = permissionHandlers.get("runtime-1")
-    if (!update || !permission) throw new Error("restored session handlers were not registered")
-
-    await update({
-      sessionId: "runtime-1",
-      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "restored reply" } },
-    })
-    await update({
-      sessionId: "runtime-1",
-      update: { sessionUpdate: "tool_call", toolCall: { toolName: "bash", status: "in_progress" } },
-    })
-
-    expect(agentSessionRuntimeEvents).toHaveBeenNthCalledWith(
-      1,
-      "project-1",
-      "gen-1",
-      expect.objectContaining({
-        runtimeSessionId: "runtime-1",
-        runtimeEvents: [expect.objectContaining({
-          type: "message.delta",
-          payload: expect.objectContaining({ sessionUpdate: "agent_message_chunk" }),
-        })],
-      }),
-      expect.any(AbortSignal),
-    )
-    expect(agentSessionRuntimeEvents).toHaveBeenNthCalledWith(
-      2,
-      "project-1",
-      "gen-1",
-      expect.objectContaining({
-        runtimeEvents: [expect.objectContaining({ type: "tool_call.started" })],
-      }),
-      expect.any(AbortSignal),
-    )
-    await expect(permission({
-      options: [{ kind: "allow_once", optionId: "allow" }],
-    })).resolves.toEqual({ outcome: { outcome: "selected", optionId: "allow" } })
-  })
-
-  it("GenericFollowupResolver_StalledRestore_IsTemporarilyUnavailable", async () => {
-    vi.clearAllMocks()
-    const resumeSession = vi.fn(() => new Promise<never>(() => {}))
-    const setSessionHandlers = vi.fn()
-    const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
-      runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown }
-    host.sharedAcpConnection = {
-      connection: { prompt: vi.fn(), cancel: vi.fn(), resumeSession },
-      processPid: null,
-      setSessionHandlers,
-      clearSessionHandlers: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
-    }
-    const target: SessionTarget = {
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
-      binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
-        workDir: "/tmp/work",
-      },
-    }
-
-    const resolution = capturedFollowupTargetResolver?.(target)
-    await vi.advanceTimersByTimeAsync(30_000)
-
-    await expect(Promise.resolve(resolution)).resolves.toEqual({ unavailable: true })
-    expect(setSessionHandlers).not.toHaveBeenCalled()
-  })
-
-  it("GenericFollowupResolver_ResumeFailureReturnsMissingTarget", async () => {
-    vi.clearAllMocks()
-    const resumeSession = vi.fn(async () => { throw new Error("runtime unavailable") })
-    const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
-      runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown }
-    host.sharedAcpConnection = { connection: { prompt: vi.fn(), cancel: vi.fn(), resumeSession } }
-
-    const resolved = await capturedFollowupTargetResolver?.({
-      kind: "generic",
-      projectId: "project-1",
-      sessionId: "gen-1",
-      binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-test",
+        runnerId: "different-runner",
         workDir: "/tmp/work",
       },
     })
 
     expect(resolved).toBeNull()
-    expect(resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("GenericFollowupResolver_MissingWorkDir_IsMissingTarget", () => {
+    new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    const resolved = capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: null,
+      },
+    })
+
+    expect(resolved).toBeNull()
+  })
+
+  it("GenericFollowupResolver_NoBinding_IsMissingTarget", () => {
+    new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    const resolved = capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+    })
+
+    expect(resolved).toBeNull()
   })
 
   it("GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject", async () => {
@@ -734,11 +652,20 @@ describe("RunnerHost", () => {
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
-    }) as unknown as { sharedAcpConnection: unknown; sessionManager: { set(key: string, entry: unknown): void; genericKey(sessionId: string): string } }
-    host.sharedAcpConnection = { connection: { prompt: vi.fn() } }
-    host.sessionManager.set(host.sessionManager.genericKey("gen-1"), { sessionId: "acp-1", workDir: "/tmp/work" })
+    }) as unknown as { openCodeRuntime: { ready(): boolean } | null }
+    host.openCodeRuntime = { ready: () => true }
 
-    const resolved = capturedFollowupTargetResolver?.({ kind: "generic", projectId: "other-project", sessionId: "gen-1" })
+    const resolved = capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "other-project",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    })
 
     expect(resolved).toBeNull()
   })

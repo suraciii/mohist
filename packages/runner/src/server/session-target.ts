@@ -10,28 +10,29 @@
 // scenarios in `specs/runner-signalr-push-handlers/spec.md` ("Session
 // target resolution discriminates on target.kind with legacy fallback").
 //
-// `FollowupTarget` / `FollowupTargetResolver` were originally declared
-// inside `runner-signalr.ts` for `RunnerSignalRClientOptions`. They are
-// moved here in T-008 (design P7) because both `registerFollowupHandler`
-// and `registerCancelHandler` need them on their respective deps surface,
-// and keeping them next to the `SessionTarget` resolver they wrap keeps
-// the type graph simple (the types live where the discriminator they
-// depend on lives).
+// Issue-410 T-003 / design D3: the `FollowupTarget` carried by the
+// handlers is no longer a live `ClientSideConnection` — it is a Mohist-owned
+// value object `{ runtimeSessionId, workDir, projectId }` resolved from
+// the persisted binding (the same source the Workflow path already uses).
+// The handlers pass the value object to `OpenCodeRuntime.followup` /
+// `OpenCodeRuntime.cancel`. The session-target module therefore stops
+// importing any symbol from `@agentclientprotocol/sdk`; the live ACP
+// connection lifecycle and the per-session reconnect path were already
+// removed by the design D3's "no live per-session connection" rule.
 
-import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import type { RuntimeSessionBinding, SessionTarget } from "../runtime/acp-connection.js"
 
 /**
- * The resolver's return value. Carries the live `ClientSideConnection`
- * (the runner-side ACP session manager opens it once and reuses it across
- * followups / cancels) and the resolved ACP session id + projectId.
- * `connection.prompt` is the fire-and-forget target for followups;
- * `connection.cancel?.bind(connection)` is the cancel notification
- * surface for `CancelAgentSession`.
+ * The resolver's return value. A pure Mohist-owned value object:
+ * `runtimeSessionId` + `workDir` come from the persisted AgentSession
+ * binding the server already carries on the wire target; `projectId`
+ * is the AgentSession's owning project. No live RPC surface is held
+ * here — the handler consumes the value object and forwards it to
+ * `OpenCodeRuntime.followup` / `OpenCodeRuntime.cancel`.
  */
 export interface FollowupTarget {
-  readonly connection: ClientSideConnection
-  readonly sessionId: string
+  readonly runtimeSessionId: string
+  readonly workDir: string
   readonly projectId: string
 }
 
@@ -43,10 +44,16 @@ export const FOLLOWUP_TARGET_UNAVAILABLE: FollowupTargetUnavailable = { unavaila
 
 /**
  * The runner-side resolver turns a discriminated `SessionTarget`
- * (issue-129 T-004) into a live `FollowupTarget`, or `null` when no
- * ACP session is registered for the target. Both `ReceiveFollowup` and
- * `CancelAgentSession` call into this resolver; a single registration
- * keeps the wire-decoding logic in one place.
+ * (issue-129 T-004) into a `FollowupTarget` constructed from the
+ * persisted binding, or `null` when no usable binding is registered.
+ * `FOLLOWUP_TARGET_UNAVAILABLE` is returned when the runtime is
+ * initializing (the OpenCode runtime is not yet ready / catalog not
+ * loaded) so the handler can return the existing `unavailable`
+ * taxonomy without consulting a live connection.
+ *
+ * Both `ReceiveFollowup` and `CancelAgentSession` call into this
+ * resolver; a single registration keeps the wire-decoding logic in
+ * one place.
  */
 export type FollowupTargetResolution = FollowupTarget | FollowupTargetUnavailable | null
 
@@ -59,11 +66,20 @@ export function isFollowupTargetUnavailable(value: FollowupTargetResolution): va
 /**
  * Discriminated session target carried in the unified
  * `ReceiveFollowup` SignalR payload (issue-129 T-004). The runner
- * branches on `kind` to pick the right `AcpSessionManager` key prefix
- * (`workflow:` / `generic:`, T-002) and the right server-side runtime
- * endpoint. Older runners that only know workflow followups can keep
- * reading the top-level `workflowRunId` / `sessionName` fields the
- * server still populates for the issue-scoped route.
+ * branches on `kind` to pick the right runtime-events endpoint
+ * (`workflow:` / `generic:`, T-002) and the right server-side
+ * runtime endpoint. Older runners that only know workflow followups
+ * can keep reading the top-level `workflowRunId` / `sessionName`
+ * fields the server still populates for the issue-scoped route.
+ *
+ * The `binding` field carries the persisted AgentSession binding
+ * (the same source the Workflow path already uses). Issue-410 T-003
+ * promotes `binding` from a resume path input to the resolver's
+ * authoritative source: the resolver reads `binding.runtimeSessionId`
+ * + `binding.workDir` and projects them into a `FollowupTarget`.
+ * `binding.runtime !== "opencode"` (e.g. legacy `acp`) is treated as
+ * missing — the resolver returns `null` and the handler fails with
+ * the existing missing taxonomy + Reset hint.
  */
 export interface ReceiveFollowupSessionTarget {
   kind: "workflow" | "generic"

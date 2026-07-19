@@ -20,17 +20,24 @@
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type {
+  RuntimeCancelFacts,
+  RuntimeCancelRequest,
+  RuntimeCancelResult,
   RuntimeDiagnostic,
+  RuntimeFollowupFacts,
+  RuntimeFollowupRequest,
+  RuntimeFollowupResult,
   RuntimeModelCatalog,
   RuntimeProviderErrorPolicy,
   RuntimeReadyState,
   RuntimeResult,
   RuntimeSessionCreateRequest,
   RuntimeSessionCreateResult,
+  RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
 } from "./types.js"
-import { errorKindFor, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
+import { errorKindFor, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
 import type { CatalogClient } from "./catalog.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
@@ -233,6 +240,148 @@ export class OpenCodeRuntime {
     }
   }
 
+  /**
+   * Dispatch a Follow-up prompt to an existing Runtime Session.
+   *
+   * Wraps `client.session.promptAsync` (issue-410 T-003 / design D3).
+   * The runtime verifies the persisted binding still resolves to a
+   * live physical Session before dispatching; a stale binding surfaces
+   * as `missing-session` with the existing Reset hint. The dispatch
+   * is fire-and-forget at the SDK layer — the prompt returns when
+   * the message is on the wire, not when the agent finishes. The
+   * runner-side handler treats this as `accepted: true` regardless of
+   * the eventual turn outcome (turn completion is observed through
+   * the existing global event subscription + AgentSession event
+   * channel, the same way the Workflow source observes it).
+   *
+   * `options.model` / `options.variant` apply to the prompt body only
+   * — the physical Session is never rotated on a Follow-up.
+   */
+  async followup(request: RuntimeFollowupRequest): Promise<RuntimeResult<RuntimeFollowupResult>> {
+    const diagnostics: RuntimeDiagnostic[] = []
+
+    if (!this.state.server || !this.state.ready) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+
+    const validation = validateFollowupInput(request, diagnostics)
+    if (validation.kind === "failure") {
+      return { ok: false, error: validation.error, diagnostics: [...diagnostics, ...validation.error.diagnostics] }
+    }
+    const { model, variant } = validation.value
+
+    if (!request.target.runtimeSessionId) {
+      const error = normalizeInvalidInput(
+        "Follow-up requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding",
+        [{
+          severity: "error",
+          code: "missing-binding",
+          message: "Reset the session to establish a fresh Runtime Session, then retry",
+        }],
+      )
+      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+    }
+
+    const client = this.state.server.client
+    try {
+      const resolved = await client.session.get({
+        path: { id: request.target.runtimeSessionId },
+        query: { directory: request.target.workDir },
+      } as never)
+      const resolvedData = (resolved as { data?: { id?: string } } | undefined)?.data
+      if (!resolvedData || resolvedData.id !== request.target.runtimeSessionId) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+    } catch (cause) {
+      const status = (cause as { status?: number } | undefined)?.status
+      if (status === 404) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
+      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+    }
+
+    try {
+      await client.session.promptAsync({
+        sessionID: request.target.runtimeSessionId,
+        directory: request.target.workDir,
+        parts: [{ type: "text", text: request.prompt }],
+        ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
+        ...(variant ? { variant } : {}),
+      } as never)
+      const facts: RuntimeFollowupFacts = {
+        runtimeSessionId: request.target.runtimeSessionId,
+        workDir: request.target.workDir,
+      }
+      return { ok: true, value: { facts, diagnostics }, diagnostics }
+    } catch (cause) {
+      const status = (cause as { status?: number } | undefined)?.status
+      if (status === 404) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode follow-up prompt failed") })
+      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+    }
+  }
+
+  /**
+   * Cancel an active Runtime Session turn.
+   *
+   * Wraps `client.session.abort` (issue-410 T-003 / design D3). The
+   * runtime resolves the binding first; a stale binding surfaces as
+   * `missing-session` with the existing Reset hint. `cancelled: true`
+   * is the authoritative reply — whether the agent honours the
+   * cancellation is the agent's decision; the runtime reports the
+   * attempt honestly (matches the `not-cancellable` vs `cancelled`
+   * taxonomy the cancel handler already speaks).
+   */
+  async cancel(request: RuntimeCancelRequest): Promise<RuntimeResult<RuntimeCancelResult>> {
+    const diagnostics: RuntimeDiagnostic[] = []
+
+    if (!this.state.server || !this.state.ready) {
+      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+
+    if (!request.target.runtimeSessionId) {
+      const error = normalizeInvalidInput(
+        "Cancel requires a current OpenCode Runtime Session binding; pass the persisted runtimeSessionId from the AgentSession binding",
+        [{
+          severity: "error",
+          code: "missing-binding",
+          message: "Reset the session to establish a fresh Runtime Session, then retry",
+        }],
+      )
+      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+    }
+
+    const client = this.state.server.client
+    try {
+      await client.session.abort({
+        sessionID: request.target.runtimeSessionId,
+        directory: request.target.workDir,
+      } as never)
+      const facts: RuntimeCancelFacts = {
+        runtimeSessionId: request.target.runtimeSessionId,
+        workDir: request.target.workDir,
+        cancelled: true,
+      }
+      return { ok: true, value: { facts, diagnostics }, diagnostics }
+    } catch (cause) {
+      const status = (cause as { status?: number } | undefined)?.status
+      if (status === 404) {
+        const error = normalizeMissingSession()
+        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+      const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode cancel failed") })
+      return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+    }
+  }
+
   private ensureInFlightTracker() {
     if (!this.inFlight) this.inFlight = bindTurnInFlightTracker()
     return this.inFlight
@@ -425,4 +574,52 @@ function toRawError(cause: unknown): { message: string; status?: number; code?: 
     return { message, ...(typeof status === "number" ? { status } : {}), ...(typeof code === "string" ? { code } : {}), ...(typeof service === "string" ? { service } : {}) }
   }
   return { message: String(cause) }
+}
+
+function errorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof Error) return cause.message || fallback
+  return String(cause) || fallback
+}
+
+type FollowupValidationOk = {
+  kind: "ok"
+  value: { model: { providerID: string; modelID: string } | null; variant: string | null }
+}
+type FollowupValidationFailure = {
+  kind: "failure"
+  error: ReturnType<typeof normalizeInvalidInput>
+}
+type FollowupValidationResult = FollowupValidationOk | FollowupValidationFailure
+
+function validateFollowupInput(
+  request: RuntimeFollowupRequest,
+  diagnostics: RuntimeDiagnostic[],
+): FollowupValidationResult {
+  const options: RuntimeTurnOptions | undefined | null = request.options ?? undefined
+  if (options?.unknownKeys && options.unknownKeys.length > 0) {
+    diagnostics.push({
+      severity: "info",
+      code: "options-unknown-keys",
+      message: `Ignored unknown option keys: ${options.unknownKeys.join(", ")}`,
+      details: { keys: options.unknownKeys },
+    })
+  }
+  let model: { providerID: string; modelID: string } | null = null
+  if (options?.model !== undefined && options.model !== null) {
+    if (typeof options.model !== "object") {
+      return { kind: "failure", error: normalizeInvalidInput("options.model must be an object with providerID and modelID when present") }
+    }
+    model = options.model
+  }
+  let variant: string | null = null
+  if (options?.variant !== undefined && options.variant !== null) {
+    if (typeof options.variant !== "string") {
+      return { kind: "failure", error: normalizeInvalidInput("options.variant must be a string when present") }
+    }
+    variant = options.variant
+  }
+  if (!request.prompt || typeof request.prompt !== "string" || request.prompt.trim().length === 0) {
+    return { kind: "failure", error: normalizeInvalidInput("Follow-up prompt must be a non-empty string") }
+  }
+  return { kind: "ok", value: { model, variant } }
 }

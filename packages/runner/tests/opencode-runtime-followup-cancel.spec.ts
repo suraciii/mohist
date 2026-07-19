@@ -1,0 +1,353 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  OpenCodeRuntime,
+  type RuntimeCancelRequest,
+  RuntimeError,
+  type RuntimeFollowupRequest,
+  type RuntimeResult,
+} from "../src/runtime/opencode/index.js"
+import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
+import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
+import type { CatalogClient } from "../src/runtime/opencode/catalog.js"
+import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+
+class FakeSubscription implements RuntimeEventSubscription {
+  private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
+  closed = false
+  subscribe(listener: (event: RuntimeGlobalEvent) => void): () => void {
+    if (this.closed) return () => {}
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+  emit(event: RuntimeGlobalEvent): void {
+    for (const listener of [...this.listeners]) {
+      listener(event)
+    }
+  }
+  async close(): Promise<void> {
+    this.closed = true
+    this.listeners.clear()
+  }
+}
+
+interface BuildArgs {
+  failSessionGet?: boolean
+  missingSessionOnGet?: boolean
+  failPromptAsync?: boolean
+  failAbort?: boolean
+  missingSessionOnPrompt?: boolean
+  missingSessionOnAbort?: boolean
+}
+
+interface BuildResult {
+  deps: OpenCodeRuntimeDeps
+  subscription: FakeSubscription
+  client: {
+    sessionGet: ReturnType<typeof vi.fn>
+    sessionPromptAsync: ReturnType<typeof vi.fn>
+    sessionAbort: ReturnType<typeof vi.fn>
+  }
+}
+
+function buildDeps(args: BuildArgs = {}): BuildResult {
+  const subscription = new FakeSubscription()
+  const closed = { value: false }
+  const sessionGet = vi.fn(async (params: { path: { id: string } }) => {
+    if (args.failSessionGet) throw new Error("session.get boom")
+    if (args.missingSessionOnGet) {
+      const error = new Error("not found") as Error & { status?: number }
+      error.status = 404
+      throw error
+    }
+    return { data: { id: params.path.id } }
+  })
+  const sessionPromptAsync = vi.fn(async (params: { sessionID: string }) => {
+    if (args.failPromptAsync) throw new Error("promptAsync boom")
+    if (args.missingSessionOnPrompt) {
+      const error = new Error("not found") as Error & { status?: number }
+      error.status = 404
+      throw error
+    }
+    return { data: { accepted: true, sessionID: params.sessionID } }
+  })
+  const sessionAbort = vi.fn(async (params: { sessionID: string }) => {
+    if (args.failAbort) throw new Error("abort boom")
+    if (args.missingSessionOnAbort) {
+      const error = new Error("not found") as Error & { status?: number }
+      error.status = 404
+      throw error
+    }
+    return { data: { ok: true, sessionID: params.sessionID } }
+  })
+  const clientProxy = {
+    global: { health: vi.fn(async () => ({ data: { ok: true } })) },
+    v2: {
+      provider: { list: vi.fn(async () => ({ data: { data: [] } })) },
+      model: { list: vi.fn(async () => ({ data: { data: [] } })) },
+    },
+    session: {
+      create: vi.fn(async (params: { directory?: string }) => ({
+        data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
+      })),
+      get: sessionGet,
+      promptAsync: sessionPromptAsync,
+      abort: sessionAbort,
+    },
+  }
+  const server: OpencodeServerHandle = {
+    url: "http://fake",
+    directory: "/tmp/work",
+    client: clientProxy as unknown as OpencodeClient,
+    async close() {
+      closed.value = true
+    },
+  }
+  const deps: OpenCodeRuntimeDeps = {
+    directory: "/tmp/work",
+    serverFactory: async () => server,
+    catalogFactory: () => {
+      const c: CatalogClient = {
+        async list() {
+          return { models: [{ providerID: "openai", modelID: "gpt-5", variants: ["low"] }], fetchedAt: 0 }
+        },
+      }
+      return c
+    },
+    eventSubscriptionFactory: () => subscription,
+  }
+  return {
+    deps,
+    subscription,
+    client: {
+      sessionGet,
+      sessionPromptAsync,
+      sessionAbort,
+    },
+  }
+}
+
+describe("OpenCodeRuntime.followup", () => {
+  it("calls client.session.promptAsync and returns the resolved runtime session facts", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const request: RuntimeFollowupRequest = {
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    }
+    const result = await runtime.followup(request)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.value.facts.runtimeSessionId).toBe("ses_existing")
+    expect(result.value.facts.workDir).toBe("/tmp/work")
+
+    expect(client.sessionGet).toHaveBeenCalledWith(
+      { path: { id: "ses_existing" }, query: { directory: "/tmp/work" } },
+    )
+    expect(client.sessionPromptAsync).toHaveBeenCalledWith({
+      sessionID: "ses_existing",
+      directory: "/tmp/work",
+      parts: [{ type: "text", text: "continue the work" }],
+    })
+  })
+
+  it("applies model and variant on the prompt body without rotating the physical session", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const request: RuntimeFollowupRequest = {
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+      options: { model: { providerID: "openai", modelID: "gpt-5" }, variant: "high" },
+    }
+    await runtime.followup(request)
+
+    expect(client.sessionPromptAsync).toHaveBeenCalledWith({
+      sessionID: "ses_existing",
+      directory: "/tmp/work",
+      parts: [{ type: "text", text: "continue the work" }],
+      model: { providerID: "openai", modelID: "gpt-5" },
+      variant: "high",
+    })
+  })
+
+  it("fails with unavailable-runtime when the runtime is not ready", async () => {
+    const { deps } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("unavailable-runtime")
+  })
+
+  it("fails with invalid-input when the binding is missing (no runtimeSessionId)", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("invalid-input")
+    expect(client.sessionPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it("fails with missing-session when client.session.get returns 404", async () => {
+    const { deps } = buildDeps({ missingSessionOnGet: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_orphan", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("missing-session")
+    expect(result.error.message.toLowerCase()).toContain("reset")
+  })
+
+  it("fails with missing-session when client.session.promptAsync returns 404", async () => {
+    const { deps } = buildDeps({ missingSessionOnPrompt: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_orphan", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("missing-session")
+  })
+
+  it("fails with turn-failed when client.session.get throws a non-404 error", async () => {
+    const { deps } = buildDeps({ failSessionGet: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("turn-failed")
+  })
+
+  it("fails with turn-failed when client.session.promptAsync throws", async () => {
+    const { deps } = buildDeps({ failPromptAsync: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("turn-failed")
+  })
+
+  it("fails with invalid-input when the prompt is empty", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "   ",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("invalid-input")
+    expect(client.sessionPromptAsync).not.toHaveBeenCalled()
+  })
+})
+
+describe("OpenCodeRuntime.cancel", () => {
+  it("calls client.session.abort and returns a cancelled fact", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const request: RuntimeCancelRequest = {
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    }
+    const result = await runtime.cancel(request)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.value.facts.cancelled).toBe(true)
+    expect(result.value.facts.runtimeSessionId).toBe("ses_existing")
+    expect(result.value.facts.workDir).toBe("/tmp/work")
+    expect(client.sessionAbort).toHaveBeenCalledWith({
+      sessionID: "ses_existing",
+      directory: "/tmp/work",
+    })
+  })
+
+  it("fails with unavailable-runtime when the runtime is not ready", async () => {
+    const { deps } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("unavailable-runtime")
+  })
+
+  it("fails with invalid-input when the binding is missing (no runtimeSessionId)", async () => {
+    const { deps, client } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/work" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("invalid-input")
+    expect(client.sessionAbort).not.toHaveBeenCalled()
+  })
+
+  it("fails with missing-session when client.session.abort returns 404", async () => {
+    const { deps } = buildDeps({ missingSessionOnAbort: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: "ses_orphan", workDir: "/tmp/work" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("missing-session")
+    expect(result.error.message.toLowerCase()).toContain("reset")
+  })
+
+  it("fails with turn-failed when client.session.abort throws a non-404 error", async () => {
+    const { deps } = buildDeps({ failAbort: true })
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    const result = await runtime.cancel({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("turn-failed")
+  })
+})

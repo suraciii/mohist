@@ -1,218 +1,105 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import * as signalR from "@microsoft/signalr"
-import { RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
-import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
-interface CapturedBuilder {
-  handlers: Map<string, (...args: unknown[]) => unknown>
-  connection: FakeConnection
-}
-const builders: CapturedBuilder[] = []
-let nextConnectionId = 0
+import {
+  buildClient,
+  emitFollowup,
+  flush,
+  invokeFollowup,
+  lastBuilder,
+  makeFakeRuntime,
+  resetBuilders,
+  type FakeRuntimeHandles,
+  type MockServerConnection,
+} from "./support/followup-handler-fixture.js"
+
+let runtime: FakeRuntimeHandles
+
+beforeEach(() => {
+  resetBuilders()
+  runtime = makeFakeRuntime()
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
-  builders.length = 0
-  nextConnectionId = 0
-  setRunnerSignalRGitRunnerForTest(null)
-  setRunnerSignalRExistsCheckerForTest(null)
 })
-interface FakeConnection {
-  state: signalR.HubConnectionState
-  connectionId: string | null
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  invoke: ReturnType<typeof vi.fn>
-  on: ReturnType<typeof vi.fn>
-  onreconnected: ((cb: (id?: string) => void) => void) | undefined
-  _reconnectHandler?: (connectionId?: string) => void
-}
-function makeFakeConnection(): FakeConnection {
-  const conn: FakeConnection = {
-    state: signalR.HubConnectionState.Disconnected,
-    connectionId: null,
-    start: vi.fn(),
-    stop: vi.fn(),
-    invoke: vi.fn(),
-    on: vi.fn(),
-    onreconnected: undefined,
-  }
-  conn.start.mockImplementation(async () => {
-    conn.state = signalR.HubConnectionState.Connected
-    conn.connectionId = `conn-${++nextConnectionId}`
-  })
-  conn.stop.mockImplementation(async () => {
-    conn.state = signalR.HubConnectionState.Disconnected
-    conn.connectionId = null
-  })
-  conn.onreconnected = ((cb: (id?: string) => void) => {
-    conn._reconnectHandler = cb
-  }) as FakeConnection["onreconnected"]
-  return conn
-}
-vi.mock("@microsoft/signalr", () => {
-  return {
-    HubConnectionBuilder: class {
-      private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
-      private _connection: FakeConnection = makeFakeConnection()
-      withUrl(_url: string) {
-        builders.push({ handlers: this._handlers, connection: this._connection })
-        return this
-      }
-      withAutomaticReconnect(_reconnectPolicy: number[]) {
-        return this
-      }
-      build() {
-        this._connection.on.mockImplementation((event: string, handler: (...args: unknown[]) => unknown) => {
-          this._handlers.set(event, handler)
-          return this._connection
-        })
-        return this._connection as unknown as signalR.HubConnection
-      }
-    },
-    HubConnectionState: {
-      Disconnected: "Disconnected",
-      Connecting: "Connecting",
-      Connected: "Connected",
-      Disconnecting: "Disconnecting",
-      Reconnecting: "Reconnecting",
-    },
-  }
-})
-
-function lastBuilder(): CapturedBuilder {
-  const builder = builders.at(-1)
-  if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
-  return builder
-}
-
-type AnyFn = (...args: any[]) => any
-
-interface MockServerConnection {
-  workflowAgentSessionRuntimeEvents: AnyFn
-  agentSessionRuntimeEvents?: AnyFn
-}
-
-interface MockConnection {
-  prompt: AnyFn
-  cancel?: AnyFn
-}
-
-function buildClient(opts: {
-  resolver?: AnyFn | null
-  serverConnection?: MockServerConnection | null
-  followupFailureOutbox?: { record: AnyFn } | null
-}) {
-  builders.length = 0
-  const defaultServerConnection: MockServerConnection = {
-    workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-    agentSessionRuntimeEvents: vi.fn(async () => undefined),
-  }
-  const serverConnection = opts.serverConnection === undefined ? defaultServerConnection : opts.serverConnection
-  const resolver = opts.resolver === undefined ? null : opts.resolver
-  const client = new RunnerSignalRClient(
-    "http://localhost:3456",
-    "runner-1",
-    "/tmp/mohist/projects",
-    null,
-    {
-      serverConnection: serverConnection as never,
-      followupTargetResolver: resolver as never,
-      followupFailureOutbox: opts.followupFailureOutbox as never,
-    },
-  )
-  return client
-}
-
-function emitFollowup(builder: CapturedBuilder, payload: ReceiveFollowupPayload | null | undefined) {
-  const handler = builder.handlers.get("ReceiveFollowup")
-  if (!handler) throw new Error("ReceiveFollowup handler was not registered")
-  handler(payload)
-}
-
-async function invokeFollowup(builder: CapturedBuilder, payload: ReceiveFollowupPayload | null | undefined) {
-  const handler = builder.handlers.get("ReceiveFollowup")
-  if (!handler) throw new Error("ReceiveFollowup handler was not registered")
-  return await handler(payload)
-}
-
-async function flush() {
-  await new Promise((resolve) => setImmediate(resolve))
-}
 
 describe("RunnerSignalRClient ReceiveFollowup handler", () => {
-  it("Followup_FireAndForgetPromptCallsConnectionPromptWithoutAwait", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_FireAndForgetPromptCallsRuntimeFollowupWithoutAwait", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "add a logout button" })
     await flush()
 
-    expect(prompt).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledWith({
-      sessionId: "acp-1",
-      prompt: [{ type: "text", text: "add a logout button" }],
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(runtime.followupCalls[0]).toEqual({
+      target: { runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" },
+      prompt: "add a logout button",
     })
   })
 
-  it("Followup_AcknowledgesWorkflowDeliveryBeforePromptResolution", async () => {
-    let resolvePrompt!: (value: unknown) => void
-    const prompt = vi.fn(() => new Promise((resolve) => { resolvePrompt = resolve }))
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_AcknowledgesDeliveryBeforeRuntimeCompletion", async () => {
+    let resolveFollowup!: (value: { ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }) => void
+    const promise = new Promise<{ ok: true; value: { facts: { runtimeSessionId: string; workDir: string }; diagnostics: readonly never[] }; diagnostics: readonly never[] }>((resolve) => { resolveFollowup = resolve })
+    const followupCalls = runtime.followupCalls
+    runtime.runtime.followup = async () => {
+      followupCalls.push({
+        target: { runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" },
+        prompt: "ship it",
+      })
+      return await promise
+    }
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const delivery = invokeFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship it" })
-    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(followupCalls).toHaveLength(1)
     await expect(delivery).resolves.toEqual({ accepted: true })
-    resolvePrompt(undefined)
+    resolveFollowup({
+      ok: true,
+      value: { facts: { runtimeSessionId: "acp-1", workDir: "/work/project" }, diagnostics: [] },
+      diagnostics: [],
+    })
     await flush()
   })
 
   it("Followup_PromptsEvenWhenRuntimeEventsEmitIsStillPending", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(() => new Promise(() => undefined))
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship while event is pending" })
     await flush()
 
     expect(runtimeEvents).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledWith({
-      sessionId: "acp-1",
-      prompt: [{ type: "text", text: "ship while event is pending" }],
-    })
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(runtime.followupCalls[0].prompt).toBe("ship while event is pending")
   })
 
-  it("Followup_EmitsSessionInputEventBeforeCallingPrompt", async () => {
+  it("Followup_EmitsSessionInputEventBeforeCallingRuntime", async () => {
     const callOrder: string[] = []
-    const prompt = vi.fn(async () => {
-      callOrder.push("prompt")
-    })
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    runtime.runtime.followup = async () => {
+      callOrder.push("followup")
+      return { ok: true, value: { facts: { runtimeSessionId: "acp-1", workDir: "/work/project" }, diagnostics: [] }, diagnostics: [] }
+    }
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => {
       callOrder.push("session.input")
     })
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "fix the typo" })
@@ -220,17 +107,15 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     await flush()
 
     expect(runtimeEvents).toHaveBeenCalledTimes(1)
-    expect(callOrder).toEqual(["session.input", "prompt"])
+    expect(callOrder).toEqual(["session.input", "followup"])
   })
 
   it("Followup_TagsEventWithPromptKindFollowup", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "tag me" })
@@ -268,24 +153,23 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async () => {
-    const prompt = vi.fn(async () => undefined)
     const runtimeEvents = vi.fn(async () => undefined)
     const resolver = vi.fn(() => null)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
     expect(runtimeEvents).not.toHaveBeenCalled()
   })
 
   it("Followup_ReturnsMissingWhenTheRuntimeSessionCannotBeResolved", async () => {
     const resolver = vi.fn(() => null)
-    buildClient({ resolver })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
 
     await expect(invokeFollowup(lastBuilder(), {
       workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
@@ -293,56 +177,80 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_ReturnsUnavailableWhileTheRuntimeIsInitializing", async () => {
-    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE })
+    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE, openCodeRuntime: runtime.runtime })
 
     await expect(invokeFollowup(lastBuilder(), {
       workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
     })).resolves.toEqual({ accepted: false, error: "unavailable" })
   })
 
+  it("Followup_ReturnsUnavailableWhenRuntimeReadyIsFalse", async () => {
+    runtime.setReady(false)
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
+
+    await expect(invokeFollowup(lastBuilder(), {
+      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
+    })).resolves.toEqual({ accepted: false, error: "unavailable" })
+    expect(runtime.followupCalls).toHaveLength(0)
+  })
+
   it("Followup_DropsWhenResolverThrows", async () => {
-    const prompt = vi.fn(async () => undefined)
     const runtimeEvents = vi.fn(async () => undefined)
     const resolver = vi.fn(() => { throw new Error("resolver boom") })
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
     expect(runtimeEvents).not.toHaveBeenCalled()
     expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()
   })
 
-  it("Followup_CatchesPromptRejectionAndLogsWithoutThrowing", async () => {
-    const prompt = vi.fn(async () => { throw new Error("opencode crashed") })
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_CatchesFollowupRejectionAndLogsWithoutThrowing", async () => {
+    runtime.setFollowupResult({
+      ok: false,
+      error: {
+        kind: "turn-failed",
+        message: "opencode crashed",
+        diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
+      },
+      diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "boom" })).not.toThrow()
     await flush()
     await flush()
 
-    expect(prompt).toHaveBeenCalledTimes(1)
-    expect(errorSpy).toHaveBeenCalledWith("followup connection.prompt rejected:", expect.stringContaining("opencode crashed"))
+    expect(runtime.followupCalls).toHaveLength(1)
+    expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()
   })
 
-  it("Followup_PromptRejectionRecordsTheMatchingOperationForDurableDelivery", async () => {
-    const prompt = vi.fn(async () => { throw new Error("opencode crashed") })
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_FollowupRejectionRecordsTheMatchingOperationForDurableDelivery", async () => {
+    runtime.setFollowupResult({
+      ok: false,
+      error: {
+        kind: "turn-failed",
+        message: "opencode crashed",
+        diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
+      },
+      diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
+    })
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const serverConnection: MockServerConnection = {
       workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
       agentSessionRuntimeEvents: vi.fn(async () => undefined),
@@ -350,7 +258,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const outbox = { record: vi.fn(async () => undefined) }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox })
+    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox, openCodeRuntime: runtime.runtime })
     emitFollowup(lastBuilder(), {
       target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
       text: "continue",
@@ -370,17 +278,15 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     errorSpy.mockRestore()
   })
 
-  it("Followup_PromptCompletionRecordsTheMatchingOperationForDurableDelivery", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_FollowupCompletionRecordsTheMatchingOperationForDurableDelivery", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const serverConnection: MockServerConnection = {
       workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
       agentSessionRuntimeEvents: vi.fn(async () => undefined),
     }
     const outbox = { record: vi.fn(async () => undefined) }
 
-    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox })
+    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox, openCodeRuntime: runtime.runtime })
     emitFollowup(lastBuilder(), {
       target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
       text: "continue",
@@ -400,14 +306,12 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_ContinuesToPromptEvenIfRuntimeEventsEmitFails", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => { throw new Error("server unreachable") })
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "keep going" })
@@ -415,385 +319,79 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     await flush()
 
     expect(runtimeEvents).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(runtime.followupCalls).toHaveLength(1)
     expect(errorSpy).toHaveBeenCalledWith("failed to emit followup session.input event:", expect.any(Error))
     errorSpy.mockRestore()
   })
 
   it("Followup_DropsPayloadWhenTextIsMissing", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "" })
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
     expect(runtimeEvents).not.toHaveBeenCalled()
   })
 
   it("Followup_DropsPayloadWhenResolverIsNull", async () => {
-    const prompt = vi.fn(async () => undefined)
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver: null, serverConnection })
+    buildClient({ resolver: null, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
     expect(runtimeEvents).not.toHaveBeenCalled()
   })
 
   it("Followup_DropsPayloadWhenServerConnectionIsNull", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null })
+    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
   })
 
-  it("Followup_DropsNullOrUndefinedPayload", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
+  it("Followup_DropsPayloadWhenRuntimeIsNull", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
-    buildClient({ resolver, serverConnection })
+    buildClient({ resolver, serverConnection, openCodeRuntime: null })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    await flush()
+
+    expect(runtimeEvents).not.toHaveBeenCalled()
+  })
+
+  it("Followup_DropsNullOrUndefinedPayload", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     emitFollowup(builder, null)
     emitFollowup(builder, undefined)
     await flush()
 
-    expect(prompt).not.toHaveBeenCalled()
+    expect(runtime.followupCalls).toHaveLength(0)
     expect(runtimeEvents).not.toHaveBeenCalled()
-  })
-})
-
-describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
-  function genericPayload(text: string): ReceiveFollowupPayload {
-    return {
-      target: { kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" },
-      text,
-    }
-  }
-
-  it("GenericFollowup_LocatesSessionByGenericKey_AndCallsConnectionPrompt", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn((target: SessionTarget) => {
-      expect(target.kind).toBe("generic")
-      expect((target as { sessionId: string }).sessionId).toBe("gen-session-1")
-      return { connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }
-    })
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, genericPayload("add a logout route"))
-    await flush()
-
-    expect(prompt).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledWith({
-      sessionId: "acp-1",
-      prompt: [{ type: "text", text: "add a logout route" }],
-    })
-    expect(workflowRuntimeEvents).not.toHaveBeenCalled()
-    expect(agentSessionRuntimeEvents).toHaveBeenCalledTimes(1)
-  })
-
-  it("GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn((target: SessionTarget) => {
-      expect(target.kind).toBe("generic")
-      expect(target.binding).toEqual({
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-1",
-        workDir: null,
-      })
-      return { connection: connection as never, sessionId: "runtime-1", projectId: "proj-1" }
-    })
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-      agentSessionRuntimeEvents: vi.fn(async () => undefined),
-    }
-
-    buildClient({ resolver, serverConnection })
-    await expect(invokeFollowup(lastBuilder(), {
-      target: {
-        kind: "generic",
-        projectId: "proj-1",
-        sessionId: "gen-session-1",
-        binding: {
-          runtime: "opencode",
-          runtimeSessionId: "runtime-1",
-          runnerId: "runner-1",
-        },
-      },
-      text: "continue",
-    })).resolves.toEqual({ accepted: true })
-
-    expect(prompt).toHaveBeenCalledWith({
-      sessionId: "runtime-1",
-      prompt: [{ type: "text", text: "continue" }],
-    })
-  })
-
-  it("GenericFollowup_AcknowledgesDeliveryBeforePromptResolution", async () => {
-    let resolvePrompt!: (value: unknown) => void
-    const prompt = vi.fn(() => new Promise((resolve) => { resolvePrompt = resolve }))
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "runtime-1", projectId: "proj-1" }))
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-      agentSessionRuntimeEvents: vi.fn(async () => undefined),
-    }
-
-    buildClient({ resolver, serverConnection })
-
-    const delivery = invokeFollowup(lastBuilder(), genericPayload("continue"))
-
-    await expect(delivery).resolves.toEqual({ accepted: true })
-    expect(prompt).toHaveBeenCalledTimes(1)
-    resolvePrompt(undefined)
-    await flush()
-  })
-
-  it("GenericFollowup_EmitsSessionInputViaAgentSessionRuntimeEventsEndpoint", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, genericPayload("kind tag"))
-    await flush()
-
-    expect(agentSessionRuntimeEvents).toHaveBeenCalledWith(
-      "proj-1",
-      "gen-session-1",
-      expect.objectContaining({
-        runtimeEvents: [
-          expect.objectContaining({
-            type: "session.input",
-            payload: expect.objectContaining({
-              kind: "followup",
-              text: "kind tag",
-              role: "user",
-              runtimeSessionId: "acp-1",
-              source: "followup",
-            }),
-          }),
-        ],
-      }),
-      expect.any(AbortSignal),
-    )
-    const genericCalls = agentSessionRuntimeEvents.mock.calls as unknown as Array<[
-      string,
-      string,
-      { runtimeEvents: Array<{ payload: Record<string, unknown> }> },
-      AbortSignal,
-    ]>
-    const genericEventBatch = genericCalls[0]?.[2]
-    expect(genericEventBatch.runtimeEvents[0]?.payload).not.toHaveProperty("acpSessionId")
-    expect(workflowRuntimeEvents).not.toHaveBeenCalled()
-  })
-
-  it("GenericFollowup_ContinuesToPromptEvenIfAgentSessionRuntimeEventsEmitFails", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => { throw new Error("server unreachable") })
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, genericPayload("keep going"))
-    await flush()
-    await flush()
-
-    expect(agentSessionRuntimeEvents).toHaveBeenCalledTimes(1)
-    expect(prompt).toHaveBeenCalledTimes(1)
-    expect(errorSpy).toHaveBeenCalledWith("failed to emit followup session.input event:", expect.any(Error))
-    errorSpy.mockRestore()
-  })
-
-  it("GenericFollowup_DropsUnknownSessionWithoutThrowing", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const resolver = vi.fn(() => null)
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    expect(() => emitFollowup(builder, genericPayload("ignored"))).not.toThrow()
-    await flush()
-
-    expect(prompt).not.toHaveBeenCalled()
-    expect(workflowRuntimeEvents).not.toHaveBeenCalled()
-    expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
-  })
-
-  it("GenericFollowup_DropsWhenTargetSessionIdMissing", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, {
-      target: { kind: "generic", projectId: "proj-1" },
-      text: "no sessionId",
-    })
-    await flush()
-
-    expect(prompt).not.toHaveBeenCalled()
-    expect(workflowRuntimeEvents).not.toHaveBeenCalled()
-    expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
-  })
-
-  it("GenericFollowup_DropsWhenTextMissing", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, { ...genericPayload(""), text: "" })
-    await flush()
-
-    expect(prompt).not.toHaveBeenCalled()
-    expect(workflowRuntimeEvents).not.toHaveBeenCalled()
-    expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
-  })
-
-  it("WorkflowFollowup_StillUsesWorkflowRuntimeEventsEndpoint_WhenTargetShapeCarriesIt", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn((target: SessionTarget) => {
-      expect(target.kind).toBe("workflow")
-      return { connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }
-    })
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    emitFollowup(builder, {
-      target: {
-        kind: "workflow",
-        projectId: "proj-1",
-        workflowRunId: "wr-1",
-        sessionName: "work-1",
-      },
-      text: "tag me",
-    })
-    await flush()
-
-    expect(workflowRuntimeEvents).toHaveBeenCalledTimes(1)
-    expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
-    expect(prompt).toHaveBeenCalledTimes(1)
-  })
-
-  it("WorkflowFollowup_LegacyTopLevelFields_StillResolveToWorkflowTarget", async () => {
-    const prompt = vi.fn(async () => undefined)
-    const connection: MockConnection = { prompt }
-    const resolver = vi.fn((target: SessionTarget) => {
-      expect(target.kind).toBe("workflow")
-      if (target.kind === "workflow") {
-        expect(target.workflowRunId).toBe("wr-legacy")
-        expect(target.sessionName).toBe("work-legacy")
-      }
-      return { connection: connection as never, sessionId: "acp-1", projectId: "proj-legacy" }
-    })
-    const workflowRuntimeEvents = vi.fn(async () => undefined)
-    const agentSessionRuntimeEvents = vi.fn(async () => undefined)
-    const serverConnection: MockServerConnection = {
-      workflowAgentSessionRuntimeEvents: workflowRuntimeEvents,
-      agentSessionRuntimeEvents,
-    }
-
-    buildClient({ resolver, serverConnection })
-    const builder = lastBuilder()
-
-    // Older server builds only populate top-level workflowRunId/sessionName
-    // and emit no `target` field. The handler must still resolve them
-    // (the workflowRunId/sessionName fallback inside `resolveSessionTarget`).
-    emitFollowup(builder, { workflowRunId: "wr-legacy", sessionName: "work-legacy", text: "legacy ok" })
-    await flush()
-
-    expect(workflowRuntimeEvents).toHaveBeenCalledTimes(1)
-    expect(workflowRuntimeEvents).toHaveBeenCalledWith(
-      "proj-legacy",
-      "wr-legacy",
-      "work-legacy",
-      expect.objectContaining({
-        runtimeEvents: [
-          expect.objectContaining({
-            type: "session.input",
-            payload: expect.objectContaining({ kind: "followup", text: "legacy ok" }),
-          }),
-        ],
-      }),
-      expect.any(AbortSignal),
-    )
-    expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
-    expect(prompt).toHaveBeenCalledTimes(1)
   })
 })

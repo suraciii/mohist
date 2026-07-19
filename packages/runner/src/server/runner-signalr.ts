@@ -36,6 +36,7 @@ import {
   type SessionCommandRequest,
   type SessionCommandResult,
 } from "./session-command-handler.js"
+import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
 
 export {
   isUnderRunnerRoot,
@@ -69,6 +70,14 @@ export interface RunnerSignalRClientOptions {
   sessionCommandJournal?: SessionCommandJournalStore | null
   reconcileStartedSessionCommand?: import("./session-command-handler.js").SessionCommandReconciler | null
   registry?: WorkspaceRegistry | null
+  /**
+   * Late-binding runtime accessor used by the Follow-up / Cancel
+   * handlers (issue-410 T-003 / design D3). The host wires this so
+   * the handler always consults the current runtime handle (which
+   * is rebuilt on Server exit). Tests pass a static fake instead of
+   * a getter.
+   */
+  openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
@@ -84,6 +93,7 @@ export class RunnerSignalRClient {
   private readonly sessionCommandHandler: SessionCommandHandler | null
   private readonly sessionCommandJournal: SessionCommandJournalStore | null
   private readonly reconcileStartedSessionCommand: import("./session-command-handler.js").SessionCommandReconciler | null
+  private readonly openCodeRuntime: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
@@ -111,6 +121,7 @@ export class RunnerSignalRClient {
     this.sessionCommandHandler = options.sessionCommandHandler ?? null
     this.sessionCommandJournal = options.sessionCommandJournal ?? null
     this.reconcileStartedSessionCommand = options.reconcileStartedSessionCommand ?? null
+    this.openCodeRuntime = options.openCodeRuntime ?? null
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
@@ -164,10 +175,12 @@ export class RunnerSignalRClient {
       serverConnection: this.serverConnection,
       followupTargetResolver: this.followupTargetResolver,
       followupFailureOutbox: this.followupFailureOutbox,
+      openCodeRuntime: this.resolveOpenCodeRuntime(),
     })
 
     registerCancelHandler(this.connection, {
       followupTargetResolver: this.followupTargetResolver,
+      openCodeRuntime: this.resolveOpenCodeRuntime(),
     })
 
     registerSessionCommandHandler(this.connection, {
@@ -179,5 +192,11 @@ export class RunnerSignalRClient {
     registerWorkflowRunStatusHandler(this.connection, {
       registry: this.registry,
     })
+  }
+
+  private resolveOpenCodeRuntime(): OpenCodeRuntime | null {
+    if (this.openCodeRuntime === null) return null
+    if (typeof this.openCodeRuntime === "function") return this.openCodeRuntime()
+    return this.openCodeRuntime
   }
 }

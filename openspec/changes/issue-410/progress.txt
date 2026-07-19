@@ -347,3 +347,50 @@ on the fresh workspace.
   95 test files, 1167 tests, 0 failed.
 - No new acceptance-criteria code change was required for T-002; the
   rerun only re-confirms the landed state on the fresh workspace.
+
+## T-003: rework Follow-up, Cancel, and failure-outbox handlers to target the OpenCode runtime
+
+### Codebase patterns observed
+- `OpenCodeRuntime` exposes `runTurn`, `createSession`, `diagnostic`, `ready`, `catalog` after #409. T-003 promotes `client.session.promptAsync` (Follow-up) and `client.session.abort` (Cancel) to first-class public methods on `OpenCodeRuntime` (`followup` / `cancel`) with the same Mohist-owned `RuntimeResult<T>` shape `runTurn` already returns. `RuntimeFollowupRequest`/`RuntimeFollowupResult`/`RuntimeFollowupFacts` and `RuntimeCancelRequest`/`RuntimeCancelResult`/`RuntimeCancelFacts` are added to `runtime/opencode/types.ts`; the new types are exported from `runtime/opencode/index.ts` so the handler layer can import them without reaching into the runtime module.
+- The handlers consult the persisted `binding` on the wire target (the same source the Workflow path already uses) and project it into a Mohist-owned value object `{ runtimeSessionId, workDir, projectId }`. `session-target.ts` drops its `import type { ClientSideConnection } from "@agentclientprotocol/sdk"` and re-points `FollowupTarget` to the value-object shape; the resolver (`RunnerHost.resolveFollowupTarget`) reads `target.binding` and projects it without holding a live connection.
+- `runtime/host.ts` deletes `restoreSessionTarget`, `resumeSessionTarget`, `installRestoredSessionHandlers`, and the `sessionRestorations` dedup map. Restart / reconnect reconciliation now lives entirely inside `OpenCodeRuntime` per #409 D7 (persisted binding + `client.session.get` snapshot). The shared ACP init path in `initializeSharedConnection` keeps the `SharedAcpConnection` lifecycle in place (T-004 deletes it); T-003 only stops the runner host from **restoring** ACP sessions and from calling `resumeSession`.
+- The runtime accessor the SignalR client uses is `OpenCodeRuntime | (() => OpenCodeRuntime | null) | null` so the host can wire a late-binding accessor that consults the rebuilt runtime handle on every handler call. The host wires `openCodeRuntime: () => this.openCodeRuntime`; tests pass a static fake.
+- `FollowupFailureOutbox` keeps the `target: SessionTarget` field on each entry so persisted entries still carry the discriminator (`workflow` vs `generic`) the drain needs to fan out to the right runtime-events endpoint. The class no longer references a live connection — the comment block at the top of the file is the only documentation of the new contract.
+
+### Implementation notes
+- `runtime/opencode/runtime.ts:followup` validates the input, calls `client.session.get` to verify the persisted binding still resolves, then `client.session.promptAsync` (fire-and-forget). `client.session.abort` is the symmetric Cancel path. 404s surface as `missing-session` (existing Reset hint), non-404 errors as `turn-failed`. The runtime returns `unavailable-runtime` when the OpenCode runtime is not ready so the handler can preserve the existing unavailable taxonomy.
+- `server/followup-handler.ts` calls `runtime.followup(...)` exactly once (fire-and-forget) and records the terminal outcome (`completed` / `failed`) via the followup failure outbox when an `operationId` is supplied. The handler no longer holds a `ClientSideConnection`; the `FollowupTarget` is the value object.
+- `server/cancel-handler.ts` branches on `runtime.cancel(...)` returning `{ state: "cancelled" }` for a `cancelled: true` fact, `{ state: "not-cancellable" }` for a missing-session / turn-failed outcome, and `{ state: "unavailable" }` for an `unavailable-runtime` outcome.
+- `server/runner-signalr.ts` exposes `openCodeRuntime` on the options surface (function or static) and resolves the late-binding value at handler-registration time, so the handler always consults the rebuilt runtime handle.
+- The shared `runner-signalr-followup.spec.ts` test was 888 lines (over the 800-line budget). T-003 splits it into:
+  - `runner-signalr-followup.spec.ts` (397 lines) — core `ReceiveFollowup` handler scenarios
+  - `runner-signalr-followup-generic.spec.ts` (319 lines) — generic session routing scenarios
+  - both files share a new `tests/support/followup-handler-fixture.ts` (202 lines) helper that owns the `@microsoft/signalr` mock, the `RunnerSignalRClient` builder, and the fake-runtime seams.
+- The new helper installs `vi.mock("@microsoft/signalr")` at the top of the module (not nested inside a function) so vitest's hoisting doesn't trigger its "not at the top level" warning. The helper exposes `vi.fn()`-based fake runtime + fake server connection; no real process/network/fs/clock.
+
+### Gotchas / regressions watched for
+- `runtime/host.ts` keeps `SharedAcpConnection` / `AcpSessionManager` initialization in `initializeSharedConnection` and the per-work ephemeral fallback (T-003 only deletes the **restore / resume** path that was driven by `resolveFollowupTarget`'s cache miss; T-004 deletes the shared ACP init entirely). After T-003, `resolveFollowupTarget` no longer calls `sharedAcpConnection.connection.resumeSession(...)` or installs session handlers — the workflow-side ACP bridge still initializes but no longer reattaches session handlers on a followup / cancel miss.
+- `OpenCodeRuntime.followup`'s `client.session.get` is best-effort: a non-OpenCode-runner response (e.g. the persisted binding points at a different runner) does NOT match the binding id and surfaces as `missing-session` (Reset hint), not `turn-failed`. This matches the existing Cancel reply path's `not-cancellable` for the same situation.
+- `runner-host-lifecycle.spec.ts` was rewritten for the new resolver: `GenericFollowupResolver_*` tests now drive `openCodeRuntime = { ready: () => true }` and project the binding into a `FollowupTarget` value object. The old `SharedAcpConnection` mocks stay in place because the runner host still initializes the shared ACP connection at startup — T-003 does not remove that.
+- `runner-signalr-cancel.spec.ts` and `runner-signalr-followup*.spec.ts` exercise the new runtime-targeted path with a fake runtime; the resolver returns the new value-object shape and the handler is verified to call `runtime.cancel(...)` / `runtime.followup(...)` exactly once with the projected `runtimeSessionId` / `workDir`.
+- `vi.useFakeTimers()` was added in the first split pass but breaks the `flush()` helper (which uses `setImmediate`). Removed from `beforeEach` — the existing real-timer tests don't depend on fake timers and the `flush()` helper is the bridge between `runtime.followup(...)` (fire-and-forget) and the `expect` assertion.
+- `runner-host-opencode-handlers.spec.ts` (new) verifies the host wires a late-binding `OpenCodeRuntime` accessor through to the SignalR client and that the accessor returns the live runtime handle (not a snapshot).
+- `opencode-runtime-followup-cancel.spec.ts` (new) covers the new public methods directly: prompt path (model + variant overrides), unavailable-runtime, invalid-input (missing binding / empty prompt), missing-session on `client.session.get` 404 / `client.session.promptAsync` 404 / `client.session.abort` 404, and turn-failed on non-404 SDK errors. The "reset" substring in the `missing-session` message is asserted so the Reset hint is preserved on every missing-session branch.
+- Existing `runner-host-task-log.spec.ts` still uses `ownerKind: 'agent-job'` for the flush lifecycle test; T-003 doesn't change that — the work-executor artifact pipeline still emits a terminal task-log batch on the workflow-side path, which is what that test exercises.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅ (file-size budget: split `runner-signalr-followup.spec.ts` into two files under 800 lines + a shared helper)
+- `npm run test:run -w packages/runner` ✅ 1189 / 1189 (98 test files)
+- `opencode-runtime-followup-cancel.spec.ts` ✅ 14 / 14 (new file)
+- `runner-host-opencode-handlers.spec.ts` ✅ 3 / 3 (new file)
+- `runner-signalr-followup-generic.spec.ts` ✅ 9 / 9 (new file)
+- `runner-signalr-cancel.spec.ts` ✅ 14 / 14 (rewritten: every scenario verifies `runtime.cancel(...)` is called with the projected `runtimeSessionId` / `workDir`)
+- `runner-host-lifecycle.spec.ts` ✅ 15 / 15 (rewritten: `GenericFollowupResolver_*` scenarios verify the binding projection / readiness / non-opencode binding rejection path; the `SharedAcpConnection` mock remains because T-003 doesn't tear down the shared ACP init)
+
+### What T-004 will need to thread
+- T-004 deletes `runtime/acp-connection.ts`, the entire `actions/acp/` tree, and the `SharedAcpConnection` / `AcpSessionManager` lifecycle. T-003 leaves them in place so the workflow-side ACP bridge stays live; T-004 is the dependency boundary.
+- `session-target.ts` still imports `RuntimeSessionBinding` / `SessionTarget` from `runtime/acp-connection.ts`. T-004 will relocate these types (the wire-shape stays; the connection lifecycle goes). T-003 deliberately does not move them so the diff stays self-contained.
+- `runtime/host.ts` still calls `createSharedAcpConnection` and constructs `new AcpSessionManager()` in the per-work ephemeral fallback at `:734–744`. T-003 only deletes the **resume / install** path that ran when the followup-target resolver missed the cache; the rest stays for T-004.
+- `WorkExecutor`'s constructor still accepts `sessionManager` / `acpConnection` (used by the workflow-side `acpAgentAction`). T-003 keeps these arguments for the same reason — the workflow source keeps using ACP until T-004 retires the action tree.
