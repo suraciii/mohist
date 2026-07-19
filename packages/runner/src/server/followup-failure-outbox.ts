@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { SessionTarget } from "../runtime/acp-connection.js"
+import type { SessionTarget } from "./session-target.js"
 import type { ServerConnection } from "./connection.js"
 
 // Issue-410 T-003 / design D3: the followup failure outbox is now a

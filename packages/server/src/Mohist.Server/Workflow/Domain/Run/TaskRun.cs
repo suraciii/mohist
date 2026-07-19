@@ -144,7 +144,7 @@ public static class TaskRunExtensions
 
     public static TaskClassification DeriveClassification(string? uses, IReadOnlyList<WorkflowTaskRequiredFile>? requiredFiles)
     {
-        if (uses is not null && (uses.StartsWith("core/") || uses.StartsWith("mohist/")) && !uses.Contains("acp-agent") && !uses.Contains("opencode"))
+        if (uses is not null && (uses.StartsWith("core/") || uses.StartsWith("mohist/")) && !uses.Contains("opencode"))
             return TaskClassification.Orchestration;
         return TaskClassification.UserFacing;
     }

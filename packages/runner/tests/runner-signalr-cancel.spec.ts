@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
-import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import type { SessionTarget } from "../src/server/session-target.js"
 import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
 import type {
   OpenCodeRuntime,

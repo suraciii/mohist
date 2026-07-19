@@ -245,7 +245,7 @@ internal static class IssueMetricsTestSupport
                     Status = "Completed",
                     Tasks = new[]
                     {
-                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/opencode" },
                     },
                     Checks = new[]
                     {
@@ -266,7 +266,7 @@ internal static class IssueMetricsTestSupport
                     Status = "Completed",
                     Tasks = new[]
                     {
-                        new { Id = "review", DefinitionId = "review", Attempt = 1, Title = "Check review", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "review", DefinitionId = "review", Attempt = 1, Title = "Check review", Status = "Completed", Uses = "mohist/opencode" },
                     },
                     Checks = new[]
                     {
@@ -302,7 +302,7 @@ internal static class IssueMetricsTestSupport
                     Status = "Completed",
                     Tasks = new[]
                     {
-                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/opencode" },
                     },
                     Checks = new[]
                     {
@@ -338,9 +338,9 @@ internal static class IssueMetricsTestSupport
             var tasks = new List<object>();
             if (initialized)
             {
-                tasks.Add(new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" });
+                tasks.Add(new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/opencode" });
                 foreach (var check in s.Checks!.Where(c => c.ReworkCount > 0))
-                    tasks.Add(new { Id = $"recover:{check.Name}.1", DefinitionId = $"recover:{check.Name}", Attempt = 1, Title = $"{check.Title} recovery", Status = "Completed", Uses = "mohist/acp-agent" });
+                    tasks.Add(new { Id = $"recover:{check.Name}.1", DefinitionId = $"recover:{check.Name}", Attempt = 1, Title = $"{check.Title} recovery", Status = "Completed", Uses = "mohist/opencode" });
             }
 
             return (object)new

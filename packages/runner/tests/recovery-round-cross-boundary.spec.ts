@@ -46,8 +46,6 @@ function executor(): WorkExecutor {
     registry,
     verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
     {} as never,
-    {} as never,
-    null,
     workDir,
   )
 }

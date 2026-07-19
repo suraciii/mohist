@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
-import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import type { SessionTarget } from "../src/server/session-target.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
@@ -29,9 +29,6 @@ const mocks = vi.hoisted(() => ({
   probeLiveness: vi.fn(async () => true),
   blockingAction: vi.fn(),
   forceReconnect: vi.fn(async () => undefined),
-  createSharedAcpConnection: vi.fn(),
-  shutdownSharedAcpConnection: vi.fn(),
-  acpShutdown: vi.fn(),
 }))
 
 const {
@@ -48,9 +45,6 @@ const {
   probeLiveness,
   blockingAction,
   forceReconnect,
-  createSharedAcpConnection,
-  shutdownSharedAcpConnection,
-  acpShutdown,
 } = mocks
 
 vi.mock("../src/server/connection.js", () => ({
@@ -84,20 +78,6 @@ vi.mock("../src/actions/registry.js", () => ({
   }),
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    private sessions = new Map<string, { sessionId: string; workDir: string }>()
-    key(target: SessionTarget) { return target.kind === "workflow" ? this.workflowKey(target.workflowRunId, target.sessionName) : this.genericKey(target.sessionId) }
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get(key: string) { return this.sessions.get(key) }
-    set(key: string, entry: { sessionId: string; workDir: string }) { return this.sessions.set(key, entry) }
-    has(key: string) { return this.sessions.has(key) }
-    delete(key: string) { return this.sessions.delete(key) }
-  },
-  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
-}))
-
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
   return { ...actual, WorkspaceManager: class {
@@ -107,22 +87,6 @@ vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
 })
 beforeEach(() => {
   installReadyRuntimeFactory()
-  createSharedAcpConnection.mockResolvedValue({
-    connection: {
-      prompt: vi.fn(),
-      cancel: vi.fn(),
-      newSession: vi.fn(),
-      resumeSession: vi.fn(),
-      setSessionConfigOption: vi.fn(),
-      closeSession: vi.fn(),
-    },
-    processPid: 99999,
-    setSessionHandlers: vi.fn(),
-    clearSessionHandlers: vi.fn(),
-    shutdown: shutdownSharedAcpConnection,
-  })
-  acpShutdown.mockResolvedValue(undefined)
-  shutdownSharedAcpConnection.mockResolvedValue(undefined)
   // Default implementation: write two rebase-tagged lines and resolve
   // with success — overridable per test.
   blockingAction.mockReset()
@@ -310,74 +274,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     await Promise.all([...reportsStarted.values()].map(({ promise }) => promise))
     controller.abort()
     await expect(run).resolves.toBeUndefined()
-  })
-
-  it("FallbackExecutorPathStreamsIncrementalLogsBeforeReport", async () => {
-    vi.clearAllMocks()
-    const actionStarted = deferred<void>()
-    const uploadStarted = deferred<void>()
-    const reportStarted = deferred<void>()
-    connect.mockResolvedValue(undefined)
-    heartbeat.mockResolvedValue(undefined)
-    disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockImplementation(async () => {
-      uploadStarted.resolve()
-      return { accepted: 1, truncated: false }
-    })
-    report.mockImplementation(async () => {
-      reportStarted.resolve()
-      return {}
-    })
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce([workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })]).mockImplementation(async () => [])
-    const release = deferred()
-    createSharedAcpConnection
-      .mockRejectedValueOnce(new Error("shared ACP unavailable"))
-      .mockResolvedValueOnce({
-        connection: {
-          prompt: vi.fn(),
-          cancel: vi.fn(),
-          newSession: vi.fn(),
-          resumeSession: vi.fn(),
-          setSessionConfigOption: vi.fn(),
-          closeSession: vi.fn(),
-        },
-        processPid: 99999,
-        setSessionHandlers: vi.fn(),
-        clearSessionHandlers: vi.fn(),
-        shutdown: shutdownSharedAcpConnection,
-      })
-    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
-      log?.write("action:test", "fallback live line")
-      actionStarted.resolve()
-      await release.promise
-      return { output: "ok" }
-    })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
-    const controller = new AbortController()
-    const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
-      runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-host-task-log-fallback",
-      pollIntervalMs: 1,
-      heartbeatIntervalMs: 60_000,
-      dispatchLivenessProbeIntervalMs: 60_000,
-      taskLogFlushLineThreshold: 1,
-      taskLogFlushIntervalMs: 60_000,
-    })
-    const run = host.run(controller.signal)
-
-    await actionStarted.promise
-    await uploadStarted.promise
-    expect(report).not.toHaveBeenCalled()
-
-    release.resolve()
-    await reportStarted.promise
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
-    errorSpy.mockRestore()
   })
 
   it("FlushesCapturedLogViaUploadTaskLogBeforeReport", async () => {

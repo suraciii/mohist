@@ -43,8 +43,8 @@ import {
   type FollowupTargetResolver,
   type ReceiveFollowupPayload,
   isFollowupTargetUnavailable,
+  type SessionTarget,
 } from "./session-target.js"
-import type { SessionTarget } from "../runtime/acp-connection.js"
 import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 import type { OpenCodeRuntime, RuntimeFollowupRequest } from "../runtime/opencode/index.js"
 

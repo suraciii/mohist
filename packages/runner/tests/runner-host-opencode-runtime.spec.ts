@@ -34,11 +34,6 @@ const mocks = vi.hoisted(() => ({
   probeLiveness: vi.fn(async () => true),
   blockingAction: vi.fn(),
   forceReconnect: vi.fn(async () => undefined),
-  createSharedAcpConnection: vi.fn(),
-  shutdownSharedAcpConnection: vi.fn(),
-  setSessionHandlers: vi.fn(),
-  clearSessionHandlers: vi.fn(),
-  acpShutdown: vi.fn(),
 }))
 
 const {
@@ -55,11 +50,6 @@ const {
   probeLiveness,
   blockingAction,
   forceReconnect,
-  createSharedAcpConnection,
-  shutdownSharedAcpConnection,
-  setSessionHandlers,
-  clearSessionHandlers,
-  acpShutdown,
 } = mocks
 
 vi.mock("../src/server/connection.js", () => ({
@@ -91,18 +81,6 @@ vi.mock("../src/actions/registry.js", () => ({
   createDefaultRegistry: () => ({
     resolve: (uses?: string | null) => uses === "test/block" || uses === "test/observe" ? blockingAction : undefined,
   }),
-}))
-
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get() { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
-  },
-  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
 }))
 
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
@@ -137,15 +115,6 @@ beforeEach(() => {
   getConnectionId.mockReset().mockReturnValue("conn-1")
   probeLiveness.mockReset().mockResolvedValue(true)
   forceReconnect.mockReset().mockResolvedValue(undefined)
-  createSharedAcpConnection.mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers,
-    clearSessionHandlers,
-    shutdown: shutdownSharedAcpConnection,
-  })
-  shutdownSharedAcpConnection.mockResolvedValue(undefined)
-  acpShutdown.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -363,11 +332,11 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       models: [{ providerID: "openai", modelID: "gpt-5", variants: [] }],
       fetchedAt: 0,
     })
-    let observed: { acpConnection: unknown; openCodeRuntime: unknown } | null = null
+    let observed: { openCodeRuntime: unknown } | null = null
     const actionStarted = deferred<void>()
     const actionRelease = deferred<void>()
-    blockingAction.mockReset().mockImplementation(async (context: { openCodeRuntime?: unknown; acpConnection?: unknown }) => {
-      observed = { acpConnection: context.acpConnection, openCodeRuntime: context.openCodeRuntime }
+    blockingAction.mockReset().mockImplementation(async (context: { openCodeRuntime?: unknown }) => {
+      observed = { openCodeRuntime: context.openCodeRuntime }
       actionStarted.resolve()
       await actionRelease.promise
       return { status: "success", message: "ok" }
@@ -385,9 +354,8 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     const run = host.run(controller.signal)
     try {
       await actionStarted.promise
-      const observedNonNull = observed as { acpConnection: unknown; openCodeRuntime: unknown } | null
+      const observedNonNull = observed as { openCodeRuntime: unknown } | null
       expect(observedNonNull).not.toBeNull()
-      expect(observedNonNull?.acpConnection).not.toBeNull()
       expect(observedNonNull?.openCodeRuntime).not.toBeNull()
       const runtime = observedNonNull?.openCodeRuntime as { ready: () => boolean; createSession: (...args: unknown[]) => unknown }
       expect(typeof runtime.ready).toBe("function")
@@ -454,8 +422,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
           return null
         },
       } as never,
-      {} as never,
-      null,
       "/tmp/agent-job",
       undefined,
       fakeRuntime,

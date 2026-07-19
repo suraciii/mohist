@@ -19,8 +19,26 @@
 // importing any symbol from `@agentclientprotocol/sdk`; the live ACP
 // connection lifecycle and the per-session reconnect path were already
 // removed by the design D3's "no live per-session connection" rule.
+//
+// Issue-410 T-004: the `RuntimeSessionBinding` and `SessionTarget` types
+// that used to live in `runtime/acp-connection.ts` are now defined here.
+// The wire shape is unchanged; only the connection lifecycle went away.
 
-import type { RuntimeSessionBinding, SessionTarget } from "../runtime/acp-connection.js"
+/**
+ * Persisted runtime-session binding carried on the wire target by
+ * `ReceiveFollowup` / `CancelAgentSession`. Mirrors the server-side
+ * `RuntimeSessionBinding` record (issue-407).
+ */
+export interface RuntimeSessionBinding {
+  runtime: string
+  runtimeSessionId: string
+  runnerId: string
+  workDir: string | null
+}
+
+export type SessionTarget =
+  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; binding?: RuntimeSessionBinding }
+  | { kind: "generic"; projectId: string; sessionId: string; binding?: RuntimeSessionBinding }
 
 /**
  * The resolver's return value. A pure Mohist-owned value object:

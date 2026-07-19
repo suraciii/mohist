@@ -93,8 +93,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ error: { code: "base-moved", message: "base moved" } })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -121,7 +119,7 @@ describe("WorkExecutor artifact capture", () => {
                         {
                           id: "recover:resolve-rebase-conflicts",
                           title: "Resolve rebase conflicts",
-                          uses: "mohist/acp-agent",
+                          uses: "mohist/opencode",
                           with: { session: "integrate" },
                         },
                       ],
@@ -168,8 +166,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -187,8 +183,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -208,8 +202,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -231,8 +223,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -253,8 +243,6 @@ describe("WorkExecutor artifact capture", () => {
       })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -278,8 +266,6 @@ describe("WorkExecutor artifact capture", () => {
       })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -296,8 +282,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ error: { code: "action-failed", message: "agent crashed" } })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -315,8 +299,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "ok" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -347,8 +329,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -381,8 +361,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -410,8 +388,6 @@ describe("WorkExecutor artifact capture", () => {
       }),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -432,8 +408,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -454,8 +428,6 @@ describe("WorkExecutor artifact capture", () => {
       makeRegistry(async () => ({ output: "ok" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
     )
 
@@ -484,8 +456,6 @@ describe("WorkExecutor artifact capture", () => {
       }),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
-      {} as never,
-      null,
       workDir,
       undefined,
       fakeRuntime as never,

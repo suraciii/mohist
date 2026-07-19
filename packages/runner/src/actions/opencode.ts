@@ -1,10 +1,9 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
-import { buildPromptLoaderContext } from "./acp/agent-config.js"
+import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
-import { sessionNameFromContext } from "./acp/session-events.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
 
 export const OPENCODE_USES = "mohist/opencode"

@@ -53,8 +53,6 @@ describe("WorkExecutor mid-execution variable writes", () => {
       registry,
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as ServerConnection,
-      {} as never,
-      null,
       workDir,
     )
 

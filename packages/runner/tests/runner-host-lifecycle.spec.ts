@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
-import type { SessionTarget } from "../src/runtime/acp-connection.js"
-import type { SessionCommandRequest } from "../src/server/session-command-handler.js"
+import type { SessionTarget } from "../src/server/session-target.js"
 import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
@@ -27,11 +26,6 @@ const mocks = vi.hoisted(() => ({
   probeLiveness: vi.fn(async () => true),
   blockingAction: vi.fn(),
   forceReconnect: vi.fn(async () => undefined),
-  createSharedAcpConnection: vi.fn(),
-  shutdownSharedAcpConnection: vi.fn(),
-  setSessionHandlers: vi.fn(),
-  clearSessionHandlers: vi.fn(),
-  acpShutdown: vi.fn(),
 }))
 
 const {
@@ -50,16 +44,10 @@ const {
   probeLiveness,
   blockingAction,
   forceReconnect,
-  createSharedAcpConnection,
-  shutdownSharedAcpConnection,
-  setSessionHandlers,
-  clearSessionHandlers,
-  acpShutdown,
 } = mocks
 
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 let capturedFollowupTargetResolver: ((target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>) | null = null
-let capturedSessionCommandHandler: ((request: SessionCommandRequest) => unknown) | null = null
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -82,10 +70,9 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
-    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver; sessionCommandHandler?: typeof capturedSessionCommandHandler } = {}) {
+    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver } = {}) {
       capturedOnReconnected = options.onReconnected ?? null
       capturedFollowupTargetResolver = options.followupTargetResolver ?? null
-      capturedSessionCommandHandler = options.sessionCommandHandler ?? null
     }
   },
 }))
@@ -96,35 +83,11 @@ vi.mock("../src/actions/registry.js", () => ({
   }),
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    private sessions = new Map<string, { sessionId: string; workDir: string }>()
-    key(target: SessionTarget) { return target.kind === "workflow" ? this.workflowKey(target.workflowRunId, target.sessionName) : this.genericKey(target.sessionId) }
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get(key: string) { return this.sessions.get(key) }
-    set(key: string, entry: { sessionId: string; workDir: string }) { this.sessions.set(key, entry) }
-    has(key: string) { return this.sessions.has(key) }
-    delete(key: string) { this.sessions.delete(key) }
-  },
-  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
-}))
-
 beforeEach(() => {
   vi.useFakeTimers()
   installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
-  capturedSessionCommandHandler = null
-  createSharedAcpConnection.mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers,
-    clearSessionHandlers,
-    shutdown: shutdownSharedAcpConnection,
-  })
-  acpShutdown.mockResolvedValue(undefined)
-  shutdownSharedAcpConnection.mockResolvedValue(undefined)
   uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
     const aborted = deferred<{ status: string; message: string }>()
@@ -142,25 +105,13 @@ afterEach(() => {
 })
 
 describe("RunnerHost", () => {
-  it.each(["OpenCode", "OPENCODE"])("recognizes %s as the configured runtime", async (runtime) => {
-    new RunnerHost({
-      serverUrl: "http://localhost:3456",
-      runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-test",
-      pollIntervalMs: POLL_INTERVAL_MS,
-      heartbeatIntervalMs: QUIET_INTERVAL_MS,
-      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
-    })
-
-    await expect(Promise.resolve(capturedSessionCommandHandler?.({
-      sessionId: "session-1",
-      runtime,
-      runtimeSessionId: "runtime-1",
-      runnerId: "runner-test",
-      workDir: "/tmp/mohist-runner-test",
-      command: "compact",
-      operationId: "operation-1",
-    }))).resolves.toEqual({ ok: false, error: "notStarted" })
+  it("treats 'opencode' (any casing) as the configured runtime", () => {
+    // Issue-410 T-004 retired the SessionCommand handler. The runner
+    // host no longer wires a sessionCommandHandler on the SignalR
+    // client; the only runtime the runner drives end-to-end is
+    // OpenCode, regardless of casing in the wire field.
+    expect(installReadyOpenCodeRuntimeFactory).toBe(installReadyRuntimeFactory)
+    expect(clearOpenCodeRuntimeFactoryForTest).toBeInstanceOf(Function)
   })
 
   it("RunnerRegistration_DoesNotReportWorkflowSlots", async () => {

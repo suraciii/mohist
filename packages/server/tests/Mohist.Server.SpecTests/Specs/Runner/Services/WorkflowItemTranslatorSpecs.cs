@@ -230,7 +230,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             "check",
             "recover:fix-review-findings.4",
             "Fix review findings",
-            "mohist/acp-agent",
+            "mohist/opencode",
             With("""{"session":"check","prompt":"fix","agent":"${{ vars.agent }}"}"""));
 
         var error = await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(

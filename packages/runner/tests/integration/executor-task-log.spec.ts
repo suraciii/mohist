@@ -41,8 +41,6 @@ function buildExecutor(workspaceManager: WorkspaceManager = verifyOnlyWorkspaceM
     createDefaultRegistry(),
     workspaceManager,
     {} as never,
-    {} as never,
-    null,
     workDir,
     () => new Date("2026-07-01T00:00:00.000Z"),
   )

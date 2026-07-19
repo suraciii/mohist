@@ -8,7 +8,6 @@ import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
-import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
@@ -46,13 +45,22 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  */
 const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
 
+const REMOVED_ACTIONS = new Set(["mohist/acp-agent"])
+
+function isRemovedAction(uses?: string | null): boolean {
+  return !!uses && REMOVED_ACTIONS.has(uses.trim().toLowerCase())
+}
+
+function removedActionMessage(uses: string): string {
+  return `Workflow task uses the removed Action '${uses}'. The Action no longer exists in this runner. ` +
+    "Rerun the affected stage with a profile that uses 'mohist/opencode' to recover this run."
+}
+
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
     private readonly workspaceManager: WorkspaceManager,
     private readonly connection: ServerConnection,
-    private readonly sessionManager: AcpSessionManager,
-    private acpConnection: SharedAcpConnection | null,
     private readonly fallbackWorkDir = process.cwd(),
     /**
      * Injected clock for {@link TaskLogCollector} timestamps. Defaults
@@ -67,9 +75,8 @@ export class WorkExecutor {
      * Shared OpenCode runtime handle. Set by the runner host after
      * `OpenCodeRuntime.start()` passes readiness; cleared when the
      * runtime exits and rebuilds. Both Workflow and AgentJob work
-     * receive this handle through `ActionContext.openCodeRuntime`
-     * (the source-keyed gate was removed in #410 T-001). The
-     * AgentJob path additionally dispatches through
+     * receive this handle through `ActionContext.openCodeRuntime`.
+     * The AgentJob path additionally dispatches through
      * {@link agentJobExecutor} so it never reaches the Action
      * registry. Hosts may swap it through {@link updateOpenCodeRuntime}
      * when the runtime rebuilds after a server exit.
@@ -77,10 +84,6 @@ export class WorkExecutor {
     private openCodeRuntime: OpenCodeRuntime | null = null,
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
   ) {}
-
-  updateAcpConnection(acp: SharedAcpConnection | null) {
-    this.acpConnection = acp
-  }
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
     this.openCodeRuntime = runtime
@@ -146,7 +149,12 @@ export class WorkExecutor {
     }
 
     const action = this.actions.resolve(work.uses)
-    if (!action) return failure(work, `No action found for '${work.uses}'`)
+    if (!action) {
+      if (work.uses && isRemovedAction(work.uses)) {
+        return failure(work, removedActionMessage(work.uses))
+      }
+      return failure(work, `No action found for '${work.uses}'`)
+    }
 
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
@@ -164,7 +172,7 @@ export class WorkExecutor {
         return startCheck.result
       }
       const result = await action({
-        ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
+        ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
         with: renderedWith,
         rawWith: work.with,
         workDir,
@@ -197,7 +205,7 @@ export class WorkExecutor {
         variables,
         signal,
         resolveCleanupAgentAction(action),
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime) },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime) },
         log,
       )
       if (worktreeResult.status !== "completed") {
@@ -220,7 +228,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
+      context: baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -384,8 +392,6 @@ export function baseContext(
   work: RenderedWorkItem,
   variables: JsonObject,
   signal: AbortSignal,
-  sessionManager: AcpSessionManager,
-  acpConnection: SharedAcpConnection | null,
   connection: ServerConnection,
   log: TaskLogger | null = null,
   openCodeRuntime: OpenCodeRuntime | null = null,
@@ -407,8 +413,6 @@ export function baseContext(
     ownerKind,
     agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,
-    acpSessionManager: sessionManager,
-    acpConnection,
     serverConnection: connection,
     openCodeRuntime,
     log,

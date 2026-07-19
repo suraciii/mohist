@@ -37,8 +37,6 @@ describe("workspace preparation across stages", () => {
       buildRegistry(async () => ({ output: "should-not-reach" })),
       recordingManager,
       connection() as never,
-      {} as never,
-      null,
       "/runner",
       undefined,
       fakeRuntime() as never,
@@ -75,8 +73,6 @@ describe("workspace preparation across stages", () => {
       buildRegistry(async () => ({ output: "should not run" })),
       failingManager,
       connection() as never,
-      {} as never,
-      null,
       "/runner",
     )
 
@@ -101,8 +97,6 @@ describe("execution context runtime wiring", () => {
       },
       {},
       new AbortController().signal,
-      {} as never,
-      null,
       {} as never,
       null,
       runtime,

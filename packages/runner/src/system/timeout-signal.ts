@@ -8,7 +8,7 @@
  *     `Error("Timed out after Ns")` (matched as `/Timed out after/`)
  *
  * Single implementation shared by `core/script` (`actions/registry.ts`),
- * `mohist/acp-agent`, and `runCommand`'s per-command timeout so callers
+ * `mohist/opencode`, and `runCommand`'s per-command timeout so callers
  * never reimplement signal-layered timeout.
  */
 export interface TimeoutSignalHandle {

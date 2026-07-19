@@ -352,7 +352,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",
             WorkId: $"work-{Guid.NewGuid():N}",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             WorkType: "task",
             Stage: "Build",
             Title: issueTitle,

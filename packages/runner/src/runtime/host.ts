@@ -1,15 +1,10 @@
 import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
-import {
-  RunnerSignalRClient,
-  type SessionCommandRequest,
-} from "../server/runner-signalr.js"
+import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
-import { SessionCommandJournal } from "./session-command-journal.js"
-import { executeAcpSessionCommand } from "./acp-session-command.js"
 import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
@@ -22,7 +17,6 @@ import {
   type RuntimeModelCatalog,
   type RuntimeModelDescriptor,
 } from "./opencode/index.js"
-import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -30,6 +24,7 @@ import {
   FOLLOWUP_TARGET_UNAVAILABLE,
   type FollowupTarget,
   type FollowupTargetResolution,
+  type SessionTarget,
 } from "../server/session-target.js"
 
 export interface ReportResult {
@@ -88,7 +83,6 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
-  private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupFailureOutbox: FollowupFailureOutbox
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
@@ -113,13 +107,9 @@ export class RunnerHost {
   // immediate heartbeat it triggers.
   private activeSignal: AbortSignal | null = null
 
-  // Step 10 of design/eventbus.md: AcpSessionManager and
-  // SharedAcpConnection are created once per host (not per work item).
-  // The previous design recreated them for every executeAndReport call,
-  // so AcpSessionManager's cross-task cache was always cold and
-  // SharedAcpConnection's session-resume path was never reachable.
-  private sessionManager: AcpSessionManager = new AcpSessionManager()
-  private sharedAcpConnection: SharedAcpConnection | null = null
+  // Step 10 of design/eventbus.md: WorkExecutor is created once per host
+  // (not per work item). The previous design recreated it for every
+  // executeAndReport call, so shared lifecycle state was always cold.
   private workExecutor: WorkExecutor | null = null
 
   // Process-lifetime reported set (see workKey/InFlightEntry doc above).
@@ -146,7 +136,6 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
-    this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupFailureOutbox = new FollowupFailureOutbox(options.runnerRoot)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
@@ -168,34 +157,12 @@ export class RunnerHost {
         serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         followupFailureOutbox: this.followupFailureOutbox,
-        sessionCommandHandler: (request) => this.handleSessionCommand(request),
-        sessionCommandJournal: this.sessionCommandJournal,
-        reconcileStartedSessionCommand: (request) => this.reconcileStartedSessionCommand(request),
         registry: this.workspaceRegistry,
         openCodeRuntime: () => this.openCodeRuntime,
       },
     )
   }
 
-  private handleSessionCommand(request: SessionCommandRequest) {
-    return executeAcpSessionCommand(request, this.sharedAcpConnection?.connection ?? null)
-  }
-
-  private reconcileStartedSessionCommand(_request: SessionCommandRequest) {
-    return { state: "indeterminate" } as const
-  }
-
-  // Issue-410 T-003 / design D3: the resolver no longer holds a live
-  // `ClientSideConnection` per session. It returns a Mohist-owned value
-  // object (`FollowupTarget` = `{ runtimeSessionId, workDir, projectId }`)
-  // built from the persisted AgentSession binding the server already
-  // carries on the wire target. Restart / reconnect reconciliation is
-  // owned entirely by `OpenCodeRuntime` (#409 D7): the runtime resolves
-  // the binding via `client.session.get` on every followup / cancel and
-  // surfaces a `missing-session` (with the Reset hint) if the persisted
-  // id no longer exists. The runner host only validates the wire target
-  // (projectId, runnerId, runtime=opencode, runtimeSessionId present,
-  // workDir present).
   private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution {
     if (this.options.projectId && this.options.projectId !== target.projectId) return null
     const binding = target.binding ?? null
@@ -226,7 +193,6 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
-      await this.sessionCommandJournal.load()
       // The OpenCode runtime must be initialized BEFORE we connect to
       // the server so the first `RunnerRegistration` already carries
       // the runtime-loaded catalog (`coderModels` /
@@ -337,14 +303,10 @@ export class RunnerHost {
   }
 
   private async initializeSharedConnection(signal: AbortSignal) {
-    if (this.sharedAcpConnection !== null) return;
-    // Construct the shared OpenCode runtime BEFORE the shared ACP
-    // connection so the runner's readiness gate and registration
-    // catalog are populated even when the ACP connection fails
-    // initially (the per-work-item fallback path uses the same
-    // runtime handle). The factory seam returns a real
-    // `OpenCodeRuntime` (production) or a fake the test injected via
-    // `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
+    if (this.workExecutor !== null) return
+    // Construct the shared OpenCode runtime. The factory seam returns a
+    // real `OpenCodeRuntime` (production) or a fake the test injected
+    // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
     // check + catalog load and only flips `ready()` true after both
     // pass; until then the host's `pollOnce` gate keeps the runner
     // from claiming work.
@@ -356,34 +318,19 @@ export class RunnerHost {
     if (!startResult.ok) {
       console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
     }
-    try {
-      this.sharedAcpConnection = await createSharedAcpConnection(process.cwd())
-      this.workExecutor = new WorkExecutor(
-        createDefaultRegistry(),
-        this.workspace,
-        this.connection,
-        this.sessionManager,
-        this.sharedAcpConnection,
-        undefined,
-        undefined,
-        this.openCodeRuntime,
-        new AgentJobExecutor(this.connection, this.openCodeRuntime),
-      )
-      console.log("runner ACP connection established (per-host, shared across work items)")
-    } catch (error) {
-      console.error("failed to start shared ACP connection:", error)
-    }
+    this.workExecutor = new WorkExecutor(
+      createDefaultRegistry(),
+      this.workspace,
+      this.connection,
+      undefined,
+      undefined,
+      this.openCodeRuntime,
+      new AgentJobExecutor(this.connection, this.openCodeRuntime),
+    )
   }
 
   private async shutdownSharedConnection() {
-    if (this.sharedAcpConnection === null) return;
-    try {
-      await this.sharedAcpConnection.shutdown()
-    } catch { /* best effort */ }
-    this.sharedAcpConnection = null
     this.workExecutor = null
-    // Reset the session manager so the next initialize starts clean.
-    this.sessionManager = new AcpSessionManager()
     if (this.openCodeRuntime !== null) {
       try {
         await this.openCodeRuntime.shutdown()
@@ -728,38 +675,7 @@ export class RunnerHost {
     }
 
     if (this.workExecutor === null) {
-      // ACP connection failed to initialize at startup; fall back to the
-      // per-work-item ephemeral path so the work still attempts to run.
-      const sessionManager = new AcpSessionManager()
-      const executor = new WorkExecutor(
-        createDefaultRegistry(),
-        this.workspace,
-        this.connection,
-        sessionManager,
-        null,
-        undefined,
-        undefined,
-        this.openCodeRuntime,
-        new AgentJobExecutor(this.connection, this.openCodeRuntime),
-      )
-      const fallback = await createSharedAcpConnection(process.cwd())
-      try {
-        executor.updateAcpConnection(fallback)
-        const collector = new TaskLogCollector()
-        const flushTrigger = startIncrementalFlushForCollector(collector)
-        try {
-          const execution = await executor.executeWithLog(work, signal, collector)
-          execution.collector.setAppendListener(null)
-          await flushTrigger.stop()
-          await flushTaskLog(execution.collector)
-          return execution.result
-        } finally {
-          collector.setAppendListener(null)
-          await flushTrigger.stop()
-        }
-      } finally {
-        await fallback.shutdown()
-      }
+      throw new Error("WorkExecutor not initialized; runner host is shutting down")
     }
 
     // Start the incremental flush trigger alongside executeWithLog and

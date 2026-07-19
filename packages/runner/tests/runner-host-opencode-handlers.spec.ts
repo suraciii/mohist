@@ -104,25 +104,6 @@ vi.mock("../src/actions/registry.js", () => ({
   }),
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get() { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
-  },
-  async createSharedAcpConnection() {
-    return {
-      connection: { prompt: vi.fn(), cancel: vi.fn() },
-      processPid: 99999,
-      setSessionHandlers: vi.fn(),
-      clearSessionHandlers: vi.fn(),
-      async shutdown() {},
-    }
-  },
-}))
 
 interface StubRuntimeOptions {
   ready?: boolean

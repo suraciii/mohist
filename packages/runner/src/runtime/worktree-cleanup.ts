@@ -2,7 +2,6 @@ import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 
 export const AGENT_BACKED_USES = "mohist/opencode"
-const LEGACY_AGENT_BACKED_USES = "mohist/acp-agent"
 export const DEFAULT_MAX_CLEANUP_ATTEMPTS = 3
 
 export interface WorktreeSnapshot {
@@ -15,7 +14,7 @@ export interface WorktreeSnapshot {
 export function isAgentBackedTask(work: Pick<RenderedWorkItem, "uses">): boolean {
   if (typeof work.uses !== "string") return false
   const normalized = work.uses.trim().toLowerCase()
-  return normalized === AGENT_BACKED_USES || normalized === LEGACY_AGENT_BACKED_USES
+  return normalized === AGENT_BACKED_USES
 }
 
 export function resolveMaxCleanupAttempts(variables: JsonObject): number {

@@ -394,3 +394,71 @@ on the fresh workspace.
 - `session-target.ts` still imports `RuntimeSessionBinding` / `SessionTarget` from `runtime/acp-connection.ts`. T-004 will relocate these types (the wire-shape stays; the connection lifecycle goes). T-003 deliberately does not move them so the diff stays self-contained.
 - `runtime/host.ts` still calls `createSharedAcpConnection` and constructs `new AcpSessionManager()` in the per-work ephemeral fallback at `:734–744`. T-003 only deletes the **resume / install** path that ran when the followup-target resolver missed the cache; the rest stays for T-004.
 - `WorkExecutor`'s constructor still accepts `sessionManager` / `acpConnection` (used by the workflow-side `acpAgentAction`). T-003 keeps these arguments for the same reason — the workflow source keeps using ACP until T-004 retires the action tree.
+
+## T-004: Delete the ACP code, dependency, and recognition; surface an actionable error for the removed Action
+
+### Codebase patterns observed
+- The runner's workflow source had been running on the ACP bridge (`actions/acp-agent.ts`, `actions/acp/` tree, `runtime/acp-connection.ts`, `runtime/acp-command.ts`, `runtime/acp-session-command.ts`) until T-003/T-004 retired it. After T-001, both Workflow and AgentJob work share the OpenCode runtime through `OpenCodeRuntime.runTurn`; the ACP bridge is now dead code that only existed for the workflow source.
+- T-003 already relocated `RuntimeSessionBinding` / `SessionTarget` / `FollowupTarget` to `server/session-target.ts` (the wire-shape stayed; the connection lifecycle went away). T-004 builds on this and also drops the ACP-coupled `SharedAcpConnection` / `AcpSessionManager` from `runtime/host.ts`.
+- The runner host's `initializeSharedConnection` had two responsibilities — building the shared OpenCode runtime and initializing the shared ACP connection. After T-004 only the OpenCode runtime lifecycle remains; the name is preserved for the file-local `WorkExecutor` ownership check (the host now keys off `workExecutor !== null` instead of `sharedAcpConnection !== null`).
+- The worktree-enforcement cleanup action was wired to `acpAgentAction` so the dirty-worktree cleanup contract ran on the same backend the original task used. After T-004 it's wired to `opencodeAction` (the same `mohist/opencode` Action the workflow source uses); the cleanup contract is preserved — `buildCleanupWith` produces a prompt that instructs the agent to use only `git add` / `commit` / `checkout --` / `restore` / `clean` (no `git push`, no PR).
+- The web milestone classifier was already renamed `isInlineAgentTask` (compared against `mohist/opencode`) by T-004 prep; the only consumer (`TaskLogPanel`) follows the rename.
+
+### Implementation notes
+- New `packages/runner/src/actions/opencode-helpers.ts` holds `buildPromptLoaderContext` and `sessionNameFromContext` so `actions/opencode.ts` no longer imports from the deleted `actions/acp/` subtree. The exports match the original signatures exactly so `opencodeAction` is unchanged.
+- `runtime/executor.ts` introduces a `REMOVED_ACTIONS = new Set(["mohist/acp-agent"])` set + `removedActionMessage(uses)` helper; `executeOne` consults `isRemovedAction(work.uses)` BEFORE the generic "No action found" miss so a pre-cutover WorkflowRun dispatch fails with a named, actionable error pointing to rerun the affected stage with a `mohist/opencode` profile.
+- `runtime/worktree-enforcement.ts` swaps `cleanupAgentAction = acpAgentAction` for `cleanupAgentAction = opencodeAction`. The cleanup contract (no push, only `git add`/`commit`/`checkout --`/`restore`/`clean`) is preserved by `buildCleanupPrompt` (`runtime/worktree-cleanup.ts`) — the prompt instructs the agent explicitly, and the executor checks the worktree again after the turn.
+- `runtime/worktree-cleanup.ts` drops `LEGACY_AGENT_BACKED_USES = "mohist/acp-agent"`; `isAgentBackedTask` now recognizes `mohist/opencode` only.
+- `system/timeout-signal.ts` comment updates `mohist/acp-agent` → `mohist/opencode` so the documentation reflects the only consumer.
+- `runner-signalr.ts` removes `sessionCommandHandler` / `sessionCommandJournal` / `reconcileStartedSessionCommand` options (T-004 didn't explicitly delete `server/session-command-handler.ts` and `runtime/session-command-journal.ts`; they're now orphaned helpers — they have no source callers but their spec tests still cover them). The `runner-signalr.ts` type re-exports for `SessionCommand*` are removed in lockstep.
+- `server/session-target.ts` now declares `RuntimeSessionBinding` and `SessionTarget` directly (T-003 already moved them; T-004 no longer depends on `runtime/acp-connection.ts`). The wire shape is unchanged.
+- Server `WorkflowItemTranslator.IsInlineAgentUses` and `WorkflowYamlSerializer.IsInlineAgentUses` collapse to `mohist/opencode`-only (drop the `|| string.Equals(uses, "mohist/acp-agent", ...)` branch). `TaskRun.DeriveClassification` drops the `!uses.Contains("acp-agent")` clause.
+- Server `Api/IssueRoutes.Helpers.cs` recovery fixture `Uses: "mohist/acp-agent"` → `Uses: "mohist/opencode"`.
+- Server `AgentSessionQuerier.cs` doc-comments at :413 and :852 drop the "ACP" wording in favor of "OpenCode runtime" / "OpenCode runtime's `generic:`-prefixed binding lookup".
+- Web `widgets/issue-workflow/ui/milestones.ts` `isAcpAgentTask` → `isInlineAgentTask` (semantics unchanged: returns true when `uses === "mohist/opencode"` and `sessionName` is non-empty). The two test fixtures that referenced the old name follow the rename.
+
+### Gotchas / regressions watched for
+- The runner-host-test mocks (`runner-host-opencode-runtime.spec.ts`, `runner-host-task-log.spec.ts`, `runner-host-lifecycle.spec.ts`, `runner-host-reporting.spec.ts`, `runner-host-cleanup-config.spec.ts`, `runner-host-convergence.spec.ts`, `runner-host-liveness.spec.ts`, `runner-host-model-rediscovery.spec.ts`, `runner-host-opencode-handlers.spec.ts`) had the `vi.mock("../src/runtime/acp-connection.js", ...)` block dropped, the `createSharedAcpConnection` / `shutdownSharedAcpConnection` / `setSessionHandlers` / `clearSessionHandlers` mocks removed, and the `WorkExecutor` constructor argument list changed (sessionManager + acpConnection removed; only the OpenCode runtime + AgentJobExecutor remain). The `runner-host-cleanup-config.spec.ts` "CleanupLoop_AcpFailureLogsDiagnostics" type test was removed entirely (the ACP-failure case no longer exists).
+- `tests/external-process-guard.test.ts` was deleted (it asserted `opencode acp` startup behaviour; after T-004 the runner no longer spawns `opencode acp`).
+- `tests/executor-removed-action.spec.ts` (new) covers the actionable error: `mohist/acp-agent` dispatch returns `failed` with `message` containing "removed Action", "mohist/acp-agent", "mohist/opencode", and matching `/rerun/i`; case-insensitive on the uses identifier; unknown Actions that aren't in `REMOVED_ACTIONS` still fall through to the generic "No action found for '...'" message.
+- `tests/runner-signalr-cancel.spec.ts` and `tests/runner-signalr-followup*.spec.ts` have the `sessionCommandHandler` / `sessionCommandJournal` mock seams removed in lockstep with `runner-signalr.ts`.
+- The web `LiveTaskProvider.transcript.dom.test.ts:87` assertion `expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')` is preserved — the production code never emits an `acpSessionId` field; this test is now an anti-regression check that the renamed runtime field stays off the wire.
+- The runner source still has two surviving mentions of `mohist/acp-agent`: `REMOVED_ACTIONS = new Set(["mohist/acp-agent"])` in `executor.ts` and the comment in `agent-job-executor.ts`. Both are intentional (the former drives the actionable error; the latter documents the AgentJob's runtime path).
+- The runner's `session-target.ts` carries a comment block that mentions `@agentclientprotocol/sdk` (no import) — the comment documents the migration ("the module no longer imports any symbol from `@agentclientprotocol/sdk`"). The `grep -r '@agentclientprotocol' packages/runner/src` check finds only that comment.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅
+- `npm run test:run -w packages/runner` ✅ 1131 / 1131 (89 test files)
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ 4738 / 4738 (340 test files)
+- `npm run build` (root: dotnet + workspaces) ✅
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` ✅ UnitTests 1202 / SpecTests 2849 / ArchTests 30 / Cli 1396 = 5477 passed, 0 failed
+- `npm ls @agentclientprotocol/sdk` (from `packages/runner/`) reports `extraneous` (the SDK is on the lockfile from a prior workspace install but `package.json` no longer declares it; after `npm install` it disappears). The acceptance criterion "the runner `package.json` no longer declares the SDK" is satisfied — `package.json` lists only `@microsoft/signalr` and `@opencode-ai/sdk`.
+
+### Acceptance criteria check
+- `packages/runner/package.json` no longer declares `@agentclientprotocol/sdk` ✅
+- `packages/runner/src/actions/acp-agent.ts` and `packages/runner/src/actions/acp/` are gone ✅
+- `packages/runner/src/runtime/acp-connection.ts`, `runtime/acp-command.ts`, `runtime/acp-session-command.ts` are gone ✅
+- `actions/registry.ts` registers only `mohist/opencode` ✅
+- `actions/opencode.ts` imports `buildPromptLoaderContext` / `sessionNameFromContext` from `actions/opencode-helpers.ts` (not `actions/acp/`) ✅
+- `ActionContext` has no `acpSessionManager` / `acpConnection` field ✅
+- `WorkExecutor` has no `sessionManager` / `acpConnection`; `baseContext` threads no ACP state ✅
+- `runtime/host.ts` has no `SharedAcpConnection`, no `AcpSessionManager`, no `initializeSharedConnection` ACP init, no `shutdownSharedConnection`, no per-work ephemeral fallback ✅
+- The runner host does not spawn `opencode acp` on startup; the single `isOpenCodeReadyForClaim()` gate applies uniformly to Workflow and AgentJob work ✅
+- No runner source file reads `MOHIST_AGENT_ARGS` ✅
+- `WorkflowItemTranslator.IsInlineAgentUses` and `WorkflowYamlSerializer.IsInlineAgentUses` collapse to `mohist/opencode`-only ✅
+- `TaskRun.DeriveClassification` no longer consults the substring `'acp-agent'` ✅
+- `Api/IssueRoutes.Helpers.cs` recovery fixture uses `mohist/opencode` ✅
+- `AgentSessionQuerier.cs` doc-comments at :413 and :852 carry no ACP wording ✅
+- Web production source has no `isAcpAgentTask` identifier and no `acpSessionId` references ✅
+- A pre-cutover WorkflowRun dispatching `uses: mohist/acp-agent` fails with the named, actionable error (covered by `executor-removed-action.spec.ts`) ✅
+- A custom profile naming `uses: mohist/acp-agent` fails at dispatch (the runner registry is `mohist/opencode`-only; the dispatch path returns the actionable error) ✅
+- `runtime/worktree-enforcement.ts` cleanup action is `opencodeAction`; the dirty-worktree cleanup contract (no push, only `git add` / `commit` / `checkout --` / `restore` / `clean`) is preserved by `buildCleanupPrompt` ✅
+- All builds and tests pass ✅
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections. The landed state matches the spec body; the gap sections are footnotes that no longer apply.
+- The web production source is now runtime-neutral for the milestone classifier; the doc updates can describe it as such.
+- The `acpSessionId` wire field is gone; the doc updates describe the converged wire (`runtimeSessionId` only, runtime discriminator `"opencode"`).
