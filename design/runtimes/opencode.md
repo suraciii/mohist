@@ -148,9 +148,13 @@ Work ID。由 AgentJob 拥有的工作直接接收 dispatch 时创建的 AgentSe
 重复持久化同一个 Session ID 必须幂等，不得形成新的 lineage。
 
 物理 Session 的复用只由逻辑 AgentSession 的当前绑定、Runtime 和工作目录决定。同一
-WorkflowRun 中的同名 session 跨 task、retry 和 Runner 重启都必须解析到当前绑定。
-Runtime 变化、工作目录变化与 Reset 会创建新物理绑定并追加 lineage，不迁移上下文；
-Compact 与 model / variant 变化必须保持同一物理 Session ID。
+WorkflowRun 中的同名 session 跨 task、retry 和 Runner 重启都必须解析到当前绑定，且
+工作目录必须相同。调用者请求了不同工作目录时，adapter 在提交 Prompt 前以可操作错误
+拒绝；不得静默采用旧目录，也不得在一次 open 中自动迁移或替换绑定。需要新目录的工作
+必须使用新的逻辑 Session 身份。
+
+Runtime 变化与 Reset 会创建新物理绑定并追加 lineage，不迁移上下文；Compact 与 model /
+variant 变化必须保持同一物理 Session ID。
 
 Model 与 variant 是回合执行参数，不能进入 Session cache key，不能作为是否调用
 `resumeSession` 的门槛，也不能触发 attach replacement 或追加 lineage。复用已有 Session
@@ -189,6 +193,12 @@ SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的
 声明：未显式指定时，单个 Prompt 的默认期限为 60 分钟，显式期限可以覆盖该默认值。
 期限的收尾与终止按「回合期限与两段式收尾」执行。移除 ACP liveness probe
 后，`OpenCodeRuntime` 不做静默/空闲检测；悬挂回合由 executor 期限兜底，而 provider 错误可在到达期限前按 `session.status` retry 事实提前失败（见「Provider 错误失败策略」）。
+
+`prompt()` 到本机 OpenCode Server 的 HTTP client 不得另设比 executor 更短的 header 或
+body timeout；executor 的 AbortSignal 是单一回合期限权威。该设置只属于 OpenCode Client，
+不得改变 Runner 其它 HTTP 调用的全局 dispatcher。任何 transport failure 都必须先请求
+abort 并确认当前物理 Session 已停止，随后才向调用者报告失败；不自动重放提交状态不确定
+的 Prompt。
 
 Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
 接收状态不确定的响应都不能盲目 retry。保留现有 in-process dispatch deduplication；
@@ -333,6 +343,9 @@ permission request 时，abort 当前回合并返回可操作错误。
 `permission required`、`interrupted` 与 `turn failed`。Provider-specific detail 只作为
 诊断信息，不成为 Action output 字段。不要建立全局 Workflow error enum；各调用者通过
 自己的 TaskRun 或 AgentJob 契约报告失败。
+
+已知的本地 transport code（例如 header/body timeout）映射为稳定、可操作的失败文案；
+完整 SDK / provider payload 只保留在 diagnostics，避免把未审查的外部内容带入 TaskRun。
 
 ## 模型目录
 

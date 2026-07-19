@@ -83,10 +83,11 @@ Concept ownership and origin rules are defined in
   identity. Workflow- and Agent-scoped routes resolve to the canonical `sessionId` resource.
 - `runtime` names the execution backend. Do not add a second `kind` field.
 - Current runtime binding also retains `runnerId` and immutable `workDir` so Session commands
-  survive Runner process restart.
+  survive Runner process restart. A Workflow adapter rejects a request whose authoritative
+  workspace differs from that immutable binding; it never silently reuses the old directory.
 - Runtime Session lineage records `runtime`, `runtimeSessionId`, and `boundAt`.
-- Compact does not change `runtimeSessionId`. Reset, runtime change, or work directory change
-  appends a new lineage entry while preserving `sessionId`.
+- Compact does not change `runtimeSessionId`. Reset or runtime change appends a new lineage entry
+  while preserving `sessionId`. A work directory change requires a new logical Session identity.
 
 ## WorkflowRun metadata
 
