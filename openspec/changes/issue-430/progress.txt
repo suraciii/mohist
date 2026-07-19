@@ -829,3 +829,12 @@ Decisions / gotchas for downstream tasks:
 - Verification passed: `npm run typecheck -w packages/web`,
   `npm run test:run -w packages/web` (358 files, 4935 tests), and
   `git diff --check master...HEAD`.
+
+## Follow-up Queue Scope Fix (2026-07-20)
+
+- The shell now stores the queued follow-up marker with its originating
+  `sessionKey`. A queued marker only disables the composer while that same
+  session remains displayed, so sibling navigation cannot inherit it.
+- Added `SessionDetailShell.followup-queue.spec.tsx`, which submits in one
+  session and rerenders the shell for a sibling session before new transcript
+  content arrives. The sibling composer remains interactive.
