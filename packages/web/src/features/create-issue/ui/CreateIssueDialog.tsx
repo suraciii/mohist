@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -10,7 +10,7 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { createIssue, extractAttachmentIds, IssuePrerequisitePicker, LabelEditor } from '../../../entities/issue'
+import { createIssue, extractAttachmentIds, IssuePrerequisitePicker, LabelEditor, useIssues } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
@@ -18,6 +18,11 @@ import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-tem
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
+import {
+  deriveEligibleParentCandidates,
+  mapCreateIssueError,
+  pickInitialRepositoryName,
+} from '../lib/assignment'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -125,12 +130,14 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [modelVariant, setModelVariant] = useState<string | null>(null)
   const [priority, setPriority] = useState<string>('p2')
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
+  const [parentIssueNumber, setParentIssueNumber] = useState<number | null>(null)
   const [workflowProfileId, setWorkflowProfileId] = useState<string | null>(null)
   const [workflowTouched, setWorkflowTouched] = useState(false)
   const [risk, setRisk] = useState<string | null>(null)
   const [riskTouched, setRiskTouched] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [prerequisiteNumbers, setPrerequisiteNumbers] = useState<number[]>([])
+  const [assignmentErrorMessage, setAssignmentErrorMessage] = useState<string | null>(null)
   const { projectId, projects } = useProject()
   const currentProject = projects?.find((p) => p.id === projectId)
   const { data: repositories } = useRepositories(currentProject?.id)
@@ -152,11 +159,32 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const frontmatterRisk =
     frontmatter.kind === 'parsed' ? frontmatter.risk ?? null : null
 
+  const lastInitializedProjectIdRef = useRef<string | null>(null)
   useEffect(() => {
-    if (repositories && repositories.length === 1) {
-      setRepositoryName(repositories[0].name)
+    if (!projectId) return
+    if (lastInitializedProjectIdRef.current !== projectId) {
+      setRepositoryName(null)
+      setParentIssueNumber(null)
+      lastInitializedProjectIdRef.current = projectId
     }
-  }, [repositories])
+    if (repositories !== undefined) {
+      setRepositoryName((current) => pickInitialRepositoryName(repositories, current))
+    }
+  }, [projectId, repositories])
+
+  const parentIssuesQuery = useIssues(projectId ? { projectId } : undefined)
+  const parentIssuesLoaded = parentIssuesQuery.data !== undefined
+  const eligibleParentCandidates = useMemo(
+    () => deriveEligibleParentCandidates(parentIssuesQuery.data ?? []),
+    [parentIssuesQuery.data],
+  )
+  useEffect(() => {
+    if (parentIssueNumber === null) return
+    if (!parentIssuesLoaded) return
+    if (!eligibleParentCandidates.some((issue) => issue.number === parentIssueNumber)) {
+      setParentIssueNumber(null)
+    }
+  }, [eligibleParentCandidates, parentIssueNumber, parentIssuesLoaded])
 
   const enabledWorkflowIds = useMemo(
     () => new Set((workflowProfiles ?? []).map((profile) => profile.id)),
@@ -187,6 +215,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
 
   const mutation = useMutation({
     mutationFn: () => {
+      setAssignmentErrorMessage(null)
       return createIssue({
         title,
         body: body || undefined,
@@ -200,15 +229,25 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(submittedWorkflowProfileId ? { workflowProfileId: submittedWorkflowProfileId } : {}),
         ...(effectiveRisk ? { risk: effectiveRisk } : {}),
         ...(prerequisiteNumbers.length > 0 ? { prerequisiteNumbers } : {}),
+        ...(parentIssueNumber != null ? { parentIssueNumber } : {}),
       })
     },
     onSuccess: (data: Issue) => {
       toast.success(`Issue #${data.number} created`)
+      if (parentIssueNumber != null) {
+        queryClient.invalidateQueries({ queryKey: ['issues', parentIssueNumber, projectId] })
+        queryClient.invalidateQueries({ queryKey: ['issues', parentIssueNumber, projectId, 'children'] })
+      }
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       resetAndClose()
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to create issue')
+      const mapped = mapCreateIssueError(err)
+      if (mapped.isAssignment) {
+        setAssignmentErrorMessage(mapped.message)
+        return
+      }
+      toast.error(mapped.message)
     },
   })
 
@@ -220,12 +259,14 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setModelVariant(null)
     setPriority('p2')
     setRepositoryName(null)
+    setParentIssueNumber(null)
     setWorkflowProfileId(null)
     setWorkflowTouched(false)
     setRisk(null)
     setRiskTouched(false)
     setSelectedTemplateId(null)
     setPrerequisiteNumbers([])
+    setAssignmentErrorMessage(null)
     onClose()
   }
 
@@ -373,10 +414,20 @@ export function CreateIssueDialog({ open, onClose }: Props) {
             />
           </div>
 
-          {repositories && repositories.length > 1 && (
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Repository</label>
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Repository</label>
+            {repositories === undefined && (
+              <div
+                data-testid="create-issue-repository-loading"
+                className="rounded-md border border-dashed border-input bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
+              >
+                Loading repository…
+              </div>
+            )}
+            {repositories && repositories.length > 1 && (
               <select
+                aria-label="Repository"
+                data-testid="create-issue-repository-select"
                 value={repositoryName ?? ''}
                 onChange={(e) => setRepositoryName(e.target.value || null)}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
@@ -387,8 +438,45 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                   </option>
                 ))}
               </select>
-            </div>
-          )}
+            )}
+            {repositories && repositories.length === 1 && (
+              <div
+                data-testid="create-issue-repository-label"
+                className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+              >
+                {repositories[0].name} (only repository)
+              </div>
+            )}
+            {repositories && repositories.length === 0 && (
+              <div
+                data-testid="create-issue-repository-empty"
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700"
+              >
+                No repositories declared for this project.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Parent issue</label>
+            <select
+              aria-label="Parent issue"
+              data-testid="create-issue-parent-select"
+              value={parentIssueNumber != null ? String(parentIssueNumber) : ''}
+              onChange={(e) => setParentIssueNumber(e.target.value === '' ? null : Number(e.target.value))}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+              disabled={parentIssuesQuery.isLoading}
+            >
+              <option value="">
+                {parentIssuesQuery.isLoading ? 'Loading issues…' : 'No parent (ordinary issue)'}
+              </option>
+              {eligibleParentCandidates.map((issue) => (
+                <option key={issue.number} value={issue.number}>
+                  #{issue.number} · {issue.title}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
@@ -431,7 +519,17 @@ export function CreateIssueDialog({ open, onClose }: Props) {
             </div>
           </div>
 
-          {mutation.error && (
+          {assignmentErrorMessage && (
+            <div
+              data-testid="create-issue-assignment-error"
+              className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
+              role="alert"
+            >
+              {assignmentErrorMessage}
+            </div>
+          )}
+
+          {mutation.error && !assignmentErrorMessage && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
               {mutation.error.message}
             </div>

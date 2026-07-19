@@ -117,3 +117,47 @@
 - `npm run typecheck -w packages/web`: clean.
 - `npm run test:run -w packages/web`: 4930 tests pass (358 files).
 - `npm test`: server + web + runner suites all green (no regressions; `IssueCompositeAdvancementApiSpecs.ReopenParent_ReturnsToBacklog_AndCanAttachAndStartNewChild` passes when not racing parallel tests).
+
+## T-004: Repository and parent assignment in New Issue
+
+### Decisions
+
+- Extracted `CreateIssueInput` type in `entities/issue/api/client.ts` and added `parentIssueNumber?: number`. The dialog only ever sends a real number, so the optional-number type is enough — the server reads `parentIssueNumber === null` and "absent" identically through the existing nullable `int?`.
+- New `features/create-issue/lib/assignment.ts` module hosts the three conservative helpers the dialog needs and nothing else: `isTerminalIssueStatus`, `isEligibleParentCandidate` (excludes terminal issues and any issue with a `parentIssueRef`), `deriveEligibleParentCandidates` (sort ascending by number), `findDefaultRepository` / `pickInitialRepositoryName` (preserve the user's previous choice when still declared, otherwise default or first), and `mapCreateIssueError` (maps `ApiError.code` against the four server-stable codes to an in-form error; everything else falls through to the existing toast path). Helpers live in `features/` because they're scoped to the New Issue slice and have no entity-wide significance.
+- Repository initialization now handles every state:
+  - Single-repo: `<div data-testid="create-issue-repository-label">` shows the repo name; the selector is hidden, no choice required (matches the spec scenario).
+  - Multi-repo: `<select data-testid="create-issue-repository-select">` is rendered; `repositoryName` starts at the declared default and can be changed.
+  - Empty list: amber empty-state (`create-issue-repository-empty`) tells the user the project has no repositories declared.
+  - Loading: `<div data-testid="create-issue-repository-loading">` placeholder so nothing visually pops in later.
+- A `useRef<string|null>(null)` keyed by `projectId` triggers a state reset when the project changes (both `repositoryName` and `parentIssueNumber` cleared). Without this a stale selection from one project could bleed into another on account/project-context reload.
+- Parent picker is a native `<select>` showing `#N · Title`; candidates are filtered to "not terminal" + "no `parentIssueRef`", sorted ascending, and the empty placeholder defaults to an ordinary issue. A small `useEffect` re-clears the selection only after the query has loaded (`data !== undefined`) and only when the stored parent falls out of the eligible set — avoids transient clears during background refetches.
+- Both `repositoryName` and `parentIssueNumber` are emitted in the same existing `POST /api/projects/{p}/issues`. Submitting a parent on a different repository than the parent issue does NOT inherit the parent's repository — the assignment belongs to the new issue itself.
+- Error mapping covers the four stable server codes (`repository_not_found`, `parent_not_found`, `parent_ineligible`, `parent_is_sub_issue`). On any of them, the dialog stays open, the entered values are preserved, a `<div data-testid="create-issue-assignment-error" role="alert">` is shown, and `resetAndClose()` is never called. The success toast never fires. Every other error code still funnels to the existing `toast.error` path.
+- Success invalidates the broad `['issues']` query (board + active-issue list) and, when a parent is set, the parent's detail and child-cache entries (`['issues', parent, projectId]` and `… ['children']`). Successful child creation closes + resets the form exactly as before.
+- `useIssues` for parent candidates uses the existing entity query; TanStack Query deduplicates against any other consumer (e.g. `IssuePrerequisitePicker`).
+
+### Gotchas
+
+- Browser-only React refs as the project-change sentinel avoid a `useEffect` that would compare `projectId` on every render; the ref is invisible from the dependency array yet still tracks the last project seen.
+- The state effect that prunes a now-ineligible parent must guard against the data-not-yet-loaded case. An earlier version cleared the selection before the first response because the candidates list was briefly `[]`; gating on `parentIssuesQuery.data !== undefined` keeps the user's choice stable across background refetches.
+- MSW-backed tests built a single combined file that initially crossed the 500-line test budget. Split it into two sibling files (`*.assignment.repository.test.tsx` for repos + happy-path parents; `*.assignment.errors.test.tsx` for validation + invalidation + regression). Both stay under 500 lines.
+- In the "single-repo submission" test the dialog momentarily renders the loading placeholder before the repositories query resolves. The "no dropdown / sole repository" assertions are wrapped in `waitFor` so the synchronous assertions don't run against the still-loading state.
+- The "selected parent disappears" test calls `queryClient.refetchQueries({ queryKey: ['issues'] })` rather than `invalidateQueries`. Invalidation marks the cache stale but TanStack Query may serve the previous data without an immediate refetch inside the test's `waitFor` window; explicit `refetchQueries` makes the timing deterministic.
+- The "non-assignment regression" test pins that adding the parent picker doesn't disturb the existing prerequisites submission path (the prerequisite buffer state already exercised by `CreateIssueDialog.test.tsx`).
+- The Create Issue success path shows two new toast strings unchanged (`Issue #<n> created`). The parentError banner only renders for the four mapped codes; everything else falls to the existing toast.error block.
+
+### Files Touched
+
+- `packages/web/src/entities/issue/api/client.ts` — extracted `CreateIssueInput`, added optional `parentIssueNumber`.
+- `packages/web/src/entities/issue/api/create-issue-api-client.test.ts` — added a "sends parentIssueNumber alongside repositoryName in one POST" assertion.
+- `packages/web/src/features/create-issue/lib/assignment.ts` (new) — terminal/eligibility/default/error-mapping helpers.
+- `packages/web/src/features/create-issue/lib/assignment.test.ts` (new) — 21 unit specs covering terminal detection, eligibility filtering (terminal/child exclusion), candidate derivation/sorting, default + single-repo + missing-repo initialization, and error-code mapping for all four codes (including fallback path and Error/non-Error sources).
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx` — added `parentIssueNumber`, `assignmentErrorMessage`, project-change ref, parent-issue `<select>`, repository single-repo label / empty state / loading placeholder, assignment error banner, mutation error-code mapping, parent detail invalidation, `resetAndClose` clears parent and banner.
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.assignment.repository.test.tsx` (new) — MSW-backed: multi-repo default pre-selection with all option labels, multi-repo change submission, single-repo submission (no dropdown), loading placeholder, eligible parent filtering (excludes terminal/child), parent+repo combined POST, no-parent omission, cross-repository child payload.
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.assignment.errors.test.tsx` (new) — MSW-backed: all four assignment error codes keep dialog open with assignment-specific messages + draft preservation; success clears banner and shows toast; success invalidates parent detail + child cache + broad issues when a parent is set; omits parent-keyed invalidations when no parent is set; prerequisites still wire up alongside parent; selected parent clears when the issue turns terminal.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:run -w packages/web`: 4970 tests pass (361 files), +40 over T-003.
+- `npm test`: server + web + runner suites all green; `npm run check:test-boundaries` only flags the pre-existing `IssueDetailPage.composite-parent-detail.test.tsx` oversize file from T-003 (555 lines, unrelated to this task and out of scope to fix here).

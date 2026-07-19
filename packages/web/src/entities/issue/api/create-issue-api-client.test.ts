@@ -123,4 +123,24 @@ describe('createIssue api client', () => {
       },
     ])
   })
+
+  it('sends parentIssueNumber alongside repositoryName in one POST', async () => {
+    const requests = recordCreateIssueRequest(issueResponse('Child issue'))
+
+    await createIssue({
+      title: 'Child issue',
+      repositoryName: 'web',
+      parentIssueNumber: 42,
+      projectId: 'proj_1',
+    })
+
+    expect(requests).toEqual([
+      {
+        path: '/api/projects/proj_1/issues',
+        method: 'POST',
+        contentType: 'application/json',
+        body: { title: 'Child issue', repositoryName: 'web', parentIssueNumber: 42 },
+      },
+    ])
+  })
 })
