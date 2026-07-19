@@ -350,6 +350,7 @@ describe('SessionPage sticky recovery bar', () => {
     expect(record.options.root).toBe(scrollContainer)
     expect(record.options.threshold).toBe(0)
     expect(record.observer.observedTargets).toEqual([header])
+    expect(scrollContainer!.contains(header!)).toBe(true)
 
     unmount()
     expect(record.observer.disconnected).toBe(true)
@@ -378,6 +379,18 @@ describe('SessionPage sticky recovery bar', () => {
     expect(stickyTitle!.querySelectorAll('[data-testid="session-status-badge"]')).toHaveLength(1)
     expect(stickyTitle!.querySelector('button')).toBeNull()
     expect(stickyTitle!.querySelector('[data-testid^="session-header-"]')).toBeNull()
+  })
+
+  it('keeps the sticky title hidden when the observer initially reports the header in view', async () => {
+    const { container } = await renderPage()
+    const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
+    expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
+
+    reportHeaderIntersection(header!, 1)
+
+    expect(scrollContainer!.querySelector('[data-testid="session-sticky-title"]')).toBeNull()
   })
 
   it('unmounts the sticky title when the observer reports the header has re-entered', async () => {
@@ -433,7 +446,7 @@ describe('SessionPage sticky recovery bar', () => {
     expect((reset as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('the sticky title strip is the first child of the transcript scroll container and the recovery bar is offset below it', async () => {
+  it('keeps the header first in the transcript scroll container and offsets the sticky title above the recovery bar', async () => {
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     const header = container.querySelector('[data-testid="session-header"]')
@@ -444,7 +457,11 @@ describe('SessionPage sticky recovery bar', () => {
     const children = Array.from(scrollContainer!.children)
     expect(children.length).toBeGreaterThan(0)
     const firstChild = children[0] as HTMLElement
-    expect(firstChild.getAttribute('data-testid')).toBe('session-sticky-title')
+    expect(firstChild.getAttribute('data-testid')).toBe('session-header')
+
+    const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]') as HTMLElement | null
+    expect(stickyTitle).not.toBeNull()
+    expect(firstChild.compareDocumentPosition(stickyTitle!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     const recoveryBar = scrollContainer!.querySelector('[data-testid="session-recovery-bar"]') as HTMLElement | null
     expect(recoveryBar).not.toBeNull()

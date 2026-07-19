@@ -399,14 +399,12 @@ export function SessionDetailShell({
   return (
     <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
       <div className="flex flex-col flex-1 min-h-0">
-        {header}
-        <SessionUsageSummary usage={meta.usage} />
-        {errorsEvidence}
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0 min-h-[120px] md:min-h-0"
           data-testid="session-transcript-scroll-container"
         >
+          {header}
           <ScrollEngagedStickyTitle
             headerRef={headerRef}
             scrollContainerRef={scrollContainerRef}
@@ -414,6 +412,8 @@ export function SessionDetailShell({
             statusKind={displayStatusKind}
             turnCount={displayTurnCount}
           />
+          <SessionUsageSummary usage={meta.usage} />
+          {errorsEvidence}
           {recoveryBarContent && (
             <div
               data-testid="session-recovery-bar"
