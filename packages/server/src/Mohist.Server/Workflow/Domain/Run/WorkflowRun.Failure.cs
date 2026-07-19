@@ -188,7 +188,7 @@ public static partial class WorkflowRunExtensions
                 run.Stages[i] = new StageRun
                 {
                     Id = later.Id,
-                    Attempt = 1,
+                    Attempt = later.Initialized ? later.Attempt + 1 : later.Attempt,
                     RequiresApproval = later.RequiresApproval,
                     Status = StageRunStatus.Pending,
                 };

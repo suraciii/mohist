@@ -254,6 +254,44 @@ describe("opencodeAction — happy path + turn fact", () => {
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
 
+  it("Rejects a persisted Session from a different workspace before creating or prompting", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    const serverConnection = {
+      openWorkflowAgentSession: vi.fn(async () => ({ runtimeSessionId: "ses_old", workDir: "/tmp/old-workspace" })),
+      attachWorkflowAgentSession: vi.fn(),
+    } as unknown as NonNullable<ActionContext["serverConnection"]>
+
+    const result = await opencodeAction(baseContext({
+      openCodeRuntime: runtime,
+      serverConnection,
+      with: { session: "plan", prompt: "do not use old workspace" } as never,
+    }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toMatch(/different workspace/i)
+    expect(client.sessionCreate).not.toHaveBeenCalled()
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
+  })
+
+  it("Aborts the physical Session and exposes a stable error when prompt transport times out", async () => {
+    const transportCause = Object.assign(new Error("Headers Timeout Error"), {
+      code: "UND_ERR_HEADERS_TIMEOUT",
+    })
+    const { runtime, client } = buildRuntime({
+      promptImplementation: async () => {
+        throw new TypeError("fetch failed", { cause: transportCause })
+      },
+    })
+    await ensureReady(runtime)
+
+    const result = await opencodeAction(baseContext({ openCodeRuntime: runtime }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("UND_ERR_HEADERS_TIMEOUT")
+    expect(client.sessionAbort).toHaveBeenCalledTimes(1)
+  })
+
   it("Action passes multi-slash model as provider + remainder without rotation", async () => {
     const { runtime, client } = buildRuntime()
     await ensureReady(runtime)

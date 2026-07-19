@@ -45,6 +45,16 @@ const NON_RECOVERABLE_ACTION_REASONS = new Set([
   "usage_limit",
 ])
 
+const TRANSPORT_ERROR_CODES = new Set([
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+])
+
 export const DEFAULT_PROVIDER_ERROR_POLICY = {
   nonRecoverablePatterns: DEFAULT_NON_RECOVERABLE_MESSAGE_PATTERNS,
   consecutiveRetryThreshold: 5,
@@ -147,14 +157,37 @@ export function normalizeInvalidInput(message: string, diagnostics: readonly Run
 
 export function normalizeTurnFailed(raw: RawSdkError | string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   const message = typeof raw === "string" ? raw : raw.message || "OpenCode turn failed"
+  const transportCode = transportErrorCode(raw)
   return {
     kind: "turn-failed",
-    message: "OpenCode turn failed",
+    message: transportCode
+      ? `OpenCode local transport failed (${transportCode}); confirm the local runtime is healthy, then retry`
+      : "OpenCode turn failed",
     diagnostics: [
       ...diagnostics,
-      { severity: "error", code: "turn-failed", message, details: typeof raw === "string" ? undefined : { ...raw } },
+      {
+        severity: "error",
+        code: transportCode ? "opencode-transport-failed" : "turn-failed",
+        message: transportCode ? `OpenCode local transport failed with ${transportCode}: ${message}` : message,
+        details: typeof raw === "string" ? undefined : { ...raw },
+      },
     ],
   }
+}
+
+export function isTransportFailure(cause: unknown): boolean {
+  return transportErrorCode(cause) !== undefined
+    || (cause instanceof Error && /fetch failed|network error/i.test(cause.message))
+}
+
+function transportErrorCode(value: unknown): string | undefined {
+  let current = value
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth++) {
+    const code = (current as { code?: unknown }).code
+    if (typeof code === "string" && TRANSPORT_ERROR_CODES.has(code)) return code
+    current = (current as { cause?: unknown }).cause
+  }
+  return undefined
 }
 
 export function normalizeAbortUnconfirmed(message: string, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {

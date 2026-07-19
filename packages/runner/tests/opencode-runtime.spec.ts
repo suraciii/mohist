@@ -250,6 +250,15 @@ describe("error normalization", () => {
     expect(error.diagnostics.some((d) => d.message.includes("OpenAI quota"))).toBe(true)
   })
 
+  it("normalizeTurnFailed exposes a stable local transport failure without exposing the raw payload in the message", () => {
+    const error = normalizeTurnFailed({
+      message: "fetch failed",
+      cause: { code: "UND_ERR_HEADERS_TIMEOUT", message: "Headers Timeout Error" },
+    })
+    expect(error.message).toContain("UND_ERR_HEADERS_TIMEOUT")
+    expect(error.diagnostics.some((d) => d.code === "opencode-transport-failed")).toBe(true)
+  })
+
   it("normalizeInvalidInput echoes the message", () => {
     const error = normalizeInvalidInput("model must be a string")
     expect(error.kind).toBe("invalid-input")

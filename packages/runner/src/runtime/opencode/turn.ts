@@ -59,6 +59,7 @@ import {
   DEFAULT_PROVIDER_ERROR_POLICY,
   isNonRecoverableProviderRetry,
   normalizeAbortUnconfirmed,
+  isTransportFailure,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeMissingSession,
@@ -399,6 +400,9 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     if (args.signal.aborted) {
       return finishAbortedTurn(args, retryTracker, "signal", reconciliationFailure, promptDiagnostics)
     }
+    if (isTransportFailure(promptOutcome.cause)) {
+      return finishTransportFailure(args, promptOutcome.cause, promptDiagnostics)
+    }
     const error = toUnavailableOrTurnError(promptOutcome.cause, "OpenCode prompt failed")
     return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
   }
@@ -410,6 +414,20 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     workDir: args.directory,
   }
   return { kind: "success", value: { facts, diagnostics: [...promptDiagnostics] } }
+}
+
+async function finishTransportFailure(
+  args: ExecutePromptArgs,
+  cause: unknown,
+  promptDiagnostics: RuntimeDiagnostic[],
+): Promise<PromptFailure> {
+  const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
+  if (!abortResult.ok) {
+    const error = normalizeAbortUnconfirmed(abortResult.message, promptDiagnostics)
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
+  const error = toUnavailableOrTurnError(cause, "OpenCode local transport failed")
+  return { kind: "failure", error, diagnostics: [...error.diagnostics, ...promptDiagnostics] }
 }
 
 interface RetryTracker {
@@ -657,7 +675,20 @@ function toUnavailableOrTurnError(cause: unknown, fallback: string) {
     const status = (cause as { status?: number }).status
     if (status === 404) return normalizeMissingSession()
   }
-  return normalizeTurnFailed({ message: errorMessage(cause, fallback) })
+  return normalizeTurnFailed(toRawSdkError(cause, fallback))
+}
+
+function toRawSdkError(cause: unknown, fallback: string) {
+  if (cause instanceof Error) {
+    const error = cause as Error & { status?: number; code?: string; cause?: unknown }
+    return {
+      message: error.message || fallback,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+      ...(typeof error.code === "string" ? { code: error.code } : {}),
+      ...(error.cause === undefined ? {} : { cause: error.cause }),
+    }
+  }
+  return { message: errorMessage(cause, fallback) }
 }
 
 function errorMessage(cause: unknown, fallback: string): string {

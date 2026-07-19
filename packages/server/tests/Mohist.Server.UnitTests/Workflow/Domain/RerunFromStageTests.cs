@@ -106,10 +106,10 @@ public class RerunFromStageTests
         Assert.Equal(StageRunStatus.Running, newBuild.Status);
         Assert.Equal(originalBuild.RequiresApproval, newBuild.RequiresApproval);
 
-        // Later stages reset
+        // Later stages keep a new attempt when their prior attempt was initialized.
         var newIntegrate = run.Stages[2];
         Assert.Equal("integrate", newIntegrate.Id);
-        Assert.Equal(1, newIntegrate.Attempt);
+        Assert.Equal(originalIntegrate.Attempt + 1, newIntegrate.Attempt);
         Assert.False(newIntegrate.Initialized);
         Assert.Empty(newIntegrate.Tasks);
         Assert.Empty(newIntegrate.Checks);
@@ -382,13 +382,33 @@ public class RerunFromStageTests
         var newPlan = run.Stages[0];
         Assert.Equal(2, newPlan.Attempt);
 
-        // Build and integrate are fresh (Attempt=1)
-        Assert.Equal(1, run.Stages[1].Attempt);
+        // Build and integrate are fresh and use their next attempts.
+        Assert.Equal(2, run.Stages[1].Attempt);
         Assert.False(run.Stages[1].Initialized);
         Assert.Equal(StageRunStatus.Pending, run.Stages[1].Status);
 
-        Assert.Equal(1, run.Stages[2].Attempt);
+        Assert.Equal(2, run.Stages[2].Attempt);
         Assert.False(run.Stages[2].Initialized);
         Assert.Equal(StageRunStatus.Pending, run.Stages[2].Status);
+    }
+
+    [Fact]
+    public void RerunFromStage_ReinitializedTaskUsesStageScopedIdentity()
+    {
+        var run = BuildCompletedRun();
+        var originalTaskId = run.Stages.Single(stage => stage.Id == "build").Tasks.Single().Id;
+        run.Status = WorkflowRunStatus.Failed;
+        run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
+
+        run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
+        run.InitializeStage(
+            [new("compile", "Compile", "spec/task")],
+            [new("build-ok", "Build OK", "spec/check")],
+            DateTimeOffset.UnixEpoch,
+            advance: false);
+
+        var rerunTask = run.CurrentStage().Tasks.Single();
+        Assert.Equal("compile.s2.1", rerunTask.Id);
+        Assert.NotEqual(originalTaskId, rerunTask.Id);
     }
 }
