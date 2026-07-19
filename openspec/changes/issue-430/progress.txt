@@ -374,3 +374,43 @@ Decisions / gotchas for downstream tasks:
 - `npm run typecheck -w packages/web` passes.
   `npm run test:run -w packages/web` passes (4900 tests, was 4895).
   `npm run check:fsd` and `npm run check:test-boundaries` both pass.
+
+## T-004 — Cancel session secondary action slot (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Moved the existing Cancel trigger out of
+    `session-header-metadata-row` into a dedicated
+    `session-header-secondary-actions` wrapper rendered immediately after the
+    metadata row with `mt-1 flex justify-end`.
+  - Switched the trigger from `variant="destructive"` to `variant="ghost"`.
+    The existing `size="sm"`, stop icon, inline `Cancel session` label,
+    `aria-label="Cancel session"`, `data-testid="session-cancel-trigger"`,
+    running-session visibility guard, AlertDialog, and cancel mutation are
+    unchanged.
+- `packages/web/src/pages/session/ui/SessionPage.cancel.test.tsx`:
+  - Expanded the running-session render scenario to assert the preserved
+    accessible name and inline label, ghost styling (`hover:bg-muted`), absence
+    of the destructive variant classes, containment in the secondary slot,
+    absence from the metadata row, `justify-end`, and immediate-after-row DOM
+    placement.
+  - Strengthened the existing mutation scenario to move focus onto the Cancel
+    trigger with `userEvent.tab()`, activate it with Enter, assert the existing
+    dialog opens, confirm it, and verify the same workflow-session cancel
+    mutation and result flow.
+
+Decisions / gotchas for downstream tasks:
+
+- The shared Button base classes include generic `aria-invalid:*destructive`
+  tokens for every variant. Tests therefore assert the destructive variant's
+  actual paint classes (`bg-destructive/10`, `text-destructive`, `bg-danger*`)
+  are absent instead of rejecting every class token containing the word
+  `destructive`.
+- T-004 does not alter `SessionRecoveryActions`; its structured disabled-reason
+  tooltip remains owned by T-005.
+- The pre-refactor focused spec passed (5 tests). After the change, the focused
+  spec passes (5 tests), `npm run typecheck -w packages/web` passes,
+  `npm run test:run -w packages/web` passes (4902 tests), and both
+  `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` pass.

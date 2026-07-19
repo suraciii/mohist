@@ -733,9 +733,15 @@ function SessionHeader({
             truncated={meta.sessionId.slice(0, 8)}
           />
         )}
-        {showCancelControl && (
+      </div>
+
+      {showCancelControl && (
+        <div
+          data-testid="session-header-secondary-actions"
+          className="mt-1 flex justify-end"
+        >
           <Button
-            variant="destructive"
+            variant="ghost"
             size="sm"
             onClick={() => setCancelDialogOpen(true)}
             data-testid="session-cancel-trigger"
@@ -745,8 +751,8 @@ function SessionHeader({
             <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
             Cancel session
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {showCancelControl && cancel && (
         <AlertDialog
