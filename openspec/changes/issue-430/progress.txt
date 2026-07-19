@@ -414,3 +414,101 @@ Decisions / gotchas for downstream tasks:
   `npm run test:run -w packages/web` passes (4902 tests), and both
   `npm run check:fsd -w packages/web` and
   `npm run check:test-boundaries -w packages/web` pass.
+
+## T-005 — Structured disabled-reason tooltip on Compact/Reset via existing Tooltip primitive (done)
+
+What landed:
+
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx`:
+  - Replaced the two per-button `<span title="Unavailable while session is active">`
+    wrappers and the native `title={active ? INACTIVE_TOOLTIP : undefined}`
+    attribute on the buttons with a single private `DisabledReasonTooltip`
+    helper component that wraps the existing `Tooltip` primitive from
+    `@/shared/ui/components/tooltip`. The wrapper is only applied when
+    `active === true` (i.e. `data-active="true"`); the enabled branch
+    renders the bare button with no wrapper at all.
+  - The `DisabledReasonTooltip` renders structured content as a
+    `<div className="space-y-1">` with a `<div className="font-medium">`
+    title (`"Session is running"`) and a plain `<div>` reason sentence
+    (`"Finish or cancel the session before compacting or resetting."`).
+    No new contract attribute was introduced — `data-active="true"` is the
+    only trigger and the only reason today.
+  - Removed `INACTIVE_TOOLTIP` constant and the inline
+    `session-recovery-compact-wrapper` / `session-recovery-reset-wrapper`
+    `data-testid`s (no consumer depended on them; only the wrapper spans
+    carried them).
+  - The existing `Tooltip` primitive already wraps its child in a
+    `tabIndex={0}` span with `onFocus`/`onBlur` toggling the tooltip,
+    so the focus path of the spec scenario (`disabled button is reachable
+    via the wrapper's focusable proxy`) works with no new a11y code.
+  - The Reset button still uses `variant="destructive"` — the design has
+    Compact at `variant="outline"` and Reset at `variant="destructive"`,
+    and the demotion of Reset to outline / ghost is explicitly out of
+    T-005's scope (it sits in a separate secondary-actions slot owned by
+    T-004 if any consumer wires it that way; the recovery bar here ships
+    its own slot already).
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.test.tsx`:
+  - Updated the existing `disables both buttons and shows the tooltip
+    wrapper when status is running` spec to assert the new behaviour:
+    `toBeDisabled()` + `data-active="true"` are preserved, but the
+    `title` assertions flipped from `toHaveAttribute('title', 'Unavailable
+    while session is active')` to `not.toHaveAttribute('title')` on both
+    buttons (the native title is gone; the structured tooltip replaces it).
+  - Added a new `describe('SessionRecoveryActions — structured
+    disabled-reason tooltip', …)` block with three scenarios:
+    1. **renders the running-block structured tooltip when the session is
+       running** — focuses the `tabIndex={0}` wrapper span that the
+       existing Tooltip primitive adds around the disabled Compact button
+       (asserted via `parentElement?.getAttribute('tabindex')`), then
+       asserts `screen.getByRole('tooltip')` shows both the
+       `'Session is running'` title and the reason sentence regex
+       `/finish or cancel the session before compacting or resetting/i`.
+       A follow-up `fireEvent.blur` confirms the tooltip disappears on
+       blur (covers the off-focus half of the spec scenario).
+    2. **renders the running-block structured tooltip on the Reset
+       button when the session is running** — same shape as (1) but
+       targets the Reset button, guaranteeing both disabled buttons
+       receive the structured tooltip wrapper.
+    3. **does not wrap enabled buttons with a disabled-reason tooltip** —
+       renders with `status="completed"`, asserts neither parent element
+       carries `tabindex="0"` (i.e. no Tooltip wrapper), neither button
+       carries `title`, and a hover + focus on each button does NOT
+       render any tooltip element (`queryByRole('tooltip')` returns null).
+  - The local `focusDisabledWrapper(testId)` helper inside the new
+    describe block wraps the `getByTestId` + `parentElement` +
+    `toHaveAttribute('tabindex', '0')` + `fireEvent.focus` chain to keep
+    the new scenarios DRY.
+
+Decisions / gotchas for downstream tasks:
+
+- The structured tooltip text is rendered as a `<div className="space-y-1">`
+  inside the existing Tooltip primitive's `<span role="tooltip">` bubble.
+  The Tooltip primitive applies `text-xs font-normal leading-relaxed
+  text-popover-foreground` to the bubble; we don't override the
+  typography, just add a `font-medium` for the title line to create the
+  short-title-vs-long-sentence hierarchy. No CSS color tokens change.
+- The disabled-button focus path now goes through the Tooltip primitive's
+  `tabIndex={0}` wrapper. Keyboard users land on the wrapper span (which
+  is focusable); the disabled button itself remains non-focusable. This is
+  the exact a11y shape that the spec scenario required, with no new
+  mechanism added.
+- The `fireEvent.focus(button)` path does NOT open the tooltip when the
+  button is disabled (browser / jsdom won't deliver focus to a disabled
+  element), so the tests focus the wrapper span instead. The wrapper span
+  is reachable via `getByTestId(testId).parentElement` — both spans are
+  direct parents, and the wrapper carries `tabindex="0"` per the
+  Tooltip primitive contract.
+- The tooltip closes on blur, which the first new spec asserts to confirm
+  the off-focus half of the spec scenario (`WHEN a user hovers or focuses
+  the disabled button` ⇒ tooltip renders; the symmetric "and stops
+  hovering / focuses away" is implicit but worth a sanity assertion).
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4905 tests, was 4902 — the
+  3 new specs). `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` both pass.
+- No FSD / layer change: `widgets/coder-session/ui/SessionRecoveryActions.tsx`
+  now imports the `Tooltip` primitive from `@/shared/ui/components/tooltip`,
+  which is the same shared-layer dependency other widgets already use
+  (e.g. `pages/settings/ui/AgentSettingsSection.tsx`). No new public
+  surface: `SessionRecoveryActionsProps` and `SessionRecoveryActions`
+  exports are unchanged.

@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/shared/ui/components/dialog'
+import { Tooltip } from '@/shared/ui/components/tooltip'
 import { cn } from '@/shared/lib/utils'
 import {
   compactGenericSession,
@@ -19,10 +20,27 @@ import {
 } from '../../../entities/coder-session'
 import { useProject } from '../../../entities/project'
 
-const INACTIVE_TOOLTIP = 'Unavailable while session is active'
+const DISABLED_REASON_TITLE = 'Session is running'
+const DISABLED_REASON_BODY =
+  'Finish or cancel the session before compacting or resetting.'
 const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
   'A new runtime session will start without prior context. Transcript and audit history remain available.'
+
+function DisabledReasonTooltip({ children }: { children: React.ReactNode }) {
+  return (
+    <Tooltip
+      content={
+        <div className="space-y-1">
+          <div className="font-medium">{DISABLED_REASON_TITLE}</div>
+          <div>{DISABLED_REASON_BODY}</div>
+        </div>
+      }
+    >
+      {children}
+    </Tooltip>
+  )
+}
 
 function isSessionActive(status: string | null | undefined): boolean {
   if (!status) return false
@@ -190,7 +208,6 @@ export function SessionRecoveryActions({
       onClick={handleCompact}
       disabled={active || anyPending}
       aria-disabled={active}
-      title={active ? INACTIVE_TOOLTIP : undefined}
       data-testid="session-recovery-compact"
       data-active={active ? 'true' : 'false'}
     >
@@ -206,7 +223,6 @@ export function SessionRecoveryActions({
       onClick={openResetDialog}
       disabled={active || anyPending}
       aria-disabled={active}
-      title={active ? INACTIVE_TOOLTIP : undefined}
       data-testid="session-recovery-reset"
       data-active={active ? 'true' : 'false'}
     >
@@ -218,24 +234,12 @@ export function SessionRecoveryActions({
     <>
       <div className="flex items-center gap-2">
         {active ? (
-          <span
-            className="inline-block"
-            title={INACTIVE_TOOLTIP}
-            data-testid="session-recovery-compact-wrapper"
-          >
-            {compactButton}
-          </span>
+          <DisabledReasonTooltip>{compactButton}</DisabledReasonTooltip>
         ) : (
           compactButton
         )}
         {active ? (
-          <span
-            className="inline-block"
-            title={INACTIVE_TOOLTIP}
-            data-testid="session-recovery-reset-wrapper"
-          >
-            {resetButton}
-          </span>
+          <DisabledReasonTooltip>{resetButton}</DisabledReasonTooltip>
         ) : (
           resetButton
         )}

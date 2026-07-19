@@ -110,7 +110,7 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 
-  it('disables both buttons and shows the tooltip wrapper when status is running', () => {
+  it('disables both buttons when status is running and drops the native title attribute', () => {
     renderActions({ status: 'running' })
     const compact = screen.getByTestId('session-recovery-compact')
     const reset = screen.getByTestId('session-recovery-reset')
@@ -118,8 +118,8 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(reset).toBeDisabled()
     expect(compact).toHaveAttribute('data-active', 'true')
     expect(reset).toHaveAttribute('data-active', 'true')
-    expect(compact).toHaveAttribute('title', 'Unavailable while session is active')
-    expect(reset).toHaveAttribute('title', 'Unavailable while session is active')
+    expect(compact).not.toHaveAttribute('title')
+    expect(reset).not.toHaveAttribute('title')
   })
 
   it('disables both buttons for the legacy "active" status', () => {
@@ -132,6 +132,63 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     renderActions({ status: 'live' })
     expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
     expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
+  })
+})
+
+describe('SessionRecoveryActions — structured disabled-reason tooltip', () => {
+  function focusDisabledWrapper(buttonTestId: string): HTMLElement {
+    const button = screen.getByTestId(buttonTestId)
+    const wrapper = button.parentElement
+    if (!wrapper) throw new Error(`${buttonTestId} has no parent wrapper`)
+    expect(wrapper).toHaveAttribute('tabindex', '0')
+    fireEvent.focus(wrapper)
+    return wrapper
+  }
+
+  it('renders the running-block structured tooltip when the session is running', () => {
+    renderActions({ status: 'running' })
+
+    focusDisabledWrapper('session-recovery-compact')
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent('Session is running')
+    expect(tooltip).toHaveTextContent(
+      /finish or cancel the session before compacting or resetting/i,
+    )
+
+    fireEvent.blur(screen.getByTestId('session-recovery-compact').parentElement as HTMLElement)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('renders the running-block structured tooltip on the Reset button when the session is running', () => {
+    renderActions({ status: 'running' })
+
+    focusDisabledWrapper('session-recovery-reset')
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent('Session is running')
+    expect(tooltip).toHaveTextContent(
+      /finish or cancel the session before compacting or resetting/i,
+    )
+  })
+
+  it('does not wrap enabled buttons with a disabled-reason tooltip', () => {
+    renderActions({ status: 'completed' })
+
+    const compact = screen.getByTestId('session-recovery-compact')
+    const reset = screen.getByTestId('session-recovery-reset')
+
+    expect(compact.parentElement).not.toHaveAttribute('tabindex', '0')
+    expect(reset.parentElement).not.toHaveAttribute('tabindex', '0')
+    expect(compact).not.toHaveAttribute('title')
+    expect(reset).not.toHaveAttribute('title')
+
+    fireEvent.mouseEnter(compact)
+    fireEvent.mouseEnter(reset)
+    fireEvent.focus(compact)
+    fireEvent.focus(reset)
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 })
 
