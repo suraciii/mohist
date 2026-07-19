@@ -36,6 +36,7 @@ import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
 import { CollapsibleRailCard } from './cards/CollapsibleRailCard'
+import { CompositeParentOverview } from './sections/CompositeParentOverview'
 import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
 import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
 import { IssueCommitsSection } from './sections/IssueCommitsSection'
@@ -98,15 +99,20 @@ export function IssueDetailPage({
   )
 
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
+  const isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0
+  const workflowDataEnabled = !!issue && !isCompositeParent
   const { data: agentStatus } = useAgentStatus()
-  const { data: diffData } = useIssueDiff(issueNumber)
-  const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.status !== IssueStatus.Backlog)
+  const { data: diffData } = useIssueDiff(issueNumber, workflowDataEnabled)
+  const { data: workflowTimeline } = useWorkflowTimeline(
+    issueNumber,
+    workflowDataEnabled && !!issue && issue.status !== IssueStatus.Backlog,
+  )
   const isNarrowViewport = useNarrowViewport()
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
 
-  const workflowRunId = issue?.workflowRunId ?? null
+  const workflowRunId = !isCompositeParent ? (issue?.workflowRunId ?? null) : null
   const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
   const activeSession = workflowSessions.find((session) => (
     session.status === 'active'
@@ -114,11 +120,11 @@ export function IssueDetailPage({
     || session.status === 'probing'
   ))
 
-  const rebaseRecovery = useRebaseRecovery(issueNumber)
+  const rebaseRecovery = useRebaseRecovery(issueNumber, workflowDataEnabled)
 
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
-  const { data: commitsData } = useIssueCommits(issueNumber)
+  const { data: commitsData } = useIssueCommits(issueNumber, workflowDataEnabled)
 
   if (isError) {
     return <NotFoundState />
@@ -134,9 +140,10 @@ export function IssueDetailPage({
 
   const isBacklog = issue.status === IssueStatus.Backlog
   const isArchived = !!issue.archivedAt
-  const workflowStage = issue.workflowStage ?? null
-  const prDeliveryMetadata = findPublishViaPrMetadata(workflowTimeline)
-  const decision = deriveRuntimeDecision({
+  const workflowStage = isCompositeParent ? null : (issue.workflowStage ?? null)
+  const prDeliveryMetadata = isCompositeParent ? null : findPublishViaPrMetadata(workflowTimeline)
+
+  const decisionInputs = isCompositeParent ? null : {
     issue: {
       status: issue.status,
       workflowStage: issue.workflowStage ?? null,
@@ -165,29 +172,35 @@ export function IssueDetailPage({
     agentStatus: agentStatus ?? null,
     issueNumber,
     hasActiveAgent: isAgentRunningOnThis,
-  })
+  }
 
-  const executionSignal = buildExecutionSignal({
-    activeSession: activeSession
-      ? {
-          sessionName: activeSession.sessionName,
-          transcriptPath: toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`),
-        }
-      : null,
-    agentStatus: agentStatus ?? null,
-    blocker: issue.blocker,
-    summary: decision.summary,
-  })
-  const driftRecovery = buildDriftRecoveryAction({
-    drift: issue.drift ?? null,
-    rebase: rebaseRecovery,
-    baseBranchFallback: issue.repository?.baseBranch ?? null,
-  })
+  const decision = decisionInputs ? deriveRuntimeDecision(decisionInputs) : null
+
+  const executionSignal = decision
+    ? buildExecutionSignal({
+        activeSession: activeSession
+          ? {
+              sessionName: activeSession.sessionName,
+              transcriptPath: toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`),
+            }
+          : null,
+        agentStatus: agentStatus ?? null,
+        blocker: issue.blocker,
+        summary: decision.summary,
+      })
+    : null
+  const driftRecovery = decision
+    ? buildDriftRecoveryAction({
+        drift: issue.drift ?? null,
+        rebase: rebaseRecovery,
+        baseBranchFallback: issue.repository?.baseBranch ?? null,
+      })
+    : null
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
-  const convergence = issue.convergence ?? null
-  const hasConvergenceContent = !!convergence
+  const convergence = isCompositeParent ? null : (issue.convergence ?? null)
+  const hasConvergenceContent = !isCompositeParent && !!convergence
     && (!!convergence.failedCheck || convergence.blockingItemCount > 0 || convergence.reactionAttempts > 0)
   const convergenceSummary = convergence?.blockingItemCount
     ? `${convergence.blockingItemCount} blocking`
@@ -200,24 +213,36 @@ export function IssueDetailPage({
     issue.attachments,
     `/api${issueAttachmentContentPath(issueNumber, id, issueProjectId)}`,
   )
+  const compositeSummary = isCompositeParent
+    ? {
+        count: issue.childIssuesSummary?.count ?? issue.children?.length ?? 0,
+        doneCount: issue.childIssuesSummary?.doneCount ?? 0,
+        blockedCount: issue.childIssuesSummary?.blockedCount ?? 0,
+      }
+    : null
+  const showMobileActionBar = isNarrowViewport && !isCompositeParent && !!decision?.primary
+  const showWorkflowSections = !isCompositeParent
+  const showRuntimeDecisionSurface = !isNarrowViewport && !isCompositeParent
 
   return (
     <>
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
         <div
           className={
-            isNarrowViewport && decision.primary
+            showMobileActionBar
               ? 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 pt-6 pb-[calc(8rem+env(safe-area-inset-bottom))]'
               : 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6'
           }
           data-testid="issue-detail-content-column"
-          data-bar-reserved={isNarrowViewport && decision.primary ? 'true' : 'false'}
+          data-bar-reserved={showMobileActionBar ? 'true' : 'false'}
         >
           <div data-testid="status-header-tier" className="space-y-4">
-            <StatusHeadline
-              decision={decision}
-              stageProgress={issue.workflowStageProgress ?? null}
-            />
+            {decision && (
+              <StatusHeadline
+                decision={decision}
+                stageProgress={issue.workflowStageProgress ?? null}
+              />
+            )}
 
             <button
               type="button"
@@ -238,10 +263,20 @@ export function IssueDetailPage({
                   <PriorityChip priority={issue.priority} />
                   {issue.isDraft && <DraftPill />}
                   {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
+                  {isCompositeParent && (
+                    <span
+                      data-testid="composite-parent-badge"
+                      className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 px-2 py-0.5 text-[10px] font-semibold"
+                    >
+                      Parent issue
+                    </span>
+                  )}
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
-                  <RuntimeSummaryPill summary={decision.summary} />
-                </div>
+                {decision && !isCompositeParent && (
+                  <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
+                    <RuntimeSummaryPill summary={decision.summary} />
+                  </div>
+                )}
               </div>
               {isArchived && (
                 <div
@@ -258,11 +293,13 @@ export function IssueDetailPage({
                   {issue.title}
                 </h1>
                 <div className="flex shrink-0 items-center gap-2">
-                  <ActivityDialog
-                    issueNumber={issueNumber}
-                    workflowStatus={issue?.workflowStatus}
-                    TimelinePanel={components?.EventTimelinePanel}
-                  />
+                  {!isCompositeParent && (
+                    <ActivityDialog
+                      issueNumber={issueNumber}
+                      workflowStatus={issue?.workflowStatus}
+                      TimelinePanel={components?.EventTimelinePanel}
+                    />
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -323,7 +360,7 @@ export function IssueDetailPage({
               </div>
             </div>
 
-            {!isNarrowViewport && (
+            {showRuntimeDecisionSurface && decision && (
               <div data-testid="runtime-decision-surface-frame">
                 <RuntimeDecisionSurface
                   decision={decision}
@@ -350,31 +387,44 @@ export function IssueDetailPage({
 
           <div className="mt-8 grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
             <div className="min-w-0 lg:col-span-2 space-y-8" data-testid="reading-flow" data-tier-weight="reading-flow">
-              <BranchBar
-                issueNumber={issueNumber}
-                stage={workflowStage}
-                isAgentRunning={isAgentRunningOnThis}
-                baseBranch={issue.repository?.baseBranch}
-                allowRebase={!isBacklog && !!issue.workflowRunId}
-              />
+              {isCompositeParent && compositeSummary && (
+                <CompositeParentOverview
+                  children={issue.children ?? []}
+                  summary={compositeSummary}
+                />
+              )}
 
-              <div data-testid="workflow-view-frame">
-                <WorkflowView issue={issue} readOnly />
-              </div>
+              {showWorkflowSections && (
+                <BranchBar
+                  issueNumber={issueNumber}
+                  stage={workflowStage}
+                  isAgentRunning={isAgentRunningOnThis}
+                  baseBranch={issue.repository?.baseBranch}
+                  allowRebase={!isBacklog && !!issue.workflowRunId}
+                />
+              )}
 
-              {prDeliveryMetadata && (
+              {showWorkflowSections && (
+                <div data-testid="workflow-view-frame">
+                  <WorkflowView issue={issue} readOnly />
+                </div>
+              )}
+
+              {showWorkflowSections && prDeliveryMetadata && (
                 <div data-testid="pr-delivery-summary-frame">
                   <PrDeliverySummary timeline={workflowTimeline} />
                 </div>
               )}
 
-              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
+              {showWorkflowSections && (
+                <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
+              )}
 
-              {issue.workflowRunId && (
+              {showWorkflowSections && issue.workflowRunId && (
                 <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
               )}
 
-              {(!isBacklog || issue.workflowRunId) && (
+              {showWorkflowSections && (!isBacklog || issue.workflowRunId) && (
                 <div data-testid="runtime-evidence-frame" className="space-y-4">
                   {!isBacklog && workflowStage && (
                     <TaskProgressPanel
@@ -393,7 +443,7 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              {diffData?.available === true && (
+              {showWorkflowSections && diffData?.available === true && (
                 <div
                   className="min-w-0 px-4 py-3 text-sm"
                   data-testid="diff-summary-banner"
@@ -433,17 +483,21 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              <IssueDiffFilesSection
-                diffData={diffData}
-                onViewFiles={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
-              />
+              {showWorkflowSections && (
+                <IssueDiffFilesSection
+                  diffData={diffData}
+                  onViewFiles={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
+                />
+              )}
 
-              <IssueCommitsSection
-                commitsData={commitsData}
-                onViewAllCommits={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
-              />
+              {showWorkflowSections && (
+                <IssueCommitsSection
+                  commitsData={commitsData}
+                  onViewAllCommits={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
+                />
+              )}
 
-              {(diffData?.available === false || commitsData?.available === false) && (
+              {showWorkflowSections && (diffData?.available === false || commitsData?.available === false) && (
                 <div className="text-sm text-muted-foreground" data-tier-weight="reading-flow">
                   <p>
                     {diffData?.available === false && diffData.message}
@@ -484,23 +538,25 @@ export function IssueDetailPage({
                 <IssueDetailsCard issue={issue} unframed />
               </CollapsibleRailCard>
 
-              <CollapsibleRailCard
-                testId="reference-rail-workflow-profile"
-                title="Workflow Profile"
-                forceCollapsed={isNarrowViewport}
-                summary={issue.workflowProfileId ?? 'default'}
-              >
-                <div className="space-y-4">
-                  <div data-testid="issue-workflow-profile-control-frame">
-                    <WorkflowProfileControl issue={issue} embedded />
+              {!isCompositeParent && (
+                <CollapsibleRailCard
+                  testId="reference-rail-workflow-profile"
+                  title="Workflow Profile"
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.workflowProfileId ?? 'default'}
+                >
+                  <div className="space-y-4">
+                    <div data-testid="issue-workflow-profile-control-frame">
+                      <WorkflowProfileControl issue={issue} embedded />
+                    </div>
+                    <div data-testid="workflow-profile-editor-frame">
+                      <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
+                    </div>
                   </div>
-                  <div data-testid="workflow-profile-editor-frame">
-                    <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
-                  </div>
-                </div>
-              </CollapsibleRailCard>
+                </CollapsibleRailCard>
+              )}
 
-              {issue.drift?.drifted && (
+              {!isCompositeParent && issue.drift?.drifted && (
                 <CollapsibleRailCard
                   testId="reference-rail-drift"
                   title="Base Drift Detected"
@@ -512,7 +568,7 @@ export function IssueDetailPage({
                 </CollapsibleRailCard>
               )}
 
-              {hasConvergenceContent && (
+              {!isCompositeParent && hasConvergenceContent && convergence && (
                 <CollapsibleRailCard
                   testId="reference-rail-convergence"
                   title="Convergence"
@@ -596,7 +652,7 @@ export function IssueDetailPage({
         />
       )}
 
-      {isNarrowViewport && decision.primary && (
+      {showMobileActionBar && decision && (
         <MobileActionBar
           decision={decision}
           mutations={{

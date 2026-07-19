@@ -81,3 +81,39 @@
 - `npm run test:ci -w packages/web`: 4918 tests pass (357 files); FSD + node test boundary checks clean.
 - `npm test`: server + web + runner suites all green (no regressions).
 - `npm run test:browser -w packages/web -- --grep "issue board"`: 4/4 issue-board browser layout tests pass (including two new repository-filter layout tests at desktop and mobile viewports).
+
+## T-003: Composite parent and child issue detail navigation
+
+### Decisions
+
+- One `isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0` flag (server projection only — non-archived, current children) drives both query enablement (`useIssueDiff`, `useIssueCommits`, `useWorkflowTimeline`, `useRebaseRecovery` all gated on `!!issue && !isCompositeParent`) and render guards (`showWorkflowSections`, `showRuntimeDecisionSurface`, `showMobileActionBar`).
+- `useWorkflowRunSessions` is gated via `workflowRunId` being null for parents (`!isCompositeParent ? (issue?.workflowRunId ?? null) : null`), avoiding any session fetch.
+- `IssueDetailsCard` parent reference is now a real `Link` via `useProjectPath()` with `data-testid="parent-issue-backlink"`; child issue pages have to mount the same card to expose it (no separate backlink widget).
+- `IssueDetailsCard` repository metadata accepts either the resolved `issue.repository?.name` or the persisted `issue.repositoryName` fallback (added in T-002) so child/parent/orphan-repository detail pages all show the issue's own assignment.
+- `CompositeParentOverview` (a page-slice section, not a widget per design notes) renders `done/total done` progress, total + blocked counts, and a child list in ascending issue-number order with status pill, repository chip, and a red "Blocked" indicator driven by `IssueHealth.Blocked`.
+- The page keeps `Description`, `Comments`, repository metadata, prerequisites, the Edit button, and `IssueActionsCard` for parents; only `BranchBar`/`WorkflowView`/`LatestArtifactsPanel`/`TaskProgressPanel`/`WorkflowSessionsPanel`/`IssueWorkflowProfileEditor`/`WorkflowProfileControl`/`drift`/`convergence`/`runtime-evidence`/`runtime-decision-surface` and the workflow mobile action bar are gated away.
+- Decision/recovery inputs, `executionSignal`, and `driftRecovery` are built once `decision` is truthy, so the parent branch never fabricates a workflow decision from absent stage data.
+
+### Gotchas
+
+- Strict hook gating on `!!issue && !isCompositeParent` defers diff/commits/timeline/rebase fetches until after the issue read lands; four pre-existing tests (`IssueDetailPage.cross-tier.test.tsx`, `IssueDetailPage.control-workspace.active.spec.tsx`, `IssueDetailPage.reading-flow.test.tsx`, `IssueDetailPage.test.tsx`) raced the issue fetch with parallel workflow reads and now need `waitFor` around dynamic DOM checks (`commits-section`, `runtime-evidence`). Each was updated in place to assert against the fetched state.
+- `getIssueWorkflowVariables` (called from `IssueModelSelector` `useEffect`) and `useOpencodeModel` (`/api/projects/:projectId/workflow-profile/variables`) are not gated — the model selector is always rendered via `IssueConfigurationCard`. The "no workflow request for a parent" test only tracks the workflow surface endpoints listed by the design (diff, commits, timeline, workspace-status, artifacts, workflow-profile, project workflow-profile, system templates, sessions, yaml, rebase) and accepts these legitimate model fetches.
+- The "no workflow request for a parent" assertion uses MSW handlers stacked on top of `mountIssueDetail`'s defaults so workflow endpoints that fire are recorded in `workflowCalls`; an `act`-wrapped 100 ms settle lets `IssueModelSelector`'s useEffect microtasks flush before the assertion runs.
+- `useProjectPath` encodes the project name (`Project 1` → `Project%201`); when a `<Route path="/:projectName/issues/:number">` is added to the MemoryRouter, the navigate-from-child assertion can read `useLocation().pathname === '/Project%201/issues/13'` without a separate project-prefixed route.
+- `CompositeParentIssueInput` (`Pick<Issue, 'children' | 'childIssuesSummary'>`) is exported so downstream code can consume the page's composite summary without re-deriving it.
+
+### Files Touched
+
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` — added `isCompositeParent` / `workflowDataEnabled` flags, derived composite summary, routed pages using the page-slice section, and gated workflow queries + render paths.
+- `packages/web/src/pages/issue-detail/ui/cards/IssueDetailsCard.tsx` — parent reference becomes a navigable `<Link>` (new `data-testid="parent-issue-backlink"`); repository metadata uses persisted fallback.
+- `packages/web/src/entities/issue/api/queries.ts` — `useIssueDiff` and `useIssueCommits` accept an `enabled` flag forwarded to `useQuery`.
+- `packages/web/src/widgets/issue-workflow/model/useRebaseRecovery.ts` — accepts an `enabled` flag forwarded to `useWorkspaceStatus`.
+- `packages/web/src/pages/issue-detail/ui/sections/CompositeParentOverview.tsx` (new) — composite parent overview section with `composite-child-row`, `composite-child-status-pill`, `composite-child-blocked-indicator`, `composite-child-repository`, and `composite-parent-progress-label` / `composite-parent-blocked-label` data attributes.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.composite-parent-detail.test.tsx` (new) — 12 MSW-backed specs covering mixed child rows, navigation, zero/nonzero blocked counts, parent backlink, repository identity, retained non-workflow content, detached/health-changed reload, workflow render suppression, and the no-workflow-request assertion.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.cross-tier.test.tsx`, `…reading-flow.test.tsx`, `…test.tsx`, `…control-workspace.active.spec.tsx` — added `waitFor` for `commits-section` / `runtime-evidence` to handle the post-issue workflow fetch ordering introduced by strict gating.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:run -w packages/web`: 4930 tests pass (358 files).
+- `npm test`: server + web + runner suites all green (no regressions; `IssueCompositeAdvancementApiSpecs.ReopenParent_ReturnsToBacklog_AndCanAttachAndStartNewChild` passes when not racing parallel tests).
