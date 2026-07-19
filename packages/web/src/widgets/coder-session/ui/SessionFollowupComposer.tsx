@@ -181,7 +181,7 @@ export function SessionFollowupComposer({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={2}
-          disabled={isSending || isQueued}
+          disabled={disabled || isSending || isQueued}
           aria-label="Followup message"
           className="h-10 min-h-10 resize-none md:h-auto md:min-h-12"
         />

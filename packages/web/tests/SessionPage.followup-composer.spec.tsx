@@ -58,9 +58,9 @@ beforeEach(() => {
   issueData = null
   sessionsData = []
   sessionsLoading = false
-    metadata = null
-    transcript = { turns: [], partCount: 0, lastActivityAt: null }
-    transcriptVersion = 0
+  metadata = null
+  transcript = { turns: [], partCount: 0, lastActivityAt: null }
+  transcriptVersion = 0
   followupMutateAsync.mockClear()
   setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })

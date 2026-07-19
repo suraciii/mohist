@@ -232,6 +232,14 @@ describe('SessionFollowupComposer — three-state data-state attribute', () => {
     expect(composer).toHaveTextContent(/no longer accepting followups/i)
   })
 
+  it('keeps the input disabled when disabled=true overrides an interactive visual state', () => {
+    renderComposer({ disabled: true, state: 'interactive' })
+
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-send')).toBeDisabled()
+  })
+
   it('renders data-state="queued" when hasQueuedFollowup is true', () => {
     renderComposer({ hasQueuedFollowup: true })
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
@@ -339,10 +347,10 @@ describe('SessionFollowupComposer — queued-state persistent indicator', () => 
     const { rerender } = renderComposer({ hasQueuedFollowup: true, isSending: true })
 
     rerender(
-      <SessionFollowupComposer 
-        onSend={onSendMock} 
-        isSending={false} 
-        hasQueuedFollowup 
+      <SessionFollowupComposer
+        onSend={onSendMock}
+        isSending={false}
+        hasQueuedFollowup
       />,
     )
 
