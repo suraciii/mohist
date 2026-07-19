@@ -815,3 +815,17 @@ Decisions / gotchas for downstream tasks:
   (`visibility and enabled state`, `disabled (terminal state)`,
   `sending and success state`, `error handling`, `disabled transition
   clears prior errors`) keep their original assertions verbatim.
+
+## Review Fixes (2026-07-20)
+
+- Moved the session header, usage summary, and error evidence inside the
+  transcript scroll container so the sticky title observes a header that
+  actually moves through its root. The sticky title stays hidden on the
+  observer's initial in-view callback.
+- The shell now passes `completedAt` to the followup composer and keeps a
+  followup queued from submit until the transcript version advances.
+- A disabled composer now disables its textarea even when an explicit visual
+  state is interactive. Removed trailing whitespace from the composer spec.
+- Verification passed: `npm run typecheck -w packages/web`,
+  `npm run test:run -w packages/web` (358 files, 4935 tests), and
+  `git diff --check master...HEAD`.
