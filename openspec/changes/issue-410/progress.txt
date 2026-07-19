@@ -462,3 +462,45 @@ on the fresh workspace.
 - T-005 closes the design-doc gap sections. The landed state matches the spec body; the gap sections are footnotes that no longer apply.
 - The web production source is now runtime-neutral for the milestone classifier; the doc updates can describe it as such.
 - The `acpSessionId` wire field is gone; the doc updates describe the converged wire (`runtimeSessionId` only, runtime discriminator `"opencode"`).
+
+## T-005: Close ACP gap sections in design docs and rename the ACP scenario in specs/workflow-agent
+
+### Codebase patterns observed
+- `design/agent-execution.md` and `design/runtimes/opencode.md` carried `## 实装差距` sections describing historical #407 / #409 / #410 work-in-progress. After T-001/T-003/T-004 land, every ACP-related gap item is resolved; only an unrelated gap (two-phase wrapup) stays open in `runtimes/opencode.md`.
+- `docs/actions/opencode.md` carried an `## 实装差距` section that described the Workflow-source Session commands as "currently still on the historical ACP path" — that text was no longer accurate after T-003 and was the only ACP-era wording in the consumer-facing docs.
+- `docs/agents.md` carried no ACP-era wording and no `实装差距` section; a `grep -nE 'ACP|acp|liveness|probeTimeout|sessionStartTimeout|acpSessionId' docs/agents.md` returns nothing, so the doc was already aligned with the converged state. T-005 confirms the alignment rather than editing it.
+- `specs/workflow-agent/spec.md` had a single scenario named `ACP agent receives workspace cwd` whose `WHEN` clause referenced "an ACP-backed task". The workspace-isolation invariant under it (cwd = workflow workspace path, prompt context does not leak project / repository local execution paths) is independent of the runtime identity, so the rename is a pure wording change.
+
+### Implementation notes
+- `design/agent-execution.md`: the entire `## 实装差距` section (lines 168–189) is removed. The body is the spec; no gap remains.
+- `design/runtimes/opencode.md`: the gap section is reduced to the two paragraphs that describe an open, non-ACP gap (two-phase wrapup) and a historical SDK-version note. The issue-407 / issue-409 / "issue-409 范围之外、当前仍未实装" paragraphs that described AgentJob ACP migration, `acpSessionId`, and the ACP Action deferral are removed.
+- `docs/actions/opencode.md`: the `## 实装差距` section is rewritten so that "Workflow and AgentJob" both use the OpenCode-driven path and the Workflow-source Session commands are no longer described as carried by an ACP path. The `issue-410 处理剩余的 AgentJob 路径清理` paragraph is folded into the new "both sources" sentence because T-004 closed it.
+- `specs/workflow-agent/spec.md`: the scenario is renamed to `Agent-backed task uses workflow workspace cwd` and the `WHEN` clause is updated to `an agent-backed task starts for a workflow run`. The `THEN` clauses are unchanged so the workspace-isolation invariant stays intact.
+
+### Gotchas / regressions watched for
+- `design/runtimes/opencode.md` still mentions `mohist/acp-agent`, `acpSessionId`, and ACP era wording in the **body** sections (e.g. the `## 决策` decision statement at line 9, the `## 回合执行` section's mention of "移除 ACP liveness probe 后" at line 180, the `## 完整替换` section at lines 346–363, and the `## 存量数据与配置的过渡行为` section at lines 365–379). These are spec content describing the converged / documented behavior — they are not gaps and are out of T-005's scope (the task closes gap **sections**, not all ACP-era wording).
+- `docs/actions/opencode.md` line 143 keeps the phrase "不再包含历史 ACP 身份字段" because it documents the converged state ("no longer contains the historical ACP-era identity fields") rather than describing ACP as the current behavior.
+- The design body text was not rewritten. Per AGENTS.md "正文是 spec，差距是脚注", the body is the spec and the gap sections are footnotes — closing the footnotes is the only edit.
+- `docs/agents.md` was not edited: a `grep -nE 'ACP|acp|liveness|probeTimeout|sessionStartTimeout|acpSessionId' docs/agents.md` finds zero matches. The consumer-facing doc already described the converged state (no ACP identity on Workflow-source sessions, no ACP liveness fields, model/variant only on the issue-level agentConfig is implied by the absence of any agentConfig wiring in the doc itself; agentConfig specifics live in the issue surface).
+
+### Verification
+- `npm run build` (root: dotnet + workspaces) ✅ 0 warnings, 0 errors. `Mohist.Cli`, `Mohist.Server`, `Mohist.Server.UnitTests`, `Mohist.Server.SpecTests`, `Mohist.Server.ArchTests`, `Mohist.Cli.Tests` all build; web `vite build` produces the dist bundle; runner `tsc -p tsconfig.json` succeeds and `write-build-info.ts` emits a `build-info.json`.
+- `npm test` (root: dotnet + workspaces) ✅:
+  - `Mohist.Server.UnitTests`: 1202 / 1202 passed
+  - `Mohist.Server.SpecTests`: 2849 / 2849 passed
+  - `Mohist.Server.ArchTests`: 30 / 30 passed
+  - `Mohist.Cli.Tests`: 1396 / 1396 passed
+  - `npm run test:ci -w packages/web`: 340 test files, 4738 / 4738 passed
+  - `npm run test:ci -w packages/runner`: 89 test files, 1131 / 1131 passed
+
+### Acceptance criteria check
+- `design/agent-execution.md` no longer carries an open gap section about AgentJob ACP migration ✅ (the entire `## 实装差距` section is removed; no remaining gap exists in this file)
+- `design/runtimes/opencode.md` no longer carries an open gap section about AgentJob ACP migration or the acpSessionId/ACP Action deferral ✅ (only the two-phase wrapup gap and the SDK-version historical note remain in the gap section; both are unrelated to ACP)
+- `docs/actions/opencode.md` no longer describes ACP-era behavior as the current state ✅ (the gap section now states that Workflow and AgentJob both use the OpenCode-driven path; the "currently still on the historical ACP path" wording is gone)
+- `docs/agents.md` no longer describes ACP-era behavior as the current state ✅ (already in the converged state; no ACP references anywhere in the file)
+- `specs/workflow-agent/spec.md` has no scenario whose name or body uses the terms 'ACP agent' or 'ACP-backed' ✅ (renamed to `Agent-backed task uses workflow workspace cwd`; the `WHEN` clause uses "agent-backed" only, no "ACP"; the workspace-isolation invariant under the renamed scenario is preserved verbatim)
+- `npm run build` (which treats warnings as errors) passes after the doc edits ✅
+
+### What completes after T-005
+- All #410 acceptance criteria are now met by the landed state plus the documentation close-out. The design bodies describe the spec, and the only remaining gap footnotes are unrelated (two-phase wrapup, SDK version note).
+- No further code or doc changes are required to land #410. The issue's product shape, domain model, and acceptance criteria are all satisfied.
