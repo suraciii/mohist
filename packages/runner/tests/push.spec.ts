@@ -86,6 +86,41 @@ describe("mohist/push", () => {
     expect(calls).toHaveLength(0)
   })
 
+  it("CheckpointPush_PublishesHeadToAuthoritativeWorkflowBranch", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse HEAD":
+          return ok("checkpoint-sha\n")
+        case "push --force origin HEAD:mo/issue-99":
+          return ok("To https://example.com/repo.git\n   checkpoint-sha  HEAD -> mo/issue-99")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({
+      source: "HEAD",
+      target: "mo/issue-99",
+      remote: "origin",
+      force: true,
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse HEAD",
+      "push --force origin HEAD:mo/issue-99",
+    ])
+    expect(output).toMatchObject({
+      source: "HEAD",
+      target: "mo/issue-99",
+      refspec: "HEAD:mo/issue-99",
+      landedCommit: "checkpoint-sha",
+      pushed: true,
+    })
+  })
+
   it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")

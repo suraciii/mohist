@@ -19,6 +19,39 @@ export function resolveDeliveryBaseBranch(context: ActionContext, inputName = "t
     ?? "main"
 }
 
+export function resolvePushTarget(context: ActionContext): string | null {
+  const explicit = stringInput(context.with, "target")
+  if (!hasAuthoritativeIssueRepository(context)) {
+    return explicit ?? resolveDeliveryBaseBranch(context)
+  }
+
+  const baseBranch = stringAt(context.variables, ["repository", "baseBranch"])
+  const workflowBranch = stringAt(context.variables, ["workspace", "branch"])
+  const target = explicit ?? baseBranch
+  return target && (target === baseBranch || target === workflowBranch) ? target : null
+}
+
+export function resolvePushSource(context: ActionContext, target: string): string | null {
+  if (!hasAuthoritativeIssueRepository(context)) return resolveDeliverySource(context)
+
+  const explicit = stringInput(context.with, "source")
+  const baseBranch = stringAt(context.variables, ["repository", "baseBranch"])
+  const workflowBranch = stringAt(context.variables, ["workspace", "branch"])
+  if (!workflowBranch) return null
+
+  if (target === workflowBranch) {
+    const source = explicit ?? workflowBranch
+    return source === "HEAD" || source === workflowBranch ? source : null
+  }
+
+  if (target === baseBranch) {
+    const source = explicit ?? workflowBranch
+    return source === workflowBranch ? source : null
+  }
+
+  return null
+}
+
 export function isIssueBacked(context: ActionContext): boolean {
   return context.issueNumber !== undefined || numberAt(context.variables, ["issue", "number"]) !== undefined
 }
