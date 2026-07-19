@@ -163,6 +163,7 @@ describe('IssueDetailPage composite parent overview', () => {
     expect(screen.getByTestId('edit-issue-button')).toBeTruthy()
     expect(screen.getByTestId('repository-metadata-row')).toBeTruthy()
     expect(screen.getByTestId('repository-name')).toHaveTextContent('master')
+    expect(screen.queryByText('Workflow Stage')).toBeNull()
 
     expect(await waitFor(() => screen.getByTestId('composite-parent-overview'))).toBeTruthy()
   })

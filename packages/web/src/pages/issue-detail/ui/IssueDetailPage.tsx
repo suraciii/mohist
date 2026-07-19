@@ -535,7 +535,10 @@ export function IssueDetailPage({
                 forceCollapsed={isNarrowViewport}
                 summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
               >
-                <IssueDetailsCard issue={issue} unframed />
+                <IssueDetailsCard
+                  issue={isCompositeParent ? { ...issue, workflowStage: null } : issue}
+                  unframed
+                />
               </CollapsibleRailCard>
 
               {!isCompositeParent && (
