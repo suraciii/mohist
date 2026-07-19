@@ -25,8 +25,8 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
 
         var approval = await Manager.LoadApprovalConfigAsync(runId);
 
-        Assert.NotNull(approval?.Feedback?.Task);
-        Assert.Equal("apply-feedback", approval!.Feedback!.Task!.Id);
+        var task = Assert.Single(approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
     }
 
     [Fact]
@@ -34,11 +34,11 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
     {
         var runId = "wr_approval_defined";
         var feedbackConfig = new ApprovalFeedbackConfig(
-            Task: new TaskDefinition(
+            Tasks: [new TaskDefinition(
                 Id: "apply-feedback",
                 Title: "Apply Feedback",
                 Uses: "spec/task",
-                With: null));
+                With: null)]);
         var approval = new ApprovalConfig(Feedback: feedbackConfig);
         var def = new WorkflowDefinition("approval-template",
             new List<StageDefinition>
@@ -60,9 +60,9 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
 
         Assert.NotNull(loaded);
         Assert.NotNull(loaded!.Feedback);
-        Assert.NotNull(loaded.Feedback!.Task);
-        Assert.Equal("apply-feedback", loaded.Feedback.Task!.Id);
-        Assert.Equal("spec/task", loaded.Feedback.Task.Uses);
+        var task = Assert.Single(loaded.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
+        Assert.Equal("spec/task", task.Uses);
     }
 
     [Fact]

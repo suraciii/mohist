@@ -250,12 +250,9 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         EnsureRun();
         var stage = _run.CurrentStage();
         var approval = await _profileManager.LoadApprovalConfigAsync(GrainKey);
-        var config = approval?.Feedback?.Task;
-        var feedbackTask = config is null
-            ? WorkflowRunExtensions.BuildDefaultFeedbackTask(stage.Id)
-            : WorkflowRunExtensions.ResolveFeedbackTask(config, stage.Id);
+        var feedbackTasks = WorkflowRunExtensions.ResolveFeedbackTasks(approval?.Feedback?.Tasks, stage.Id);
         var feedbackId = CreateFeedbackId();
-        var events = _run.RequestChanges(body, feedbackId, Now(), feedbackTask);
+        var events = _run.RequestChanges(body, feedbackId, Now(), feedbackTasks);
         _log.LogInformation("Workflow {Id} requested changes at stage={Stage}: feedback={FeedbackId}", GrainKey, stage.Id, feedbackId);
         await CommitAsync(events);
         return feedbackId;

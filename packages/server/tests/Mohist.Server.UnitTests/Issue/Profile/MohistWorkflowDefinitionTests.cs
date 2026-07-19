@@ -426,9 +426,8 @@ public class MohistWorkflowDefinitionTests
 
         Assert.NotNull(definition.Approval);
         Assert.NotNull(definition.Approval!.Feedback);
-        var task = definition.Approval!.Feedback!.Task;
-        Assert.NotNull(task);
-        Assert.Equal("apply-feedback", task!.Id);
+        var task = Assert.Single(definition.Approval!.Feedback!.Tasks!);
+        Assert.Equal("apply-feedback", task.Id);
         Assert.Equal("Apply approval feedback", task.Title);
         Assert.Equal("mohist/opencode", task.Uses);
         Assert.NotNull(task.With);

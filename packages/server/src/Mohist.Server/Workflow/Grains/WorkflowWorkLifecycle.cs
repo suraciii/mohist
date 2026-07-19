@@ -41,6 +41,9 @@ internal sealed class WorkflowWorkLifecycle
         {
             if (currentTask is not null)
                 currentTask.Output = ParseOutputToJsonElement(report.Output);
+            var hasFollowUpTasks = taskAttempts.Count > 0;
+            events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
+
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
                 var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
@@ -51,8 +54,6 @@ internal sealed class WorkflowWorkLifecycle
                         _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
-            var hasFollowUpTasks = taskAttempts.Count > 0;
-            events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
 
             if (hasFollowUpTasks)
             {

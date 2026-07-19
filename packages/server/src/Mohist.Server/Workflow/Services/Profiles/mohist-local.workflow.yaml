@@ -9,14 +9,14 @@ variables:
 
 approval:
   feedback:
-    task:
-      id: apply-feedback
-      title: Apply approval feedback
-      uses: mohist/opencode
-      with:
-        session: ${{ stage.name }}
-        prompt: ${{ prompts.apply-feedback }}
-        options: ${{ vars.agent }}
+    tasks:
+      - id: apply-feedback
+        title: Apply approval feedback
+        uses: mohist/opencode
+        with:
+          session: ${{ stage.name }}
+          prompt: ${{ prompts.apply-feedback }}
+          options: ${{ vars.agent }}
 
 stages:
   - stage: plan

@@ -45,7 +45,7 @@ public sealed record StageDefinition(
     string? LockBehavior = null,
     List<string>? Resources = null);
 
-public sealed record ApprovalFeedbackConfig(TaskDefinition? Task = null);
+public sealed record ApprovalFeedbackConfig(IReadOnlyList<TaskDefinition>? Tasks = null);
 
 public sealed record ApprovalConfig(ApprovalFeedbackConfig? Feedback = null);
 

@@ -65,7 +65,9 @@ public static partial class WorkflowRunExtensions
 
     extension(WorkflowRun)
     {
-        public static TaskDefinition BuildDefaultFeedbackTask(string stage)
+        public static IReadOnlyList<TaskDefinition> BuildDefaultFeedbackTasks(string stage) => [BuildDefaultFeedbackTask(stage)];
+
+        private static TaskDefinition BuildDefaultFeedbackTask(string stage)
         {
             var withInput = new Dictionary<string, JsonElement?>
             {
@@ -80,11 +82,19 @@ public static partial class WorkflowRunExtensions
                 With: withInput);
         }
 
-        public static TaskDefinition ResolveFeedbackTask(TaskDefinition? config, string stage)
+        public static IReadOnlyList<TaskDefinition> ResolveFeedbackTasks(IReadOnlyList<TaskDefinition>? configs, string stage)
         {
-            if (config is null)
-                return BuildDefaultFeedbackTask(stage);
+            if (configs is null || configs.Count == 0)
+                return BuildDefaultFeedbackTasks(stage);
 
+            return configs.Select(config => NormalizeFeedbackTask(config, stage)).ToList();
+        }
+
+        private static TaskDefinition NormalizeFeedbackTask(TaskDefinition config, string stage)
+        {
+            if (!string.Equals(config.Uses, "mohist/opencode", StringComparison.Ordinal)
+                && !string.Equals(config.Uses, "mohist/acp-agent", StringComparison.Ordinal))
+                return config;
             var with = config.With;
             if (with is null || !with.ContainsKey("session"))
             {
@@ -152,7 +162,7 @@ public static partial class WorkflowRunExtensions
             string body,
             string feedbackId,
             DateTimeOffset now,
-            TaskDefinition? feedbackTask = null)
+            IReadOnlyList<TaskDefinition>? feedbackTasks = null)
         {
             if (string.IsNullOrWhiteSpace(body))
                 throw new ArgumentException("Feedback body is required", nameof(body));
@@ -174,12 +184,14 @@ public static partial class WorkflowRunExtensions
 
             run.Feedback.Add(feedback);
 
-            var resolvedTask = feedbackTask ?? WorkflowRunExtensions.BuildDefaultFeedbackTask(current.Id);
+            var resolvedTasks = feedbackTasks ?? WorkflowRunExtensions.BuildDefaultFeedbackTasks(current.Id);
+            if (resolvedTasks.Count == 0)
+                throw new ArgumentException("Feedback requires at least one task", nameof(feedbackTasks));
 
             var events = new List<WorkflowEvent>();
 
-            var runtimeEvents = run.AddRuntimeTask(
-                resolvedTask,
+            var runtimeEvents = run.AddRuntimeTasks(
+                resolvedTasks,
                 now,
                 stage: current.Id,
                 invalidateChecks: true,
@@ -196,12 +208,24 @@ public static partial class WorkflowRunExtensions
             if (feedback is null) return null;
             if (feedback.Status == ApprovalFeedbackStatus.Resolved) return feedback;
 
+            var feedbackTasks = run.CurrentStage().Tasks
+                .Where(task => task.CausedByFeedbackId == feedbackId)
+                .ToList();
+            if (feedbackTasks.Count == 0 || feedbackTasks.Any(task => task.Status != TaskRunStatus.Completed))
+                return null;
+
+            var summary = feedbackTasks
+                .Select(task => task.Output)
+                .FirstOrDefault(value => value is { ValueKind: JsonValueKind.String })
+                ?.GetString()
+                ?? output;
+
             var resolved = feedback with
             {
                 Status = ApprovalFeedbackStatus.Resolved,
                 ResolutionTaskId = taskId,
                 ResolvedAt = now,
-                ResolutionSummary = ExtractResolutionSummary(output),
+                ResolutionSummary = ExtractResolutionSummary(summary),
             };
 
             var idx = run.Feedback.FindIndex(f => f.Id == feedbackId);
