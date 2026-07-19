@@ -512,9 +512,7 @@ export class RunnerHost {
       // readiness diagnostic — but it still drains `awaitingAck`
       // reports (the line above) and respects the existing poll
       // cadence so a recovered runtime resumes claiming on the next
-      // tick. One gate covers both Workflow and AgentJob work; the
-      // AgentJob path now drives the same `OpenCodeRuntime` directly
-      // (#410 T-001) so the transitional caveat is gone.
+      // tick.
       if (!this.isOpenCodeReadyForClaim()) {
         const diagnostic = this.openCodeReadinessDiagnostic()
         const now = Date.now()

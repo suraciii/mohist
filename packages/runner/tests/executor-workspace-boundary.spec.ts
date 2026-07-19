@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ActionRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
-import { WorkExecutor } from "../src/runtime/executor.js"
+import { WorkExecutor, baseContext } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
@@ -86,6 +86,29 @@ describe("workspace preparation across stages", () => {
     )
     expect(result.status).toBe("failed")
     expect(result.message).toContain("workspace preparation timed out")
+  })
+})
+
+describe("execution context runtime wiring", () => {
+  it("passes the OpenCode runtime to AgentJob contexts", () => {
+    const runtime = fakeRuntime()
+    const context = baseContext(
+      {
+        workflowRunId: "",
+        workId: "agent-work",
+        workType: "task",
+        ownerKind: "agent-job",
+      },
+      {},
+      new AbortController().signal,
+      {} as never,
+      null,
+      {} as never,
+      null,
+      runtime,
+    )
+
+    expect(context.openCodeRuntime).toBe(runtime)
   })
 })
 

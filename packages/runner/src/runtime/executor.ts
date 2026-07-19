@@ -380,7 +380,7 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
 }
 
-function baseContext(
+export function baseContext(
   work: RenderedWorkItem,
   variables: JsonObject,
   signal: AbortSignal,

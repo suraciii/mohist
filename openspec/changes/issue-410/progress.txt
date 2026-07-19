@@ -267,3 +267,19 @@ This rerun was triggered to:
   `workspaces/server/...` instead of `workspaces/issue-410/server/...`;
   external-process-guard's spawn-opencode assertion fails because
   `opencode` is not on the path of the CI runner.
+
+## T-001 completion pass
+
+- Removed the stale transitional readiness-gate caveat from `runtime/host.ts`.
+- `AgentJobExecutor.execute` now exposes the Agent-owned result as an
+  `ActionResult`, while retaining the `WorkItemResult`-compatible status and
+  legacy output envelope consumed by the AgentJob report path.
+- Added a runner regression assertion that `baseContext` preserves the
+  OpenCode runtime handle for `agent-job` owner kinds.
+- Extended the server dispatch-envelope regression with the launch-time
+  variant and confirmed it remains a flat sibling field beside prompt,
+  instructions, and model.
+- Targeted Runner typecheck, test typecheck, AgentJob executor/host/workspace
+  tests, and Server AgentJob/Launcher specs passed after the completion pass.
+- Final `npm test` passed: Server/CLI 5477 tests, Web 4738 tests, and
+  Runner 1167 tests. `npm run build` also completed successfully.

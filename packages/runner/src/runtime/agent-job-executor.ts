@@ -3,7 +3,6 @@ import type {
   ActionResult,
   JsonObject,
   RenderedWorkItem,
-  WorkItemResult,
 } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { parseModelIdentifier } from "./opencode/index.js"
@@ -43,7 +42,7 @@ export class AgentJobExecutor {
     private readonly runtime: OpenCodeRuntime | null,
   ) {}
 
-  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<ActionResult> {
     if (work.ownerKind !== "agent-job") {
       return failureResult(work, `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? "null"})`)
     }
@@ -246,7 +245,7 @@ function collectUnknownKeys(payload: JsonObject | null): readonly string[] | und
   return unknown.length > 0 ? unknown : undefined
 }
 
-function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {
+function failureResult(work: RenderedWorkItem, message: string): ActionResult {
   return {
     status: "failed",
     message,

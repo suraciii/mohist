@@ -9,24 +9,6 @@ import {
   installReadyOpenCodeRuntimeFactory,
 } from "./support/opencode-runtime-factory.js"
 
-// Wire-level coverage for the OpenCodeRuntime lifecycle the runner host
-// owns in T-003:
-//   - connectRunner/initializeSharedConnection start the OpenCode
-//     server + client and load the catalog via the runtime; the
-//     RunnerRegistration reports `coderModels`/`coderModelVariants`
-//     sourced from the runtime (no CLI discovery).
-//   - pollOnce is skipped while runtime.ready() is false; awaitingAck
-//     reports still drain.
-//   - On a simulated server exit the runner stops claiming,
-//     in-flight Workflow turns fail without auto-replay, and
-//     claiming resumes only after health + catalog re-pass.
-//   - The transitional AgentJob readiness gate is honoured —
-//     AgentJob work, still on ACP until #410, is also paused when
-//     the OpenCode runtime is not ready (one shared gate per design
-//     D3).
-//   - The runtime handle reaches ActionContext for Workflow work;
-//     the AgentJob path still receives the ACP connection.
-
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
 
