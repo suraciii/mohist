@@ -54,11 +54,11 @@ function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
 }
 
 const issues = [
-  makeIssue(101, { status: 'backlog', title: 'Backlog board item' }),
-  makeIssue(102, { status: 'in_progress', workflowStage: 'build', title: 'In progress board item' }),
-  makeIssue(103, { status: 'done', workflowStage: 'done', workflowStatus: 'completed', health: 'done', title: 'Done board item' }),
-  makeIssue(104, { status: 'cancelled', workflowStage: null, workflowStatus: null, health: 'cancelled', title: 'Cancelled board item' }),
-  makeIssue(105, { status: 'backlog', health: 'interrupted', title: 'Mobile rerun board item' }),
+  makeIssue(101, { status: 'backlog', title: 'Backlog board item', repositoryName: 'web' }),
+  makeIssue(102, { status: 'in_progress', workflowStage: 'build', title: 'In progress board item', repositoryName: 'web' }),
+  makeIssue(103, { status: 'done', workflowStage: 'done', workflowStatus: 'completed', health: 'done', title: 'Done board item', repositoryName: 'server' }),
+  makeIssue(104, { status: 'cancelled', workflowStage: null, workflowStatus: null, health: 'cancelled', title: 'Cancelled board item', repositoryName: 'server' }),
+  makeIssue(105, { status: 'backlog', health: 'interrupted', title: 'Mobile rerun board item', repositoryName: 'web' }),
 ]
 
 async function mockIssueBoardApi(page: Page) {
@@ -92,9 +92,12 @@ async function mockIssueBoardApi(page: Page) {
 }
 
 async function box(locator: Locator) {
-  const value = await locator.boundingBox()
+  const value = await locator.evaluate((node) => {
+    const r = (node as HTMLElement).getBoundingClientRect()
+    return { x: r.x, y: r.y, width: r.width, height: r.height }
+  })
   expect(value).not.toBeNull()
-  return value!
+  return value
 }
 
 function boxesOverlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
@@ -192,5 +195,70 @@ test.describe('Issue board browser layout', () => {
     expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport!.width)
     expect(actionBox.x).toBeGreaterThanOrEqual(cardBox.x)
     expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width)
+  })
+
+  test('renders the repository filter alongside the existing desktop filter bar without overlap at desktop viewports', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await mockIssueBoardApi(page)
+    await page.goto(`/${project.name}/issues`)
+
+    const filterBar = page.locator('.hidden.md\\:flex.flex-wrap').first()
+    const repoFilter = filterBar.getByTestId('repository-filter')
+    const search = filterBar.getByTestId('search-input')
+    const priority = filterBar.getByTestId('priority-chip-p0')
+    const sort = filterBar.getByTestId('sort-priority')
+
+    await expect(repoFilter).toBeVisible()
+    await expect(search).toBeVisible()
+    await expect(priority).toBeVisible()
+    await expect(sort).toBeVisible()
+
+    const filterBarBox = await box(filterBar)
+    const repoFilterBox = await box(repoFilter)
+    const searchBox = await box(search)
+    const priorityBox = await box(priority)
+    const sortBox = await box(sort)
+
+    expect(repoFilterBox.y).toBeGreaterThanOrEqual(filterBarBox.y)
+    expect(repoFilterBox.y + repoFilterBox.height).toBeLessThanOrEqual(filterBarBox.y + filterBarBox.height)
+    expect(repoFilterBox.x).toBeGreaterThanOrEqual(filterBarBox.x)
+    expect(repoFilterBox.x + repoFilterBox.width).toBeLessThanOrEqual(filterBarBox.x + filterBarBox.width)
+    expect(searchBox.x).toBeGreaterThanOrEqual(filterBarBox.x)
+    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(filterBarBox.x + filterBarBox.width)
+    expect(priorityBox.x).toBeGreaterThanOrEqual(filterBarBox.x)
+    expect(priorityBox.x + priorityBox.width).toBeLessThanOrEqual(filterBarBox.x + filterBarBox.width)
+    expect(sortBox.x).toBeGreaterThanOrEqual(filterBarBox.x)
+    expect(sortBox.x + sortBox.width).toBeLessThanOrEqual(filterBarBox.x + filterBarBox.width)
+  })
+
+  test('renders the repository filter inside the mobile filter panel without overlap at mobile viewports', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 820 })
+    await mockIssueBoardApi(page)
+    await page.goto(`/${project.name}/issues`)
+
+    await page.getByTestId('mobile-filter-toggle').click()
+    const panel = page.getByTestId('mobile-filter-panel')
+    const repoFilter = page.locator('[data-testid="mobile-repository-filter"]')
+    const sort = panel.getByTestId('sort-priority')
+    const search = page.getByTestId('search-input').first()
+
+    await expect(repoFilter).toBeVisible()
+    await expect(sort).toBeVisible()
+
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    const panelBox = await box(panel)
+    const repoFilterBox = await box(repoFilter)
+    const sortBox = await box(sort)
+    const searchBox = await box(search)
+
+    expect(panelBox.x).toBeGreaterThanOrEqual(0)
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport!.width)
+    expect(repoFilterBox.x).toBeGreaterThanOrEqual(panelBox.x)
+    expect(repoFilterBox.x + repoFilterBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width)
+    expect(sortBox.x).toBeGreaterThanOrEqual(panelBox.x)
+    expect(sortBox.x + sortBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width)
+    expect(boxesOverlap(repoFilterBox, sortBox)).toBe(false)
+    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(viewport!.width)
   })
 })

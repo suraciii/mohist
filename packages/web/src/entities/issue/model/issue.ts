@@ -75,6 +75,15 @@ export interface ChildIssuesSummary {
   inProgressCount: number
   doneCount: number
   cancelledCount: number
+  blockedCount: number
+}
+
+export interface IssueChildRef {
+  number: number
+  title: string
+  status: IssueStatus
+  health: IssueHealth
+  repositoryName: string | null
 }
 
 export type IssueStartBlocker =
@@ -129,6 +138,8 @@ export interface Issue {
   primaryEpic?: { number: number | null; title: string; status: string; priority: string } | null
   parentIssueRef?: IssueParentRef | null
   childIssuesSummary?: ChildIssuesSummary | null
+  children?: IssueChildRef[]
+  repositoryName?: string | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
   feedback?: ApprovalFeedback[] | null

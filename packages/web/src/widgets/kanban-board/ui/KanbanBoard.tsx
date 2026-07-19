@@ -20,6 +20,7 @@ import {
   parseBoardQuery,
   deriveBoardColumns,
   serializeBoardQuery,
+  deriveRepositoryOptions,
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
@@ -176,16 +177,79 @@ function SortToggle({
   )
 }
 
+function RepositoryFilter({
+  repositories,
+  selected,
+  onChange,
+  showLabel = false,
+  dataTestId = 'repository-filter',
+}: {
+  repositories: string[]
+  selected: string | null
+  onChange: (next: string | null) => void
+  showLabel?: boolean
+  dataTestId?: string
+}) {
+  if (repositories.length === 0 && !selected) return null
+  const value = selected ?? ''
+  const hasUnknown = !!selected && !repositories.includes(selected)
+  return (
+    <div className="flex items-center gap-1">
+      {showLabel && (
+        <span className="text-[11px] text-muted-foreground font-medium mr-1">
+          Repository:
+        </span>
+      )}
+      <select
+        aria-label="Repository"
+        data-testid={dataTestId}
+        data-active={value ? 'true' : 'false'}
+        data-unknown={hasUnknown ? 'true' : 'false'}
+        value={value}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+        className={`h-7 rounded-md border border-input bg-background px-2 text-xs font-medium ${
+          value
+            ? 'text-blue-700 ring-1 ring-blue-200'
+            : 'text-muted-foreground'
+        }`}
+      >
+        <option value="">All repositories</option>
+        {repositories.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+        {hasUnknown && selected && (
+          <option value={selected}>{`${selected} (unknown)`}</option>
+        )}
+      </select>
+      {value && (
+        <Button
+          variant="link"
+          size="xs"
+          data-testid={`${dataTestId}-clear`}
+          onClick={() => onChange(null)}
+          className="h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
+        >
+          Clear
+        </Button>
+      )}
+    </div>
+  )
+}
+
 function FilterBar({
   state,
   onChange,
   allLabels,
+  repositories,
   sort,
   onSortChange,
 }: {
   state: BoardQueryState
   onChange: (state: BoardQueryState) => void
   allLabels: Array<{ key: string; value: string }>
+  repositories: string[]
   sort: SortMode
   onSortChange: (s: SortMode) => void
 }) {
@@ -224,6 +288,11 @@ function FilterBar({
 
   const hasActiveFilters = state.priorities.length > 0 || state.labels.length > 0
   const activeFilterCount = state.priorities.length + state.labels.length
+
+  const setRepository = useCallback(
+    (next: string | null) => onChange({ ...state, repository: next }),
+    [state, onChange],
+  )
 
   const labelPopover = (
     <Popover>
@@ -303,6 +372,11 @@ function FilterBar({
           onClear={() => onChange({ ...state, priorities: [] })}
         />
         {allLabels.length > 0 && labelPopover}
+        <RepositoryFilter
+          repositories={repositories}
+          selected={state.repository}
+          onChange={setRepository}
+        />
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
           <Input
@@ -379,6 +453,15 @@ function FilterBar({
                   Clear filters
                 </Button>
               )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <RepositoryFilter
+                repositories={repositories}
+                selected={state.repository}
+                onChange={setRepository}
+                showLabel
+                dataTestId="mobile-repository-filter"
+              />
             </div>
             <div className="flex items-center gap-1 border-t pt-2">
               <SortToggle sort={sort} onChange={onSortChange} showLabel />
@@ -498,6 +581,7 @@ export function KanbanBoard({
   runnerSummaryHook = useRunnerSummary,
 }: Props) {
   const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
+  const repositoryOptions = useMemo(() => deriveRepositoryOptions(issues), [issues])
 
   const queryState = useMemo(() => parseBoardQuery(getSearchParams()), [])
 
@@ -577,6 +661,7 @@ export function KanbanBoard({
         state={localState}
         onChange={updateState}
         allLabels={allLabels}
+        repositories={repositoryOptions}
         sort={localState.sort}
         onSortChange={(s) => updateState({ ...localState, sort: s })}
       />

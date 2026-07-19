@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArchiveIcon } from 'lucide-react'
+import { ArchiveIcon, AlertTriangleIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
@@ -52,6 +52,24 @@ function getStageLabel(issue: Issue): string | null {
   const stage = issue.workflowStage
   if (!stage) return null
   return WORKFLOW_STAGE_LABELS[stage] ?? null
+}
+
+function getIssueRepositoryName(issue: Issue): string | null {
+  const resolved = issue.repository?.name
+  if (resolved && resolved.length > 0) return resolved
+  const persisted = issue.repositoryName
+  if (persisted && persisted.length > 0) return persisted
+  return null
+}
+
+function getChildProgress(issue: Issue): { done: number; total: number } | null {
+  const summary = issue.childIssuesSummary
+  if (!summary || summary.count <= 0) return null
+  return { done: summary.doneCount, total: summary.count }
+}
+
+function getBlockedChildCount(issue: Issue): number {
+  return issue.childIssuesSummary?.blockedCount ?? 0
 }
 
 function getProgressLabel(progress?: WorkflowStageProgress | null): string | null {
@@ -242,6 +260,54 @@ function WorkflowStageProgressIndicator({
   )
 }
 
+function RepositoryChip({ name }: { name: string }) {
+  return (
+    <span
+      data-testid="issue-card-repository"
+      data-repository={name}
+      className="inline-flex items-center rounded-md bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+      title={`Target repository: ${name}`}
+    >
+      {name}
+    </span>
+  )
+}
+
+function ParentProgressBadge({ done, total }: { done: number; total: number }) {
+  const allDone = done >= total && total > 0
+  return (
+    <span
+      data-testid="parent-progress-badge"
+      data-done={done}
+      data-total={total}
+      data-completed={allDone ? 'true' : 'false'}
+      className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+        allDone
+          ? 'bg-emerald-100 text-emerald-800'
+          : 'bg-violet-100 text-violet-800'
+      }`}
+      title={`${done} of ${total} children done`}
+    >
+      {done}/{total} done
+    </span>
+  )
+}
+
+function BlockedChildrenIndicator({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span
+      data-testid="blocked-children-indicator"
+      data-blocked-count={count}
+      className="inline-flex items-center gap-1 rounded-md bg-red-100 text-red-800 px-1.5 py-0.5 text-[10px] font-semibold"
+      title={`${count} child ${count === 1 ? 'issue is' : 'issues are'} blocked`}
+    >
+      <AlertTriangleIcon className="size-3" aria-hidden="true" />
+      {count} blocked
+    </span>
+  )
+}
+
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -295,6 +361,10 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
       : ''
   const stageLabel = getStageLabel(issue)
   const progressLabel = getProgressLabel(issue.workflowStageProgress)
+  const repositoryName = getIssueRepositoryName(issue)
+  const parentProgress = getChildProgress(issue)
+  const blockedChildCount = getBlockedChildCount(issue)
+  const hasParentMetadata = parentProgress !== null || blockedChildCount > 0
 
   return (
     <Link
@@ -379,6 +449,19 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         >
           {issue.title}
         </h3>
+
+        {(repositoryName || hasParentMetadata) && (
+          <div
+            data-testid="issue-card-metadata-row"
+            className="mt-2 flex items-center gap-1 flex-wrap"
+          >
+            {repositoryName && <RepositoryChip name={repositoryName} />}
+            {parentProgress && (
+              <ParentProgressBadge done={parentProgress.done} total={parentProgress.total} />
+            )}
+            <BlockedChildrenIndicator count={blockedChildCount} />
+          </div>
+        )}
 
         {sortedLabels.length > 0 && (
           <div className="mt-2 flex items-center gap-1 flex-nowrap overflow-hidden">

@@ -39,3 +39,45 @@
 
 - `dotnet test Mohist.sln -p:SkipWebBuild=true`: 5462 tests pass (1384 Cli + 1215 Server.Unit + 30 Server.Arch + 2833 Server.Spec).
 - `npm test`: server + 4876 web + 1192 runner tests all pass.
+
+## T-002: Repository-aware composite issue cards and board filtering
+
+### Decisions
+
+- Extended `Web.Issue` with `repositoryName?: string | null` and `children?: IssueChildRef[]`; `ChildIssuesSummary` gains `blockedCount: number`. These fields arrive additively from the server JSON envelope (server `IssueReadModel.Children` + `ChildIssuesSummary.BlockedCount`); no Web API transform is needed because `request<Issue>` already trusts the server payload shape.
+- `BoardQueryState` adds a nullable `repository` field. `parseBoardQuery` reads the `repository` URL parameter, preserving unknown values verbatim (so they keep filtering to no matches and the user can still clear). `serializeBoardQuery` omits the parameter when `null` and emits `repository=<name>` otherwise. Round-trips cleanly with priority/labels/search/sort.
+- New `deriveRepositoryOptions(issues)` derives the dropdown options from the existing issue set using `issueRepositoryName(issue)`. This avoids a separate project-repositories fetch and guarantees the filter dropdown never offers a name the user cannot clear against — even on a single-repository project.
+- `issueRepositoryName(issue)` prefers `issue.repository?.name` (resolved `RepositoryInfo`) and falls back to `issue.repositoryName` (persisted) so cards and the filter keep working when only the persisted assignment is available (e.g. orphaned repository name).
+- `applyBoardFilters` compares exact persisted repository names. The filter applies in the same pipeline as priority/labels/search so cancelled visibility, archive controls, and sort continue to compose.
+- `KanbanBoard` exposes a new `RepositoryFilter` selector in both the desktop flex-wrap row and the mobile filter panel behind the existing disclosure. The Clear button removes only the repository filter; priority/labels/search/sort remain. When the URL carries an unknown repository name, the dropdown renders a synthetic `{name} (unknown)` option (so the user sees what's filtering) and the Clear button stays available — never silently falling back to "All repositories".
+- `IssueCard` renders a compact repository chip plus, for parents, a `X/Y done` composite progress badge and an independent blocked-child attention indicator. These live in a new `issue-card-metadata-row` between the title and labels, keeping the existing six-dimension top row untouched. The blocked indicator renders `N blocked` whenever `childIssuesSummary.blockedCount > 0` — independent of the parent's own health, and hidden at zero. Cancelled children stay in the denominator (`Y`) without incrementing done.
+- Repository availability is derived, not fetched: a single-repository project still shows the chip on every card but the filter does not demand a choice.
+
+### Gotchas
+
+- The existing `kanban-board-filter-reachability.test.tsx` test asserted an exact list of testids in the desktop bar — extended it to include `repository-filter` and seeded `repositoryName` on its makeIssue fixtures so the filter actually renders.
+- `IssueCard.test.tsx` was already near the 629-line file-size budget; the new repository + composite tests live in a new sibling `IssueCard.repository-and-composite.test.tsx` so the existing file stays within budget without splitting legacy suites.
+- Playwright's `Locator.boundingBox()` returned `null` for the mobile-scoped `panel.getByTestId('mobile-repository-filter')` even though `expect(...).toBeVisible()` and the actual `getBoundingClientRect()` were non-null. Switching the test to a page-rooted locator (`page.locator('[data-testid="mobile-repository-filter"]')`) and reading the rect via `evaluate(...getBoundingClientRect())` made the assertions reliable; the underlying element was always laid out correctly.
+- Browser fixture was extended to set `repositoryName` on every makeIssue so the repository dropdown actually has options to show in the new layout tests.
+- `deriveRepositoryOptions` intentionally returns `[]` (not throws) when the issue list is empty — `RepositoryFilter` short-circuits to `null` in that case so empty projects render without a stale empty selector.
+- T-003 (parent detail rendering) deliberately does NOT touch this card layer; `isCompositeParent` and the navigation surface are derived from the same server projection but live in the detail page slice.
+
+### Files Touched
+
+- `packages/web/src/entities/issue/model/issue.ts` — additive `IssueChildRef`, `Issue.children`, `Issue.repositoryName`, `ChildIssuesSummary.blockedCount`.
+- `packages/web/src/widgets/kanban-board/model/board-query.ts` — `BoardQueryState.repository`, parse/serialize for `repository`, `issueRepositoryName`, `deriveRepositoryOptions`, `applyBoardFilters` repository step.
+- `packages/web/src/widgets/kanban-board/ui/KanbanBoard.tsx` — `RepositoryFilter` (desktop + mobile variants), `FilterBar` accepts `repositories`, board derives `repositoryOptions` from issues.
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx` — `getIssueRepositoryName`, `getChildProgress`, `getBlockedChildCount`, `RepositoryChip`, `ParentProgressBadge`, `BlockedChildrenIndicator`, `issue-card-metadata-row`.
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.test.tsx` — updated fixture's `repositoryName` only where the repository-filter reachability assertion requires it (existing tests unchanged otherwise).
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.repository-and-composite.test.tsx` (new) — 14 specs covering repository chip resolution / fallback, parent progress / cancelled math / completion state, independent blocked-child indicator, metadata-row grouping.
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-query.pure.test.tsx` — added `repository` field to every state literal, 11 new specs (parse repository, parse unknown, parse alongside priority/label/search/sort, serialize with/without repository, round-trip, filter by resolved name, filter by persisted name, unknown → empty, composition with priority/label/search, clearing preserves others).
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-repository-filter.test.tsx` (new) — 15 specs covering desktop/mobile reachability, exact-name column filtering, URL write/restore, popstate, unknown filter + clear, filter composition with priority, archive-controls preserved under filter, cancelled-stub independence, single-repository projects.
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-filter-reachability.test.tsx` — updated fixture to seed `repositoryName` and added `repository-filter` to the desktop reachability assertion.
+- `packages/web/tests/browser/issue-board-layout.spec.ts` — fixture seeds `repositoryName`, two new tests: desktop repository-filter reaches alongside the existing filter bar; mobile repository-filter reaches inside the mobile panel.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:ci -w packages/web`: 4918 tests pass (357 files); FSD + node test boundary checks clean.
+- `npm test`: server + web + runner suites all green (no regressions).
+- `npm run test:browser -w packages/web -- --grep "issue board"`: 4/4 issue-board browser layout tests pass (including two new repository-filter layout tests at desktop and mobile viewports).
