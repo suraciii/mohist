@@ -18,38 +18,28 @@ The `Cancel session` action SHALL NOT be rendered as the highest visual weight e
 - **AND** SHALL expose an accessible name (for example `aria-label="Cancel session"`)
 - **AND** activating it SHALL open the existing cancel confirmation dialog and SHALL call the cancel mutation
 
-### Requirement: Disabled Compact / Reset actions expose a structured disabled reason
+### Requirement: Disabled Compact / Reset actions render a structured tooltip explaining the running-session block
 
-When the `Compact` or `Reset` action in `SessionRecoveryActions` is disabled, the disabled button SHALL expose a stable `data-disabled-reason` attribute identifying why the action is unavailable. The reason SHALL be drawn from a fixed closed set: `"active"` (session is currently running or otherwise not in a finished state), `"prereq"` (the session state does not meet a prerequisite the action requires), and `"unknown"` (the session status could not be confirmed and the action is temporarily unavailable). A parent tooltip affordance SHALL render a structured explanation (a title plus a longer reason line) on hover or focus, derived from that attribute, so users learn why the action is unavailable rather than seeing only a brief browser tooltip.
+When the `Compact` or `Reset` action in `SessionRecoveryActions` is disabled because the session is currently running (or otherwise not in a finished state), the disabled button SHALL be wrapped by the existing `Tooltip` primitive so a structured explanation is shown on hover or focus, and the rendered button SHALL NOT carry the native `title` attribute. The structured explanation SHALL convey both a short title and a longer reason sentence that names the running-session block as the cause and notes that finishing (or cancelling) the session would unblock the action. The `data-active="true"` attribute already exposed on the disabled button by `SessionRecoveryActions` is the trigger for the structured tooltip; no new contract attribute (no `data-disabled-reason` closed-set) is introduced, because the only currently-known disabled trigger is "session active / not finished".
 
-#### Scenario: Disabled buttons carry a closed-set reason attribute
-- **WHEN** either the Compact or the Reset action is rendered in a disabled state
-- **THEN** that button SHALL expose a `data-disabled-reason` attribute whose value is one of `"active"`, `"prereq"`, or `"unknown"`
-- **AND** SHALL NOT leave the attribute unset while disabled
+#### Scenario: Disabled running-session Compact / Reset renders a structured tooltip
+- **WHEN** either the Compact or the Reset action is rendered in a disabled state because the session is running
+- **AND** a user hovers or focuses the disabled button
+- **THEN** a structured tooltip SHALL render containing a short title and a longer reason sentence
+- **AND** the reason sentence SHALL explain that the session is still running and that finishing (or cancelling) it would unblock the action
 
-#### Scenario: Disabled reason renders a structured tooltip
-- **WHEN** a user hovers or focuses a disabled Compact or Reset button
-- **THEN** a structured tooltip SHALL render containing at least a short title and a longer reason sentence derived from the `data-disabled-reason` value
-- **AND** the tooltip SHALL differ across the three reasons so that each reason conveys its specific cause
+#### Scenario: Native title attribute is removed when structured tooltip is shown
+- **WHEN** a Compact or Reset button is rendered in a disabled state because the session is running
+- **THEN** the rendered button SHALL NOT carry a native `title` attribute
+- **AND** only the structured tooltip SHALL be the source of the disabled reason
 
-#### Scenario: Active reason explains the running-session block
-- **WHEN** the session is currently running (or otherwise not in a finished state) and Compact or Reset is disabled
-- **THEN** `data-disabled-reason="active"` SHALL be set
-- **AND** the tooltip SHALL explain that the session is still running and must finish (or be cancelled) before the action becomes available
-
-#### Scenario: Prerequisite reason explains what is missing
-- **WHEN** the session is not running but is not yet in a state where Compact or Reset is allowed (for example prerequisite data is missing)
-- **THEN** `data-disabled-reason="prereq"` SHALL be set
-- **AND** the tooltip SHALL identify the missing prerequisite
-
-#### Scenario: Unknown reason explains the temporary unavailability
-- **WHEN** the session status could not be confirmed (for example a network or status query is pending)
-- **THEN** `data-disabled-reason="unknown"` SHALL be set
-- **AND** the tooltip SHALL indicate that the action is temporarily unavailable and may be retried shortly
+#### Scenario: Enabled Compact / Reset does not render the disabled tooltip
+- **WHEN** either the Compact or the Reset action is rendered in an enabled state
+- **THEN** no disabled-reason tooltip SHALL wrap the button
 
 ### Requirement: Action weight changes are presentational only
 
-The action-weight changes (Cancel demotion, structured disabled-reason tooltips on Compact/Reset) SHALL be purely presentational. They SHALL NOT alter the cancel mutation, the compact mutation, the reset mutation, the recovery data fields, the liveness gate, or the underlying enabled/disabled decision for either action. The same input state SHALL yield the same disabled reason classification before and after the change.
+The action-weight changes (Cancel demotion, structured disabled-reason tooltip on Compact/Reset) SHALL be purely presentational. They SHALL NOT alter the cancel mutation, the compact mutation, the reset mutation, the recovery data fields, the liveness gate, or the underlying enabled/disabled decision for either action. The same input state SHALL yield the same disabled-vs-enabled classification before and after the change.
 
 #### Scenario: Mutations and enabled/disabled logic are unchanged
 - **WHEN** the header and recovery actions render with the same input state

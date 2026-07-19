@@ -21,7 +21,7 @@ Stakeholders: any reader who opens a Mohist session (primary); reviewers watchin
 - Render the session header metadata as a single row of stable, separately testable items, with session id as a one-click copy control that exposes the full id to assistive tech.
 - Make the sticky identity strip scroll-engaged: hidden while the outer header is visible, sticky-visible once the header scrolls out, only carrying session name + status + turn count.
 - Demote the Cancel session button out of the primary destructive variant and into a secondary slot (icon-only / outline / menu), keeping keyboard reachability and the existing confirm dialog.
-- Surface a structured disabled-reason tooltip on Compact/Reset via a closed-set `data-disabled-reason` attribute (`active` / `prereq` / `unknown`) rendered through the existing `Tooltip` primitive.
+- Surface a structured disabled-reason tooltip on Compact/Reset driven by the existing `data-active="true"` attribute (the only currently-known disabled trigger), wrapped by the existing `Tooltip` primitive; no new closed-set attribute is introduced.
 - Remove the header prev/next sibling slot on wide viewports; keep it as a narrow-viewport fallback so navigation stays reachable when the sidebar is hidden.
 - Render absolute date-time as the default for terminal sessions (`completed` / `failed` / `stale`) older than the 1-hour threshold; keep relative for live sessions and for fresh terminal sessions; expose the alt form as a hover/focus tooltip.
 - Render three explicit followup states (interactive / queued / closed), with copy that matches real behavior — closed-state copy references the session's `completedAt` and falls back to a generic message when no timestamp is available.
@@ -39,15 +39,15 @@ Stakeholders: any reader who opens a Mohist session (primary); reviewers watchin
 
 ### D1: Extract the time formatter to `shared/lib/format-time.ts` and make it status-aware
 
-Move `formatRelativeTime` from `SessionDetailShell.tsx:451` to a new module `packages/web/src/shared/lib/format-time.ts`. The new helper is `formatSessionTime({ date, statusKind, anchor, now })` returning `{ primary: string; secondary: string }`, where `primary` is what renders inline and `secondary` is what the tooltip shows. Threshold and branches match `session-time-display/spec.md`:
+Move `formatRelativeTime` from `SessionDetailShell.tsx:451` to a new module `packages/web/src/shared/lib/format-time.ts`. The new helper is `formatSessionTime({ date, statusKind, now })` returning `{ primary: string; secondary: string }`, where `primary` is what renders inline and `secondary` is what the tooltip shows. The threshold is `now - date ≥ 1h`. Branches:
 
-| `statusKind` | `now - anchor` ≥ 1h | primary | secondary |
+| `statusKind` | `now - date` ≥ 1h | primary | secondary |
 |---|---|---|---|
 | `completed` / `failed` / `stale` | yes | absolute date-time (`Jun 17, 09:52`) | relative (`8h ago`) |
 | `completed` / `failed` / `stale` | no | relative (`5m ago`) | absolute |
 | `live` / `finalizing` / `probing` | any | relative | absolute |
 
-The "Checking since <relative>" phrasing for `probing` is a separate wrapper that calls the helper and pins the relative form regardless of threshold, so the spec's probing invariant holds. The helper MUST accept `now` as an argument (no implicit `Date.now()`), making `session-time-display/spec.md`'s determinism requirement satisfiable.
+For terminal sessions the helper is invoked with `date = max(completedAt, lastActivityAt)` (the more recent of the two), as `session-time-display/spec.md` requirement 2 defines. The "Checking since <relative>" phrasing for `probing` is a separate call site that pins the relative form regardless of threshold (it does not go through the helper); the helper's probing row guarantees the `relative` arm but the probing indicator chooses not to use `secondary`. The helper MUST accept `now` as an argument (no implicit `Date.now()`), making `session-time-display/spec.md`'s determinism requirement satisfiable.
 
 **Rationale.** Tests can drive the absolute-vs-relative branch by varying `now` without `vi.useFakeTimers`, matching the project's testing rule ("禁止真实时间"); `formatRelativeTime` is currently untestable. Status-aware branching keeps live sessions readable while fixing the "8h ago" mental arithmetic for finished ones.
 
@@ -55,20 +55,22 @@ The "Checking since <relative>" phrasing for `probing` is a separate wrapper tha
 
 - *Keep the helper inside `SessionDetailShell.tsx` and just add a `statusKind` parameter.* Rejected — no test surface for a presentational helper that is now policy-bearing; mixing it into the shell makes it harder to reuse from `StickySessionTitle` and any future consumer.
 - *Push branching into the call sites.* Rejected — every call site would need to know the threshold and the alt form, scattering the policy.
+- *Helper signature `formatSessionTime({ date, statusKind, anchor, now })` with a separate `anchor` parameter for the threshold reference.* Rejected — only one timestamp is involved (the one being formatted); two parameters would be redundant or unclear, so Occam drops the second.
 
-### D2: Sticky identity strip uses IntersectionObserver against the outer header
+### D2: Sticky identity strip uses IntersectionObserver against the outer header; wrapper owns the initial hidden state
 
-The sticky strip's visibility is driven by an `IntersectionObserver` registered on the outer header (`data-testid="session-header"`) with `root: scrollContainerRef.current` and `threshold: 0`. When the header's intersection ratio drops below a small epsilon (≈0.001 — equivalent to "fully scrolled past"), `setEngaged(true)` and the strip transitions from `hidden` to `sticky top-0`. When the header re-enters, `setEngaged(false)` and the strip is removed from layout. A `requestAnimationFrame` flush between the toggle and any potential `scrollTop` measurement ensures the strip never paints in its hidden-then-shown state mid-frame.
+The sticky strip's visibility is driven by an `IntersectionObserver` registered on the outer header (`data-testid="session-header"`) with `root: scrollContainerRef.current` and `threshold: 0`. A small wrapper component (call it `ScrollEngagedStickyTitle`) owns the `engaged` boolean: it starts at `engaged=false`, and only flips to `true` after the observer's first callback reports `intersectionRatio < ~0.001` (header fully scrolled past). The wrapper renders `<StickySessionTitle>` only when `engaged=true`; until then it renders `null` (no DOM, no layout contribution, no a11y surface). When the header re-enters, `setEngaged(false)` collapses the strip back to null. A `requestAnimationFrame` flush between the toggle and any potential `scrollTop` measurement avoids mid-frame paint.
 
-The strip itself stays the same component (`StickySessionTitle`), but its visibility is now controlled by a new `engaged` boolean prop (default `true` for callers that don't yet pass the new prop — backward compatibility for the existing widget public API) and its wrapper is `inert` + `aria-hidden="true"` while disengaged. When disengaged, the strip renders `display: none` (not `visibility: hidden`) so it does not contribute height.
+The inner `StickySessionTitle` component itself is unchanged — no new prop. Visibility is owned entirely by the wrapper. This guarantees the initial-render hidden invariant from `session-sticky-identity/spec.md` requirement 1.
 
-**Rationale.** IntersectionObserver is the platform-native primitive for "is X visible inside Y"; it avoids the cost of a scroll listener that would have to fire on every scroll tick. Tying visibility to the actual outer-header element (not a pixel offset threshold) survives any header-height change. `display: none` (vs `visibility: hidden`) is what guarantees the no-layout contribution required by the spec.
+**Rationale.** IntersectionObserver is the platform-native primitive for "is X visible inside Y"; it avoids the cost of a scroll listener that would have to fire on every scroll tick. Tying visibility to the actual outer-header element (not a pixel offset threshold) survives any header-height change. Rendering `null` (vs `display: none` or `visibility: hidden`) is the strongest no-layout contribution guarantee — the node is not in the DOM at all.
 
 **Alternatives considered:**
 
 - *Pixel-offset threshold tied to `scrollContainerRef.scrollTop`.* Simpler but tied to header height; regresses if the header grows; does not account for header resize.
 - *CSS-only `position: sticky` with a sentinel element above the strip.* Pure CSS, but then "hidden on first screen" requires JS anyway to suppress the sticky rendering; the IntersectionObserver is the source of truth for that.
 - *A second `ResizeObserver` on the header so the threshold updates if the header height changes.* Defer — IntersectionObserver already returns `intersectionRect` whose bottom relative to the root gives us exactly the "scrolled past" signal.
+- *Add an `engaged` prop on `StickySessionTitle` itself, default `true` for backward compatibility.* Rejected — `true` would render the strip visible on first render, directly violating the spec's "hidden on first screen" invariant. The wrapper, not the inner component, owns visibility.
 
 ### D3: Header metadata row is a flex wrap with stable test selectors and no `·` dividers
 
@@ -118,35 +120,38 @@ The Cancel button moves from inside the metadata row to a small action slot rend
 - *Push Cancel into a kebab / overflow menu.* Hides the action behind a click; reviewers actively watching a running session may not look for it. Rejected for first release; revisit if dogfooding shows the inline button still over-weights.
 - *Replace the label with `aria-label` only.* Rejected — the design system does not yet have a documented icon-only destructive pattern; mixing it in risks accidental weight loss for genuinely destructive one-off actions elsewhere.
 
-### D6: Disabled-reason tooltips go through the existing `Tooltip` primitive
+### D6: Disabled-reason tooltips go through the existing `Tooltip` primitive; one reason (`active`), no new contract attribute
 
-`SessionRecoveryActions` exposes `data-disabled-reason="active" | "prereq" | "unknown"` on every disabled button. The button is then wrapped in the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`), whose content is a small node: a short title line + a longer reason sentence, derived from a reason map keyed by `data-disabled-reason`:
+`SessionRecoveryActions` already exposes `data-active="true"` on disabled Compact/Reset buttons (`packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx:195, 211`). That attribute is the only contract the disabled-reason story needs: `data-active="true"` ⇒ the session is running / not finished, and the structured tooltip must explain why this blocks the action. There is no second or third trigger today — only "session is active or otherwise not finished" — so no closed-set `data-disabled-reason` attribute and no enumeration of "prereq" / "unknown" branches; those would be speculative and would require inventing detection rules that don't exist in the codebase. The structured tooltip is rendered whenever `data-active="true"` on a Compact or Reset button, with content drawn from a single fixed pair:
 
-| reason | title | reason sentence |
-|---|---|---|
-| `active` | "Session is running" | "Finish or cancel the session before compacting or resetting." |
-| `prereq` | "Prerequisite not met" | (derived from the missing prerequisite; default "Session is not yet in a state that supports this action.") |
-| `unknown` | "Status not confirmed" | "Retry shortly; the session status could not be confirmed." |
+| title | reason sentence |
+|---|---|
+| "Session is running" | "Finish or cancel the session before compacting or resetting." |
 
-The wrapper sets `aria-describedby` when the tooltip is open (matches the existing primitive). The button's native `title` attribute is removed to avoid double tooltips.
+The wrapper is the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`). It already wraps the child in a `tabIndex={0}` span with `onFocus`/`onBlur` toggling the tooltip — no new a11y surface or new contract attribute is needed for the focus path; the existing wrapper IS the focus mechanism. The button's native `title="Unavailable while session is active"` attribute is removed to avoid double tooltips.
 
-**Rationale.** Reuses the project's existing tooltip primitive (no new dependency, no new a11y surface). The closed-set reason attribute is the stable contract spec relies on; the parent renders the human copy from a map. `aria-describedby` is the screen-reader hook the primitive already provides.
+**Rationale.** Occam: the existing `data-active` attribute already conveys "the action is blocked because the session is running". A separate `data-disabled-reason` closed-set would duplicate that information without adding any new signal. The wrapper already handles focus — reimplementing the a11y chain would add code for no behavioural gain. A single reason today means a single tooltip copy; future reasons (genuine missing prerequisites, status pending) can be added when their triggers actually exist in the codebase.
 
 **Alternatives considered:**
 
 - *Radix-based tooltip.* Heavier, new dependency; the existing primitive covers the hover/focus + `aria-describedby` contract.
 - *Render the reason inline next to the button.* Pollutes the row layout; defeats the "secondary slot" cleanup.
+- *Closed-set `data-disabled-reason` with `"active" | "prereq" | "unknown"` for future-proofing.* Rejected — speculative; `prereq` and `unknown` have no concrete detection rule today, so an enumeration would be invented. Adding them when a real trigger appears (e.g. when a "prereq" actually emerges in the codebase) is cheaper than committing now and reconciling later.
+- *Custom a11y wrapper that exposes a focusable proxy outside the disabled button.* The existing `Tooltip` primitive already does this — no new mechanism.
 
-### D7: Sibling nav dedup uses a `matchMedia('(min-width: 1280px)')` check
+### D7: Sibling nav dedup uses a `matchMedia('(min-width: 1280px)')` check; sidebar stays CSS-hidden
 
 `SessionHeader` reads `useMediaQuery('(min-width: 1280px)')` (a tiny new hook in `packages/web/src/shared/lib/use-media-query.ts` returning the current match state, with an SSR-safe initial value of `false` and a `matchMedia` listener registered on mount). When the query matches, the header does not render the `siblingNav` slot at all. When it doesn't match, it renders the existing prev/next links with a `data-viewport="narrow"` attribute on the slot wrapper so tests can distinguish the fallback from the removed wide-viewport version.
 
-**Rationale.** `matchMedia('(min-width: 1280px)')` is the same breakpoint the existing shell uses for `xl:flex-row`. The hook is small (one effect, one state, cleanup) and is exactly the shape that other layout branches in the codebase would benefit from later.
+`SiblingSessionsSidebar` visibility is not touched — it remains the same CSS-driven visibility it has today (`xl:flex-row` on the parent at `SessionDetailShell.tsx:396`: `flex flex-col ... xl:flex-row`). No conditional render mechanism is added; the sidebar's data-testid is always present in the DOM, the parent flex layout decides whether it sits beside or below the transcript. This matches the de-facto behaviour the codebase has shipped and avoids an extra render gate whose only effect would be to remove a hidden DOM node.
+
+**Rationale.** `matchMedia('(min-width: 1280px)')` is the same breakpoint the existing shell uses for `xl:flex-row`. The hook is small (one effect, one state, cleanup) and is exactly the shape that other layout branches in the codebase would benefit from later. Keeping the sidebar's visibility mechanism unchanged follows Occam — no new mechanism when the existing one already produces the right user-visible result.
 
 **Alternatives considered:**
 
 - *Container queries.* Tailwind 3 supports `@container`, but the design system has not adopted container queries project-wide; introducing one here would be inconsistent.
 - *Pass the visibility decision down from `SessionDetailShell` via a prop.* Couples the shell to the header's viewport logic and forces the shell to read `matchMedia`; worse factoring.
+- *Conditionally render `{siblingSidebar}` based on `useMediaQuery` (not just CSS-hide).* Rejected — would add a new render-gate mechanism just to remove a hidden DOM node. CSS-hidden is sufficient.
 
 ### D8: Followup composer accepts optional `state` / `endedAt` / `hasQueuedFollowup` props
 
@@ -171,10 +176,10 @@ The `Sent` flash behavior is preserved on the transient `isSending` window only 
 - [`matchMedia` in jsdom is not implemented by default.] -> Mitigation: the new `useMediaQuery` hook exposes a `setMatchesForTest(matches: boolean)` test seam (same pattern as `useNow`'s `now` injection) so specs drive the narrow/wide state directly; production behavior is unchanged.
 - [Sticky strip's visibility flickers during the IntersectionObserver's initial fire if the strip is rendered before its first observation.] -> Mitigation: initialize `engaged` to `false` and only flip to `true` after the observer's first callback reports `intersectionRatio < 0.001`. Until that first callback, the strip is `display: none`. A rAF flush between state change and DOM commit avoids a paint of the intermediate state.
 - [Cancel demotion might hide the action from users who don't recognize the icon.] -> Mitigation: keep the `Cancel session` text label inline next to the icon (not icon-only); the icon becomes a visual anchor, the label remains readable. `aria-label` reinforces for screen readers.
-- [Tooltip on disabled buttons breaks for keyboard-only users if the primitive's focus trigger is removed.] -> Mitigation: the existing `Tooltip` primitive already wraps the child in a `tabIndex={0}` element with `onFocus`/`onBlur` toggling the tooltip; spec ensures the disabled button remains focusable (`aria-disabled` rather than `disabled` where the underlying mutation must still see the click — or `disabled` plus a separate focusable wrapper; spec leaves this as a final-decision note, see Open Questions).
+- [Tooltip on disabled buttons breaks for keyboard-only users if the primitive's focus trigger is removed.] -> Mitigation: the existing `Tooltip` primitive already wraps the child in a `tabIndex={0}` element with `onFocus`/`onBlur` toggling the tooltip; that primitive IS the focus mechanism — the disabled button remains operable via screen-reader focus landing on the wrapper span, with no new a11y code needed.
 - [`navigator.clipboard.writeText` is not available in jsdom / older browsers.] -> Mitigation: feature-detect in the copy handler; fall back to a hidden `<textarea>` + `document.execCommand('copy')` or to surfacing the full id in a tooltip as a manual-copy fallback. The "transient confirmation" branch is not required when clipboard access fails — instead the tooltip stays open showing the full id so the user can copy manually.
 - [Time formatter's `absolute` branch depends on `Intl.DateTimeFormat` which depends on the host locale.] -> Mitigation: pin the absolute format to a stable pattern (`'MMM d, HH:mm'` style, derived via `Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })`) so the rendered string is deterministic in tests and across locales. Tests assert against the formatted string with a frozen locale, never against the raw `Date`.
-- [Followup composer's `state` prop can disagree with derived `disabled`/`isSending` if the caller passes all three.] -> Mitigation: `state` always wins when supplied; derived state only applies when `state` is undefined. Documented in the prop's JSDoc and asserted in a test.
+- [Followup composer's `state` prop can disagree with derived `disabled`/`isSending` if the caller passes all three.] -> Mitigation: `state` always wins when supplied (the prop's JSDoc documents this); derived state only applies when `state` is undefined. Asserted in `SessionFollowupComposer.test.tsx` as part of the three-state migration.
 - [Removing the inline `·` separators from the header reduces visual scannability for users who relied on them.] -> Mitigation: each item keeps its own chip / badge styling (`rounded-full border` for stage, distinct colors for status), so the row remains scannable without the dividers.
 
 ## Migration Plan
@@ -184,9 +189,9 @@ The `Sent` flash behavior is preserved on the transient `isSending` window only 
 1. **Time helper extraction** (`D1`): add `packages/web/src/shared/lib/format-time.ts`; move `formatRelativeTime` body into `formatSessionTime`; replace call sites in `SessionDetailShell.tsx`; add `formatSessionTime.test.ts` asserting all six branches and the determinism rule (same inputs → same output; changing `now` can flip the branch).
 2. **Header single-row rewrite** (`D3`): rewrite `SessionHeader`'s metadata block; remove `·` dividers; add stable `data-testid` / `data-*` to each item; ensure existing render specs continue to pass (`SessionPage.test.ts`, `SessionPage.sticky.test.tsx`, `SessionPage.cancel.test.tsx`) by migrating any selector assertions to the new `data-testid`s.
 3. **Session id copy** (`D4`): add the icon button + clipboard handler; wire it into `SessionHeader`; assert the full id is exposed via `aria-label` and `data-session-id`.
-4. **Sticky strip scroll-engaged** (`D2`): wrap `StickySessionTitle` with the IntersectionObserver; pass the resolved `engaged` boolean into the strip; assert the strip is `display: none` + `inert` + `aria-hidden="true"` on first render and after a scroll-back-to-top.
+4. **Sticky strip scroll-engaged** (`D2`): add a `ScrollEngagedStickyTitle` wrapper in `SessionDetailShell.tsx`; its initial state is `engaged=false` (renders `null`); the `IntersectionObserver` flips it to `true` only after the header scrolls fully out. Assert the strip is not in the DOM on first render and after a scroll-back-to-top, and that the inner `StickySessionTitle` itself has no new prop.
 5. **Cancel demotion** (`D5`): move the cancel button into the secondary slot; switch `variant` from `destructive` to `ghost`; assert `variant` and slot location; confirm dialog + mutation unchanged.
-6. **Disabled-reason tooltip** (`D6`): extend `SessionRecoveryActions` to expose `data-disabled-reason`; wrap the disabled button with the existing `Tooltip`; assert the three reasons render distinct content; assert native `title` is removed.
+6. **Disabled-reason tooltip** (`D6`): wrap disabled Compact/Reset buttons (those carrying `data-active="true"`) with the existing `Tooltip` primitive, render the running-block explanation, and remove the native `title` attribute. Assert the structured tooltip is shown when `data-active="true"` and absent when not. No new attribute is added.
 7. **Sibling nav dedup** (`D7`): add `useMediaQuery`; remove the wide-viewport `siblingNav` slot; keep the narrow fallback with `data-viewport="narrow"`; assert wide renders no slot, narrow renders the slot, both never render together.
 8. **Followup composer three states** (`D8`): extend the composer with the three optional props + the `data-state` attribute; migrate `SessionFollowupComposer.test.tsx` to assert the new states (interactive / queued / closed) and that disabled input + persistent queued indicator match the spec.
 9. **Run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`** before commit. The change is presentation-only; no server / runner / CLI / protocol changes.
@@ -197,14 +202,14 @@ The `Sent` flash behavior is preserved on the transient `isSending` window only 
 
 **Verification:**
 
-- Unit (`*.test.ts(x)` colocation): `formatSessionTime` (six branches + determinism + threshold flip); `useMediaQuery` (matches the query, updates on `setMatchesForTest`); `SessionRecoveryActions` (reason attribute closed-set, three reason contents); `SessionFollowupComposer` (three states + behavior contracts).
+- Unit (`*.test.ts(x)` colocation): `formatSessionTime` (six matrix rows + determinism + threshold flip); `useMediaQuery` (matches the query, updates on `setMatchesForTest`); `SessionRecoveryActions` (structured tooltip on disabled Compact/Reset driven by `data-active`; native `title` removed); `SessionFollowupComposer` (three states + behavior contracts).
 - Spec (`*.spec.ts(x)` colocation): sticky strip first-render / scroll-out / scroll-back-to-top; cancel demotion + slot position; session id copy (clipboard spy, transient confirmation, full-id `aria-label`); sibling dedup (wide/narrow via `setMatchesForTest`); followup queued persistence past `isSending`.
 - All time-dependent assertions use `vi.useFakeTimers` or the formatter's injected `now`; never `elapsed < N` or wall-clock waits, per `design/testing.md`.
 
 ## Open Questions
 
-- **Disabled button + tooltip focus chain.** The existing `Tooltip` primitive wraps the child in a focusable span. When the child is a `<button disabled>`, the child itself is not focusable, so the span wrapper becomes the focusable proxy. This is fine for screen readers, but `Tab` lands on the span and not the button — does that match expectations? Alternative: use `aria-disabled` on an enabled `<button>` and guard the click in the handler, so the focus chain stays on the button. Default for first release: keep `disabled` + focusable wrapper; revisit if a11y review flags it.
 - **Cancel slot visual weight.** Ghost vs outline vs icon-only — keep text inline next to the icon for first release. If dogfooding shows it still reads as "primary", revisit a kebab menu.
 - **Sticky strip offset when header is wider than expected.** The strip sits at `top-0` inside the scroll container; the recovery bar (`data-sticky="true"` at `top-9`) overlays it on scroll. Current ordering (`sticky top-0` strip, `sticky top-9` recovery) keeps the strip behind the recovery bar, which is fine. If dogfooding shows the layering is confusing, swap the offsets so the recovery bar is the visible top element once engaged. Default: keep current ordering.
 - **Narrow-viewport sibling slot breakpoint.** The hook uses `min-width: 1280px` to match the existing shell's `xl`. If dogfooding on tablets (≤ 1280px) shows the sidebar collapse + no header slot feels barren, revisit at a wider breakpoint or add a thin horizontal sibling bar.
 - **Followup queued signal source.** The spec accepts `hasQueuedFollowup` as the source. The current `useSessionTranscript` does not expose a "first new part since submit" signal; that would need a small `submittedAt` ref tracked by the caller (the data source). For first release the caller passes `hasQueuedFollowup={followupIsPending || (turns last id hasn't advanced since submit)}` — keeping the consumer-side derivation simple and avoiding a data-source contract change. Revisit if the derived signal turns out to flicker.
+- **Future Compact/Reset disabled reasons.** Today only "session active / not finished" disables the buttons. If the data layer later gains a real "prerequisite missing" or "status pending" trigger (not invented ones), the structured tooltip can be parameterised by adding a closed-set `data-disabled-reason` attribute or by extending the existing `data-active` semantics. That is deferred to the change that introduces the trigger.
