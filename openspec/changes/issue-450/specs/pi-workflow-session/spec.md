@@ -92,7 +92,7 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 
 Existing Session commands SHALL NOT be allowed to start idle work on a binding while a Workflow task is preparing, rebinding, between its original and cleanup Prompts, or durably reporting. A guarded bind SHALL reject without mutation when Follow-up, Compact, or Reset command state is pending or active. When the Workflow lease wins first, the owning Runner SHALL reject command admission during preparation; only an existing OpenCode Follow-up MAY steer after the Runtime has synchronously reserved the physical Session for the active Prompt. Compact and Reset SHALL remain idle-only. These admission rules MUST NOT add Pi command routing in this issue.
 
-When an existing Workflow-origin OpenCode idle Follow-up, Compact, or Reset wins admission first, its Runner handler SHALL acquire the same logical-Session coordinator key before Runtime entry and retain that command lease through terminal operation evidence. Idle Follow-up SHALL retain it until `session.closed` or `session.followup_failed`; Compact and Reset SHALL retain it through Server completion. A later Workflow task, including one reusing the current binding without bind, SHALL queue behind that lease. Definite command preflight failure SHALL release it immediately, and Runner restart SHALL clear it because in-process command work has ended.
+When an existing Workflow-origin OpenCode idle Follow-up, Compact, or Reset wins admission first, its Runner handler SHALL acquire the same logical-Session coordinator key before Runtime entry and retain that command lease through terminal operation evidence. Idle Follow-up SHALL retain it until `session.closed` or `session.followup_failed`. For Compact and Reset, the Runner SHALL call an idempotent authenticated Server completion operation with the existing operation ID while holding the lease; it SHALL release only after the AgentSession authority acknowledges the completion transition, then return to the original command dispatch. The waiting public route SHALL read that persisted outcome and MUST NOT complete the transition a second time. Callback transport failure SHALL retain the lease and retry the same operation ID without claiming success. A later Workflow task, including one reusing the current binding without bind, SHALL queue behind that lease. Definite preflight failure SHALL release through the existing abandon path, and Runner restart SHALL clear the in-process lease while the persisted Server reservation remains authoritative for recovery.
 
 Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow-origin Compact and Reset command delivery SHALL also carry optional project, WorkflowRun, and session-name identity resolved by the Session authority; generic AgentSession commands SHALL omit it. The owning Runner SHALL use that identity to consult the Workflow coordinator even when no prior Workflow open has populated process-local Session mappings.
 
@@ -148,6 +148,12 @@ Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow
 - **WHEN** Workflow-origin OpenCode idle Follow-up, Compact, or Reset acquires the logical command lease before a Workflow task targets the same current binding
 - **THEN** the Workflow task SHALL remain queued until terminal command evidence releases that lease
 - **AND** it MUST NOT restore or submit a Prompt concurrently merely because no bind is required
+
+#### Scenario: Compact and Reset release after acknowledged completion
+
+- **WHEN** a Workflow-origin OpenCode Compact or Reset Runtime operation finishes
+- **THEN** the Runner SHALL complete the existing operation ID through the Server while retaining its command lease
+- **AND** it SHALL release only after acknowledgement, while duplicate completion returns the persisted outcome and callback transport failure retains the lease
 
 #### Scenario: Workflow preparation acquired first blocks idle commands
 
