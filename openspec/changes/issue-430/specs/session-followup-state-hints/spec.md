@@ -19,6 +19,11 @@ The composer MUST NOT render the interactive state when the underlying send is u
 - **AND** the rendered message SHALL indicate the session is closed
 - **AND** the placeholder and submit affordance SHALL NOT be presented as if the user could send a followup
 
+#### Scenario: Closed state remains visible without transcript turns
+- **WHEN** a completed or failed session has no transcript turns
+- **THEN** the page SHALL still render the closed composer state
+- **AND** the closed-state message SHALL explain that the session is no longer accepting followups
+
 #### Scenario: Queued state matches in-flight submit
 - **WHEN** the composer has a submitted followup still awaiting the agent's first new part (for example the followup mutation is pending, or a queued flag is set upstream)
 - **THEN** the composer SHALL render the queued state: the input SHALL be disabled

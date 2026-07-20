@@ -257,6 +257,40 @@ describe('SessionPage followup composer integration', () => {
     expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
   })
 
+  it('shows the closed composer when a completed session has no turns', async () => {
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
+      status: 'completed',
+      statusKind: 'completed',
+      completedAt: '2024-01-01T11:00:00.000Z',
+    })
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    const composer = await screen.findByTestId('session-followup-composer')
+    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
+    expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
+  })
+
+  it('shows the closed composer when a failed session has no turns', async () => {
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
+      status: 'failed',
+      statusKind: 'failed',
+      completedAt: '2024-01-01T11:00:00.000Z',
+    })
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    const composer = await screen.findByTestId('session-followup-composer')
+    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveTextContent(/session ended .*not accepting new followups/i)
+    expect(screen.queryByTestId('session-followup-input')).not.toBeInTheDocument()
+  })
+
   it('shows the composer even while waiting for activity on a running session with no turns', async () => {
     sessionsData = [{
       ...makeSessionsForLookup()[0],

@@ -416,6 +416,7 @@ export function SessionDetailShell({
   )
 
   const hasTurns = turns.length > 0
+  const showFollowupComposer = hasTurns || canFollowup || !isRunning
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
@@ -455,7 +456,7 @@ export function SessionDetailShell({
           ) : isRunning ? <SessionWaitingState /> : <SessionEmptyState />}
         </div>
 
-        {(hasTurns || canFollowup) && (
+        {showFollowupComposer && (
           <div data-testid="session-followup-composer-region">
             <SessionFollowupComposer
               onSend={handleFollowupSend}
