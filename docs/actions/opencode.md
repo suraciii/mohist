@@ -116,8 +116,9 @@ Runner 重启后，Mohist 仍使用 AgentSession 保存的 OpenCode Session 绑�
 
 ## 完成与失败
 
-OpenCode 回合结束后，Workflow 仍按 task 的 `expect`、`artifacts`、`failIf` 和
-recovery 规则判断后续流程。这些是 Workflow 的 task 完成要求，不是
+OpenCode 回合成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和
+recovery 规则判断后续流程。回合失败、取消或超时时，原始错误就是 task 结果，不再检查
+文件或 marker。这些是 Workflow 的 task 完成要求，不是
 `mohist/opencode` 的 Action Input。Action Output 只在命中 promise marker 时返回：
 
 ```json
@@ -131,7 +132,9 @@ OpenCode 的权限配置仍是最终判断。它已经允许的操作直接执�
 当 OpenCode 只要求确认时，Mohist 的无人值守执行仅允许这一次操作，不保存为以后自动
 允许，也不会创建审批或要求用户介入。若这次回应无法完成，本次 task 立即失败并给出
 可操作的错误，不等待执行期限耗尽。执行超时会中断当前回合；提交结果不确定时不会
-自动重放 Prompt，避免同一任务被执行两次。
+自动重放 Prompt，避免同一任务被执行两次。Runner 主动触发的执行期限会明确报告 timeout；
+中断 OpenCode 只是收尾，不能用缺少 marker 覆盖 timeout，也不会替换当前 Session 绑定或
+自动 Reset。
 
 provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 OpenCode
 回合并让本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理

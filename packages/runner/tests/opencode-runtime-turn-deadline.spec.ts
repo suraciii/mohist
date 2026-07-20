@@ -46,6 +46,7 @@ interface BuildArgs {
   promptResult?: unknown
   createId?: (params: { directory?: string }) => string
   policy?: RuntimeProviderErrorPolicy
+  abortResult?: boolean
 }
 
 interface BuildResult {
@@ -84,7 +85,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
     return { data: true }
   })
 
-  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: true }))
+  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: args.abortResult ?? true }))
   const sessionGet = vi.fn(async () => ({ data: { id: "ses_1" } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
 
@@ -376,8 +377,8 @@ describe("OpenCodeRuntime.runTurn — warned turn that ends normally is not abor
   })
 })
 
-describe("OpenCodeRuntime.runTurn — deadline abort unchanged", () => {
-  it("Calls session.abort and returns interrupted when the deadline fires before the prompt resolves", async () => {
+describe("OpenCodeRuntime.runTurn — deadline abort", () => {
+  it("Calls session.abort and returns deadline-exceeded when the runner deadline fires before the prompt resolves", async () => {
     vi.useFakeTimers()
     try {
       const { deps, client } = buildRuntime()
@@ -398,13 +399,43 @@ describe("OpenCodeRuntime.runTurn — deadline abort unchanged", () => {
       const result = await turnPromise
       expect(result.ok).toBe(false)
       if (result.ok) return
-      expect(result.error.kind).toBe("interrupted")
+      expect(result.error.kind).toBe("deadline-exceeded")
+      expect(result.error.message).toBe(`OpenCode turn timed out after ${deadlineMs / 1000}s`)
+      expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === "deadline-exceeded")).toBe(true)
       expect(client.sessionAbort).toHaveBeenCalledTimes(1)
       expect(client.sessionAbort.mock.calls[0]?.[0]).toEqual({
         sessionID: expect.stringMatching(/^ses_/),
         directory: "/tmp/projA",
       })
       expect(client.sessionPromptAsync).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("Keeps deadline-exceeded when abort cannot be confirmed and does not create a replacement Session", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client } = buildRuntime({ abortResult: false })
+      const runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+      client.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
+
+      const deadlineMs = 60_000
+      const turnPromise = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "hangs past deadline",
+        deadlineMs,
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(deadlineMs)
+
+      const result = await turnPromise
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.kind).toBe("deadline-exceeded")
+      expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === "abort-unconfirmed")).toBe(true)
+      expect(client.sessionCreate).toHaveBeenCalledTimes(1)
+      expect(client.sessionAbort).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

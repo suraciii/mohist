@@ -100,6 +100,18 @@ export function normalizeInterrupted(diagnostics: readonly RuntimeDiagnostic[] =
   }
 }
 
+export function normalizeDeadlineExceeded(deadlineMs: number, diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
+  const seconds = deadlineMs / 1000
+  return {
+    kind: "deadline-exceeded",
+    message: `OpenCode turn timed out after ${seconds}s`,
+    diagnostics: [
+      ...diagnostics,
+      { severity: "error", code: "deadline-exceeded", message: `The runner deadline expired after ${seconds}s` },
+    ],
+  }
+}
+
 export function normalizeMissingSession(diagnostics: readonly RuntimeDiagnostic[] = []): RuntimeError {
   return {
     kind: "missing-session",

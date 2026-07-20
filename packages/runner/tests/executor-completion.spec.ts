@@ -248,6 +248,26 @@ describe("WorkExecutor completion evaluation", () => {
     expect(JSON.parse(result.output ?? "null")).toEqual({ promise: "FAIL" })
   })
 
+  it("OpenCodeFailure_SkipsCompletionAndPreservesTimeout", async () => {
+    const executor = executorForOpencode(async () => ({
+      status: "failure",
+      message: "OpenCode turn timed out after 60s",
+      output: JSON.stringify({ kind: "opencode", error: "deadline-exceeded" }),
+      turnFact: { finalAssistantText: null },
+    }), "mohist/opencode")
+
+    const result = await executor.execute(buildWork({
+      uses: "mohist/opencode",
+      expect: {
+        markers: [{ path: "_output", oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"] }],
+      },
+    }), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.message).toBe("OpenCode turn timed out after 60s")
+    expect(result.output).toBeNull()
+  })
+
   it("OpenCodeOutput_ProjectsPASSWhenMatched_NoFailIf", async () => {
     const executor = executorForOpencode(async () => ({
       status: "success",
