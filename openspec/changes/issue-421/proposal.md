@@ -16,8 +16,8 @@ After work is split into sub-issues, the shared requirement background, overall 
 
 ## Impact
 
-- **Server**: Issue read-side and Plan dispatch/prompt assembly must resolve the current child's parent and provide only the parent's title and body to Plan-stage Inline Agent work.
-- **Runner contract**: the server-to-runner work input gains the optional related-issue background needed to present parent context to the Inline Agent; non-Plan and non-child dispatches do not gain effective context.
+- **Server**: the Issue read side resolves only the current parent's title/body, and the runner poll API adds it while mapping the HTTP response; Workflow, `WorkflowItemTranslator`, and the internal `WorkDispatch` remain unaware of parent-child organization.
+- **Runner contract**: the HTTP poll response gains the optional related-issue background needed to present parent context to the Inline Agent; non-Plan and non-child dispatches do not gain effective context.
 - **Runner**: `mohist/opencode` Plan turns consume the optional background without changing the child issue prompt or task completion contract.
 - **Tests**: server and runner coverage must distinguish child Plan dispatch, ordinary Plan dispatch, non-Plan dispatch, and exclusion of parent comments and artifacts.
 - **Public surfaces and dependencies**: no CLI, Web, public Issue API, persistence schema, or external dependency changes.
