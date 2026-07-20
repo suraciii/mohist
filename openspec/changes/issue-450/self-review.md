@@ -1,32 +1,32 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: current issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current affected callers, repository architecture, and testing rules. This review modifies no plan artifact.
+Scope: current issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current domain/wire/read models, repository architecture, and testing rules. This review modifies no plan artifact.
 
 ## Findings
 
-### F-1 High: The SDK smoke is called a hard gate but does not gate all implementation tasks
+### F-1 High: The promised explicit turn deadline has no authoritative dispatch source
 
-The runtime spec and design require the pinned real-SDK smoke to complete and any drift to be reconciled before implementation proceeds or product code relies on the assumed API (`specs/pi-runtime/spec.md:1-15`; `design.md:11,46-52,211-212`). T-001 likewise calls itself a hard gate (`tasks.json:6-26`). T-002 correctly depends on T-001, but T-003 and T-005 are product implementation tasks with empty dependency lists (`tasks.json:59-83,117-135`). They can run before or concurrently with the smoke.
+The runtime requirement and canonical Pi design say each Workflow turn uses an executor-declared deadline, defaults to 60 minutes when omitted, and permits an explicit override (`specs/pi-runtime/spec.md:93-107`; `design/runtimes/pi.md:183-205`). The Pi Action input is explicitly limited to `prompt`, `session`, and `options.model` / `options.variant` (`specs/pi-workflow-action/spec.md:17-59`; `proposal.md:7`), while the rendered dispatch envelope has no deadline field (`packages/runner/src/core/types.ts:151-186`). The only current override precedent is OpenCode's undocumented `with.timeout` lookup (`packages/runner/src/actions/opencode.ts:251-254`), which the Pi input contract rejects as an unknown field.
 
-Even though T-003/T-005 are not Pi SDK adapters, the plan's stated migration order says no product code begins before the gate, and both can be invalidated by the contract reconciliation T-001 is allowed to make. Make every implementation task depend directly or transitively on T-001, or narrow the normative gate explicitly to SDK-dependent tasks and explain why the independent Server/coordination slices cannot consume smoke-driven design changes. The current prose and graph must agree.
+An implementer can provide the 60-minute default but cannot implement the promised explicit deadline without inventing a second configuration channel or violating the Action schema. Define the deadline's product/DSL owner and units, add it to the Workflow task/dispatch/executor contract rather than Pi-specific Action input, specify validation/defaulting and retry/cleanup propagation, and assign the required Server/Runner/documentation tests. If explicit override is intentionally outside this issue, remove that promise consistently and specify the fixed executor default.
 
-### F-2 Medium: The Node 22.19 migration omits active version declarations
+### F-2 High: Cache-write usage has no persisted or Web projection field
 
-T-001 says it raises every documented and enforced Node floor, but its concrete acceptance/output names root/Runner manifests, `CONTRIBUTING.md`, CI, and Docker (`tasks.json:9-23`; `design.md:164-170,211`). The repository also pins `.nvmrc` to the unspecified major `22` (`.nvmrc:1`) and tells self-host source installers to use `Node 22` (`docs/self-host.md:72-75`). Both are active installation/version guidance and can select an unsupported pre-22.19 release while all listed T-001 criteria pass.
+The canonical Pi event map includes distinct `cacheRead` and `cacheWrite` usage (`design/runtimes/pi.md:213-223`). The change requires every supplied input/output/cache-read/cache-write/thought dimension to be durable and rendered (`tasks.json:98,160,184`; `specs/pi-workflow-session/spec.md:122-128`). However, the current Session domain and API carry only `CachedReadTokens`, not cache-write tokens (`packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.cs:273-282`; `packages/server/src/Mohist.Server/Sessions/AgentSessionReadModels.cs:6-18`), and the Web usage type likewise exposes only `cachedReadTokens` (`packages/web/src/entities/coder-session/model/types.ts:26-37`). D9 incorrectly says existing runtime-neutral Session usage DTOs already suffice and limits Web work to classification (`design.md:164-170`).
 
-T-001 must enumerate `.nvmrc` and every source-install prerequisite, including `docs/self-host.md`, and verify all CI workflows such as `.github/workflows/ci.yml` and `web-test-shuffle.yml` use an explicit compatible release. The migration should have one repository-wide search/assertion proving no active Node declaration remains below or ambiguously before 22.19.
+The plan must explicitly add `cachedWriteTokens` through the Session domain state/transition, Orleans serialization IDs, runtime-event parsing, API/read models, mappings, Web types/rendering, outbox/restart reconciliation, and duplicate-safe tests. Assign Server ownership to T-003/T-004 and Web presentation to T-007, and update proposal/design impact so this persisted/API schema change is not hidden behind generic "usage facts" wording.
 
 ## Structural Checks
 
 - `tasks.json` parses as valid JSON.
-- All seven task IDs and dependencies resolve; the graph is acyclic and every existing dependency points to a lower priority.
+- All seven task IDs and dependencies resolve; the graph is acyclic, every dependency points to a lower priority, and every implementation task reaches T-001.
 - All task spec paths and requirement anchors resolve.
 - All three proposal capabilities have matching spec files; 21 requirements contain 77 correctly headed scenarios.
-- The product, runtime, Session, failure, audit, cleanup, credential, and scope contracts are otherwise internally consistent and have task/test ownership.
-- The temporary current-Action plumbing is consistently identified as issue #447-owned debt rather than target architecture.
+- The SDK smoke gate and repository-wide Node 22.19 migration are now correctly represented in the executable graph.
+- Other product, runtime, Session, failure, audit, cleanup, credential, and scope contracts are internally consistent and have task/test ownership.
 
 ## Verdict
 
-The plan's behavior and architecture contracts are ready, but the executable graph does not enforce its mandatory pre-implementation SDK gate, and the breaking Node floor migration can leave active version guidance ambiguous. Fix these two task-plan gaps before build execution.
+The plan is close, but builders still have to invent the explicit deadline transport and cannot satisfy the promised cache-write usage projection with the existing Session/Web model. Both contracts need explicit model, wire, ownership, and test changes before implementation.
 
 <promise>FAIL</promise>
