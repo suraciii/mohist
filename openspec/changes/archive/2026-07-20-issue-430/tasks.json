@@ -1,0 +1,150 @@
+{
+  "project": "mohist",
+  "description": "Consolidate the session page frame: single-row header metadata with copy-on-click session id, scroll-engaged sticky identity strip, demoted Cancel action, structured disabled-reason tooltips on Compact/Reset, deduplicated sibling navigation, status-aware time display, and three-state followup composer (interactive/queued/closed).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Extract and status-aware rewrite of session time formatter",
+      "spec": "specs/session-time-display/spec.md",
+      "description": "Move the private `formatRelativeTime` from `SessionDetailShell.tsx` into a new `packages/web/src/shared/lib/format-time.ts` exporting `formatSessionTime({ date, statusKind, now })` that returns `{ primary, secondary }` per the threshold and status matrix in `session-time-display/spec.md`. The header's call sites (last activity in the metadata row, probing indicator) are migrated to the helper. The anchor for terminal sessions is `max(completedAt, lastActivityAt)`; for live sessions it is `lastActivityAt` directly; the helper itself only ever sees one timestamp. Unit tests must assert all six matrix rows, the determinism rule (same inputs -> same output), the threshold flip on changing `now`, the probing invariant (relative preserved), and that the function does not read the system clock.",
+      "acceptanceCriteria": [
+        "`packages/web/src/shared/lib/format-time.ts` exports `formatSessionTime({ date, statusKind, now })` (no `anchor` parameter — there is only one timestamp in play) returning `{ primary, secondary }`; the absolute format uses a pinned `Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })` so the output is locale-deterministic.",
+        "`SessionDetailShell.tsx` no longer contains a private `formatRelativeTime`; the header's last-activity and probing-since rendering use the new helper. For terminal sessions the helper is called with `date = max(completedAt, lastActivityAt)`.",
+        "`formatSessionTime.test.ts` asserts all six matrix rows (terminal + past threshold -> absolute primary / relative secondary; terminal + within threshold -> relative primary / absolute secondary; live/finalizing/probing at any threshold -> relative primary / absolute secondary), the determinism rule (same inputs -> same output), the threshold flip on changing `now`, and the probing indicator invariant.",
+        "`formatSessionTime` does not call `Date.now()` internally; the only clock input is the `now` argument, verifiable by static inspection and by a test that does not install fake timers.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `packages/web/src/shared/lib/format-time.ts` + `format-time.test.ts`; updated `SessionDetailShell.tsx` import + call sites.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Includes call-site switchover per the splitting principle (helper + call sites are one feature module)."
+    },
+    {
+      "id": "T-002",
+      "title": "Rewrite SessionHeader metadata as a single row with copy-on-click session id",
+      "spec": "specs/session-header-meta-line/spec.md",
+      "description": "Collapse `SessionHeader`'s two-row `flex flex-col ... sm:flex-row` metadata block into a single `flex flex-wrap items-center gap-x-2 gap-y-1` row with no `·` dividers and no per-item `hidden md:inline` responsive breakpoints. Every metadata item gets a stable `data-testid` and `data-*` value attribute per the design table. The session id becomes a copy-to-clipboard icon button that writes `meta.sessionId` via `navigator.clipboard.writeText`, exposes the full id via `aria-label`, and shows a transient 'Copied!' state for ~1.5s. Migrate the existing render specs (`SessionPage.test.ts`, `SessionPage.sticky.test.tsx`, `SessionPage.cancel.test.tsx`) to the new `data-testid`s and add coverage for the copy control. The Cancel button and the sibling nav slot are not modified by this task — both are owned by T-004 and T-006 respectively.",
+      "acceptanceCriteria": [
+        "`SessionHeader` renders all metadata (session name, status badge, stage chip, model, turn count, last activity, total duration, session id) on a single flex-wrap row with no `·` separator glyphs; the row wraps to a second metadata row at narrow widths without dropping items.",
+        "Each metadata item carries the `data-testid` and `data-*` value attribute enumerated in design D3 (`session-header-name`, `session-status-badge`, `session-header-stage` with `data-stage`, `session-header-model`, `session-header-turn-count`, `session-header-last-activity`, `session-header-duration`, `session-header-session-id` with `data-session-id` carrying the full id).",
+        "Activating the session id control calls `navigator.clipboard.writeText` with the full `meta.sessionId` value, exposes the full id via `aria-label` (not only the truncated 8-char prefix), and renders a transient 'Copied!' state for ~1.5s; the timer uses `vi.useFakeTimers` in tests.",
+        "When `navigator.clipboard` is unavailable the control falls back to keeping the tooltip open showing the full id so the user can copy manually; no silent failure.",
+        "The Cancel button keeps its existing `data-testid=\"session-cancel-trigger\"` and is positioned exactly where it sits today (in the metadata row) — this task MUST NOT alter the Cancel button's location, variant, or testid; that work is owned by T-004. Verifiable by `SessionPage.cancel.test.tsx` continuing to find `[data-testid=\"session-cancel-trigger\"]`.",
+        "`SessionPage.test.ts`, `SessionPage.sticky.test.tsx`, and `SessionPage.cancel.test.tsx` are migrated to the new selectors where they overlap with metadata items, and continue to pass; a new spec covers the copy control (clipboard spy, transient confirmation, full-id `aria-label`).",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SessionDetailShell.tsx` (`SessionHeader` metadata rewritten; new `SessionIdCopyButton` inline); migrated render specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reads time via the helper from T-001. Cancel and sibling-nav slot edits land in T-004 and T-006; this task's acceptance criterion 5 explicitly fences those changes out."
+    },
+    {
+      "id": "T-003",
+      "title": "Make StickySessionTitle scroll-engaged via IntersectionObserver wrapper",
+      "spec": "specs/session-sticky-identity/spec.md",
+      "description": "Add a small `ScrollEngagedStickyTitle` wrapper component in `SessionDetailShell.tsx` that registers an `IntersectionObserver` on the outer `SessionHeader` element with `root: scrollContainerRef.current` and `threshold: 0`. The wrapper owns the `engaged` boolean: it starts at `false`, and only flips to `true` after the observer's first callback reports `intersectionRatio < ~0.001` (header fully scrolled past). When `engaged=false` the wrapper renders `null` (no DOM, no layout contribution); when `engaged=true` it renders `<StickySessionTitle>` with the same props it had before. The inner `StickySessionTitle` itself is unchanged — no new prop. The wrapper's initial state guarantees the spec's first-screen hidden invariant without any conditional CSS or `display: none` heuristic.",
+      "acceptanceCriteria": [
+        "The wrapper's initial `engaged` boolean is `false`. Until the first IntersectionObserver callback fires, the sticky strip is NOT in the DOM (`null` rendered), so the spec's 'SHALL NOT occupy any visible space' invariant holds from the first render without depending on `display: none` heuristics.",
+        "After a scroll that moves the outer header fully out of the scroll container's viewport (header's bottom edge passes the scroll container's top), the wrapper's `engaged` flips to `true` and `<StickySessionTitle>` mounts; the rendered strip carries only session name, status badge, and turn count.",
+        "Scrolling back so the outer header re-enters the viewport flips `engaged` back to `false`; the strip is removed from the DOM until the header scrolls out again.",
+        "The IntersectionObserver is registered with `root: scrollContainerRef.current`, cleans up on unmount, and is driven in jsdom via `vi.stubGlobal('IntersectionObserver', …)` polyfill (callback-driven state changes, not direct state mutation).",
+        "`SessionPage.sticky.test.tsx` is extended with three scenarios: not in the DOM on first render, mounted after the observer's first callback reports the header out of view, unmounted again after the header re-enters.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SessionDetailShell.tsx` (new `ScrollEngagedStickyTitle` wrapper); extended `SessionPage.sticky.test.tsx`.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-002/T-004/T-006; touches a different sub-region. The wrapper, not the inner component, owns the engagement state — the inner `StickySessionTitle` is untouched."
+    },
+    {
+      "id": "T-004",
+      "title": "Demote Cancel session into a secondary action slot",
+      "spec": "specs/session-action-weight/spec.md",
+      "description": "Move the `Cancel session` button out of the metadata row in `SessionHeader` into a dedicated secondary action slot rendered after the metadata row, right-aligned. Switch the button from `variant=\"destructive\"` to `variant=\"ghost\"` (or `outline` if ghost is unavailable), keep the `Cancel session` inline label, retain the existing `AlertDialog` confirm flow and the cancel mutation. The button remains focusable, keyboard-activatable, labelled with `aria-label=\"Cancel session\"`, and preserves its existing `data-testid=\"session-cancel-trigger\"` testid so `SessionPage.cancel.test.tsx` continues to find it.",
+      "acceptanceCriteria": [
+        "The Cancel button preserves `data-testid=\"session-cancel-trigger\"` and `aria-label=\"Cancel session\"` across the demotion; `SessionPage.cancel.test.tsx` continues to find it without selector changes.",
+        "When the session is running, the rendered Cancel button uses a non-destructive variant (ghost or outline); a `SessionPage.cancel.test.tsx` spec asserts the variant class does not include `bg-danger` / destructive styling.",
+        "The Cancel button is rendered outside the metadata row in a dedicated secondary action slot; `SessionPage.cancel.test.tsx` asserts it is not a sibling of the metadata items.",
+        "The Cancel button remains focusable (Tab-reachable) and activating it opens the existing cancel confirm dialog and calls the cancel mutation as before.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SessionDetailShell.tsx` (Cancel slot); updated `SessionPage.cancel.test.tsx`.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Acceptance criterion 1 explicitly fences the existing testid from change so the test surface is preserved. T-002's acceptance criterion 5 leaves the button in place; T-004 only moves and repaints it."
+    },
+    {
+      "id": "T-005",
+      "title": "Surface a structured disabled reason for Compact/Reset via the existing Tooltip primitive",
+      "spec": "specs/session-action-weight/spec.md",
+      "description": "Extend `SessionRecoveryActions` so a disabled Compact or Reset button is wrapped by the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) with a structured explanation (title + reason sentence). Running sessions use the existing `data-active=\"true\"` signal; pending Compact/Reset mutations use the existing `anyPending` state. Remove the button's native `title` attribute to avoid double tooltips. NO new `data-disabled-reason` closed-set attribute is introduced. The existing Tooltip primitive already wraps its child in a `tabIndex={0}` span with focus/blur toggling the tooltip, so the focus path of the spec scenario works with no new a11y code.",
+      "acceptanceCriteria": [
+        "When Compact or Reset is disabled because the session is running (`data-active=\"true\"`) or another recovery action is pending (`anyPending`), the rendered button is wrapped by the existing `Tooltip` primitive with the matching short title and reason sentence; the native `title` attribute is removed and `aria-disabled` is true.",
+        "When Compact and Reset are enabled, no disabled-reason tooltip wraps either button.",
+        "The wrapping reuses the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) as-is — no new a11y mechanism, no new contract attribute, no Radix dependency.",
+        "`SessionRecoveryActions.test.tsx` covers running-session, Compact-pending, and Reset-pending structured reasons plus the enabled state; existing enabled-state and disabled-state assertions are preserved unchanged.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SessionRecoveryActions.tsx`; updated `SessionRecoveryActions.test.tsx`.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Occam: no `data-disabled-reason` closed-set; the existing running-session and mutation-pending inputs drive presentation. No new a11y mechanism is needed because the existing Tooltip primitive handles focus via its `tabIndex` wrapper."
+    },
+    {
+      "id": "T-006",
+      "title": "Deduplicate sibling navigation: remove wide-viewport prev/next, keep narrow fallback; sidebar stays CSS-hidden",
+      "spec": "specs/session-sibling-nav-dedup/spec.md",
+      "description": "Add a small `useMediaQuery('(min-width: 1280px)')` hook at `packages/web/src/shared/lib/use-media-query.ts` with a `setMatchesForTest(matches: boolean)` test seam (same pattern as `useNow`'s `now` injection), a synchronous browser match, and an SSR-safe `false` fallback. In `SessionHeader`, suppress the `siblingNav` slot when the query matches; on narrow viewports, render the slot with `data-viewport=\"narrow\"` so the fallback is distinguishable from the removed wide-viewport version. The `SiblingSessionsSidebar`'s visibility mechanism is NOT touched — it stays CSS-driven via the parent's `xl:flex-row` flex layout (no new render gate).",
+      "acceptanceCriteria": [
+        "`packages/web/src/shared/lib/use-media-query.ts` exports `useMediaQuery` with a `setMatchesForTest` seam; tests use the seam to drive narrow vs wide without installing fake timers or window-resize events.",
+        "When `useMediaQuery` reports wide (>= 1280px), the header does NOT render an element with `data-testid=\"session-sibling-navigation-slot\"` AND the SiblingSessionsSidebar IS visible to users (via the existing CSS-driven `xl:flex-row` parent layout). A jsdom-based test asserts both via the parent's computed display value (e.g. checking the layout class on the scroll container's parent) OR via a focused DOM/CSS attribute check the spec author considers stable.",
+        "When `useMediaQuery` reports narrow (< 1280px), the header renders the slot with `data-viewport=\"narrow\"` and exposes the prev/next links; the SiblingSessionsSidebar is CSS-hidden by the existing `flex-col` parent layout (the same data-testid is always present in the DOM, no new mechanism is added).",
+        "Wide and narrow renders never both expose a user-visible prev/next sibling affordance simultaneously.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `packages/web/src/shared/lib/use-media-query.ts` + `use-media-query.test.ts`; updated `SessionDetailShell.tsx`.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of the header row rewrite; the slot removal is in the breadcrumb sub-region, separate from the metadata row that T-002 rewrites. Sidebar visibility deliberately unchanged per Occam — CSS-driven hide is the existing mechanism; no new render gate is added."
+    },
+    {
+      "id": "T-007",
+      "title": "Add three explicit states (interactive/queued/closed) to SessionFollowupComposer",
+      "spec": "specs/session-followup-state-hints/spec.md",
+      "description": "Extend `SessionFollowupComposer` with three optional props — `endedAt?: string | null`, `hasQueuedFollowup?: boolean`, `state?: 'interactive' | 'queued' | 'closed'` — plus a `data-state` attribute on the composer root that reflects the resolved state. Derive state when `state` is omitted: closed if `disabled`, else queued if `isSending || hasQueuedFollowup`, else interactive. The closed-state copy uses `formatSessionTime` (from T-001) in relative form when `endedAt` is provided and falls back to the existing generic 'no longer accepting followups' phrasing when absent. The queued state shows a persistent 'Queued — waiting for agent...' indicator that survives past the transient `Sent` flash. Existing props and behavior remain backward compatible — when no new props are supplied, today's observable behavior (interactive placeholder + send, disabled banner with current copy, transient `Sent` flash during `isSending`) is unchanged.",
+      "acceptanceCriteria": [
+        "`SessionFollowupComposer` renders three resolved states observable via `data-state=\"interactive\" | \"queued\" | \"closed\"` on `data-testid=\"session-followup-composer\"`.",
+        "When `state` is supplied, it wins over derivation; a spec asserts that explicitly passing `state=\"closed\"` overrides `disabled=false`.",
+        "When `disabled` is true and `endedAt` is provided, the closed-state copy references `endedAt` in relative form (e.g. 'Session ended 8h ago — not accepting new followups.'); when `endedAt` is absent the copy falls back to the existing generic phrasing — verified by two specs. The page renders this closed state for completed and failed sessions even when they have no transcript turns.",
+        "When `hasQueuedFollowup` is true (or `isSending` is true and `hasQueuedFollowup` is unset), the input is disabled and the queued indicator is visible; the indicator persists past the transient `Sent` flash window — verified by a spec that toggles `isSending` false while `hasQueuedFollowup` stays true.",
+        "Backward compatibility: the existing `SessionFollowupComposer.test.tsx` specs pass unchanged — specifically `visibility and enabled state` (interactive state), `disabled (terminal state)` (asserting `data-disabled=\"true\"` and the current copy '/no longer accepting followups/i'), and the transient `Sent` flash spec (asserting `data-state=\"sent\"` after submit resolution, fired only when `hasQueuedFollowup` is NOT supplied).",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SessionFollowupComposer.tsx`; extended `SessionFollowupComposer.test.tsx`.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the T-001 time helper for the closed-state copy. Independent of all SessionHeader / SessionRecoveryActions changes."
+    }
+  ]
+}

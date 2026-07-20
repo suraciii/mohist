@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { formatElapsedTimeAgo, formatTime, formatTimeAgo, formatLogTime } from './format-time'
+import {
+  formatElapsedTimeAgo,
+  formatSessionTime,
+  formatTime,
+  formatTimeAgo,
+  formatLogTime,
+  sessionTimeAbsoluteFormatter,
+} from './format-time'
 
 describe('formatTime', () => {
   it('formats a known ISO date string to locale string', () => {
@@ -109,5 +116,158 @@ describe('formatLogTime', () => {
   it('returns "Invalid Date" for unparseable input (does not throw)', () => {
     const result = formatLogTime('not-a-date')
     expect(result).toBe('Invalid Date')
+  })
+})
+
+describe('formatSessionTime', () => {
+  const dateIso = '2026-06-17T09:52:00.000Z'
+  const dateMs = Date.parse(dateIso)
+  const pastThreshold = dateMs + 5 * 60 * 60 * 1000
+  const withinThreshold = dateMs + 30 * 60 * 1000
+  const longAfter = dateMs + 5 * 24 * 60 * 60 * 1000
+
+  function absoluteOf(ms: number): string {
+    return sessionTimeAbsoluteFormatter.format(new Date(ms))
+  }
+
+  describe('terminal + past threshold (absolute primary / relative secondary)', () => {
+    it('completed → 5h past threshold', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'completed', now: pastThreshold })
+      expect(out.primary).toBe(absoluteOf(dateMs))
+      expect(out.secondary).toBe('5h ago')
+    })
+
+    it('failed → 5d past threshold', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'failed', now: longAfter })
+      expect(out.primary).toBe(absoluteOf(dateMs))
+      expect(out.secondary).toBe('5d ago')
+    })
+
+    it('stale → 5h past threshold', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'stale', now: pastThreshold })
+      expect(out.primary).toBe(absoluteOf(dateMs))
+      expect(out.secondary).toBe('5h ago')
+    })
+  })
+
+  describe('terminal + within threshold (relative primary / absolute secondary)', () => {
+    it('completed within 30m', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'completed', now: withinThreshold })
+      expect(out.primary).toBe('30m ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('failed within 30m', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'failed', now: withinThreshold })
+      expect(out.primary).toBe('30m ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('stale within 30m', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'stale', now: withinThreshold })
+      expect(out.primary).toBe('30m ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+  })
+
+  describe('non-terminal at any threshold (relative primary / absolute secondary)', () => {
+    it('live within 30m', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'live', now: withinThreshold })
+      expect(out.primary).toBe('30m ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('live 5h past threshold — still relative', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'live', now: pastThreshold })
+      expect(out.primary).toBe('5h ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('finalizing 5d past threshold — still relative', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'finalizing', now: longAfter })
+      expect(out.primary).toBe('5d ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('probing 5h past threshold — relative preserved (probing invariant)', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'probing', now: pastThreshold })
+      expect(out.primary).toBe('5h ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+
+    it('probing 5d past threshold — still relative (probing invariant)', () => {
+      const out = formatSessionTime({ date: dateMs, statusKind: 'probing', now: longAfter })
+      expect(out.primary).toBe('5d ago')
+      expect(out.secondary).toBe(absoluteOf(dateMs))
+    })
+  })
+
+  it('sub-minute differences render as "just now" for live sessions', () => {
+    const justNow = formatSessionTime({
+      date: dateMs,
+      statusKind: 'live',
+      now: dateMs + 5_000,
+    })
+    expect(justNow.primary).toBe('just now')
+  })
+
+  it('sub-minute differences render as "just now" for terminal sessions', () => {
+    const justNow = formatSessionTime({
+      date: dateMs,
+      statusKind: 'completed',
+      now: dateMs + 5_000,
+    })
+    expect(justNow.primary).toBe('just now')
+  })
+
+  describe('determinism', () => {
+    it('same inputs produce identical output', () => {
+      const input = { date: dateMs, statusKind: 'completed' as const, now: pastThreshold }
+      expect(formatSessionTime(input)).toEqual(formatSessionTime(input))
+    })
+
+    it('ISO string and epoch ms inputs are equivalent', () => {
+      const fromIso = formatSessionTime({ date: dateIso, statusKind: 'live', now: pastThreshold })
+      const fromMs = formatSessionTime({ date: dateMs, statusKind: 'live', now: pastThreshold })
+      expect(fromIso).toEqual(fromMs)
+    })
+
+    it('Date instance input is equivalent to epoch ms', () => {
+      const fromDate = formatSessionTime({ date: new Date(dateMs), statusKind: 'live', now: pastThreshold })
+      const fromMs = formatSessionTime({ date: dateMs, statusKind: 'live', now: pastThreshold })
+      expect(fromDate).toEqual(fromMs)
+    })
+  })
+
+  it('changing now flips the absolute/relative branch for terminal sessions across the 1-hour threshold', () => {
+    const earlier = formatSessionTime({ date: dateMs, statusKind: 'completed', now: dateMs + 30 * 60 * 1000 })
+    const later = formatSessionTime({ date: dateMs, statusKind: 'completed', now: dateMs + 90 * 60 * 1000 })
+
+    expect(earlier.primary).toBe('30m ago')
+    expect(later.primary).toBe(absoluteOf(dateMs))
+    expect(later.primary).not.toBe(earlier.primary)
+  })
+
+  it('changing now does NOT flip the branch for a live session', () => {
+    const earlier = formatSessionTime({ date: dateMs, statusKind: 'live', now: dateMs + 30 * 60 * 1000 })
+    const later = formatSessionTime({ date: dateMs, statusKind: 'live', now: dateMs + 90 * 60 * 1000 })
+
+    expect(earlier.primary).toBe('30m ago')
+    expect(later.primary).toBe('1h ago')
+    expect(earlier.primary).not.toBe(absoluteOf(dateMs))
+  })
+
+  describe('clock isolation', () => {
+    it('does not call Date.now() internally', () => {
+      const spy = vi.spyOn(Date, 'now')
+      try {
+        formatSessionTime({ date: dateIso, statusKind: 'completed', now: pastThreshold })
+        formatSessionTime({ date: dateIso, statusKind: 'live', now: withinThreshold })
+        formatSessionTime({ date: dateIso, statusKind: 'probing', now: longAfter })
+        expect(spy).not.toHaveBeenCalled()
+      } finally {
+        spy.mockRestore()
+      }
+    })
   })
 })

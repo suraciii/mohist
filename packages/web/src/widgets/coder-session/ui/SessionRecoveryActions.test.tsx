@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ProjectProvider } from '../../../entities/project'
@@ -110,7 +110,7 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 
-  it('disables both buttons and shows the tooltip wrapper when status is running', () => {
+  it('disables both buttons when status is running and drops the native title attribute', () => {
     renderActions({ status: 'running' })
     const compact = screen.getByTestId('session-recovery-compact')
     const reset = screen.getByTestId('session-recovery-reset')
@@ -118,8 +118,8 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     expect(reset).toBeDisabled()
     expect(compact).toHaveAttribute('data-active', 'true')
     expect(reset).toHaveAttribute('data-active', 'true')
-    expect(compact).toHaveAttribute('title', 'Unavailable while session is active')
-    expect(reset).toHaveAttribute('title', 'Unavailable while session is active')
+    expect(compact).not.toHaveAttribute('title')
+    expect(reset).not.toHaveAttribute('title')
   })
 
   it('disables both buttons for the legacy "active" status', () => {
@@ -132,6 +132,116 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     renderActions({ status: 'live' })
     expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
     expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
+  })
+})
+
+describe('SessionRecoveryActions — structured disabled-reason tooltip', () => {
+  function focusDisabledWrapper(buttonTestId: string): HTMLElement {
+    const button = screen.getByTestId(buttonTestId)
+    const wrapper = button.parentElement
+    if (!wrapper) throw new Error(`${buttonTestId} has no parent wrapper`)
+    expect(wrapper).toHaveAttribute('tabindex', '0')
+    fireEvent.focus(wrapper)
+    return wrapper
+  }
+
+  it('renders the running-block structured tooltip when the session is running', () => {
+    renderActions({ status: 'running' })
+
+    focusDisabledWrapper('session-recovery-compact')
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent('Session is running')
+    expect(tooltip).toHaveTextContent(
+      /finish or cancel the session before compacting or resetting/i,
+    )
+
+    fireEvent.blur(screen.getByTestId('session-recovery-compact').parentElement as HTMLElement)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('renders the running-block structured tooltip on the Reset button when the session is running', () => {
+    renderActions({ status: 'running' })
+
+    focusDisabledWrapper('session-recovery-reset')
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent('Session is running')
+    expect(tooltip).toHaveTextContent(
+      /finish or cancel the session before compacting or resetting/i,
+    )
+  })
+
+  it('does not wrap enabled buttons with a disabled-reason tooltip', () => {
+    renderActions({ status: 'completed' })
+
+    const compact = screen.getByTestId('session-recovery-compact')
+    const reset = screen.getByTestId('session-recovery-reset')
+
+    expect(compact.parentElement).not.toHaveAttribute('tabindex', '0')
+    expect(reset.parentElement).not.toHaveAttribute('tabindex', '0')
+    expect(compact).not.toHaveAttribute('title')
+    expect(reset).not.toHaveAttribute('title')
+
+    fireEvent.mouseEnter(compact)
+    fireEvent.mouseEnter(reset)
+    fireEvent.focus(compact)
+    fireEvent.focus(reset)
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('explains why Reset is disabled while Compact is pending', async () => {
+    let resolveCompact: (value: SessionRecoveryResult) => void = () => {}
+    const clients = {
+      ...recoveryClients,
+      compact: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
+        resolveCompact = resolve
+      })),
+    }
+    renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
+    })
+    expect(screen.getByTestId('session-recovery-reset')).toHaveAttribute('aria-disabled', 'true')
+
+    focusDisabledWrapper('session-recovery-reset')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Recovery action in progress')
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/wait for the current recovery action to finish/i)
+
+    await act(async () => {
+      resolveCompact(makeCompactResult())
+    })
+  })
+
+  it('explains why Compact is disabled while Reset is pending', async () => {
+    let resolveReset: (value: SessionRecoveryResult) => void = () => {}
+    const clients = {
+      ...recoveryClients,
+      reset: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
+        resolveReset = resolve
+      })),
+    }
+    renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-reset'))
+    fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
+    })
+    expect(screen.getByTestId('session-recovery-compact')).toHaveAttribute('aria-disabled', 'true')
+
+    focusDisabledWrapper('session-recovery-compact')
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Recovery action in progress')
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(/wait for the current recovery action to finish/i)
+
+    await act(async () => {
+      resolveReset(makeCompactResult())
+    })
   })
 })
 

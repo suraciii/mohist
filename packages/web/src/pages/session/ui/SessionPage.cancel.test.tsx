@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -212,19 +213,44 @@ describe('SessionPage workflow cancel control', () => {
     queryClients.length = 0
   })
 
-  it('renders a cancel trigger in the header when the issue/workflow session is running', async () => {
+  it('renders a secondary cancel action outside the metadata row', async () => {
     const { container } = await renderIssueSessionPage()
 
-    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).not.toBeNull()
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-cancel-trigger"]')!
+    const metadataRow = container.querySelector('[data-testid="session-header-metadata-row"]')!
+    const secondaryActions = container.querySelector('[data-testid="session-header-secondary-actions"]')!
+    const triggerClasses = trigger.className.split(/\s+/)
+
+    expect(trigger).toHaveAttribute('aria-label', 'Cancel session')
+    expect(trigger).toHaveTextContent('Cancel session')
+    expect(triggerClasses).toContain('hover:bg-muted')
+    expect(triggerClasses).not.toContain('bg-destructive/10')
+    expect(triggerClasses).not.toContain('text-destructive')
+    expect(triggerClasses.some((className) => className.startsWith('bg-danger'))).toBe(false)
+    expect(metadataRow).not.toContainElement(trigger)
+    expect(secondaryActions).toContainElement(trigger)
+    expect(secondaryActions).toHaveClass('flex', 'justify-end')
+    expect(secondaryActions.previousElementSibling).toBe(metadataRow)
     expect(container.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
   })
 
-  it('confirms cancellation through the workflow session name', async () => {
+  it('keeps cancellation Tab-reachable and confirms through the workflow session name', async () => {
+    const user = userEvent.setup()
     const { container } = await renderIssueSessionPage()
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-cancel-trigger"]')!
+    const tabbableElements = Array.from(
+      container.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex="0"]'),
+    )
+    const triggerIndex = tabbableElements.indexOf(trigger)
 
-    fireEvent.click(container.querySelector('[data-testid="session-cancel-trigger"]')!)
+    expect(triggerIndex).toBeGreaterThan(0)
+    tabbableElements[triggerIndex - 1]!.focus()
+    await user.tab()
+    expect(trigger).toHaveFocus()
+
+    await user.keyboard('{Enter}')
     expect(document.querySelector('[data-testid="session-cancel-alert"]')).not.toBeNull()
-    fireEvent.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
+    await user.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
 
     expect(cancelMutate).toHaveBeenCalledWith(
       { issueNumber: 123, sessionName: 'session-1' },
