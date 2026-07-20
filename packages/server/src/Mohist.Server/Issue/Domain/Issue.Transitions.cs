@@ -427,6 +427,19 @@ public sealed partial class Issue
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
         if (_workflowRunId != workflowRunId) return false;
+        return CompleteCore(workflowRunId, IssueCompletionKinds.Workflow, now);
+    }
+
+    public bool MarkDone(DateTime? now = null)
+    {
+        if (_status == IssueStatus.Done) return false;
+        var workflowRunId = _workflowRunId
+            ?? throw new InvalidOperationException($"Issue #{Number} has no workflow run to complete");
+        return CompleteCore(workflowRunId, IssueCompletionKinds.Manual, now);
+    }
+
+    private bool CompleteCore(string workflowRunId, string completionKind, DateTime? now)
+    {
         if (_status == IssueStatus.Done) return false;
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
@@ -435,7 +448,7 @@ public sealed partial class Issue
         _status = IssueStatus.Done;
         _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
         Touch(completedAt);
-        RecordEvent(new IssueCompleted(workflowRunId));
+        RecordEvent(new IssueCompleted(workflowRunId, completionKind));
         return true;
     }
 

@@ -108,6 +108,16 @@ public class IssueEventSerializerTests
     }
 
     [Fact]
+    public void ToData_IssueCompleted_PreservesCompletionKind()
+    {
+        var data = IssueEventSerializer.ToData(
+            new IssueCompleted("wr_1", IssueCompletionKinds.Manual));
+
+        Assert.Equal("wr_1", data.GetProperty("workflowRunId").GetString());
+        Assert.Equal("manual", data.GetProperty("completionKind").GetString());
+    }
+
+    [Fact]
     public void BusType_IssueCompositeStarted_IsRegisteredInCatalog()
     {
         Assert.Equal("com.mohist.issue.composite-started", EventCatalog.ReverseDns.IssueCompositeStarted);

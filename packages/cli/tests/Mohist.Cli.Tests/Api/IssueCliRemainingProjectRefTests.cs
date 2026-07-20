@@ -31,6 +31,7 @@ public class IssueCliRemainingProjectRefTests
     [Theory]
     [InlineData("start")]
     [InlineData("approve")]
+    [InlineData("done")]
     [InlineData("close")]
     [InlineData("reopen")]
     [InlineData("retry")]
@@ -80,6 +81,7 @@ public class IssueCliRemainingProjectRefTests
 
     [Theory]
     [InlineData("start")]
+    [InlineData("done")]
     [InlineData("close")]
     [InlineData("retry")]
     [InlineData("rebase")]

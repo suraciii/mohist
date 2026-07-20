@@ -70,6 +70,7 @@ full lifecycle. All take `<number>` (issue number in the active project, or use
 | Stop | `mo issue stop <number>` | **Terminal** stop — cannot be resumed. Use only when you intend to abandon the run. |
 | Force-stop | `mo issue force-stop <number>` | Hard-kill the in-flight agent; recoverable with `resume`. |
 | Resume | `mo issue resume <number>` | Continue from a paused state. |
+| Done | `mo issue done <number>` | Mark externally delivered work Done after its workflow is stopped or completed. |
 | Rebase | `mo issue rebase <number> [--base-branch <b>]` | Rebase the issue branch onto its base. |
 | Close | `mo issue close <number>` | Close a completed/abandoned issue. |
 | Reopen | `mo issue reopen <number>` | Reopen a closed issue. |
@@ -77,6 +78,7 @@ full lifecycle. All take `<number>` (issue number in the active project, or use
 Key distinctions:
 
 - **`stop` vs `force-stop`**: `stop` is terminal (the workflow run ends permanently); `force-stop` is a soft kill — the run is paused and `mo issue resume` brings it back. Choose `stop` only when you mean to abandon.
+- **`done` vs `close`**: `done` records delivered work after a terminal workflow; `close` cancels work that will not be delivered.
 - **`retry` vs `rerun` vs `rerun-from-stage`**: `retry` re-runs the current stage; `rerun` re-runs the whole workflow from the beginning; `rerun-from-stage` invalidates one named stage and everything after it.
 - **`reject` vs `stop`**: `reject` bounces back at an approval gate with a change request (the issue stays alive for another pass); `stop` ends the run.
 

@@ -1,4 +1,4 @@
-import { BotIcon } from 'lucide-react'
+import { BotIcon, CircleCheckIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { AgentStatus } from '../../../../entities/agent'
@@ -14,6 +14,7 @@ export interface IssueActionsCardProps {
     | 'sendBackMutation'
     | 'startMutation'
     | 'markReadyMutation'
+    | 'markDoneMutation'
     | 'closeMutation'
     | 'resumeMutation'
     | 'retryMutation'
@@ -35,6 +36,11 @@ export function IssueActionsCard({
   const otherAgentsCount = activeAgents.filter((agent) => agent.issueNumber !== issue.number).length
   const showOtherAgents = !isAgentRunningOnThis && otherAgentsCount > 0 && issue.status !== 'backlog'
   const showClose = issue.health === 'active' && !isAgentRunningOnThis
+  const hasChildren = issue.childIssuesSummary?.hasChildren === true || (issue.children?.length ?? 0) > 0
+  const showMarkDone = issue.status === 'in_progress'
+    && !hasChildren
+    && !isAgentRunningOnThis
+    && (issue.workflowStatus === 'stopped' || issue.workflowStatus === 'completed')
 
   const content = (
     <div className="space-y-2" data-testid="issue-actions-card-body">
@@ -78,6 +84,18 @@ export function IssueActionsCard({
           className="w-full"
         >
           {mutations.closeMutation.isPending ? 'Closing...' : 'Close'}
+        </Button>
+      )}
+
+      {showMarkDone && (
+        <Button
+          onClick={() => mutations.markDoneMutation.mutate()}
+          disabled={mutations.markDoneMutation.isPending}
+          className="w-full"
+          data-testid="mark-issue-done"
+        >
+          <CircleCheckIcon className="size-4 mr-2" />
+          {mutations.markDoneMutation.isPending ? 'Marking done...' : 'Mark as done'}
         </Button>
       )}
 

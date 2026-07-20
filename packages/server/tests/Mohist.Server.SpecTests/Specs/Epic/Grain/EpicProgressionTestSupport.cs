@@ -201,6 +201,7 @@ public abstract class EpicProgressionTestSupport
             return "wr_test";
         }
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task MarkDoneAsync() => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();

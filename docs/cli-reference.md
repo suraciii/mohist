@@ -222,6 +222,7 @@ mo issue rerun <编号> --from-stage <阶段>
 mo issue stop <编号>                            终止（不可恢复）
 mo issue force-stop <编号>                      暂停（可恢复）
 mo issue resume <编号>
+mo issue done <编号>                            手工标记完成（workflow 必须已终止）
 mo issue rebase <编号>
 mo issue close <编号>
 mo issue reopen <编号>

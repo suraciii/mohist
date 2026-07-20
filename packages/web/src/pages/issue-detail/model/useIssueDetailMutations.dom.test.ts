@@ -20,6 +20,7 @@ const apiMocks = {
   requestChangesIssue: vi.fn<IssueDetailMutationDependencies['requestChangesIssue']>(),
   updateIssue: vi.fn<IssueDetailMutationDependencies['updateIssue']>(),
   closeIssue: vi.fn<IssueDetailMutationDependencies['closeIssue']>(),
+  markIssueDone: vi.fn<IssueDetailMutationDependencies['markIssueDone']>(),
   reopenIssue: vi.fn<IssueDetailMutationDependencies['reopenIssue']>(),
   resumeIssue: vi.fn<IssueDetailMutationDependencies['resumeIssue']>(),
   retryIssue: vi.fn<IssueDetailMutationDependencies['retryIssue']>(),
@@ -54,7 +55,7 @@ function getMutationConfigs(): MutationConfig[] {
   return Object.values(mutationConfigs) as MutationConfig[]
 }
 
-const expectedMutationCount = 15
+const expectedMutationCount = 16
 
 function arrange(options: UseIssueDetailMutationsOptions) {
   mutationConfigs = createIssueDetailMutationOptions(options, queryClient, apiMocks)
@@ -89,7 +90,7 @@ function findMutationByApiCallWithArg(apiMock: ReturnType<typeof vi.fn>, arg: un
 }
 
 describe('useIssueDetailMutations', () => {
-  it('registers exactly 15 useMutation calls', () => {
+  it('registers exactly 16 useMutation calls', () => {
     arrange({ issueNumber: 42, projectId: 'proj-1' })
     expect(getMutationConfigs()).toHaveLength(expectedMutationCount)
   })
@@ -194,6 +195,18 @@ describe('useIssueDetailMutations', () => {
     close.onSuccess?.()
     expect(invalidateQueriesMock).toHaveBeenCalledTimes(1)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+  })
+
+  it('done: calls the manual completion API and invalidates list plus detail', () => {
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
+    const done = findMutationByApiCall(apiMocks.markIssueDone)
+
+    expect(apiMocks.markIssueDone).toHaveBeenCalledWith(7, 'proj-x')
+
+    invalidateQueriesMock.mockClear()
+    done.onSuccess?.()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
   })
 
   it('reopen: invalidates ["issues"] only on success', () => {

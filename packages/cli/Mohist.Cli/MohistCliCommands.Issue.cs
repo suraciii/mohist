@@ -15,6 +15,7 @@ internal static partial class IssueCommands
         issue.Subcommands.Add(BuildUpdate(api));
         issue.Subcommands.Add(BuildAction("start", "Start workflow", api));
         issue.Subcommands.Add(BuildAction("approve", "Approve workflow", api));
+        issue.Subcommands.Add(BuildAction("done", "Mark as done", api));
         issue.Subcommands.Add(BuildAction("close", "Close issue", api));
         issue.Subcommands.Add(BuildAction("reopen", "Reopen issue", api));
         issue.Subcommands.Add(BuildAction("retry", "Retry issue", api));

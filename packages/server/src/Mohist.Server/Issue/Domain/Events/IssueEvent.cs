@@ -86,7 +86,14 @@ public sealed record IssueWorkStartedContext(
     string? Priority);
 
 public sealed record IssueCompleted(
-    string WorkflowRunId);
+    string WorkflowRunId,
+    string CompletionKind = IssueCompletionKinds.Workflow);
+
+public static class IssueCompletionKinds
+{
+    public const string Workflow = "workflow";
+    public const string Manual = "manual";
+}
 
 public sealed record IssueCancelled(
     string? Reason);

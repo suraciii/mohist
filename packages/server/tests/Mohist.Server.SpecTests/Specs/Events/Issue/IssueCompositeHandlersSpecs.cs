@@ -522,9 +522,10 @@ public class IssueCompositeHandlersSpecs
 
     private sealed class NullIssueGrain : IIssueGrain
     {
-        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null) => Task.FromResult(number);
+        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef, string? risk, bool isDraft, string[]? attachmentIds, string? workflowProfileId, int[]? prerequisiteNumbers, int? parent) => Task.FromResult(number);
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => Task.FromResult("wr_test");
         public Task CompleteWorkAsync(string workflowRunId) => Task.CompletedTask;
+        public Task MarkDoneAsync() => Task.CompletedTask;
         public Task CancelAsync() => Task.CompletedTask;
         public Task UpdateAsync(string title, string? body) => Task.CompletedTask;
         public Task UpdateFullAsync(UpdateIssueData data) => Task.CompletedTask;

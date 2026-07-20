@@ -208,6 +208,8 @@ public abstract class IssueWorkflowCompletionHandlerTestSupport
             await PersistAsync(_key, state);
         }
 
+        public Task MarkDoneAsync() => throw new NotSupportedException();
+
         private async Task<DomainIssue?> LoadAsync(string key)
         {
             var fromMemory = await _stateStore.LoadAsync(key);
@@ -313,6 +315,7 @@ public abstract class IssueWorkflowCompletionHandlerTestSupport
     {
         public Task CompleteWorkAsync(string workflowRunId) =>
             throw new InvalidOperationException("simulated grain failure");
+        public Task MarkDoneAsync() => throw new NotSupportedException();
         public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null) => throw new NotSupportedException();
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
