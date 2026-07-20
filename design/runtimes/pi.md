@@ -360,8 +360,10 @@ Pi 是第二个 Runtime，以下既有单 Runtime 假设需要泛化（均不改
 - 模型 catalog API：opencode 专属路由泛化为按 runtime 查询，或并列新增 Pi 路由。
 - Session 命令 handler（Follow-up / Cancel / Compact / Reset）：按 AgentSession 当前
   绑定的 runtime 路由到对应 Runtime。
-- Runner host：构造并启动 `PiRuntime`，注入 `WorkExecutor` 与 `AgentJobExecutor`；
-  `ActionContext` 增加 `piRuntime`；promise 投影规则把 `mohist/pi` 纳入。
+- Runner host：构造并启动 `PiRuntime`，由 manifest 声明的 `agent-turn` capability 向
+  Workflow Action 注入回合能力，并向 `AgentJobExecutor` 注入 Runtime；promise 投影按
+  capability 驱动。#450 若先于能力收窄 issue #447 落地，会暂时沿用当前 runtime-bearing
+  `ActionContext` 与按名投影机制；这是 #447 明确拥有的实现差距，不是本设计的目标接口。
 - Web：Mohist Agent 编辑与 issue 模型选择增加执行后端维度；模型列表按所选后端
   出（OpenCode catalog / Pi catalog）。
 
