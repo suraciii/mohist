@@ -6,24 +6,25 @@
       "id": "T-001",
       "title": "Pin Pi SDK and verify the runtime/toolchain contract",
       "spec": "specs/pi-runtime/spec.md#pi-is-a-pinned-in-process-runner-capability",
-      "description": "Pin @earendil-works/pi-coding-agent to an exact Runner dependency, raise every documented and enforced Node floor to 22.19, and make CI and Docker use a compatible concrete release. Run the real-SDK smoke before product implementation, record the verified service, Session, prompt, event, trust, model, and interruption surfaces, and reconcile upstream drift into the canonical runtime call map.",
+      "description": "Pin @earendil-works/pi-coding-agent to an exact Runner dependency, raise every documented and enforced Node floor to 22.19, and make local version managers, source-install docs, CI, and Docker select a compatible concrete release. Run the real-SDK smoke before any product implementation, record the verified service, Session, Prompt, event, trust, model, and interruption surfaces, and reconcile upstream drift into the canonical runtime call map.",
       "acceptanceCriteria": [
         "packages/runner/package.json pins @earendil-works/pi-coding-agent to an exact version, package-lock.json is updated through the Runner workspace npm command, and no ACP/RPC adapter dependency is added",
-        "The root and Runner package manifests require Node >=22.19; CONTRIBUTING.md advertises the same prerequisite; CI and the Docker builder install an explicit compatible Node release rather than an unspecified Node 22 minor",
+        "The root and Runner package manifests require Node >=22.19; .nvmrc pins a concrete compatible release; CONTRIBUTING.md and docs/self-host.md advertise >=22.19; every setup-node workflow including ci.yml and web-test-shuffle.yml plus the Docker builder install an explicit compatible release rather than an unspecified Node 22 minor",
         "openspec/changes/issue-450/sdk-smoke-verification.json records only pinned package/Node versions, operation names, pass/fail booleans, and sanitized field-name/type summaries for ModelRuntime/catalog, project-untrusted resources, SessionManager create/open, sessionFile identity, createAgentSession, literal Prompt completion, messages/events, model/thinking selection, steer, abort, and stop confirmation",
         "The smoke proves repository-local .pi settings/extensions/packages/skills/prompts are not loaded while global Pi configuration and AGENTS.md/CLAUDE.md context remain available",
         "The smoke identifies stable message/tool/usage/retry identities, the final Session message surfaces usable for restart reconciliation, and the option that disables prompt-template expansion without recording environment/auth values, provider responses, Prompt/message bodies, or raw SDK objects",
         "A secret scan of the smoke artifact and staged change passes before commit; a sentinel credential used by the smoke wrapper is absent from the artifact even on a failed operation",
         "Any SDK drift found by the smoke is reflected in design/runtimes/pi.md and openspec/changes/issue-450/design.md before T-002 starts",
+        "A repository-wide search accounts for every active Node version declaration and finds no manifest, lockfile, version-manager file, source-install document, workflow, or container path that can select or advertise a release below 22.19",
         "A clean npm ci succeeds on Node >=22.19, and npm run typecheck -w packages/runner passes with the pinned dependency"
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "CONFIG",
-      "output": "Pinned Pi SDK and Node toolchain updates in package manifests, lockfile, CONTRIBUTING.md, CI, and Docker, plus sdk-smoke-verification.json and any required call-map reconciliation",
+      "output": "Pinned Pi SDK and Node toolchain updates in package manifests, lockfile, .nvmrc, CONTRIBUTING.md, docs/self-host.md, every CI workflow, and Docker, plus sdk-smoke-verification.json and any required call-map reconciliation",
       "dependsOn": [],
       "passes": false,
-      "notes": "Hard gate for Pi SDK implementation. The smoke uses real Pi and may require configured provider credentials; if the environment cannot verify the required surface, record the blocker and do not implement T-002 from assumptions. Do not add product code, AgentJob routing, Session commands, or Pi catalog reporting here."
+      "notes": "Plan-wide hard gate before every implementation task. The smoke uses real Pi and may require configured provider credentials; if the environment cannot verify the required surface, record the blocker and do not start T-002 through T-007 from assumptions. Do not add product code, AgentJob routing, Session commands, or Pi catalog reporting here."
     },
     {
       "id": "T-002",
@@ -78,9 +79,11 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Shared Workflow Session turn coordinator, atomically migrated OpenCode Workflow caller/wire, guarded runtime binding, and idempotent Server event cursor/seal",
-      "dependsOn": [],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
-      "notes": "Independent of the Pi SDK and deliverable as an OpenCode-preserving Session infrastructure change. Split the new Action event route instead of changing existing Follow-up/generic DTOs. Do not route public Follow-up/Compact/Reset/Cancel commands to Pi or let one Runner attest another Runner's local Action stream."
+      "notes": "Implementation is SDK-independent but deliberately ordered after T-001 because the smoke is the plan-wide pre-code gate and may reconcile shared design contracts. Deliver this as an OpenCode-preserving Session infrastructure change. Split the new Action event route instead of changing existing Follow-up/generic DTOs. Do not route public Follow-up/Compact/Reset/Cancel commands to Pi or let one Runner attest another Runner's local Action stream."
     },
     {
       "id": "T-004",
@@ -130,7 +133,9 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Pi-aware Server Workflow validation, explicit Inline Agent classification, parent-context dispatch, and regression specs",
-      "dependsOn": [],
+      "dependsOn": [
+        "T-001"
+      ],
       "passes": false,
       "notes": "The authoritative parent-context design has already been updated during planning. Do not register the Runner Action, add Pi AgentJob routing, or change model catalog APIs in this task."
     },

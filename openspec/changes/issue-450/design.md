@@ -45,7 +45,7 @@ The SDK service factory fixes project trust to false for every work directory. I
 
 ### D2. Pin and smoke-verify the SDK before implementation
 
-Add an exact `@earendil-works/pi-coding-agent` version to `packages/runner/package.json` using the Runner workspace npm command so `package-lock.json` is updated deliberately. Set both root and Runner `engines.node` to `>=22.19`. Record a real-SDK verification at `openspec/changes/issue-450/sdk-smoke-verification.json`, following issue #409's artifact shape but allowing only package/Node versions, operation names, pass/fail booleans, and sanitized field-name/type summaries. The artifact MUST NOT contain environment values, auth-store content, provider responses, Prompt/message text, or raw SDK objects; run the repository secret scan before committing it.
+Add an exact `@earendil-works/pi-coding-agent` version to `packages/runner/package.json` using the Runner workspace npm command so `package-lock.json` is updated deliberately. Set both root and Runner `engines.node` to `>=22.19`, and pin `.nvmrc` to a concrete compatible release. Record a real-SDK verification at `openspec/changes/issue-450/sdk-smoke-verification.json`, following issue #409's artifact shape but allowing only package/Node versions, operation names, pass/fail booleans, and sanitized field-name/type summaries. The artifact MUST NOT contain environment values, auth-store content, provider responses, Prompt/message text, or raw SDK objects; run the repository secret scan before committing it.
 
 The smoke must verify at least: `ModelRuntime.create()` and available-model loading; untrusted project-resource setup; `SessionManager.create(cwd)` and `SessionManager.open(file)`; returned `sessionFile`; `createAgentSession`; `prompt()` completion and final messages; `subscribe()` event payloads for text, thinking, tools, usage, and retry; `setModel`; `setThinkingLevel`; `steer`; `abort`; and the state used to confirm interruption. It must also verify that prompt-template/slash-command expansion can be disabled. If names or payloads differ, update `design/runtimes/pi.md` and this call map before implementing.
 
@@ -163,7 +163,7 @@ If durable append fails after admission, the reporter fixes `session-reporting-f
 
 ### D9. Update packaging and narrow Web classification only
 
-Update root and Runner Node engine constraints, `CONTRIBUTING.md`, the Runner dependency/lockfile, CI's Node setup to an explicit >=22.19 release, and the Docker builder's Node installation so root `npm ci` satisfies the engine even though that image builds only Web. Do not rely on a distro's unspecified Node 22 minor.
+Update root and Runner Node engine constraints, `.nvmrc`, `CONTRIBUTING.md`, `docs/self-host.md` source-install prerequisites, the Runner dependency/lockfile, every `actions/setup-node` workflow (including CI and Web shuffle), and the Docker builder's Node installation to an explicit >=22.19 release so every root `npm ci` path satisfies the engine. Do not rely on a distro, major-only `.nvmrc`, documentation, or CI declaration that can select an unspecified Node 22 minor. Finish with a repository-wide search for active Node version declarations and account for every match.
 
 The Web change is limited to treating `mohist/pi` as an Inline Agent task for Session/task-log milestones. Transcript, lineage, runtime, tool, and usage DTOs are already runtime-neutral. No Pi model selector or credential UI is added.
 
@@ -208,7 +208,7 @@ Run Runner typecheck/tests, Server tests, and Web typecheck/tests required by th
 
 ## Migration Plan
 
-1. Pin the Pi SDK and Node >=22.19, update `CONTRIBUTING.md` plus the lockfile/CI/Docker toolchains, run the real SDK smoke, and commit `sdk-smoke-verification.json`. Stop and reconcile the runtime design if the smoke differs.
+1. Pin the Pi SDK and Node >=22.19; update package engines/lockfile, `.nvmrc`, `CONTRIBUTING.md`, `docs/self-host.md`, every CI workflow, and Docker; run the real SDK smoke; and commit `sdk-smoke-verification.json`. Stop and reconcile the runtime design if the smoke differs. No later implementation task starts until this gate passes.
 2. Implement `runtime/pi` behind fake SDK services, including readiness, untrusted resource loading, Session cache/restore, event projection, deadlines, provider policy, and error normalization.
 3. Add the shared Workflow Session task-lifecycle coordinator, move `mohist/opencode` into it, and atomically migrate runtime-aware open/bind plus a new sequenced Workflow Action event route/cursor/seal; leave existing Follow-up/generic event routes unchanged and land both-route regressions, expected-binding, symmetric lineage, duplicate/gap/seal, cross-runtime serialization, and cleanup-intervention tests.
 4. Add the durable Workflow Session event outbox over an injected byte-storage boundary, host startup/background drain, reporting quarantine, restart reconciliation, and fake-storage tests of the production codec/state machine.
