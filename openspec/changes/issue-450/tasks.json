@@ -1,25 +1,25 @@
 {
   "project": "mohist-local",
-  "description": "Deliver the Workflow-direct mohist/pi path end to end: pin and verify the bundled Pi SDK, implement the in-process PiRuntime, make Workflow AgentSession binding runtime-aware, integrate Pi with Workflow completion and Session reporting, and expose Pi-backed Session milestones without adding AgentJob, Session-command, or model-catalog UI scope.",
+  "description": "Deliver the Workflow-direct mohist/pi path end to end: pin and verify the bundled Pi SDK, implement the in-process PiRuntime, make Workflow AgentSession coordination and binding runtime-aware without breaking OpenCode, durably report Session facts, and expose Pi-backed Session milestones without adding AgentJob, Session-command, or model-catalog UI scope.",
   "tasks": [
     {
       "id": "T-001",
       "title": "Pin Pi SDK and verify the runtime/toolchain contract",
       "spec": "specs/pi-runtime/spec.md#pi-is-a-pinned-in-process-runner-capability",
-      "description": "Pin @earendil-works/pi-coding-agent to an exact Runner dependency, raise the root and Runner Node engine floor to 22.19, and make CI and Docker use a compatible concrete Node release. Run the real-SDK smoke before implementation, record the verified service, Session, prompt, event, trust, model, and interruption surfaces, and reconcile any drift into the canonical Pi runtime design.",
+      "description": "Pin @earendil-works/pi-coding-agent to an exact Runner dependency, raise every documented and enforced Node floor to 22.19, and make CI and Docker use a compatible concrete release. Run the real-SDK smoke before product implementation, record the verified service, Session, prompt, event, trust, model, and interruption surfaces, and reconcile upstream drift into the canonical runtime call map.",
       "acceptanceCriteria": [
         "packages/runner/package.json pins @earendil-works/pi-coding-agent to an exact version, package-lock.json is updated through the Runner workspace npm command, and no ACP/RPC adapter dependency is added",
-        "The root and Runner package manifests require Node >=22.19; CI and the Docker builder install an explicit compatible Node release rather than an unspecified Node 22 minor",
+        "The root and Runner package manifests require Node >=22.19; CONTRIBUTING.md advertises the same prerequisite; CI and the Docker builder install an explicit compatible Node release rather than an unspecified Node 22 minor",
         "openspec/changes/issue-450/sdk-smoke-verification.json records the pinned package and Node versions plus results for ModelRuntime initialization/catalog, project-untrusted resource loading, SessionManager create/open, absolute sessionFile identity, createAgentSession, literal prompt completion, messages, event payloads, setModel, setThinkingLevel, steer, abort, and stop confirmation",
         "The smoke proves repository-local .pi settings/extensions/packages/skills/prompts are not loaded while global Pi configuration and AGENTS.md/CLAUDE.md context remain available",
-        "The smoke identifies stable message/tool/usage/retry identities and confirms how prompt-template expansion is disabled and interruption is confirmed",
+        "The smoke identifies stable message/tool/usage/retry identities, the final Session message surfaces usable for restart reconciliation, and the option that disables prompt-template expansion",
         "Any SDK drift found by the smoke is reflected in design/runtimes/pi.md and openspec/changes/issue-450/design.md before T-002 starts",
         "A clean npm ci succeeds on Node >=22.19, and npm run typecheck -w packages/runner passes with the pinned dependency"
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "CONFIG",
-      "output": "Pinned Pi SDK and Node toolchain updates in package manifests/lockfile/CI/Docker, plus openspec/changes/issue-450/sdk-smoke-verification.json and any required call-map reconciliation",
+      "output": "Pinned Pi SDK and Node toolchain updates in package manifests, lockfile, CONTRIBUTING.md, CI, and Docker, plus sdk-smoke-verification.json and any required call-map reconciliation",
       "dependsOn": [],
       "passes": false,
       "notes": "Hard gate for Pi SDK implementation. The smoke uses real Pi and may require configured provider credentials; if the environment cannot verify the required surface, record the blocker and do not implement T-002 from assumptions. Do not add product code, AgentJob routing, Session commands, or Pi catalog reporting here."
@@ -28,107 +28,162 @@
       "id": "T-002",
       "title": "Implement the in-process PiRuntime deep module",
       "spec": "specs/pi-runtime/spec.md",
-      "description": "Create packages/runner/src/runtime/pi as a complete deep module with Mohist-owned boundary types, injectable SDK services, project-untrusted resource setup, readiness/catalog state, physical Session create/open/cache/dispose, literal prompt execution, per-turn model/thinking selection, event projection/reconciliation, deadline interruption, provider-error policy, and normalized errors. Share only the pure deadline/provider rules that must remain identical to OpenCode; do not introduce a generic AgentRuntime interface or expose Pi SDK types.",
+      "description": "Create packages/runner/src/runtime/pi as a complete deep module with Mohist-owned boundary types, injectable SDK services, project-untrusted resource setup, readiness/catalog state, physical Session create/open/cache/dispose, literal Prompt execution, per-turn model/thinking selection, event projection/reconciliation, deadline and cancellation interruption, execution quarantine, provider policy, and normalized errors. Parse the Runner provider-policy configuration once and supply the same pure policy object to OpenCode and Pi without introducing a generic AgentRuntime interface.",
       "acceptanceCriteria": [
         "All @earendil-works/pi SDK imports are confined to packages/runner/src/runtime/pi, and callers/tests consume only Mohist-owned Pi request/result/diagnostic types",
-        "start()/ready()/diagnostic() become ready only after SDK services initialize and getAvailable completes; an empty catalog is ready with a warning, while initialization/catalog failure stays not-ready with an actionable diagnostic and a retryable start path",
+        "start()/ready()/diagnostic() become ready only after SDK services initialize and getAvailable completes; an empty catalog is ready with a warning, while initialization/catalog failure stays not-ready with an actionable diagnostic and retryable start path",
+        "cli.ts parses MOHIST_PROVIDER_RETRY_THRESHOLD as a positive integer defaulting to 5 and MOHIST_PROVIDER_NON_RECOVERABLE_TERMS as a JSON array of non-empty literal strings; invalid values block Pi readiness and operator text is escaped rather than evaluated as regular expressions",
+        "Runner startup configuration carries one parsed provider policy object; OpenCode consumes that object and PiRuntime accepts the same object, with tests proving non-default threshold/literal terms reach both runtime boundaries and preserve existing OpenCode defaults",
         "The SDK factory fixes project trust to false, loads global Pi configuration/auth and repository instruction files, and supplies no repository-local .pi execution resources; callers cannot override this policy",
-        "createSession returns the normalized absolute session-file path and rejects a missing path as incompatible-runtime; restoring an existing path uses SessionManager.open and a missing/corrupt file returns missing-session without implicit creation",
-        "runTurn applies model and thinking level on the existing Session, submits slash-prefixed prompts literally, awaits prompt() as the only completion authority, reads final assistant text from messages, and never issues a second wait or auto-replays an uncertain prompt",
-        "Model parsing keeps the complete remainder after the first slash; omitted model/variant preserve the current Session selection or Pi default; model/variant changes do not alter the physical path or cache key",
-        "The event projector maps assistant/reasoning/tool/model/usage facts to Mohist event types, suppresses duplicate message/tool/usage deltas using smoke-verified identities, reconciles final messages, and treats unknown events as diagnostics only",
-        "Fake-timer tests cover the single wrap-up warning, short-deadline warning-at-start, deadline result fixation before abort, late prompt completion not flipping timeout, external interruption, stop-unconfirmed diagnostics, and no replay",
-        "Provider-policy tests cover first-event quota/credit/billing failure, recoverable retries below the threshold, threshold-N failure (default 5), Pi-native terminal error normalization, abort confirmation, and binding preservation",
+        "createSession returns the normalized absolute session-file path and rejects a missing path as incompatible-runtime; restoring uses SessionManager.open and a missing/corrupt file returns missing-session without implicit creation",
+        "runTurn applies model and thinking level on the existing Session, preserves the complete model remainder after the first slash, submits slash-prefixed Prompts literally, awaits prompt() as the only completion authority, reads final assistant text from messages, and never issues a second wait or replays an uncertain Prompt",
+        "The event projector maps assistant/reasoning/tool/model/usage facts, persists smoke-verified message/tool/usage fingerprints through its caller-owned state, reconciles final messages, and treats unknown events as diagnostics only",
+        "Fake-timer tests cover the 60-minute default, declared deadline, one wrap-up warning, short-deadline warning-at-start, deadline result fixation, external cancellation result fixation, late completion, confirmed abort, and no replay",
+        "An unconfirmed timeout or cancellation quarantines only the physical Session path; later turns on it fail unavailable-runtime, other paths remain available, observed stop clears quarantine, and Runner restart starts with no in-process execution quarantine",
+        "Provider-policy tests cover first-event quota/credit/billing failure, recoverable retries below the configured threshold, threshold-N failure, Pi-native terminal error normalization, abort confirmation, and binding preservation",
         "Runtime tests use fake SDK services, virtual paths, and fake timers only; npm run typecheck -w packages/runner and npm test -w packages/runner pass"
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/runner/src/runtime/pi deep module and narrowly shared pure turn-policy helpers, with deterministic fake-SDK runtime tests",
+      "output": "packages/runner/src/runtime/pi deep module, validated shared provider-policy configuration, and deterministic fake-SDK runtime tests",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "Implements design D1, D3 runtime half, D7, and the projector half of D8. This task delivers a usable runtime module but does not register mohist/pi, alter RunnerHost, call Server Session routes, implement AgentJob Pi execution, or add Session commands."
+      "notes": "Implements design D1, the Pi-runtime half of D3, D7, and the projector half of D8. It does not register mohist/pi, alter Workflow Session routes, implement AgentJob Pi execution, or add Session commands."
     },
     {
       "id": "T-003",
-      "title": "Add runtime-aware Workflow AgentSession binding",
-      "spec": "specs/pi-workflow-session/spec.md#the-physical-pi-binding-is-persisted-before-the-first-prompt, specs/pi-workflow-session/spec.md#current-pi-bindings-are-reused-without-model-driven-rotation, specs/pi-workflow-session/spec.md#invalid-persisted-bindings-fail-without-silent-replacement",
-      "description": "Make only the Workflow Runner Session open/bind API runtime-aware and add a narrow expected-current grain command for first attach, idempotent reuse, and guarded cross-runtime rebind with lineage. Register Pi as a known Session runtime while preserving existing AgentJob route behavior, immutable workDir enforcement, same-runtime replacement protection, stale-binding rejection, and runtime-neutral transcript projections.",
+      "title": "Make Workflow Session coordination and binding runtime-aware",
+      "spec": "specs/pi-workflow-session/spec.md#the-physical-pi-binding-is-persisted-before-the-first-prompt, specs/pi-workflow-session/spec.md#current-pi-bindings-are-reused-without-model-driven-rotation, specs/pi-workflow-session/spec.md#invalid-persisted-bindings-fail-without-silent-replacement, specs/pi-workflow-session/spec.md#one-workflow-work-turn-executes-per-logical-agentsession, specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
+      "description": "Introduce the shared WorkflowSessionTurnCoordinator used by every Workflow Inline Agent Action, make only the Workflow Runner Session open/bind/event wire runtime-aware, and add the AgentSession cursor plus atomic drained-stream seal/rebind transition. Migrate the existing mohist/opencode caller into the coordinator and required wire fields in the same task so the currently working path never observes a half-migrated contract.",
       "acceptanceCriteria": [
-        "Workflow Session open requires and validates runtime opencode or pi, returns the observed runtime/binding/workDir, and creates a new logical Session with the selected runtime without changing AgentJob open routes",
-        "The Workflow bind request carries target runtime plus expected current runtime and runtimeSessionId; the grain applies first bind and repeated same bind idempotently",
-        "A bind from a different observed runtime to pi succeeds only when expected-current state still matches, preserves logical sessionId/source/workDir, and appends one pi lineage entry without migrating old context",
-        "A stale expected binding/runtime is rejected atomically; a same-runtime different physical ID is rejected with the existing Reset guidance rather than replacing the binding",
-        "Pi is accepted by the Session runtime registry, while historical/unregistered runtime fallback semantics and generic AgentJob routes remain unchanged",
-        "The authoritative workDir remains immutable; a mismatched Workflow open/bind is rejected before any binding change",
-        "Runtime events carrying a stale physical binding are rejected and do not alter transcript, usage, model, or Workflow state",
-        "Server domain/unit/spec coverage includes first attach, idempotent bind, cross-runtime lineage, expected-binding race, same-runtime replacement rejection, workspace mismatch, Pi registration, stale events, and persistence/reactivation",
-        "npm test passes with no real filesystem, network, process, database file, or wall-clock dependency in the new tests"
+        "WorkflowSessionTurnCoordinator serializes by projectId/WorkflowRunId/sessionName from before open through Prompt completion and reporter persistence, removes settled keys, and allows different logical Session keys to run independently",
+        "mohist/opencode enters the shared coordinator for its complete logical Session operation; concurrent OpenCode/OpenCode and OpenCode/Pi test operations on one key cannot overlap, while different keys can",
+        "Workflow Session open requires runtime opencode or pi, returns observed runtime/binding/workDir/Runner/event cursor, and the existing OpenCode caller sends runtime opencode atomically with the Server contract change",
+        "Workflow bind carries target runtime, expected current runtime/session, and for rebind the current owning Runner plus drainedThroughSequence; first bind and repeated same bind remain idempotent",
+        "A guarded cross-runtime rebind in either direction preserves logical identity/workDir, appends one lineage entry, and succeeds only when expected binding/Runner match and the current Server cursor equals drainedThroughSequence",
+        "The successful rebind seals the old stream and installs the new binding in one AgentSession transition; mismatch, gap, stale expectation, another Runner's attestation, or same-runtime different physical ID rejects without either mutation",
+        "The runtime-event command carries deterministic stream identity and sequence; the AgentSession transition acknowledges sequence <= cursor without reapplying, accepts only cursor + 1, and rejects gaps, sealed streams, and stale physical bindings before transcript/usage/model mutation",
+        "The authoritative workDir remains immutable and mismatch rejects before binding mutation; Pi is registered while historical runtime fallback and generic AgentJob DTO/routes remain unchanged",
+        "Server and Runner coverage includes the existing OpenCode Workflow regression path, first/idempotent bind, symmetric lineage, expected-binding races, atomic seal failure/success, duplicate/gap/sealed/stale events, workspace mismatch, Pi registration, persistence/reactivation, and shared coordinator concurrency",
+        "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test pass with deterministic fakes only"
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Runtime-aware Workflow AgentSession open/bind API and guarded AgentSession grain transition with Pi runtime registration, lineage semantics, and Server tests",
+      "output": "Shared Workflow Session turn coordinator, atomically migrated OpenCode Workflow caller/wire, guarded runtime binding, and idempotent Server event cursor/seal",
       "dependsOn": [],
       "passes": false,
-      "notes": "Independent of T-001/T-002 and can run in parallel. Implements design D5 at the Session authority boundary. Do not route public Reset/Compact/Follow-up/Cancel commands to Pi and do not generalize the generic AgentJob Session DTOs."
+      "notes": "Independent of the Pi SDK and deliverable as an OpenCode-preserving Session infrastructure change. Do not route AgentJob or public Follow-up/Compact/Reset/Cancel commands to Pi and do not let one Runner attest another Runner's local event stream."
     },
     {
       "id": "T-004",
-      "title": "Deliver the mohist/pi Workflow execution path",
-      "spec": "specs/pi-workflow-action/spec.md, specs/pi-workflow-session/spec.md#workflow-session-names-identify-stable-logical-conversations, specs/pi-workflow-session/spec.md#one-workflow-work-turn-executes-per-logical-agentsession, specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
-      "description": "Integrate PiRuntime into RunnerHost and WorkExecutor, register the standalone mohist/pi Action, and connect it to runtime-aware Workflow Session binding, per-logical-Session serialization, ordered Session reporting, completion/promise projection, recovery, and cleanup reuse. Update Server inline-Agent validation/classification and parent-context dispatch in the same vertical slice so a Workflow profile can execute Pi end to end without touching AgentJob or Session-command routing.",
+      "title": "Implement the durable Workflow Session event outbox",
+      "spec": "specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
+      "description": "Implement WorkflowSessionEventOutbox as the runtime-neutral owner of Workflow binding stream manifests, record encoding, projector fingerprints, sequencing, acknowledgement compaction, reporting quarantine, and restart repair over an injected byte-storage boundary. Migrate OpenCode to the same input/drain/rebind stream lifecycle, then add the production atomic file adapter, host startup/background drain, Pi current-turn reconciliation hooks, and the fenced prepareRebind operation that consumes T-003's Server cursor/seal protocol.",
       "acceptanceCriteria": [
-        "RunnerHost constructs/starts/shuts down one PiRuntime, periodically retries failed Pi startup, and gates new polling on both OpenCode and Pi readiness while still draining awaitingAck; Pi's internal catalog is not merged into RunnerRegistration",
-        "ActionContext/baseContext/check/cleanup paths carry piRuntime, createDefaultRegistry resolves mohist/pi, and ownerKind=agent-job continues to branch before Action resolution into the existing OpenCode AgentJobExecutor",
-        "mohist/pi accepts resolved non-empty prompt, optional session, and explicit options.model/options.variant; it has no hidden vars.agent fallback, rejects legacy with.agent/kind/type, retains unknown option keys for diagnostics, and maps every stable Action error code correctly",
-        "A first turn is serialized by project/WorkflowRun/session name, opens the logical Session, rejects workDir mismatch, creates the physical Pi Session, persists the guarded binding, persists session.input, and only then calls prompt()",
-        "Same-name tasks, retries, and cleanup turns reuse one logical and physical Pi Session; model/variant changes preserve the session-file path and lineage; different logical Session names can run concurrently",
-        "Runner restart restores a bound Pi Session from its persisted file path; a missing/corrupt bound file or pre-materialization crash returns runtime-session-missing with Reset guidance and never creates a replacement",
-        "The Workflow Session reporter sends ordered input, assistant/reasoning, tool, model, and usage facts under the current physical binding, flushes before Action return with bounded reporting signals, and logs post-admission reporting failures without replaying the task",
-        "Successful final assistant text reaches _output expectation evaluation only through the private turnFact; Action failure bypasses completion checks; public output is null or exactly {promise}; runtime/session/model/usage/provider diagnostics never enter Action output",
-        "Deadline maps to timeout, external interruption maps to interrupted, provider exhaustion maps to turn-failed, and all failures preserve the current binding and remain available for Workflow recovery matching",
-        "Worktree enforcement recognizes mohist/pi and reinvokes the already-resolved Action on the same logical/physical Session without rotating the binding",
-        "TaskRun classification, WorkflowItemTranslator, WorkflowYamlSerializer, and plan-stage parent issue context treat mohist/pi as an Inline Agent Action with runtime-neutral validation messages",
-        "Fake-backed Runner/Server specs cover the complete open -> bind -> input/events -> final text -> expect/promise path, concurrent same-session serialization, different-session concurrency, retry/restart reuse, missing-file failure, cleanup reuse, timeout, provider failure, and stale-event rejection",
+        "WorkflowSessionOutboxStorage exposes list/read/replaceAtomically/remove byte operations; the production adapter writes and syncs a sibling temporary file, atomically renames it, syncs the parent directory, and never exposes partially written committed snapshots",
+        "The real outbox codec/state machine runs over injected storage and deterministically identifies one stream by logical AgentSession plus physical binding; tests use in-memory bytes and never instantiate or access the host filesystem",
+        "Every OpenCode and Pi Workflow binding creates the same stream manifest and uses it for session.input, required admission drain, and rebind fencing; OpenCode can drain and seal an empty-or-input-only stream without connecting its full runtime-event observer",
+        "Before Prompt admission the outbox atomically creates a manifest containing binding identity, physical repair target when available, next sequence, projector fingerprints, and active-turn checkpoint; session.input is Server-acknowledged and the checkpoint is durably marked admitted before the Runtime call",
+        "Each required canonical Pi audit fact and updated projector fingerprint is one atomic snapshot replacement; final checkpoint closure occurs only after final assistant/reasoning, completed tool/result, model, and usage facts retained by Pi are durable, and delivery occurs in monotonic sequence order",
+        "Ambiguous acknowledgement retries the same sequence, duplicate acknowledgement compacts once, and a Server gap retains/resends the missing prefix; post-turn transport failure preserves the completed Action result when records are durable and background/startup drain retries without Prompt replay",
+        "prepareRebind holds the stream fence, drains every locally issued sequence, and supplies the final sequence to T-003's atomic seal-and-bind call; failure returns session-reporting-failed and admits neither a Prompt nor rebind",
+        "A post-admission local append failure fixes session-reporting-failed, interrupts an active Pi turn, quarantines that physical Session from later Prompt/rebind admission, retains the fact in memory, and does not replay the Prompt",
+        "Startup reloads open/admitted Pi checkpoints, opens the persisted Pi Session through an injected repair hook, reconciles required final message/reasoning/tool/model/usage facts using persisted fingerprints, appends/drains missing facts, and clears reporting quarantine only after repair; non-retained intermediate progress remains diagnostic",
+        "Recognizable orphan temporary files are removable, but corrupt/unreadable committed snapshots are preserved and expose actionable reporting-unavailable diagnostics rather than being discarded",
+        "Tests of the production codec/state machine cover OpenCode -> Pi -> OpenCode stream creation/drain/seal, atomic old-or-new replacement, append failure before/after admission, corrupt snapshots, duplicate/gap recovery, restart reconciliation/drain, pre-admission and pre-rebind failure, and no replay; fake filesystem-operation tests cover only physical-adapter call ordering",
         "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test pass"
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "End-to-end Workflow-direct mohist/pi implementation across Runner Action/host/executor/reporting and Server dispatch/classification, with fake-backed integration coverage",
+      "output": "Crash-consistent Workflow Session outbox, injected byte storage and production file adapter, host drain/repair, reporting quarantine, and deterministic recovery tests",
       "dependsOn": [
         "T-002",
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes the complete PiRuntime and runtime-aware Session bind contract. Implements design D3 host half, D4, D6, and D8 reporter half. Keep Pi AgentJob execution, Follow-up/Compact/Reset/Cancel handlers, runtime-aware catalog reporting/UI, ACP/RPC, and a generic AgentRuntime out of scope."
+      "notes": "Implements D8's transport and local-persistence guarantees before the Pi Action consumes them. The outbox owns its format and recovery policy; the physical adapter owns only byte persistence. Never turn event-delivery or append failure into automatic Prompt replay."
     },
     {
       "id": "T-005",
-      "title": "Expose Pi Workflow Session presentation and close implementation gaps",
-      "spec": "specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
-      "description": "Teach the Web Workflow milestone classifier to recognise mohist/pi and verify that the existing runtime-neutral Session transcript, tools, model observations, usage, and lineage render Pi facts correctly. After the user-visible path is verified, update only the implementation-gap footnotes in the Pi product/runtime documents so they describe the delivered Workflow-direct path and retain the explicit sister-issue gaps.",
+      "title": "Recognize Pi as a Workflow Inline Agent Action",
+      "spec": "specs/pi-workflow-action/spec.md#mohistpi-is-a-workflow-inline-agent-action",
+      "description": "Update Server Workflow validation, classification, translation, serialization, and parent-context selection to use the architecture-specified explicit Inline Agent Action set containing mohist/opencode and mohist/pi. Keep the change at the dispatch/presentation boundary so runtime implementation, AgentJob routing, and Session commands remain untouched.",
       "acceptanceCriteria": [
-        "Web isInlineAgentTask recognises mohist/pi with a non-empty Session name and continues to exclude non-inline Actions and AgentJob work",
-        "A Pi Workflow Session fixture renders assistant text, tool lifecycle, resolved model, token usage, and Pi runtime lineage through the existing Session components without a Pi-specific duplicate view",
-        "Task-log model/session milestones are derived for mohist/pi and remain correctly ordered with operation log rows",
-        "No Pi model selector, provider credential form, Agent runtime selector, or Session-command control is added",
-        "docs/actions/pi.md and design/runtimes/pi.md implementation-gap sections mark the Workflow-direct PiRuntime/Action/Session reporting path implemented while leaving AgentJob, Session-command, and runtime-aware catalog/UI gaps explicit",
-        "Web tests cover Pi inline-Agent classification and Session/milestone rendering; npm run typecheck -w packages/web and npm run test:run -w packages/web pass",
-        "Final repository verification passes: npm run typecheck -w packages/runner, npm test -w packages/runner, npm test, npm run typecheck -w packages/web, and npm run test:run -w packages/web; verification leaves no Git-visible changes"
+        "Server static validation accepts uses=mohist/pi with prompt/session/options and rejects legacy with.agent, with.kind, and with.type before dispatch with an Action-specific message",
+        "TaskRun.DeriveClassification, WorkflowItemTranslator, and WorkflowYamlSerializer classify mohist/pi as UserFacing Inline Agent without substring matching or changing non-inline Actions",
+        "Plan-stage parent issue context is attached for mohist/opencode and mohist/pi only under the existing task/stage/parent guards defined in design/workflow/task-dispatch.md; checks, other stages, AgentJobs, and unrelated Actions remain excluded",
+        "Validation and dispatch diagnostics refer to the selected Action rather than hard-coding OpenCode",
+        "Server specs cover accepted Pi dispatch, every legacy field rejection, both Inline Agent classifications, serialization, parent-context inclusion/exclusion guards, and unchanged OpenCode behavior",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pi-aware Server Workflow validation, explicit Inline Agent classification, parent-context dispatch, and regression specs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The authoritative parent-context design has already been updated during planning. Do not register the Runner Action, add Pi AgentJob routing, or change model catalog APIs in this task."
+    },
+    {
+      "id": "T-006",
+      "title": "Deliver the mohist/pi Workflow execution path",
+      "spec": "specs/pi-workflow-action/spec.md, specs/pi-workflow-session/spec.md",
+      "description": "Integrate PiRuntime and the durable reporter into RunnerHost and WorkExecutor, register the standalone mohist/pi Action, and connect it to the shared logical-Session coordinator, guarded binding, Workflow completion/promise projection, recovery, and cleanup reuse. This is the final Runner vertical slice; it consumes the already-tested runtime, Session wire, outbox, and Server dispatch boundaries without touching AgentJob or Session-command routing.",
+      "acceptanceCriteria": [
+        "RunnerHost creates one provider policy object, supplies it to OpenCode and Pi, initializes the outbox plus both runtimes before Server registration, shuts them down together, periodically retries failed Pi startup, and gates registration/new polling on both runtimes while still draining awaitingAck; Pi catalog data is not added to RunnerRegistration",
+        "ActionContext/baseContext/check/cleanup paths carry piRuntime and WorkflowSessionTurnCoordinator, createDefaultRegistry resolves mohist/pi, and ownerKind=agent-job continues to branch before Action resolution into OpenCode AgentJobExecutor",
+        "mohist/pi recursively consumes only expanded prompt/session/options; omitted or null session uses Work ID, explicit strings are trimmed, whitespace/non-string session fails before Session creation, options must be an object, model/variant accept only string or null, model requires a non-empty first-slash provider/model split, and unknown keys are diagnostic only",
+        "The Action has no hidden vars.agent fallback, Server-rejected legacy fields never execute, and slash-prefixed resolved Prompt text reaches Pi literally",
+        "A first turn enters the shared coordinator, rejects workDir mismatch, creates Pi, persists the guarded binding, creates its stream manifest, obtains session.input acknowledgement, marks the turn admitted, and only then calls prompt()",
+        "Same-name tasks, retries, cleanup, and Runner restart reuse one logical and physical Pi Session; model/variant changes preserve path and lineage; different logical names run independently; missing/corrupt bound Pi files fail with Reset guidance without replacement",
+        "The reporter durably projects required final assistant/reasoning, completed tool/result, model, and usage facts and closes the turn checkpoint before Action return; post-turn transport failure drains later without flipping success, while local append failure or a required pre-admission/pre-rebind drain failure maps to session-reporting-failed and blocks that attempted Prompt/rebind",
+        "Successful final assistant text reaches expect, failIf, artifact, recovery, and promise evaluation only through private turnFact; Action failure bypasses files/markers/missing-promise checks; public output is null or exactly {promise} and contains no runtime facts",
+        "Deadline maps to timeout, external cancellation maps to interrupted, provider exhaustion maps to turn-failed, reporting failure maps to session-reporting-failed, and all failures preserve the logical binding unless a guarded runtime rebind already committed",
+        "Worktree enforcement recognizes mohist/pi and reinvokes the already-resolved Action on the same coordinator key and physical Session without rotating the binding",
+        "Fake-backed Workflow specs cover open -> bind -> manifest/input acknowledgement -> Prompt/events -> final text -> expect/promise, exact input validation, same-session serialization, cross-runtime serialization, different-session concurrency, retry/restart reuse and repair, missing-file failure, cleanup, timeout, confirmed/unconfirmed cancellation, provider failure, reporting failure, and no replay",
+        "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test pass"
       ],
       "priority": 4,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Pi-aware Workflow Session presentation and tests in packages/web, plus accurate remaining-gap footnotes in docs/actions/pi.md and design/runtimes/pi.md",
+      "output": "End-to-end Workflow-direct mohist/pi implementation across Runner host, Action, completion, Session binding/reporting, recovery, and cleanup with fake-backed Workflow coverage",
       "dependsOn": [
-        "T-004"
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005"
       ],
       "passes": false,
-      "notes": "Final user-facing slice and closeout. Existing Session DTOs/components should remain runtime-neutral; add only the classification/fixtures needed for Pi. Product/design bodies are already target specs, so edit implementation-gap footnotes only."
+      "notes": "Consumes all preceding boundaries. Keep Pi AgentJob execution, Follow-up/Compact/Reset/Cancel handlers, runtime-aware catalog reporting/UI, ACP/RPC, and a generic AgentRuntime out of scope."
+    },
+    {
+      "id": "T-007",
+      "title": "Expose Pi Workflow Session presentation and close implementation gaps",
+      "spec": "specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
+      "description": "Teach the Web Workflow milestone classifier to recognise mohist/pi and verify that existing runtime-neutral Session transcript, tools, model observations, usage, and lineage render Pi facts correctly. After the user-visible path is verified, update only implementation-gap footnotes in the Pi product/runtime documents to describe the delivered Workflow-direct path and retain explicit sister-issue gaps.",
+      "acceptanceCriteria": [
+        "Web isInlineAgentTask recognises mohist/pi with a non-empty Session name and continues to exclude non-inline Actions and AgentJob work",
+        "A Pi Workflow Session fixture renders assistant text, tool lifecycle, resolved model, token usage, reporting diagnostics, and Pi runtime lineage through existing Session components without a Pi-specific duplicate view",
+        "Task-log model/session milestones are derived for mohist/pi and remain correctly ordered with operation log rows",
+        "No Pi model selector, provider credential form, Agent runtime selector, or Session-command control is added",
+        "docs/actions/pi.md and design/runtimes/pi.md implementation-gap sections mark the Workflow-direct PiRuntime/Action/Session reporting path implemented while leaving AgentJob, Session-command, and runtime-aware catalog/UI gaps explicit",
+        "Web tests cover Pi Inline Agent classification and Session/milestone rendering; npm run typecheck -w packages/web and npm run test:run -w packages/web pass",
+        "Final repository verification passes: npm run typecheck -w packages/runner, npm test -w packages/runner, npm test, npm run typecheck -w packages/web, and npm run test:run -w packages/web; verification leaves no Git-visible changes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pi-aware Workflow Session presentation and tests in packages/web, plus accurate remaining-gap footnotes in docs/actions/pi.md and design/runtimes/pi.md",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": false,
+      "notes": "Final user-facing slice and closeout. Existing Session DTOs/components remain runtime-neutral; add only the classification/fixtures needed for Pi. Product/design bodies are target specs, so edit implementation-gap footnotes only."
     }
   ]
 }

@@ -231,11 +231,14 @@ compaction 事实：
 Runner 进程终止即事件通道与执行中回合一并终止（见「进程拓扑与就绪」），重启后不
 重建「回合仍在执行」的假象。
 
-Workflow Inline Agent 路径不能把这些事实当作 best-effort UI 事件。Runner 在 Prompt 前
-为当前逻辑/物理绑定建立持久事件流 manifest；每条规范化事实与 projector 去重状态先原子
-写入本地 outbox，再按单调 sequence 报告给 AgentSession。AgentSession 对当前绑定持久化
-最后应用的 sequence，重复 sequence 只确认不重复应用，gap、旧绑定与已封口流在修改状态
-前拒绝。传输失败只延迟 outbox drain，不触发 Prompt replay。
+Workflow Inline Agent 路径不能把最终审计事实当作 best-effort UI 事件。Runner 为每个
+OpenCode 或 Pi Workflow 物理绑定建立同一种持久事件流 manifest，以统一输入报告、drain 与
+Runtime rebind；本 issue 只为 Pi 接通完整 Runtime 事件。Pi 最终 assistant/reasoning、完成的
+tool/result、model 与 usage 事实及 projector 去重状态先原子写入本地 outbox，再按单调
+sequence 报告给 AgentSession。中间进度 delta 可以展示，但 Pi 未保留的 delta 不属于重启后
+完整性契约。AgentSession 对当前绑定持久化最后应用的 sequence，重复 sequence 只确认不重复
+应用，gap、旧绑定与已封口流在修改状态前拒绝。传输失败只延迟 outbox drain，不触发 Prompt
+replay。
 
 本地 outbox 的格式、sequence 与恢复由 outbox 模块拥有，物理文件 adapter 只实现字节级
 原子替换。Prompt 后本地持久化失败时，Action 返回 `session-reporting-failed` 并隔离该物理

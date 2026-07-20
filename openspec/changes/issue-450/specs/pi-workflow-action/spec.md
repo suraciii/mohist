@@ -92,7 +92,7 @@ The public output of a successful `mohist/pi` task SHALL be `null` unless Workfl
 
 ### Requirement: Pi Action failures expose stable recovery codes
 
-The Action SHALL expose these stable failure codes for Workflow recovery matching: `invalid-input`, `runtime-unavailable`, `runtime-session-missing`, `session-workspace-mismatch`, `session-binding-failed`, `session-reporting-failed`, `incompatible-runtime`, `timeout`, `interrupted`, and `turn-failed`. Runtime `unavailable-runtime`, `missing-session`, and `deadline-exceeded` results SHALL map to `runtime-unavailable`, `runtime-session-missing`, and `timeout` respectively. Human-readable messages SHALL remain diagnostic text and MUST NOT be required for recovery matching. `session-reporting-failed` SHALL identify a durable Session event stream that cannot safely accept or drain facts; it MUST NOT cause automatic Prompt replay.
+The Action SHALL expose these stable failure codes for Workflow recovery matching: `invalid-input`, `runtime-unavailable`, `runtime-session-missing`, `session-workspace-mismatch`, `session-binding-failed`, `session-reporting-failed`, `incompatible-runtime`, `timeout`, `interrupted`, and `turn-failed`. Runtime `unavailable-runtime`, `missing-session`, and `deadline-exceeded` results SHALL map to `runtime-unavailable`, `runtime-session-missing`, and `timeout` respectively. Human-readable messages SHALL remain diagnostic text and MUST NOT be required for recovery matching. `session-reporting-failed` SHALL identify a durable Session event stream that cannot safely append required facts or complete the drain required before a new Prompt or rebind; it MUST NOT cause automatic Prompt replay. A transport failure during the bounded post-turn drain SHALL preserve the already-completed Action result when every fact is durable locally; only a later admission/rebind attempt that still cannot drain SHALL fail with `session-reporting-failed`.
 
 #### Scenario: Missing physical Session has a stable code
 
@@ -106,11 +106,17 @@ The Action SHALL expose these stable failure codes for Workflow recovery matchin
 - **THEN** the Action SHALL fail with `turn-failed`
 - **AND** recovery matching SHALL NOT depend on provider-specific message text
 
-#### Scenario: Durable Session reporting failure blocks replay
+#### Scenario: Required admission drain failure blocks replay
 
-- **WHEN** the current Session event stream cannot durably append or drain required facts
+- **WHEN** the current Session event stream cannot durably append a required fact or cannot complete the drain required before a new Prompt or rebind
 - **THEN** the Action SHALL fail with `session-reporting-failed`
 - **AND** it MUST NOT replay the admitted Prompt or admit another Prompt on that Session
+
+#### Scenario: Post-turn transport delay preserves completed output
+
+- **WHEN** every required fact is durable locally but the bounded post-turn delivery attempt cannot reach the Server
+- **THEN** the completed Action result SHALL remain unchanged
+- **AND** background delivery SHALL retry before later same-Session admission
 
 ### Requirement: Worktree cleanup continues the same Pi conversation
 
