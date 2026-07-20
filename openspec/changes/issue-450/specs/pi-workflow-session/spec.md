@@ -1,10 +1,10 @@
 ### Requirement: Workflow Session names identify stable logical conversations
 
-A Pi Workflow Action SHALL resolve its logical AgentSession by project, WorkflowRun, and session name. Tasks in the same WorkflowRun with the same explicit session name SHALL resolve to the same logical AgentSession; different names or different WorkflowRuns SHALL remain isolated even when prompt, model, variant, and working directory are identical. When `session` is omitted, the Action SHALL use the current Work ID as the session name.
+A Pi Workflow Action SHALL resolve its logical AgentSession by project, WorkflowRun, and session name. Tasks in the same WorkflowRun with the same explicit session name SHALL resolve to the same logical AgentSession; while its current physical binding remains unchanged, later tasks SHALL receive that binding's conversation context. A runtime switch SHALL preserve logical identity and lineage but SHALL start a new physical conversation without migrating old context. Different names, projects, or WorkflowRuns SHALL remain isolated even when prompt, model, variant, and working directory are identical. When `session` is omitted, the Action SHALL use the current Work ID as the session name.
 
 #### Scenario: Same name shares one logical conversation
 
-- **WHEN** two tasks in the same WorkflowRun use the same Pi session name
+- **WHEN** two Pi tasks in the same project and WorkflowRun use the same session name without an intervening runtime rebind
 - **THEN** both SHALL resolve to the same logical AgentSession
 - **AND** the second task SHALL receive the first task's conversation context
 
@@ -125,7 +125,7 @@ Every Workflow runtime binding SHALL have a durable Action event-stream manifest
 
 Before a runtime change, the shared logical-Session serialization boundary SHALL fence new work while the current owning Runner drains all locally issued events. The guarded bind SHALL carry that stream's final issued sequence; in the same Session transition, the authority SHALL require its applied cursor to equal that sequence, seal the old stream, and replace the binding, or SHALL reject without either mutation. A Runner MUST NOT attest another Runner's local stream. Pi message IDs and tool-call IDs SHALL suppress duplicate SDK projections before enqueue and SHALL be persisted with the stream manifest so restart reconciliation can append only missing required facts. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
 
-If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, the pre-created manifest SHALL drive reconciliation from the persisted Pi Session messages through the saved projector fingerprints; required missing final facts SHALL be appended and drained before quarantine clears. An unavailable or corrupt committed outbox state SHALL remain preserved, SHALL leave reporting unavailable with an actionable diagnostic, and MUST NOT be silently discarded. Repair MUST NOT replay the Prompt.
+If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, the pre-created manifest SHALL drive reconciliation from the persisted Pi Session messages through the saved projector fingerprints; required missing final facts SHALL be appended and drained before quarantine clears. A corrupt committed manifest SHALL remain preserved, SHALL quarantine only its logical Session with an actionable diagnostic, and MUST NOT block unrelated Sessions or AgentJob work. Failure to initialize/list the outbox root or provide atomic same-directory rename and file/directory sync SHALL instead make global Action reporting not-ready and SHALL prevent Runner registration or new work claiming. Repair MUST NOT replay the Prompt.
 
 #### Scenario: Session view shows a completed Pi turn
 
@@ -165,8 +165,15 @@ If a durable outbox append fails after Prompt admission, the Action SHALL fix `s
 #### Scenario: Corrupt committed outbox state is not discarded
 
 - **WHEN** startup cannot decode a committed stream snapshot
-- **THEN** Session reporting SHALL remain unavailable with an actionable diagnostic and the committed bytes SHALL be preserved
+- **THEN** that logical Session's reporting SHALL remain unavailable with an actionable diagnostic and the committed bytes SHALL be preserved
 - **AND** no Prompt or runtime rebind for that Session SHALL be admitted
+- **AND** unrelated Sessions and AgentJob work SHALL remain available
+
+#### Scenario: Outbox root failure blocks global readiness
+
+- **WHEN** startup cannot initialize or list the outbox root or cannot provide the required atomic replace operations
+- **THEN** Action reporting SHALL be globally not-ready and the Runner SHALL NOT register or claim new work
+- **AND** it SHALL expose a credential-redacted actionable storage diagnostic
 
 #### Scenario: Ambiguous delivery does not duplicate usage or transcript
 

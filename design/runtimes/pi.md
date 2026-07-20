@@ -25,7 +25,8 @@ Action。它与 Agent / Session 的所有权模型（Inline Agent、工作所有
 
 与 OpenCode 的责任边界差异：Pi 是 Runner 的 npm 依赖，随 Runner 发布并锁定版本，
 安装者不需要提供 Pi CLI。provider 凭证走 Pi 自己的机制（环境变量与 Pi auth
-存储），Mohist 不管理 API key。
+存储），Mohist 不管理 API key。SDK authentication manager 是凭证值的唯一读取者；
+Mohist 自有 request/result、事件、outbox、注册和 smoke artifact 都不携带凭证字段。
 
 ## Action 输入输出契约
 
@@ -269,7 +270,9 @@ Session 串行边界围住，只有当前 Runner 的 outbox 已 drain，且 Serv
 
 命中不可恢复判定时执行 `session.abort()` 并确认停止（见上节），随后向调用者返回
 带原始 provider message 的失败事实。AgentSession 与物理 Session 绑定保持不变，不
-提示 Reset。
+提示 Reset。若停止无法确认，主结果仍为 `turn-failed`，诊断附加
+interruption-unconfirmed；Runtime 先隔离物理路径，Action 再隔离逻辑 Session key，
+之后才返回。其它物理/逻辑 Session 不受影响。
 
 ## Session 命令
 
@@ -321,6 +324,13 @@ Pi 唯一的「批准」概念是 project trust：是否加载工作目录项目
 `CLAUDE.md` 与 project trust 无关，仍作为上下文提供给模型——这与 OpenCode 的行为
 一致：它们影响提示词上下文，不改变 Runner 的执行配置。Runner 用户的全局配置
 （`~/.pi/agent`）正常加载。该取值不提供配置项，是无人值守执行的确定性保证。
+
+Pi 边界复用 Runner 的 `CredentialMasker`：host 启动时注册名称匹配 credential/token/
+secret/API key 的环境变量值；SDK auth 文件内容只交给 SDK manager，Mohist 不读取。
+SDK/provider 文本在进入 task log、diagnostic、runtime event 或 smoke artifact 前统一脱敏，
+结构化 outbox 与 Runner registration 使用字段白名单而非序列化 SDK 对象。Action output
+本身不含 diagnostic。真实 smoke 只记录版本、operation 名、布尔结果和脱敏后的字段名/
+类型摘要；不记录环境、auth 文件、原始 provider 响应、Prompt 或消息正文。
 
 在 `PiRuntime` 边界把 SDK error 规范化为少量 Mohist result（kebab-case，与 wire 值
 一致）：`invalid-input`、`unavailable-runtime`、`missing-session`、

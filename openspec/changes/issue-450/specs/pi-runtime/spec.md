@@ -38,7 +38,7 @@ Before the Runner registers or claims work, it SHALL initialize the Pi SDK servi
 
 ### Requirement: Repository-local Pi configuration is never trusted
 
-The Pi runtime SHALL treat every work repository as untrusted for Pi project configuration. It MUST NOT load repository-local `.pi/` settings, extensions, packages, skills, prompts, or other project resources, and this trust decision MUST NOT be user-configurable. Runner-user global Pi configuration and provider authentication SHALL remain available. Repository `AGENTS.md` and `CLAUDE.md` instruction files SHALL remain model context and MUST NOT be treated as trusted Pi execution configuration. Mohist MUST NOT collect, persist, or expose provider API keys.
+The Pi runtime SHALL treat every work repository as untrusted for Pi project configuration. It MUST NOT load repository-local `.pi/` settings, extensions, packages, skills, prompts, or other project resources, and this trust decision MUST NOT be user-configurable. Runner-user global Pi configuration and provider authentication SHALL remain available. Repository `AGENTS.md` and `CLAUDE.md` instruction files SHALL remain model context and MUST NOT be treated as trusted Pi execution configuration. Mohist MUST NOT collect, persist, or expose provider API keys. Credential values SHALL remain inside Pi's authentication manager; Mohist-owned boundary types and field-whitelisted registration, event, outbox, and smoke-artifact shapes MUST NOT contain credential fields or raw SDK objects. Runtime/provider text SHALL pass through the Runner credential masker before it enters diagnostics, task logs, wire payloads, or committed smoke evidence.
 
 #### Scenario: Repository Pi resources do not alter execution
 
@@ -51,6 +51,12 @@ The Pi runtime SHALL treat every work repository as untrusted for Pi project con
 - **WHEN** a work repository contains `AGENTS.md` or `CLAUDE.md`
 - **THEN** Pi SHALL provide those files as model context
 - **AND** it MUST NOT treat them as permission to load project-local Pi execution resources
+
+#### Scenario: Sentinel credentials never cross the Pi boundary
+
+- **WHEN** fake Pi authentication and provider diagnostics contain a sentinel API key
+- **THEN** the key SHALL remain absent from Mohist requests, results, registration, runtime events, outbox bytes, task logs, diagnostics, Action output, and smoke evidence
+- **AND** any surfaced provider text SHALL contain only the credential mask
 
 ### Requirement: A Pi turn has one completion authority
 
@@ -159,6 +165,12 @@ The runtime SHALL derive provider retry facts from Pi retry events and MUST NOT 
 - **WHEN** a recoverable provider error reaches the configured retry-attempt threshold before the turn completes
 - **THEN** the runtime SHALL interrupt and fail the turn as `turn-failed`
 - **AND** it SHALL preserve the current physical Session binding
+
+#### Scenario: Unconfirmed provider abort preserves failure and quarantines
+
+- **WHEN** a non-recoverable provider failure requests interruption but Pi stop cannot be confirmed
+- **THEN** the turn SHALL remain `turn-failed` with the sanitized provider message and an interruption-unconfirmed diagnostic
+- **AND** the physical Session and logical Session key SHALL be quarantined before return until stop is observed or the Runner process restarts
 
 ### Requirement: Provider failure policy has validated Runner configuration
 
