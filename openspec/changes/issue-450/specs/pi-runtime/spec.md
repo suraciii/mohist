@@ -125,6 +125,19 @@ A Pi Workflow turn SHALL use the executor's declared deadline, defaulting to 60 
 - **THEN** the physical Session SHALL become eligible for a later turn
 - **AND** the failed Prompt MUST NOT be replayed
 
+#### Scenario: External cancellation fixes interruption before cleanup
+
+- **WHEN** the Action's external cancellation signal arrives before the SDK prompt operation resolves
+- **THEN** the runtime SHALL fix the outcome as `interrupted` before requesting Pi interruption
+- **AND** a late prompt resolution MUST NOT replace the interrupted result
+- **AND** the Prompt MUST NOT be replayed
+
+#### Scenario: Unconfirmed cancellation quarantines the physical Session
+
+- **WHEN** cancellation requests Pi interruption but the runtime cannot confirm that streaming stopped
+- **THEN** the current turn SHALL remain `interrupted` with an unconfirmed-stop diagnostic
+- **AND** later work targeting that physical Session SHALL fail with `unavailable-runtime` until stop is observed or the Runner process restarts
+
 ### Requirement: Non-recoverable provider failures end the turn promptly
 
 The runtime SHALL derive provider retry facts from Pi retry events and MUST NOT scan log text. A retry error that indicates exhausted quota, credit, balance, billing, plan allowance, or usage limit SHALL be non-recoverable on its first occurrence. A recoverable error whose retry attempt reaches the Runner-configured threshold, defaulting to five, SHALL also become non-recoverable. Ordinary transient rate limits below the threshold SHALL remain available for Pi to retry. On a non-recoverable judgment, the runtime SHALL interrupt the turn, verify interruption, return `turn-failed` with the original provider message as diagnostics, preserve the Session binding, and MUST NOT wait for further retries.

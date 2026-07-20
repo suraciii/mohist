@@ -92,7 +92,7 @@ The public output of a successful `mohist/pi` task SHALL be `null` unless Workfl
 
 ### Requirement: Pi Action failures expose stable recovery codes
 
-The Action SHALL expose these stable failure codes for Workflow recovery matching: `invalid-input`, `runtime-unavailable`, `runtime-session-missing`, `session-workspace-mismatch`, `session-binding-failed`, `incompatible-runtime`, `timeout`, `interrupted`, and `turn-failed`. Runtime `unavailable-runtime`, `missing-session`, and `deadline-exceeded` results SHALL map to `runtime-unavailable`, `runtime-session-missing`, and `timeout` respectively. Human-readable messages SHALL remain diagnostic text and MUST NOT be required for recovery matching.
+The Action SHALL expose these stable failure codes for Workflow recovery matching: `invalid-input`, `runtime-unavailable`, `runtime-session-missing`, `session-workspace-mismatch`, `session-binding-failed`, `session-reporting-failed`, `incompatible-runtime`, `timeout`, `interrupted`, and `turn-failed`. Runtime `unavailable-runtime`, `missing-session`, and `deadline-exceeded` results SHALL map to `runtime-unavailable`, `runtime-session-missing`, and `timeout` respectively. Human-readable messages SHALL remain diagnostic text and MUST NOT be required for recovery matching. `session-reporting-failed` SHALL identify a durable Session event stream that cannot safely accept or drain facts; it MUST NOT cause automatic Prompt replay.
 
 #### Scenario: Missing physical Session has a stable code
 
@@ -105,6 +105,12 @@ The Action SHALL expose these stable failure codes for Workflow recovery matchin
 - **WHEN** the Pi runtime reports a non-recoverable provider quota or billing failure
 - **THEN** the Action SHALL fail with `turn-failed`
 - **AND** recovery matching SHALL NOT depend on provider-specific message text
+
+#### Scenario: Durable Session reporting failure blocks replay
+
+- **WHEN** the current Session event stream cannot durably append or drain required facts
+- **THEN** the Action SHALL fail with `session-reporting-failed`
+- **AND** it MUST NOT replay the admitted Prompt or admit another Prompt on that Session
 
 ### Requirement: Worktree cleanup continues the same Pi conversation
 

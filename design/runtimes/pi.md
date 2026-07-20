@@ -117,8 +117,9 @@ Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力�
 持久化绑定 lazy 恢复。不为每个 Action 创建独立进程，也不为每个回合重建 Session
 实例。
 
-Mohist 认为物理 Session 的 directory 不可变。工作目录变化时创建新的物理 Session，
-不移动现有 Session。Pi 的 session 文件按 cwd 分目录存放（默认
+Mohist 认为逻辑 AgentSession 的 workDir 与物理 Session 的 directory 都不可变。工作目录
+变化时拒绝本次执行；调用者必须使用新的逻辑 Session 身份，不能在原 AgentSession 上创建
+替代绑定。Pi 的 session 文件按 cwd 分目录存放（默认
 `~/.pi/agent/sessions/<cwd 编码>/`），与目录不可变语义天然一致；Mohist 不引入独立
 的 session-dir 配置。
 
@@ -191,6 +192,10 @@ in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明�
 `session.abort()` 收尾；迟到 resolve 的 `prompt()` 不能翻转该结果。任何失败都不
 自动重放提交状态不确定的 Prompt；redelivery 在 crash window 内可能造成重复回合，
 这是与 OpenCode 一致的已接受限制。
+
+外部取消信号遵守同一顺序：先把结果固定为 `interrupted`，再调用 `session.abort()` 并
+确认停止。无法确认停止时，当前物理 Session 进入隔离状态；同一 Session 的后续 Prompt
+被拒绝，直到订阅观察到停止或 Runner 进程重启。取消路径同样不自动重放 Prompt。
 
 ## 回合期限与两段式收尾
 

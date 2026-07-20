@@ -81,7 +81,8 @@ AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重�
 | `options.model` 或 `options.variant` 变化 | 保持不变 |
 | Compact | 保持不变 |
 | Reset | 建立新的空 Session，并记录会话沿革 |
-| 工作目录或执行后端变化 | 建立新 Session，并记录会话沿革 |
+| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
+| 执行后端变化 | 建立新物理 Session，并记录会话沿革 |
 
 如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
 新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而
@@ -131,7 +132,8 @@ provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohis
 Session 已不存在，或用户明确要求清空上下文时才使用 Reset。
 
 如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的回合
-显示为已经安全停止。
+显示为已经安全停止，也不会允许同一物理 Session 开始后续回合。Runner 观察到回合停止或
+进程重启后才恢复该 Session 的执行资格。取消与期限中断遵守相同的停止确认和防重放规则。
 
 ## Pi 责任边界
 
@@ -163,6 +165,7 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 | `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
+| `session-reporting-failed` | Session 执行事实无法可靠持久化；后续回合被阻止 |
 | `incompatible-runtime` | Pi 版本或数据与 Mohist 不兼容 |
 | `timeout` | 回合超过执行期限被中断 |
 | `interrupted` | 回合被 Runner 外部信号中断 |
