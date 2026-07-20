@@ -40,7 +40,7 @@ A matched routing hit for which no valid execution context can be resolved SHALL
 
 ### Requirement: Routed launch preparation is first-writer fenced
 
-An idempotent routed launch SHALL persist one canonical launch plan, keyed by project id, event id, and rule id, before opening its AgentSession or making work dispatchable. The plan SHALL include the AgentJob input, Session launch metadata and work directory, and either an executable disposition or a preflight failure. Persisting the plan SHALL establish a durable AgentJob-owned recovery trigger that can open the Session and activate or fail the plan without reevaluating routing rules or current Agent status. Redelivery SHALL reuse that persisted plan and SHALL NOT merge newly resolved workspace or lineage values into the Session or AgentJob.
+An idempotent routed launch SHALL persist one canonical launch plan, keyed by project id, event id, and rule id, before opening its AgentSession or making work dispatchable. The plan SHALL include the AgentJob input, Session launch metadata and work directory, and either an executable disposition or a preflight failure. Persisting the plan SHALL establish a durable AgentJob-owned recovery trigger that can open the Session, activate or fail the plan, and continue pending dispatch until a Runner durably accepts it, without reevaluating routing rules or current Agent status. Redelivery SHALL reuse that persisted plan and SHALL NOT merge newly resolved workspace or lineage values into the Session or AgentJob.
 
 #### Scenario: Unresolved first delivery remains canonical
 
@@ -65,6 +65,12 @@ An idempotent routed launch SHALL persist one canonical launch plan, keyed by pr
 - **WHEN** the process fails after persisting a workspace-unavailable plan but before its AgentSession and terminal outcome are recorded
 - **THEN** AgentJob recovery SHALL open the Session from the persisted failed plan and enter the durable terminal-delivery protocol
 - **AND** recovery SHALL NOT require the triggering event to match the routing table again
+
+#### Scenario: Launch-ready crash recovers until Runner acceptance
+
+- **WHEN** an executable plan has durably opened its Session and persisted launch-ready state but the process fails before a Runner assignment is accepted
+- **THEN** the AgentJob recovery trigger SHALL remain durable and retry normal dispatch from the persisted plan
+- **AND** recovery SHALL clear the prepared-dispatch obligation only after `Running` with Runner acceptance is durably persisted or the job enters terminal delivery
 
 ### Requirement: Matching and prompt rendering remain envelope-only
 
