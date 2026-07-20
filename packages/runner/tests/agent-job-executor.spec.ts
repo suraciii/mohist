@@ -92,7 +92,7 @@ function makeFakeConnection(): FakeConnectionHandles {
   const attachCalls: FakeConnectionHandles["attachCalls"] = []
   const eventCalls: FakeConnectionHandles["eventCalls"] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
-  let eventWriter = async (_body: Record<string, unknown>) => undefined
+  let eventWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   const connection = {
     async attachAgentSession(
       projectId: string,
