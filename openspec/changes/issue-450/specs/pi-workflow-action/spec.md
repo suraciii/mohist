@@ -120,10 +120,16 @@ The Action SHALL expose these stable failure codes for Workflow recovery matchin
 
 ### Requirement: Worktree cleanup continues the same Pi conversation
 
-When a successful Pi task leaves changes that the Workflow requires to be committed or reverted, the executor SHALL invoke the task's already-resolved `mohist/pi` Action for the cleanup turn. The cleanup turn SHALL target the same logical AgentSession and current physical Pi Session as the original turn, and MUST NOT create a replacement binding or require a Reset. Subsequent tasks using that logical Session SHALL retain the cleanup turn in their conversation context.
+When a successful Pi task leaves changes that the Workflow requires to be committed or reverted, the executor SHALL invoke the task's already-resolved `mohist/pi` Action for the cleanup turn while retaining the same exclusive logical-Session task lease acquired before the original Action. The cleanup turn SHALL target the same logical AgentSession and current physical Pi Session as the original turn, and MUST NOT create a replacement binding or require a Reset. No queued same-name task may run or rebind between the original and cleanup turns. Subsequent tasks using that logical Session SHALL retain the cleanup turn in their conversation context.
 
 #### Scenario: Cleanup reuses the task's Pi Session
 
 - **WHEN** worktree enforcement requests a cleanup turn after a Pi task
 - **THEN** the executor SHALL run cleanup through `mohist/pi` on the task's current logical and physical Session
 - **AND** the cleanup turn MUST NOT rotate the binding
+
+#### Scenario: Queued work cannot intervene before cleanup
+
+- **WHEN** another task targeting the same logical Session is queued while the first task enters worktree cleanup
+- **THEN** the first task SHALL retain its logical-Session lease through the cleanup turn
+- **AND** the queued task MUST NOT run or rebind until cleanup and final reporting settle
