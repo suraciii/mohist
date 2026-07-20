@@ -39,12 +39,23 @@ On successful command execution, `core/process` SHALL return an output object wi
 
 ### Requirement: Approval feedback adapts explicit process text
 
-When a completed approval-feedback task uses `core/process`, the Workflow SHALL derive `ResolutionSummary` from the task's structured `output.stdout` string and SHALL apply the existing feedback-resolution section extraction to that text. Output from any Action without an explicit feedback-text adapter SHALL NOT be serialized or coerced into summary text; `null` output or an object without adapted text SHALL produce a `null` resolution summary while still allowing the feedback task to resolve normally.
+When a completed approval-feedback task uses `core/process`, the Workflow SHALL derive `ResolutionSummary` from the task's structured `output.stdout` string. It SHALL trim surrounding whitespace, remove an exact leading `## Feedback Resolution` header and the whitespace following it, discard the first exact `## Verification` header and all content after it, and trim the remaining resolution text. If no resolution text remains, `ResolutionSummary` SHALL be `null`. Output from any Action without an explicit feedback-text adapter SHALL NOT be serialized or coerced into summary text; `null` output or an object without adapted text SHALL produce a `null` resolution summary while still allowing the feedback task to resolve normally.
 
 #### Scenario: Process stdout becomes the feedback resolution summary
 
 - **WHEN** an approval-feedback task using `core/process` completes with output `{ "stdout": "Addressed the requested changes", "exitCode": 0 }`
 - **THEN** the feedback SHALL resolve with `ResolutionSummary` equal to `Addressed the requested changes`
+
+#### Scenario: Feedback and verification sections are extracted
+
+- **WHEN** an approval-feedback task using `core/process` completes with `output.stdout` equal to `  ## Feedback Resolution\n\nAddressed the requested changes\n\n## Verification\nnpm test passed  `
+- **THEN** the feedback SHALL resolve with `ResolutionSummary` equal to `Addressed the requested changes`
+- **AND** the summary MUST NOT contain either header or the verification content
+
+#### Scenario: Empty extracted resolution produces null
+
+- **WHEN** an approval-feedback task using `core/process` completes with `output.stdout` equal to `## Feedback Resolution\n\n## Verification\nnpm test passed`
+- **THEN** the feedback SHALL resolve with a `null` `ResolutionSummary`
 
 #### Scenario: Arbitrary object output is not used as summary text
 
