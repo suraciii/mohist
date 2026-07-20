@@ -40,7 +40,7 @@
 
 > 执行后端怎么配，怎么用外部 agent 探索需求、产出 ready issue。
 
-- [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode`
+- [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
 - [Skill 机制](skills.md) —— 用 OpenCode / Claude Code 探索需求，再交给 Mohist
 

@@ -14,7 +14,7 @@ Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
 | 执行契约 | Action | Workflow context | 一次工作 dispatch 的 `uses` / `with` 输入输出契约 |
 | 对话 | AgentSession | Session context | transcript、context、usage、Runtime binding、lineage |
 | Runtime | Runtime Session | 外部 Runtime | 物理对话与 provider 执行状态 |
-| Adapter | OpenCodeRuntime、未来的 Pi adapter | Runner 进程 | protocol、进程、事件、状态核对、错误 |
+| Adapter | OpenCodeRuntime、PiRuntime | Runner 进程 | protocol、进程、事件、状态核对、错误 |
 
 `Inline Agent` 是产品使用方式，不是另一个实体或 bounded context。它表示 Workflow
 TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist Agent。
@@ -51,7 +51,8 @@ AgentSession 目标交给 `OpenCodeRuntime`，Runtime 事实写回该 Session。
 Agent ID，不解析 Agent 名称，不读取 Agent 定义，也不创建 AgentJob。因此 Workflow
 直接使用它时形成 Inline Agent。
 
-未来的 `mohist/pi` 等 Runtime Action 与它处于同一层。本设计有意不定义
+`mohist/pi` 等 Runtime Action 与它处于同一层（见 [`runtimes/pi.md`](runtimes/pi.md)）。
+本设计有意不定义
 `mohist/agent` 契约；该名称留给后续 Mohist Agent 专项设计，不能在这里充当 Runtime
 别名或 `mohist/opencode` 的通用包装。
 
