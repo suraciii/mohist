@@ -1,25 +1,32 @@
 ## Findings
 
-### 1. Medium: The migration sequence implements before updating the canonical design specs
+No findings. The plan is ready to build.
 
-The repository requires both product and design specs to precede implementation: "先确定方案落到文档，再去实现" (`AGENTS.md:75-82`). T-001 correctly includes updates to `design/issue-breakdown.md` and `design/workflow/task-dispatch.md` (`tasks.json:9,19`), but the design's Migration Plan orders server implementation first, runner implementation second, and canonical design-document updates third (`design.md:86-91`). An autonomous implementer following that sequence would knowingly violate the repository's spec-first workflow.
+## Requirement Alignment
 
-Move the canonical documentation update to the first migration step, before either server or runner code. The implementation and deployment steps can otherwise retain their current order.
+- The proposal names exactly one capability, `sub-issue-plan-context`, and the matching spec exists at `specs/sub-issue-plan-context/spec.md`.
+- Parent title/body inclusion and access to parent-only requirement background are normative and covered by T-001.
+- The parent block is explicitly read-only background, while the child body remains authoritative for delivery scope.
+- Parent comments, attachments/artifacts, and sibling issue content are excluded by both the typed context shape and test criteria.
+- Ordinary Plan input, child non-Plan input, workflow lifecycle, approvals, stage progression, and parent-child status behavior remain unchanged.
 
-## Verified Corrections
+## Architecture And Feasibility
 
-The three findings from the prior review are resolved:
+- The API poll route is the existing composition boundary that maps internal `WorkDispatch` values to HTTP `WorkDispatchResponse` (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:94-140`). Enriching there permits API to consume the Issue read side without introducing the forbidden `Runner -> Issue` dependency.
+- `WorkflowItemTranslator`, Orleans `WorkDispatch`, Workflow domain state, and `WorkflowRun.Metadata` remain unchanged, preserving Workflow zero-awareness and the enforced dependency matrix.
+- The narrow Issue read can use projected `ParentIssueNumber` and deserialize only the referenced parent Issue state for title/body; no new projection column, migration, full issue enrichment, or excluded collection is required.
+- The runner has explicit propagation seams through its HTTP DTO, `RenderedWorkItem`, `ActionContext`, `WorkExecutor`, and `mohist/opencode`. Prompt behavior remains byte-for-byte unchanged when the optional context is absent.
+- The HTTP addition is optional and additive: old runners ignore it and new runners handle its absence, so the rollout and rollback plan require no persisted-state migration.
 
-- Cross-domain enrichment now occurs in the API poll response mapper, which already converts `WorkDispatch` to `WorkDispatchResponse`; `WorkflowItemTranslator` and the Runner namespace no longer depend on Issue (`proposal.md:19-20`, `design.md:29-51`, `tasks.json:12-14`). This path is compatible with the enforced domain dependency matrix (`packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs:383-439`).
-- Missing/corrupt parent behavior is no longer invented as a permanent dispatch failure; absent resolved context preserves existing dispatch behavior and corruption policy is explicitly outside this change (`design.md:51`, `tasks.json:29`).
-- Orleans field-id semantics are now limited correctly: `WorkDispatch` remains unchanged, while only the plain HTTP `WorkDispatchResponse` gains the optional context (`design.md:40-42`, `tasks.json:12-13,20`).
+## Task Quality
 
-## Coverage And Feasibility
+- T-001 is appropriately one atomic vertical slice: separating producer, transport, and prompt consumer would leave intermediate tasks unusable.
+- Acceptance criteria cover server lookup/gating/wire tests, runner mapping/prompt tests, architecture compliance, excluded data, ordinary/non-Plan regressions, canonical design documentation, and required verification commands.
+- `tasks.json` parses, all required fields are present, `passes` is `false`, and the single-task dependency graph is valid and acyclic.
+- The Migration Plan updates `design/issue-breakdown.md` and `design/workflow/task-dispatch.md` before implementation, satisfying the repository's spec-first rule.
 
-All issue acceptance criteria and non-goals trace through the proposal, the single `sub-issue-plan-context` capability spec, design decisions, and T-001: parent title/body inclusion, child-scope authority, exclusion of parent comments/artifacts and siblings, unchanged ordinary Plan input, and no non-Plan or lifecycle changes. The current poll route has the required mapping seam (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:94-140`), the runner path has explicit wire/internal/action boundaries, and the planned fake-based server/runner tests are feasible. `tasks.json` parses and its single-task dependency graph is valid and acyclic.
+## Residual Risks
 
-## Conclusion
+Implementation must preserve null/empty parent bodies consistently, keep the context DTO limited to title/body, and avoid duplicating applicability policy outside the API response mapper. These risks are already addressed by the design and acceptance criteria and do not require plan changes.
 
-The technical boundary and behavioral coverage are ready, but the migration order must be corrected to comply with the repository's mandatory spec-first process before autonomous build execution.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
