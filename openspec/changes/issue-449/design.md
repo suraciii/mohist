@@ -67,7 +67,7 @@ Persisting the plan before Session open is the first-writer fence: an unresolved
 
 Every AgentJob terminal transition uses one durable delivery protocol. Before saving terminal state, the grain stores a `PendingSessionClose` payload containing a stable delivery id (`agent-job:{jobKey}:terminal`), status, exit code, failure reason/category, and a single recorded timestamp, and registers a durable Orleans reminder. It then saves terminal state and attempts delivery. `ReportResultAsync` for an already-terminal job repairs a pending close before returning rather than rejecting it immediately; activation and reminder ticks do the same. A reminder tick that reloads state with no pending delivery unregisters the orphan reminder, covering reminder registration followed by failed terminal-state persistence.
 
-Add an AgentSession terminal command keyed by the stable delivery id. The command detects an already-persisted delivery across all Session turns, otherwise appends the terminal fact and synchronously flushes Session state/events and transcript before acknowledging. It throws on persistence failure. After acknowledgement, AgentJob clears `PendingSessionClose`, saves, and unregisters the reminder. A crash after Session commit but before clearing the AgentJob marker causes an idempotent retry; a crash before Session commit leaves the reminder active. The same protocol covers normal reports, preflight failure, dispatch exhaustion, report timeout, and forced failure.
+Add an AgentSession terminal command keyed by the stable delivery id. The command writes that id into the terminal payload and uses it verbatim as the transcript part correlation key; it detects an already-persisted delivery across all Session turns, otherwise appends the terminal fact and synchronously flushes Session state/events and transcript before acknowledging. It throws on persistence failure. After acknowledgement, AgentJob clears `PendingSessionClose`, saves, and unregisters the reminder. A crash after Session commit but before clearing the AgentJob marker causes an idempotent retry; a crash before Session commit leaves the reminder active. The same protocol covers normal reports, preflight failure, dispatch exhaustion, report timeout, and forced failure.
 
 `SubmitAsync` followed by `FailAsync` is not used because submission immediately attempts dispatch and races the failure. The existing fire-and-forget Session append is not an acknowledgement boundary because it can return before transcript flush; terminal delivery uses the new synchronous command instead.
 
@@ -111,23 +111,23 @@ Add an issue-scoped assembler under `AgentOps/Services`. It combines:
 
 - Issue events from `IEventStore`;
 - WorkflowRun events through `WorkflowEventQuerier.ListWorkflowEventsAsync`, preserving Workflow's invalidated-control-event filtering;
-- failed `session.closed` transcript parts for generic AgentSessions matching project, agent-launch issue label, and non-empty trigger event/rule labels.
+- the single AgentJob-owned failed `session.closed` transcript part for each generic AgentSession matching project, agent-launch issue label, and non-empty trigger event/rule labels. Selection requires payload delivery id and transcript correlation key to equal the stable `agent-job:{jobKey}:terminal` value; Runtime and follow-up closes are excluded.
 
 The assembler projects a failed routed Session into the existing `StoredCloudEventDto` shape as follows:
 
 - `id`: terminal transcript-part id (source-local, not globally unique);
-- `eventId`: `{sessionId}:closed:{partId}`;
+- `eventId`: `{sessionId}:closed:{terminalDeliveryId}`;
 - `source`: `AgentSessionEventPersistence.AgentSessionSource(sessionId)`;
 - `type`: `session.closed`; `subject`: Session id;
 - `time`: terminal part `LastSeenAt`; `specVersion`: `1.0`; `dataContentType`: `application/json`;
 - extensions: canonical `projectid` and `issue` lineage;
-- data: original terminal status, exit code, reason, and category plus Session id, Agent id/name, trigger event id, and trigger rule id.
+- data: terminal delivery id, status, exit code, reason, and category plus Session id, Agent id/name, trigger event id, and trigger rule id.
 
 Each source query loads at most its newest `limit` candidates, which is sufficient to determine the global newest `limit`. Define one ascending total key `(time, originRank, source ordinal, source-local id, eventId ordinal)`, where origin rank is Issue, WorkflowRun, then AgentSession. Merge candidates, take the greatest `limit` by the exact reverse key, then return that selected set by the ascending key. This resolves equal timestamps and numeric-id collisions across stores without pretending `id` is global. This is a read projection only; it does not append an Issue event or copy Session authority into another aggregate.
 
 `WorkflowEventRoutes` delegates the issue endpoint to this AgentOps assembler. `WorkflowEventQuerier` keeps WorkflowRun-specific selection and invalidation logic but no longer owns cross-domain issue-feed composition. The CLI already prints issue events as returned JSON, so no new CLI event renderer is needed.
 
-Only failed routed sessions are added by this change. Manual sessions, successful routed sessions, sessions for another project/issue, and sessions without both trigger labels are excluded.
+Only the canonical AgentJob-owned failure of a routed Session is added by this change. Manual sessions, successful routed sessions, unrelated Runtime/follow-up closes, sessions for another project/issue, and sessions without both trigger labels are excluded.
 
 **Alternatives considered:**
 
@@ -144,7 +144,7 @@ Focused coverage will include:
 - first-writer behavior when issue-current-workspace resolution changes between deliveries;
 - AgentJob grain terminal persistence and close retry behavior;
 - generic session summary/API reason-category separation, successful omission, and latest-terminal-fact selection;
-- AgentOps issue-feed inclusion/exclusion, complete envelope, equal-time ordering, and global newest-N limiting;
+- AgentOps issue-feed canonical AgentJob-close selection, unrelated-close exclusion, complete envelope, equal-time ordering, and global newest-N limiting;
 - CLI table and JSON output for generic session failures;
 - existing runner missing-workspace validation as a defensive contract, manual launch behavior, Inline Agent behavior, and architecture dependency tests.
 

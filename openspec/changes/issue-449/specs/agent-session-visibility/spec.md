@@ -51,13 +51,13 @@ The generic AgentSession summary API SHALL include `failureReason` and `failureC
 
 ### Requirement: AgentJob terminal facts are durably delivered to AgentSession
 
-Every AgentJob terminal transition SHALL retain a durable pending terminal-delivery record until the associated AgentSession has synchronously persisted one idempotently identified `session.closed` fact. This SHALL apply to runner-reported completion or failure, preflight failure, dispatch exhaustion, report timeout, and forced failure. An AgentJob report or retry that observes terminal state with a pending delivery SHALL retry the same delivery; process or activation loss SHALL NOT clear it.
+Every AgentJob terminal transition SHALL retain a durable pending terminal-delivery record until the associated AgentSession has synchronously persisted one idempotently identified `session.closed` fact. The stable delivery id SHALL be persisted in the terminal payload and used as the transcript part's correlation key so the AgentJob-owned close is identifiable across Session turns. This SHALL apply to runner-reported completion or failure, preflight failure, dispatch exhaustion, report timeout, and forced failure. An AgentJob report or retry that observes terminal state with a pending delivery SHALL retry the same delivery; process or activation loss SHALL NOT clear it.
 
 #### Scenario: Session close fails after AgentJob terminal save
 
 - **WHEN** an AgentJob persists its terminal state and the first attempt to persist `session.closed` fails
 - **THEN** the AgentJob SHALL retain the pending terminal delivery durably
-- **AND** a durable retry SHALL eventually persist exactly one `session.closed` fact with the original status, reason, category, and recorded time
+- **AND** a durable retry SHALL eventually persist exactly one `session.closed` fact with the original delivery id, status, reason, category, and recorded time
 
 #### Scenario: Activation loss before Session transcript flush
 

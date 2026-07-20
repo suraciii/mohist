@@ -89,15 +89,21 @@ For a routed launch whose event carries issue lineage, the resulting AgentSessio
 
 ### Requirement: Routed failure events have stable envelope and ordering semantics
 
-The issue event feed SHALL project each failed routed AgentSession as one CloudEvent-shaped `session.closed` entry. Its numeric `id` SHALL be the source-local terminal transcript-part id; `eventId` SHALL be the stable value `{sessionId}:closed:{partId}`; `source` SHALL be the canonical AgentSession source; `subject` SHALL be the Session id; `time` SHALL be the terminal part's persisted last-seen time; `specVersion` SHALL be `1.0`; and `dataContentType` SHALL be `application/json`. Extensions SHALL include canonical project and issue lineage. Data SHALL preserve terminal status, exit code, failure reason/category and add Session id, Agent id/name, trigger event id, and trigger rule id.
+The issue event feed SHALL project each failed routed AgentSession as exactly one CloudEvent-shaped `session.closed` entry. The selected transcript part SHALL be the AgentJob-owned terminal fact whose persisted delivery id and correlation key equal `agent-job:{jobKey}:terminal`; Runtime-owned, follow-up, or otherwise unrelated close parts SHALL NOT be projected as routing outcomes. Its numeric `id` SHALL be the source-local terminal transcript-part id; `eventId` SHALL be the stable value `{sessionId}:closed:{terminalDeliveryId}`; `source` SHALL be the canonical AgentSession source; `subject` SHALL be the Session id; `time` SHALL be the terminal part's persisted last-seen time; `specVersion` SHALL be `1.0`; and `dataContentType` SHALL be `application/json`. Extensions SHALL include canonical project and issue lineage. Data SHALL preserve terminal delivery id, status, exit code, failure reason/category and add Session id, Agent id/name, trigger event id, and trigger rule id.
 
 The feed SHALL select the newest global `limit` entries across Issue, valid WorkflowRun, and routed AgentSession sources, then return those entries in ascending order. Both selection and output SHALL use one total ordering key: time, origin rank (`issue` before `workflow-run` before `agent-session`), source ordinal, source-local numeric id, then event id ordinal. Equal timestamps and colliding numeric ids across stores SHALL therefore remain deterministic.
 
 #### Scenario: Projected routed failure has complete stable envelope
 
-- **WHEN** a routed AgentSession for issue 42 persists a failed terminal part with id 9
-- **THEN** the issue feed SHALL contain one `session.closed` entry whose `eventId` is `{sessionId}:closed:9` and whose time comes from that part
+- **WHEN** a routed AgentSession for issue 42 persists an AgentJob-owned failed terminal part with id 9 and delivery id `agent-job:job-1:terminal`
+- **THEN** the issue feed SHALL contain one `session.closed` entry whose `eventId` is `{sessionId}:closed:agent-job:job-1:terminal` and whose time comes from that part
 - **AND** the entry SHALL carry the specified source, subject, spec version, content type, project/issue extensions, terminal data, Agent identity, and trigger correlation
+
+#### Scenario: Unrelated Session closes do not duplicate a routed failure
+
+- **WHEN** a routed AgentSession contains its AgentJob-owned failed terminal part plus failed Runtime or follow-up close parts in other turns
+- **THEN** the issue feed SHALL project exactly one routed failure entry selected by the AgentJob terminal delivery id
+- **AND** SHALL NOT project the unrelated close parts as routing outcomes
 
 #### Scenario: Limit selects newest entries globally
 
