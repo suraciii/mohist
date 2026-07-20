@@ -847,3 +847,12 @@ Decisions / gotchas for downstream tasks:
   beside the CSS-visible `xl` sibling sidebar.
 - Added hook and shell specs for an unoverridden initial `matchMedia` wide
   result, and retained the test seam and no-`matchMedia` fallback behavior.
+
+## Pending Recovery Reason Fix (2026-07-20)
+
+- Compact and Reset now explain both existing disable conditions: a running
+  session and an in-flight recovery mutation. The controls' `aria-disabled`
+  state now matches their native disabled state in both cases.
+- Added Compact-pending and Reset-pending tooltip specs. The action-weight
+  proposal, design, task, and capability spec now record `anyPending` as an
+  existing presentation input without adding a new reason attribute.
