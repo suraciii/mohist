@@ -36,14 +36,32 @@ describe('SettingsSearch navigation', () => {
     await waitFor(() => expect(document.activeElement?.id).toBe('agent-runtime-timeout'))
   })
 
-  it('dispatches an entry reveal event before focusing a conditional target', async () => {
-    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+  it('dispatches an entry reveal event after the target route renders', async () => {
+    let revealPath: string | null = null
+    const recordRevealPath = () => {
+      revealPath = screen.getByTestId('location-spy').getAttribute('data-pathname')
+    }
+    window.addEventListener('mohist:settings:reveal-stage-model-overrides', recordRevealPath, { once: true })
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/agent')
     openSettingsSearch()
     await user.type(await screen.findByTestId('settings-search-input'), 'plan stage model')
     await user.keyboard('{Enter}')
-    await waitFor(() => expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'mohist:settings:reveal-stage-model-overrides' })))
+    await waitFor(() => expect(revealPath).toBe('/settings/ai'))
+  })
+
+  it('carries a reveal event across application and project route branches', async () => {
+    let revealPath: string | null = null
+    const recordRevealPath = () => {
+      revealPath = screen.getByTestId('location-spy').getAttribute('data-pathname')
+    }
+    window.addEventListener('mohist:settings:reveal-repository-add-form', recordRevealPath, { once: true })
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/agent')
+    openSettingsSearch()
+    await user.type(await screen.findByTestId('settings-search-input'), 'repository name')
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(revealPath).toBe('/selected-project/settings/repositories'))
   })
 
   it('uses application routes for application settings', async () => {

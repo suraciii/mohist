@@ -34,6 +34,7 @@ public class IssueInfo
     public int[] PrerequisiteNumbers { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
+    public bool CanBeParent { get; set; }
     public IssueStartBlockerDto? Blocker { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
@@ -182,4 +183,24 @@ public sealed class ChildIssuesSummary
     public int InProgressCount { get; set; }
     public int DoneCount { get; set; }
     public int CancelledCount { get; set; }
+    public int BlockedCount { get; set; }
+}
+
+[GenerateSerializer]
+public sealed class IssueChildRef
+{
+    [Id(0)] public int Number { get; set; }
+    [Id(1)] public string Title { get; set; } = null!;
+    [Id(2)] public string Status { get; set; } = null!;
+    [JsonPropertyName("health")] [Id(3)] public string Health { get; set; } = "active";
+    [Id(4)] public string? RepositoryName { get; set; }
+
+    public static IssueChildRef FromReadModel(IssueReadModel model) => new()
+    {
+        Number = model.Number,
+        Title = model.Title,
+        Status = model.Status,
+        Health = model.Health,
+        RepositoryName = model.RepositoryName,
+    };
 }

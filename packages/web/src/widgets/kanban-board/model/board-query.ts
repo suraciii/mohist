@@ -8,6 +8,7 @@ export interface BoardQueryState {
   labels: string[]
   search: string
   sort: SortMode
+  repository: string | null
 }
 
 export function parseBoardQuery(search: string): BoardQueryState {
@@ -15,6 +16,7 @@ export function parseBoardQuery(search: string): BoardQueryState {
   const priorities = params.get('priorities')
   const searchParam = params.get('search')
   const sortParam = params.get('sort')
+  const repositoryParam = params.get('repository')
 
   return {
     priorities: priorities ? priorities.split(',').filter(Boolean) : [],
@@ -23,6 +25,7 @@ export function parseBoardQuery(search: string): BoardQueryState {
     sort: (sortParam === 'priority' || sortParam === 'number' || sortParam === 'updated')
       ? sortParam
       : 'priority',
+    repository: repositoryParam && repositoryParam.length > 0 ? repositoryParam : null,
   }
 }
 
@@ -39,6 +42,9 @@ export function serializeBoardQuery(state: BoardQueryState): string {
   }
   if (state.sort !== 'priority') {
     params.set('sort', state.sort)
+  }
+  if (state.repository) {
+    params.set('repository', state.repository)
   }
   return params.toString()
 }
@@ -91,6 +97,23 @@ export function issueMatchesLabelTokens(labels: Record<string, string> | undefin
   })
 }
 
+export function issueRepositoryName(issue: Issue): string | null {
+  const resolved = issue.repository?.name
+  if (resolved && resolved.length > 0) return resolved
+  const persisted = issue.repositoryName
+  if (persisted && persisted.length > 0) return persisted
+  return null
+}
+
+export function deriveRepositoryOptions(issues: Issue[]): string[] {
+  const seen = new Set<string>()
+  for (const issue of issues) {
+    const name = issueRepositoryName(issue)
+    if (name) seen.add(name)
+  }
+  return Array.from(seen).sort((a, b) => a.localeCompare(b))
+}
+
 export function applyBoardFilters(
   issues: Issue[],
   state: BoardQueryState,
@@ -113,6 +136,11 @@ export function applyBoardFilters(
     result = result.filter((issue) =>
       issue.title.toLowerCase().includes(q),
     )
+  }
+
+  if (state.repository) {
+    const target = state.repository
+    result = result.filter((issue) => issueRepositoryName(issue) === target)
   }
 
   return result

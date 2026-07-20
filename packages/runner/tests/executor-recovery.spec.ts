@@ -100,7 +100,7 @@ describe("WorkExecutor recovery", () => {
   })
 
   it("uses a default handler only for failed results after explicit handlers miss", () => {
-    const recovery = {
+    const recovery: JsonObject = {
       budget: 1,
       handlers: [
         { when: "errorCode=conflict", tasks: [{ id: "specific", title: "Specific" }], retrySelf: false },

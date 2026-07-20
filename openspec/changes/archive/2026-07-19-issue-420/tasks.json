@@ -1,0 +1,101 @@
+{
+  "project": "mohist-local",
+  "description": "Expose composite issue progress and target repositories throughout the Web board, issue details, and New Issue flow while keeping Issue relationship and repository rules server-authoritative.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Project current child rows and blocked progress in issue reads",
+      "spec": "specs/composite-issue-detail/spec.md#requirement-composite-detail-data-reflects-current-relationships",
+      "description": "Extend the server Issue read model with compact, issue-number-ordered child rows carrying number, title, status, health, and persisted repository name. Derive the child collection, per-status summary, and blocked count together in `IssueQuerier` for list and detail reads, excluding archived or detached children and preserving the existing parent backlink and repository contracts.",
+      "acceptanceCriteria": [
+        "`IssueReadModel` exposes an additive child collection and `ChildIssuesSummary` exposes `BlockedCount`; no persistence schema, aggregate state, or API envelope changes are introduced.",
+        "A parent read returns every current non-archived child in ascending issue-number order with number, title, status, canonical health, and persisted repository name; an ordinary issue returns no child rows.",
+        "The summary and child rows are derived from the same batched, project-scoped child query, with `DoneCount` counting only `done`, total including cancelled children, and `BlockedCount` counting blocked child health.",
+        "Detaching or archiving a child removes it from the former parent's child rows and totals on the next read; child health changes update blocked count without writing duplicate parent state.",
+        "Existing parent backlinks and repository metadata remain additive and unchanged for child, parent, and ordinary issue reads.",
+        "Server querier specs cover deterministic order, mixed status totals, blocked count, repository names, archived exclusion, detach behavior, health changes, parent backlinks, and cross-project isolation; one API spec verifies the additive list/detail JSON shape.",
+        "`npm test` passes with the new server coverage green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Additive composite child projection in `packages/server` Issue read models and `IssueQuerier`, with focused querier and API specs.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Shared read foundation for T-002 and T-003. Use compact child rows rather than fully enriching each child, and keep health interpretation on the server. Do not add a child endpoint or persist blocked counts."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver repository-aware composite issue cards and board filtering",
+      "spec": "specs/issue-board-composite-repository/spec.md#requirement-issue-cards-identify-their-target-repository",
+      "description": "Update the Web Issue contract and kanban module so every card shows its persisted repository and parent cards show `X/Y done` plus independent blocked-child attention from the server projection. Add a desktop/mobile repository filter to the existing board query pipeline and URL state, preserving all current filtering, sorting, cancelled visibility, archive actions, and responsive behavior.",
+      "acceptanceCriteria": [
+        "Every card displays the issue's persisted repository name, including single-repository/default-assigned issues, without deriving it from the project's current default.",
+        "A parent card displays `doneCount/count done`; cancelled children remain in the denominator and do not increment done, while ordinary cards display no composite progress.",
+        "A parent card with blocked children displays an independent attention indicator and blocked count even when the parent's own health is not blocked; the indicator disappears at zero.",
+        "`BoardQueryState` parses and serializes one `repository` URL parameter, restores it on reload/history navigation, retains unknown values as an empty-result filter, and clears it without clearing priority, labels, search, or sort.",
+        "The repository filter is reachable on desktop and mobile, filters every status column by exact persisted repository assignment, and composes with existing board behavior including cancelled visibility and archive controls.",
+        "A single-repository project requires no repository selection to show all issues, while its cards still show their repository label.",
+        "Board-query unit tests cover parse/serialize, unknown values, filter composition, and clearing; card tests cover repository, progress, cancelled-child math, and blocked attention; desktop/mobile board component tests cover filter reachability and existing interaction regressions.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass; run the focused browser layout suite if component tests cannot verify non-overlap at supported viewports."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Web Issue types, kanban query state/filter controls, issue-card repository/composite presentation, and focused Web tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep filtering client-side with the existing full project issue set. Repository is a Project resource, not a synthetic issue label. Do not fold blocked-child attention into workflow status."
+    },
+    {
+      "id": "T-003",
+      "title": "Deliver composite parent and child issue detail navigation",
+      "spec": "specs/composite-issue-detail/spec.md#requirement-parent-details-show-composite-progress",
+      "description": "Add a composite-parent presentation mode to the existing issue detail page, using the server child projection for overall progress, blocked count, and navigable child rows with status and repository. Make child parent references navigable and disable both requests and rendering for workflow-only surfaces when the viewed issue is a parent, while retaining valid issue metadata, content, prerequisites, comments, and lifecycle actions.",
+      "acceptanceCriteria": [
+        "A parent detail displays `doneCount/count done`, total child count, blocked count including zero, and every current child in ascending issue-number order with number, title, status, repository, and blocked treatment.",
+        "Activating a child row navigates to that issue in the current project; activating a child's parent backlink navigates to the parent; ordinary issues display no parent backlink.",
+        "Repository metadata remains visible for parent, child, and ordinary issue details and always represents that issue's persisted assignment.",
+        "For parents, workflow timeline, branch, diff, commits, tasks, sessions, artifacts, profile controls, recovery/approval controls, rebase/workspace reads, and workflow mobile actions are neither requested nor rendered.",
+        "Parent details continue to render status, repository metadata, prerequisites, valid issue-level actions, description, attachments, and comments without fabricating a workflow decision.",
+        "When refreshed after detach or child health change, the child list, progress, blocked count, and child backlink reflect current server relationships without client-side optimistic totals.",
+        "MSW-backed detail tests cover mixed child rows and navigation, zero/nonzero blocked counts, parent backlink behavior, repository identity, retained non-workflow content, and failure on any unexpected workflow request for a parent; existing ordinary issue detail tests remain green.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Composite parent overview and child/parent navigation in `packages/web` issue detail, workflow query/render guards, and focused page tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Use one `isCompositeParent` flag from server child data across query enablement and rendering. Keep the route/page shared because parent is a derived Issue state, and keep the child list in the page slice rather than creating a reusable widget prematurely."
+    },
+    {
+      "id": "T-004",
+      "title": "Deliver repository and parent assignment in New Issue",
+      "spec": "specs/issue-creation-assignment/spec.md#requirement-new-issue-selects-a-target-repository",
+      "description": "Complete the New Issue vertical slice for repository and optional parent assignment. Initialize the repository draft from the project's declared default, present only conservatively eligible project-scoped parent candidates, submit `repositoryName` and `parentIssueNumber` together, map authoritative server error codes to actionable messages without clearing drafts, and invalidate affected issue queries after success.",
+      "acceptanceCriteria": [
+        "In a multi-repository project the declared default is initially selected and can be changed; in a single-repository project the sole repository is submitted without requiring a choice.",
+        "The optional parent selector shows issue number and title, is scoped to the current project, excludes terminal issues and issues that are themselves children, and leaves parent assignment absent when empty.",
+        "The create API client accepts `parentIssueNumber`; selecting parent `#42` and repository `web` sends both fields in one existing POST and does not inherit the parent's repository.",
+        "Server validation remains authoritative: `repository_not_found`, `parent_not_found`, `parent_ineligible`, and `parent_is_sub_issue` responses produce assignment-specific, understandable errors, keep the dialog open, preserve all entered fields, and never report success.",
+        "Successful child creation closes and resets the form, invalidates project issue list and relevant detail queries, and allows the board and parent detail to show the new child without a full-page reload.",
+        "MSW-backed create-dialog tests cover multi-repository default/change, single-repository submission, eligible candidate filtering, no-parent omission, cross-repository child payload, each assignment error category with draft preservation, and success invalidation.",
+        "Existing New Issue behaviors for title, body, attachments, labels, workflow, risk, prerequisites, model, and priority remain functional.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Web create-issue API typing and dialog repository/parent assignment flow, error mapping, cache invalidation, and component tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001 because the existing active issue list exposes parent backlinks and status needed for conservative candidate filtering, and the existing POST already validates parent/repository assignments. Do not duplicate all domain invariants in the Web or add an eligible-parent endpoint."
+    }
+  ]
+}

@@ -491,6 +491,7 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
 
     expectAssigned('description-section', 'reading-flow')
     expectAssigned('comments-section', 'reading-flow')
+    await waitFor(() => screen.getByTestId('commits-section'))
     expectAssigned('commits-section', 'reading-flow')
     expectAssigned('diff-files-section', 'reading-flow')
     expectAssigned('workflow-view-frame', 'reading-flow')

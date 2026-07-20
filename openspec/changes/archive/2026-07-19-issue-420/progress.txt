@@ -1,0 +1,163 @@
+## Codebase Patterns
+
+- `TestTime` (in `eng/TestTime.cs`) is the project-wide frozen clock. Use `TestTime.UtcDateTime`/`TestTime.UtcNow` for any `DateTime`/`DateTimeOffset` instead of `DateTime.UtcNow`; the build fails otherwise (BannedSymbols).
+- `IssueReadModelLoader.ApplyProjectionsToSingleAsync(db, model)` is the canonical "wire up workflow + feedback projection for one read model" entry point; it does N workflow queries. The companion `ApplyWorkflowProjectionsBatchAsync(db, models)` (added in T-001) batches workflow projection for a list (no feedback).
+- `IssueRow` has STORED computed columns for `Status`, `Title`, `RepositoryName`, `IsArchived`, etc. — all derived from `json_extract(State, ...)`. Filter `IsArchived != true` directly in the WHERE clause.
+- `BuildInfo(issue, project, resolvedProfileId)` is the canonical `Domain.Issue → IssueInfo` mapper; pass `project: null` when only the persisted `RepositoryName` is needed and the resolved `RepositoryInfo` is intentionally absent.
+- For the `IIssueGrain` create flow, the helper is `CreateAsync(projectId, number, title, body, labels, repositoryName, isDraft)`. Patch parent via `PATCH /api/projects/{p}/issues/{n}` with `{ "parentIssueNumber": N }`. Detach via `{ "parentIssueNumber": null }`.
+- `WorkflowRunState` JSON status `"Failed"` (Pascal) becomes the projection's `Health == "blocked"` for child rows.
+
+## T-001: Project current child rows and blocked progress in issue reads
+
+### Decisions
+
+- Refactored `IssueQuerier.EnrichAsync` to replace the old `childCounts` group-by query with `ApplyCompositeChildProjectionAsync`. One project-scoped query against `IssueRow` filters by parent numbers in the current result set, `IsArchived != true`, ordered by `Number` ascending.
+- For each child row, deserialize state → `Domain.Issue` → `IssueInfo` via `IssueReadModelLoader.BuildInfo(issue, project: null, resolvedProfileId)`. `RepositoryName` is preserved as the persisted `issue.RepositoryRef`; resolved `Repository`/`RepositoryProblem` are intentionally left null because the compact row doesn't carry them.
+- Workflow projection is applied in batch via the new `IssueReadModelLoader.ApplyWorkflowProjectionsBatchAsync` so `Health` reflects the bound workflow state (e.g. workflow `Failed` → child `Health = "blocked"`).
+- Group child rows by parent number; both `IssueReadModel.Children` (compact `IssueChildRef[]`) and `ChildIssuesSummary` (with new `BlockedCount`) are derived from the same set in `SummarizeChildren` so they cannot drift.
+- Non-parent issues get `Children = []` and `ChildIssuesSummary = null` so the Web UI can treat an empty array as "no children" and a null summary as "not a parent".
+- `ChildIssuesSummary.Count` now excludes archived children (was previously the union of all children). This is the behavioral change explicitly required by the spec's "Detaching or archiving a child removes it from the former parent's child rows and totals on the next read" scenario.
+
+### Gotchas
+
+- The existing `Reads_ProjectParentAndChildSummary_AndParentFilter` test happened to seed only non-archived children, so it still passes after the archived-exclusion change. New `Children_ExcludesArchivedChildrenFromRowsAndTotals` pins the new semantics.
+- `BlockedCount` uses canonical `Health == "blocked"`, not status — so a child in `inProgress` with a failed workflow run increments `BlockedCount`, matching the spec scenario "parent has four children, two done, one blocked in_progress, one cancelled → 2/4 done, 1 blocked".
+- `IssueChildRef.FromReadModel(IssueReadModel)` is the projection helper; downstream code (Web T-002/T-003) should depend on `IssueChildRef`, not on the full `IssueReadModel` for child lists.
+- JSON property name on `IssueChildRef.Health` is `health` (matches `IssueReadModel.Health`); other fields use camelCase by default.
+- The `$$"""..."""` raw string interpolation conflicts with `}}` literals in JSON; build raw strings via plain concatenation when the JSON contains closing braces.
+
+### Files Touched
+
+- `packages/server/src/Mohist.Server/Issue/Services/IssueInfo.cs` — added `IssueChildRef`, `ChildIssuesSummary.BlockedCount`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModel.cs` — added `IssueReadModel.Children`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueReadModelLoader.cs` — added `ApplyWorkflowProjectionsBatchAsync`.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` — removed old `childCounts` group-by; added `ApplyCompositeChildProjectionAsync` + `SummarizeChildren`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Querier/IssueQuerierSpecs.cs` — 7 new specs.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Api/IssueCompositeChildProjectionApiSpecs.cs` — new API spec for additive list/detail JSON shape.
+
+### Verification
+
+- `dotnet test Mohist.sln -p:SkipWebBuild=true`: 5462 tests pass (1384 Cli + 1215 Server.Unit + 30 Server.Arch + 2833 Server.Spec).
+- `npm test`: server + 4876 web + 1192 runner tests all pass.
+
+## T-002: Repository-aware composite issue cards and board filtering
+
+### Decisions
+
+- Extended `Web.Issue` with `repositoryName?: string | null` and `children?: IssueChildRef[]`; `ChildIssuesSummary` gains `blockedCount: number`. These fields arrive additively from the server JSON envelope (server `IssueReadModel.Children` + `ChildIssuesSummary.BlockedCount`); no Web API transform is needed because `request<Issue>` already trusts the server payload shape.
+- `BoardQueryState` adds a nullable `repository` field. `parseBoardQuery` reads the `repository` URL parameter, preserving unknown values verbatim (so they keep filtering to no matches and the user can still clear). `serializeBoardQuery` omits the parameter when `null` and emits `repository=<name>` otherwise. Round-trips cleanly with priority/labels/search/sort.
+- New `deriveRepositoryOptions(issues)` derives the dropdown options from the existing issue set using `issueRepositoryName(issue)`. This avoids a separate project-repositories fetch and guarantees the filter dropdown never offers a name the user cannot clear against — even on a single-repository project.
+- `issueRepositoryName(issue)` prefers `issue.repository?.name` (resolved `RepositoryInfo`) and falls back to `issue.repositoryName` (persisted) so cards and the filter keep working when only the persisted assignment is available (e.g. orphaned repository name).
+- `applyBoardFilters` compares exact persisted repository names. The filter applies in the same pipeline as priority/labels/search so cancelled visibility, archive controls, and sort continue to compose.
+- `KanbanBoard` exposes a new `RepositoryFilter` selector in both the desktop flex-wrap row and the mobile filter panel behind the existing disclosure. The Clear button removes only the repository filter; priority/labels/search/sort remain. When the URL carries an unknown repository name, the dropdown renders a synthetic `{name} (unknown)` option (so the user sees what's filtering) and the Clear button stays available — never silently falling back to "All repositories".
+- `IssueCard` renders a compact repository chip plus, for parents, a `X/Y done` composite progress badge and an independent blocked-child attention indicator. These live in a new `issue-card-metadata-row` between the title and labels, keeping the existing six-dimension top row untouched. The blocked indicator renders `N blocked` whenever `childIssuesSummary.blockedCount > 0` — independent of the parent's own health, and hidden at zero. Cancelled children stay in the denominator (`Y`) without incrementing done.
+- Repository availability is derived, not fetched: a single-repository project still shows the chip on every card but the filter does not demand a choice.
+
+### Gotchas
+
+- The existing `kanban-board-filter-reachability.test.tsx` test asserted an exact list of testids in the desktop bar — extended it to include `repository-filter` and seeded `repositoryName` on its makeIssue fixtures so the filter actually renders.
+- `IssueCard.test.tsx` was already near the 629-line file-size budget; the new repository + composite tests live in a new sibling `IssueCard.repository-and-composite.test.tsx` so the existing file stays within budget without splitting legacy suites.
+- Playwright's `Locator.boundingBox()` returned `null` for the mobile-scoped `panel.getByTestId('mobile-repository-filter')` even though `expect(...).toBeVisible()` and the actual `getBoundingClientRect()` were non-null. Switching the test to a page-rooted locator (`page.locator('[data-testid="mobile-repository-filter"]')`) and reading the rect via `evaluate(...getBoundingClientRect())` made the assertions reliable; the underlying element was always laid out correctly.
+- Browser fixture was extended to set `repositoryName` on every makeIssue so the repository dropdown actually has options to show in the new layout tests.
+- `deriveRepositoryOptions` intentionally returns `[]` (not throws) when the issue list is empty — `RepositoryFilter` short-circuits to `null` in that case so empty projects render without a stale empty selector.
+- T-003 (parent detail rendering) deliberately does NOT touch this card layer; `isCompositeParent` and the navigation surface are derived from the same server projection but live in the detail page slice.
+
+### Files Touched
+
+- `packages/web/src/entities/issue/model/issue.ts` — additive `IssueChildRef`, `Issue.children`, `Issue.repositoryName`, `ChildIssuesSummary.blockedCount`.
+- `packages/web/src/widgets/kanban-board/model/board-query.ts` — `BoardQueryState.repository`, parse/serialize for `repository`, `issueRepositoryName`, `deriveRepositoryOptions`, `applyBoardFilters` repository step.
+- `packages/web/src/widgets/kanban-board/ui/KanbanBoard.tsx` — `RepositoryFilter` (desktop + mobile variants), `FilterBar` accepts `repositories`, board derives `repositoryOptions` from issues.
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx` — `getIssueRepositoryName`, `getChildProgress`, `getBlockedChildCount`, `RepositoryChip`, `ParentProgressBadge`, `BlockedChildrenIndicator`, `issue-card-metadata-row`.
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.test.tsx` — updated fixture's `repositoryName` only where the repository-filter reachability assertion requires it (existing tests unchanged otherwise).
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.repository-and-composite.test.tsx` (new) — 14 specs covering repository chip resolution / fallback, parent progress / cancelled math / completion state, independent blocked-child indicator, metadata-row grouping.
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-query.pure.test.tsx` — added `repository` field to every state literal, 11 new specs (parse repository, parse unknown, parse alongside priority/label/search/sort, serialize with/without repository, round-trip, filter by resolved name, filter by persisted name, unknown → empty, composition with priority/label/search, clearing preserves others).
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-repository-filter.test.tsx` (new) — 15 specs covering desktop/mobile reachability, exact-name column filtering, URL write/restore, popstate, unknown filter + clear, filter composition with priority, archive-controls preserved under filter, cancelled-stub independence, single-repository projects.
+- `packages/web/src/widgets/kanban-board/ui/kanban-board-filter-reachability.test.tsx` — updated fixture to seed `repositoryName` and added `repository-filter` to the desktop reachability assertion.
+- `packages/web/tests/browser/issue-board-layout.spec.ts` — fixture seeds `repositoryName`, two new tests: desktop repository-filter reaches alongside the existing filter bar; mobile repository-filter reaches inside the mobile panel.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:ci -w packages/web`: 4918 tests pass (357 files); FSD + node test boundary checks clean.
+- `npm test`: server + web + runner suites all green (no regressions).
+- `npm run test:browser -w packages/web -- --grep "issue board"`: 4/4 issue-board browser layout tests pass (including two new repository-filter layout tests at desktop and mobile viewports).
+
+## T-003: Composite parent and child issue detail navigation
+
+### Decisions
+
+- One `isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0` flag (server projection only — non-archived, current children) drives both query enablement (`useIssueDiff`, `useIssueCommits`, `useWorkflowTimeline`, `useRebaseRecovery` all gated on `!!issue && !isCompositeParent`) and render guards (`showWorkflowSections`, `showRuntimeDecisionSurface`, `showMobileActionBar`).
+- `useWorkflowRunSessions` is gated via `workflowRunId` being null for parents (`!isCompositeParent ? (issue?.workflowRunId ?? null) : null`), avoiding any session fetch.
+- `IssueDetailsCard` parent reference is now a real `Link` via `useProjectPath()` with `data-testid="parent-issue-backlink"`; child issue pages have to mount the same card to expose it (no separate backlink widget).
+- `IssueDetailsCard` repository metadata accepts either the resolved `issue.repository?.name` or the persisted `issue.repositoryName` fallback (added in T-002) so child/parent/orphan-repository detail pages all show the issue's own assignment.
+- `CompositeParentOverview` (a page-slice section, not a widget per design notes) renders `done/total done` progress, total + blocked counts, and a child list in ascending issue-number order with status pill, repository chip, and a red "Blocked" indicator driven by `IssueHealth.Blocked`.
+- The page keeps `Description`, `Comments`, repository metadata, prerequisites, the Edit button, and `IssueActionsCard` for parents; only `BranchBar`/`WorkflowView`/`LatestArtifactsPanel`/`TaskProgressPanel`/`WorkflowSessionsPanel`/`IssueWorkflowProfileEditor`/`WorkflowProfileControl`/`drift`/`convergence`/`runtime-evidence`/`runtime-decision-surface` and the workflow mobile action bar are gated away.
+- Decision/recovery inputs, `executionSignal`, and `driftRecovery` are built once `decision` is truthy, so the parent branch never fabricates a workflow decision from absent stage data.
+
+### Gotchas
+
+- Strict hook gating on `!!issue && !isCompositeParent` defers diff/commits/timeline/rebase fetches until after the issue read lands; four pre-existing tests (`IssueDetailPage.cross-tier.test.tsx`, `IssueDetailPage.control-workspace.active.spec.tsx`, `IssueDetailPage.reading-flow.test.tsx`, `IssueDetailPage.test.tsx`) raced the issue fetch with parallel workflow reads and now need `waitFor` around dynamic DOM checks (`commits-section`, `runtime-evidence`). Each was updated in place to assert against the fetched state.
+- `getIssueWorkflowVariables` (called from `IssueModelSelector` `useEffect`) and `useOpencodeModel` (`/api/projects/:projectId/workflow-profile/variables`) are not gated — the model selector is always rendered via `IssueConfigurationCard`. The "no workflow request for a parent" test only tracks the workflow surface endpoints listed by the design (diff, commits, timeline, workspace-status, artifacts, workflow-profile, project workflow-profile, system templates, sessions, yaml, rebase) and accepts these legitimate model fetches.
+- The "no workflow request for a parent" assertion uses MSW handlers stacked on top of `mountIssueDetail`'s defaults so workflow endpoints that fire are recorded in `workflowCalls`; an `act`-wrapped 100 ms settle lets `IssueModelSelector`'s useEffect microtasks flush before the assertion runs.
+- `useProjectPath` encodes the project name (`Project 1` → `Project%201`); when a `<Route path="/:projectName/issues/:number">` is added to the MemoryRouter, the navigate-from-child assertion can read `useLocation().pathname === '/Project%201/issues/13'` without a separate project-prefixed route.
+- `CompositeParentIssueInput` (`Pick<Issue, 'children' | 'childIssuesSummary'>`) is exported so downstream code can consume the page's composite summary without re-deriving it.
+
+### Files Touched
+
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` — added `isCompositeParent` / `workflowDataEnabled` flags, derived composite summary, routed pages using the page-slice section, and gated workflow queries + render paths.
+- `packages/web/src/pages/issue-detail/ui/cards/IssueDetailsCard.tsx` — parent reference becomes a navigable `<Link>` (new `data-testid="parent-issue-backlink"`); repository metadata uses persisted fallback.
+- `packages/web/src/entities/issue/api/queries.ts` — `useIssueDiff` and `useIssueCommits` accept an `enabled` flag forwarded to `useQuery`.
+- `packages/web/src/widgets/issue-workflow/model/useRebaseRecovery.ts` — accepts an `enabled` flag forwarded to `useWorkspaceStatus`.
+- `packages/web/src/pages/issue-detail/ui/sections/CompositeParentOverview.tsx` (new) — composite parent overview section with `composite-child-row`, `composite-child-status-pill`, `composite-child-blocked-indicator`, `composite-child-repository`, and `composite-parent-progress-label` / `composite-parent-blocked-label` data attributes.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.composite-parent-detail.test.tsx` (new) — 12 MSW-backed specs covering mixed child rows, navigation, zero/nonzero blocked counts, parent backlink, repository identity, retained non-workflow content, detached/health-changed reload, workflow render suppression, and the no-workflow-request assertion.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.cross-tier.test.tsx`, `…reading-flow.test.tsx`, `…test.tsx`, `…control-workspace.active.spec.tsx` — added `waitFor` for `commits-section` / `runtime-evidence` to handle the post-issue workflow fetch ordering introduced by strict gating.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:run -w packages/web`: 4930 tests pass (358 files).
+- `npm test`: server + web + runner suites all green (no regressions; `IssueCompositeAdvancementApiSpecs.ReopenParent_ReturnsToBacklog_AndCanAttachAndStartNewChild` passes when not racing parallel tests).
+
+## T-004: Repository and parent assignment in New Issue
+
+### Decisions
+
+- Extracted `CreateIssueInput` type in `entities/issue/api/client.ts` and added `parentIssueNumber?: number`. The dialog only ever sends a real number, so the optional-number type is enough — the server reads `parentIssueNumber === null` and "absent" identically through the existing nullable `int?`.
+- New `features/create-issue/lib/assignment.ts` module hosts the three conservative helpers the dialog needs and nothing else: `isTerminalIssueStatus`, `isEligibleParentCandidate` (excludes terminal issues and any issue with a `parentIssueRef`), `deriveEligibleParentCandidates` (sort ascending by number), `findDefaultRepository` / `pickInitialRepositoryName` (preserve the user's previous choice when still declared, otherwise default or first), and `mapCreateIssueError` (maps `ApiError.code` against the four server-stable codes to an in-form error; everything else falls through to the existing toast path). Helpers live in `features/` because they're scoped to the New Issue slice and have no entity-wide significance.
+- Repository initialization now handles every state:
+  - Single-repo: `<div data-testid="create-issue-repository-label">` shows the repo name; the selector is hidden, no choice required (matches the spec scenario).
+  - Multi-repo: `<select data-testid="create-issue-repository-select">` is rendered; `repositoryName` starts at the declared default and can be changed.
+  - Empty list: amber empty-state (`create-issue-repository-empty`) tells the user the project has no repositories declared.
+  - Loading: `<div data-testid="create-issue-repository-loading">` placeholder so nothing visually pops in later.
+- A `useRef<string|null>(null)` keyed by `projectId` triggers a state reset when the project changes (both `repositoryName` and `parentIssueNumber` cleared). Without this a stale selection from one project could bleed into another on account/project-context reload.
+- Parent picker is a native `<select>` showing `#N · Title`; candidates are filtered to "not terminal" + "no `parentIssueRef`", sorted ascending, and the empty placeholder defaults to an ordinary issue. A small `useEffect` re-clears the selection only after the query has loaded (`data !== undefined`) and only when the stored parent falls out of the eligible set — avoids transient clears during background refetches.
+- Both `repositoryName` and `parentIssueNumber` are emitted in the same existing `POST /api/projects/{p}/issues`. Submitting a parent on a different repository than the parent issue does NOT inherit the parent's repository — the assignment belongs to the new issue itself.
+- Error mapping covers the four stable server codes (`repository_not_found`, `parent_not_found`, `parent_ineligible`, `parent_is_sub_issue`). On any of them, the dialog stays open, the entered values are preserved, a `<div data-testid="create-issue-assignment-error" role="alert">` is shown, and `resetAndClose()` is never called. The success toast never fires. Every other error code still funnels to the existing `toast.error` path.
+- Success invalidates the broad `['issues']` query (board + active-issue list) and, when a parent is set, the parent's detail and child-cache entries (`['issues', parent, projectId]` and `… ['children']`). Successful child creation closes + resets the form exactly as before.
+- `useIssues` for parent candidates uses the existing entity query; TanStack Query deduplicates against any other consumer (e.g. `IssuePrerequisitePicker`).
+
+### Gotchas
+
+- Browser-only React refs as the project-change sentinel avoid a `useEffect` that would compare `projectId` on every render; the ref is invisible from the dependency array yet still tracks the last project seen.
+- The state effect that prunes a now-ineligible parent must guard against the data-not-yet-loaded case. An earlier version cleared the selection before the first response because the candidates list was briefly `[]`; gating on `parentIssuesQuery.data !== undefined` keeps the user's choice stable across background refetches.
+- MSW-backed tests built a single combined file that initially crossed the 500-line test budget. Split it into two sibling files (`*.assignment.repository.test.tsx` for repos + happy-path parents; `*.assignment.errors.test.tsx` for validation + invalidation + regression). Both stay under 500 lines.
+- In the "single-repo submission" test the dialog momentarily renders the loading placeholder before the repositories query resolves. The "no dropdown / sole repository" assertions are wrapped in `waitFor` so the synchronous assertions don't run against the still-loading state.
+- The "selected parent disappears" test calls `queryClient.refetchQueries({ queryKey: ['issues'] })` rather than `invalidateQueries`. Invalidation marks the cache stale but TanStack Query may serve the previous data without an immediate refetch inside the test's `waitFor` window; explicit `refetchQueries` makes the timing deterministic.
+- The "non-assignment regression" test pins that adding the parent picker doesn't disturb the existing prerequisites submission path (the prerequisite buffer state already exercised by `CreateIssueDialog.test.tsx`).
+- The Create Issue success path shows two new toast strings unchanged (`Issue #<n> created`). The parentError banner only renders for the four mapped codes; everything else falls to the existing toast.error block.
+
+### Files Touched
+
+- `packages/web/src/entities/issue/api/client.ts` — extracted `CreateIssueInput`, added optional `parentIssueNumber`.
+- `packages/web/src/entities/issue/api/create-issue-api-client.test.ts` — added a "sends parentIssueNumber alongside repositoryName in one POST" assertion.
+- `packages/web/src/features/create-issue/lib/assignment.ts` (new) — terminal/eligibility/default/error-mapping helpers.
+- `packages/web/src/features/create-issue/lib/assignment.test.ts` (new) — 21 unit specs covering terminal detection, eligibility filtering (terminal/child exclusion), candidate derivation/sorting, default + single-repo + missing-repo initialization, and error-code mapping for all four codes (including fallback path and Error/non-Error sources).
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx` — added `parentIssueNumber`, `assignmentErrorMessage`, project-change ref, parent-issue `<select>`, repository single-repo label / empty state / loading placeholder, assignment error banner, mutation error-code mapping, parent detail invalidation, `resetAndClose` clears parent and banner.
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.assignment.repository.test.tsx` (new) — MSW-backed: multi-repo default pre-selection with all option labels, multi-repo change submission, single-repo submission (no dropdown), loading placeholder, eligible parent filtering (excludes terminal/child), parent+repo combined POST, no-parent omission, cross-repository child payload.
+- `packages/web/src/features/create-issue/ui/CreateIssueDialog.assignment.errors.test.tsx` (new) — MSW-backed: all four assignment error codes keep dialog open with assignment-specific messages + draft preservation; success clears banner and shows toast; success invalidates parent detail + child cache + broad issues when a parent is set; omits parent-keyed invalidations when no parent is set; prerequisites still wire up alongside parent; selected parent clears when the issue turns terminal.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: clean.
+- `npm run test:run -w packages/web`: 4970 tests pass (361 files), +40 over T-003.
+- `npm test`: server + web + runner suites all green; `npm run check:test-boundaries` only flags the pre-existing `IssueDetailPage.composite-parent-detail.test.tsx` oversize file from T-003 (555 lines, unrelated to this task and out of scope to fix here).

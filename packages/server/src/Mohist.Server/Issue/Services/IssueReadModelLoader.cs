@@ -95,6 +95,22 @@ public class IssueReadModelLoader : IScopedService
     }
 
     /// <summary>
+    /// Apply workflow projection only, in batch, to a list of read
+    /// models. Used by the compact child projection in
+    /// <see cref="IssueQuerier"/> so the per-child canonical Health can
+    /// reflect the bound workflow state without paying N workflow
+    /// queries. Feedback projection is intentionally skipped: the
+    /// compact child row does not surface <c>feedback</c>.
+    /// </summary>
+    public async Task ApplyWorkflowProjectionsBatchAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<IssueReadModel> models)
+    {
+        if (models.Count == 0) return;
+        ApplyWorkflowProjections(models, await LoadWorkflowStatesAsync(db, models));
+    }
+
+    /// <summary>
     /// Single field-by-field mapping body. Static
     /// <see cref="ToInfo(Domain.Issue, ProjectInfo?)"/> callers hardcode
     /// <see cref="IssueWorkflowProfiles.LocalId"/> to preserve the
@@ -132,6 +148,9 @@ public class IssueReadModelLoader : IScopedService
             WorkflowProfileId = resolvedProfileId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
+            CanBeParent = issue.Status == Domain.IssueStatus.Backlog
+                && !issue.HasWorkflowStarted
+                && issue.ParentIssueNumber is null,
             RepositoryName = issue.RepositoryRef,
             Repository = resolution.Repository,
             RepositoryProblem = resolution.Problem,
@@ -172,6 +191,7 @@ public class IssueReadModelLoader : IScopedService
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         IsDraft = issue.IsDraft,
         CanStart = issue.CanStart,
+        CanBeParent = issue.CanBeParent,
         Blocker = issue.Blocker,
         RepositoryName = issue.RepositoryName,
         Repository = issue.Repository,

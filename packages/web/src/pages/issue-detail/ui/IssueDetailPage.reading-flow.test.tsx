@@ -328,12 +328,12 @@ describe('IssueDetailPage reading-flow — lightest chrome', () => {
     expect(description.className).not.toContain('border-l-2')
     expect(description.className).not.toMatch(/\bbg-card\b/)
 
-    const comments = screen.getByTestId('comments-section')
+    const comments = await waitFor(() => screen.getByTestId('comments-section'))
     expect(comments.className).not.toContain('rounded-lg')
     expect(comments.className).not.toContain('border-l-2')
     expect(comments.className).not.toMatch(/\bbg-card\b/)
 
-    const commits = screen.getByTestId('commits-section')
+    const commits = await waitFor(() => screen.getByTestId('commits-section'))
     expect(commits.className).not.toContain('rounded-lg')
     expect(commits.className).not.toContain('border-l-2')
     expect(commits.className).not.toMatch(/\bbg-card\b/)

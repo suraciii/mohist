@@ -17,7 +17,7 @@ import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
-import { ProjectProvider } from '../../../entities/project'
+import { ProjectProvider, type Repository } from '../../../entities/project'
 import { server } from '../../../../tests/support/msw'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
@@ -33,12 +33,18 @@ export function runnerRowsHandler(rows: Array<Record<string, unknown>>) {
   return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } }))
 }
 
-export function renderBoard(ui: ReactNode): ReturnType<typeof render> {
+export function renderBoard(ui: ReactNode, repositories: Repository[] = []): ReturnType<typeof render> {
   server.use(defaultRunnersHandler())
   const queryClient = new QueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[]}>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
+        id: 'proj-1',
+        name: 'Project 1',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        repositories,
+      }]}>
         <MemoryRouter>
           {ui}
         </MemoryRouter>
