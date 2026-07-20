@@ -87,19 +87,19 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
             lineage!,
             entry =>
             {
-                Assert.Equal("acp-original", entry.AgentRuntimeSessionId);
+                Assert.Equal("runtime-original", entry.AgentRuntimeSessionId);
                 Assert.Equal("opencode", entry.Runtime);
                 Assert.Equal(CreatedAt.ToString("o"), entry.BoundAt);
             },
             entry =>
             {
-                Assert.Equal("acp-current", entry.AgentRuntimeSessionId);
+                Assert.Equal("runtime-current", entry.AgentRuntimeSessionId);
                 Assert.Equal("opencode", entry.Runtime);
                 Assert.Equal(CreatedAt.AddMinutes(15).ToString("o"), entry.BoundAt);
             });
 
         var wire = JsonSerializer.SerializeToElement(metadata, JSON.Options);
-        Assert.Equal("acp-current", wire.GetProperty("runtimeSessionId").GetString());
+        Assert.Equal("runtime-current", wire.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", wire.GetProperty("runtime").GetString());
         var wireLineage = wire.GetProperty("runtimeSessionLineage");
         Assert.All(wireLineage.EnumerateArray(), entry =>
@@ -254,15 +254,15 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
             Runtime = new AgentSessionRuntime("runner-lineage", null, "opencode"),
             Settings = new AgentSessionSettings("gpt-4o"),
             Status = new AgentSessionStatusSnapshot(
-                AgentRuntimeSessionId: "acp-current",
+                AgentRuntimeSessionId: "runtime-current",
                 CreatedAt: CreatedAt,
                 BoundAt: CreatedAt.AddMinutes(15),
                 LastDataAt: CreatedAt.AddMinutes(20),
                 UsageSummary: new AgentUsageSummary(),
                 RuntimeSessionLineage:
                 [
-                    new RuntimeSessionLineageEntry("acp-original", CreatedAt, "opencode"),
-                    new RuntimeSessionLineageEntry("acp-current", CreatedAt.AddMinutes(15), "opencode"),
+                    new RuntimeSessionLineageEntry("runtime-original", CreatedAt, "opencode"),
+                    new RuntimeSessionLineageEntry("runtime-current", CreatedAt.AddMinutes(15), "opencode"),
                 ],
                 ContextUsageHistory: []),
             Metadata = new AgentSessionMetadata(labels),

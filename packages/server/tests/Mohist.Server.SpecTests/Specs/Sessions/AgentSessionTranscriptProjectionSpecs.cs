@@ -113,7 +113,6 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         var wireSummary = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
         Assert.Equal(session.Id, wireSummary.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", wireSummary.GetProperty("runtime").GetString());
-        Assert.False(wireSummary.TryGetProperty("acpSessionId", out _));
         Assert.False(wireSummary.TryGetProperty("coderSessionId", out _));
     }
 

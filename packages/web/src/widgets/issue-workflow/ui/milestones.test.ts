@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
 import {
   deriveMilestones,
-  isAcpAgentTask,
+  isInlineAgentTask,
   isTaskLogMilestone,
   mergeTimelineRows,
   serializeMilestoneForExport,
@@ -32,50 +32,50 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
   }
 }
 
-describe('isAcpAgentTask', () => {
-  it('returns true when origin.uses is "mohist/acp-agent" and sessionName is non-empty', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
+describe('isInlineAgentTask', () => {
+  it('returns true when origin.uses is "mohist/opencode" and sessionName is non-empty', () => {
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
   })
 
   it('does not require classification for eligibility; classification is retained context only', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: null })).toBe(true)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '' })).toBe(true)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: null })).toBe(true)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: '' })).toBe(true)
   })
 
   it('returns false for ops uses (mohist/rebase, core/process) even when sessionName is present', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when origin.uses is the agent action but sessionName is empty', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: '', classification: 'UserFacing' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: '   ', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: '', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: '   ', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when sessionName is missing entirely even with the agent uses', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: null, classification: 'UserFacing' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: null, classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when origin.uses is non-string or missing', () => {
-    expect(isAcpAgentTask({ origin: null, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isAcpAgentTask({ origin: {}, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: undefined }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: null, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: {}, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isInlineAgentTask({ origin: { uses: undefined }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false for empty/null/undefined input', () => {
-    expect(isAcpAgentTask(null)).toBe(false)
-    expect(isAcpAgentTask(undefined)).toBe(false)
+    expect(isInlineAgentTask(null)).toBe(false)
+    expect(isInlineAgentTask(undefined)).toBe(false)
   })
 
   it('never reads workType (workType is not a task-level field)', () => {
     const inputs: unknown[] = [
-      { origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'ops' },
+      { origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'ops' },
       { origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'agent' },
     ]
     for (const input of inputs) {
-      expect(isAcpAgentTask(input as never)).toBe((input as { origin?: { uses?: string } }).origin?.uses === 'mohist/acp-agent')
+      expect(isInlineAgentTask(input as never)).toBe((input as { origin?: { uses?: string } }).origin?.uses === 'mohist/opencode')
     }
   })
 })

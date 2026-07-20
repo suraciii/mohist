@@ -240,7 +240,7 @@ export function killProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTE
       return
     } catch {
       // A non-detached child has no process group whose id equals child.pid;
-      // keep ACP and other existing callers safe by signaling the direct child.
+      // Signal the direct child when its process group is unavailable.
     }
   }
   try {

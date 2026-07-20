@@ -33,7 +33,7 @@ public class IssueRebaseRecoveryTests
         var task = Assert.Single(recovery.Handlers);
         var resolve = Assert.Single(task.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", resolve.Id);
-        Assert.Equal("mohist/acp-agent", resolve.Uses);
+        Assert.Equal("mohist/opencode", resolve.Uses);
 
         // The manual rebase recovery must reuse the builtin prompt by named
         // reference (resolved by the runner at dispatch), not handroll an

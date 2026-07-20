@@ -1,0 +1,118 @@
+using System.Text.Json;
+using Mohist.Server.Infrastructure;
+using Xunit;
+
+namespace Mohist.Server.UnitTests.SystemSpecs;
+
+public class AgentConfigSchemaTests
+{
+    [Fact]
+    public void Validate_NullOrNonObject_ReturnsNull()
+    {
+        Assert.Null(AgentConfigSchema.Validate(null));
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("null").RootElement));
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("\"foo\"").RootElement));
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("[1,2,3]").RootElement));
+    }
+
+    [Fact]
+    public void Validate_EmptyObject_ReturnsNull()
+    {
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("{}").RootElement));
+    }
+
+    [Theory]
+    [InlineData("type")]
+    [InlineData("livenessQuietThresholdMs")]
+    [InlineData("probeTimeoutMs")]
+    [InlineData("sessionStartTimeoutMs")]
+    [InlineData("compaction")]
+    public void Validate_ForbiddenKey_ReturnsActionableError(string key)
+    {
+        var element = JsonDocument.Parse($"{{\"{key}\": \"value\"}}").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains($"agentConfig.{key}", error);
+    }
+
+    [Fact]
+    public void Validate_ModelAndVariantAccepted()
+    {
+        var element = JsonDocument.Parse("""{"model":"openai/gpt-5.5","variant":"high"}""").RootElement;
+        Assert.Null(AgentConfigSchema.Validate(element));
+    }
+
+    [Fact]
+    public void Validate_MixedAcceptedAndForbidden_ReportsFirstForbidden()
+    {
+        var element = JsonDocument.Parse("""{"model":"m","type":"opencode"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.type", error);
+    }
+
+    [Fact]
+    public void Project_StripsEverythingExceptModelAndVariant()
+    {
+        var element = JsonDocument.Parse("""
+            {"type":"opencode","model":"openai/gpt-5.5","variant":"high","livenessQuietThresholdMs":1200000,"probeTimeoutMs":30000}
+            """).RootElement;
+        var projected = AgentConfigSchema.Project(element);
+        Assert.NotNull(projected);
+        Assert.Equal(2, projected!.Count);
+        Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
+        Assert.Equal("high", projected["variant"]?.ToString());
+    }
+
+    [Fact]
+    public void Project_NullOrEmpty_ReturnsNull()
+    {
+        Assert.Null(AgentConfigSchema.Project(null));
+        Assert.Null(AgentConfigSchema.Project(JsonDocument.Parse("{}").RootElement));
+    }
+
+    [Fact]
+    public void Project_OnlyAllowedKeys_ReturnsSubset()
+    {
+        var element = JsonDocument.Parse("""{"model":"openai/gpt-5.5","temperature":0.5}""").RootElement;
+        var projected = AgentConfigSchema.Project(element);
+        Assert.NotNull(projected);
+        Assert.Single(projected!);
+        Assert.Equal("openai/gpt-5.5", projected["model"]?.ToString());
+    }
+
+    [Fact]
+    public void Filter_Dictionary_StripsLegacyKeys()
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["model"] = "openai/gpt-5.5",
+            ["type"] = "opencode",
+            ["livenessQuietThresholdMs"] = 1200000,
+        };
+        var filtered = AgentConfigSchema.Filter(input);
+        Assert.NotNull(filtered);
+        Assert.Single(filtered!);
+        Assert.Equal("openai/gpt-5.5", filtered["model"]?.ToString());
+    }
+
+    [Fact]
+    public void Filter_Dictionary_AllLegacyKeys_ReturnsNull()
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["type"] = "opencode",
+            ["livenessQuietThresholdMs"] = 1200000,
+        };
+        var filtered = AgentConfigSchema.Filter(input);
+        Assert.Null(filtered);
+    }
+
+    [Fact]
+    public void Filter_Dictionary_NullOrEmpty_ReturnsNull()
+    {
+        Assert.Null(AgentConfigSchema.Filter(null));
+        Assert.Null(AgentConfigSchema.Filter(new Dictionary<string, object?>()));
+    }
+}

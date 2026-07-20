@@ -3,8 +3,8 @@
 ### Requirement: Agent tasks execute inside workflow workspace
 Agent-backed workflow tasks SHALL execute with `context.workDir` set to the workflow workspace path. Agent execution SHALL NOT use project paths, repository cache paths, repository checkout paths outside the workspace, or user checkout directories as working directories.
 
-#### Scenario: ACP agent receives workspace cwd
-- **WHEN** an ACP-backed task starts for a workflow run
+#### Scenario: Agent-backed task uses workflow workspace cwd
+- **WHEN** an agent-backed task starts for a workflow run
 - **THEN** the agent process/session SHALL use the workflow workspace path as its working directory
 - **AND** the task prompt context SHALL NOT expose project or repository local execution paths
 

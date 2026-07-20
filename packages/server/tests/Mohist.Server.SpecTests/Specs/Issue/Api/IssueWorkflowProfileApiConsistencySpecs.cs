@@ -235,7 +235,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 vars = new Dictionary<string, object?>
                 {
-                    ["agent"] = new { type = "opencode" },
+                    ["agent"] = new { model = "openai/gpt-5.6" },
                 },
                 stages = new Dictionary<string, object?>(),
             });
@@ -260,7 +260,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 vars = new Dictionary<string, object?>
                 {
-                    ["agent"] = new { type = "opencode" },
+                    ["agent"] = new { model = "openai/gpt-5.6" },
                     ["modelVariant"] = "max",
                 },
                 stages = new Dictionary<string, object?>(),
@@ -272,8 +272,8 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var beforeProfile = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var beforeData = (await beforeProfile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         var beforeVariables = beforeData.GetProperty("variables");
-        var beforeVarsAgent = beforeVariables.GetProperty("vars").GetProperty("agent").GetProperty("type").GetString();
-        Assert.Equal("opencode", beforeVarsAgent);
+        var beforeVarsAgent = beforeVariables.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString();
+        Assert.Equal("openai/gpt-5.6", beforeVarsAgent);
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
@@ -287,8 +287,12 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("mohist/github-pr", afterData.GetProperty("profileId").GetString());
         // The configured runtime overlay must survive a profile selection
         // change — PATCH workflowProfileId touches the issue aggregate's
-        // selection only, not the variable bundle.
-        Assert.Equal("opencode", afterVariables.GetProperty("vars").GetProperty("agent").GetProperty("type").GetString());
+        // selection only, not the variable bundle. Per #410 T-002 design D5,
+        // the persisted vars.agent block is projected down to the
+        // converged {model, variant} whitelist; legacy `type` is no longer
+        // carried.
+        Assert.Equal("openai/gpt-5.6", afterVariables.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
+        Assert.False(afterVariables.GetProperty("vars").GetProperty("agent").TryGetProperty("type", out _));
         Assert.Equal("max", afterVariables.GetProperty("vars").GetProperty("modelVariant").GetString());
 
         var prompts = await _client.GetDataAsync<Dictionary<string, string>>(

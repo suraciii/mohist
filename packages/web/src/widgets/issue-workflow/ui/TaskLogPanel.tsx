@@ -20,7 +20,7 @@ import {
 import type { StageTaskStatus } from '../../../entities/issue'
 import {
   deriveMilestones,
-  isAcpAgentTask,
+  isInlineAgentTask,
   isTaskLogMilestone,
   mergeTimelineRows,
   serializeMilestoneForExport,
@@ -192,7 +192,7 @@ export function TaskLogPanel({
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false
 
-  const isAgentTask = isAcpAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
+  const isAgentTask = isInlineAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
   const trimmedSessionName = typeof sessionName === 'string' ? sessionName.trim() : ''
   const { sessions, isLoading: sessionsLoading } = workflowSessionsHook(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
   const resolvedSession = useMemo(() => {

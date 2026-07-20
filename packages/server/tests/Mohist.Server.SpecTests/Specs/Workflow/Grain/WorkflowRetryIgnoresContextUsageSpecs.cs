@@ -34,7 +34,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    private const string RuntimeSessionId = "acp-retry-guard";
+    private const string RuntimeSessionId = "runtime-retry-guard";
 
     public WorkflowRetryIgnoresContextUsageSpecs(MohistIntegrationFixture fixture)
     {

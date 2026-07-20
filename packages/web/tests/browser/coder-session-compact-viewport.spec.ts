@@ -56,7 +56,7 @@ function makeCompactViewportSession(): WorkflowRunSession {
     id: `session-${sessionName}`,
     workflowRunId,
     sessionName,
-    runtimeSessionId: `acp-${sessionName}`,
+    runtimeSessionId: `runtime-${sessionName}`,
     projectId: project.id,
     issueNumber,
     runnerId: 'runner-compact-viewport',
@@ -104,7 +104,7 @@ function makeCompactViewportMetadata(status = 'failed') {
   return {
     id: `session-${sessionName}`,
     sessionName,
-    runtimeSessionId: `acp-${sessionName}`,
+    runtimeSessionId: `runtime-${sessionName}`,
     runtime: 'opencode',
     status,
     statusKind,

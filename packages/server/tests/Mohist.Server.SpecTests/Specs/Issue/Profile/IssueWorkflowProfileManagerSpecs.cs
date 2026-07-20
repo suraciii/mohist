@@ -172,20 +172,19 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     {
         var initial = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
-                new { agent = new { type = "opencode", timeout = 300 } })));
+                new { agent = new { model = "gpt-5.6" } })));
         await _manager.SetVariablesAsync(ProjectId, 7, initial);
 
         var patch = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
-                new { agent = new { model = "gpt-4o" } })));
+                new { agent = new { model = "gpt-4o", variant = "high" } })));
         await _manager.PatchVariablesAsync(ProjectId, 7, patch);
 
         var result = await _manager.GetVariablesAsync(ProjectId, 7);
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
 
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal(300, agent.GetProperty("timeout").GetInt32());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 

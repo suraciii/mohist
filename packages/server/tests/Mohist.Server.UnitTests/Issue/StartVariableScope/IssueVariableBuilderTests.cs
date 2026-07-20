@@ -55,7 +55,7 @@ public class IssueVariableBuilderTests
         {
             vars = new
             {
-                agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" }
+                agent = new { model = "minimax-coding-plan/MiniMax-M3" }
             }
         }));
 
@@ -66,16 +66,17 @@ public class IssueVariableBuilderTests
         // VariableBundle.Vars *is* the vars namespace — agent is a direct child.
         var agent = doc.RootElement.GetProperty("agent");
 
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
     }
 
     [Fact]
     public void ProjectAgentConfig_WinsOverGlobalAgent()
     {
-        // Project sets model. Global also sets model. Project wins, and
-        // non-overlapping keys from the global layer (e.g. `type`) are
-        // deep-merged from the global fallback.
+        // Project sets model. Global also sets model. Project wins for the
+        // overlapping key. Per D5, the converged surface no longer accepts
+        // legacy `type`/`liveness*` keys, so non-overlapping legacy keys
+        // from the global layer are dropped instead of being deep-merged.
         var globalBundle = BundleFrom(JsonSerializer.Serialize(new
         {
             vars = new
@@ -99,8 +100,8 @@ public class IssueVariableBuilderTests
 
         // Project wins for the overlapping key.
         Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
-        // Global fills the non-overlapping key.
-        Assert.Equal("openai-acp", agent.GetProperty("type").GetString());
+        // Legacy keys never enter vars.agent from either layer.
+        Assert.False(agent.TryGetProperty("type", out _));
     }
 
     [Fact]
@@ -113,7 +114,7 @@ public class IssueVariableBuilderTests
         {
             vars = new
             {
-                agent = new { type = "opencode", model = "openai/gpt-5.5" }
+                agent = new { model = "openai/gpt-5.5" }
             }
         }));
         var projectBundle = VariableBundle.Empty;
@@ -124,7 +125,7 @@ public class IssueVariableBuilderTests
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
 
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
     }
 
@@ -197,7 +198,7 @@ public class IssueVariableBuilderTests
                 {
                     vars = new
                     {
-                        agent = new { model = "openai/gpt-5.5", type = "openai-acp" }
+                        agent = new { model = "openai/gpt-5.5" }
                     }
                 }
             }
@@ -229,28 +230,28 @@ public class IssueVariableBuilderTests
 
         // Project wins for the overlapping key.
         Assert.Equal("minimax-coding-plan/MiniMax-M3", buildAgent.GetProperty("model").GetString());
-        // Global fills the non-overlapping key (deep merge).
-        Assert.Equal("openai-acp", buildAgent.GetProperty("type").GetString());
     }
 
     [Fact]
     public void ProjectUserVariables_DeepMergedWithGlobal()
     {
-        // Global has agent.model. Project adds agent.timeout and
-        // agent.livenessQuietThresholdMs. Final should have all three
-        // (deep merge), not just project's.
+        // Global sets vars.agent with model + variant. Project adds
+        // vars.customProjectKey. Final vars retains both (deep merge across
+        // the bundle), and the merged vars.agent is projected down to the
+        // converged {model, variant} whitelist so legacy ACP/liveness keys
+        // never enter the merged result regardless of source.
         var globalBundle = BundleFrom(JsonSerializer.Serialize(new
         {
             vars = new
             {
-                agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3", timeout = 1800 }
+                agent = new { model = "openai/gpt-5.5", variant = "max", livenessQuietThresholdMs = 1200000 }
             }
         }));
         var projectBundle = BundleFrom(JsonSerializer.Serialize(new
         {
             vars = new
             {
-                agent = new { livenessQuietThresholdMs = 120000 }
+                customProjectKey = "kept"
             }
         }));
 
@@ -260,10 +261,13 @@ public class IssueVariableBuilderTests
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
 
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
-        Assert.Equal(1800, agent.GetProperty("timeout").GetInt32());
-        Assert.Equal(120000, agent.GetProperty("livenessQuietThresholdMs").GetInt32());
+        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
+        Assert.Equal("max", agent.GetProperty("variant").GetString());
+        Assert.False(agent.TryGetProperty("livenessQuietThresholdMs", out _));
+        Assert.False(agent.TryGetProperty("type", out _));
+
+        // Non-agent top-level keys from project are preserved across the merge.
+        Assert.Equal("kept", doc.RootElement.GetProperty("customProjectKey").GetString());
     }
 
     [Fact]

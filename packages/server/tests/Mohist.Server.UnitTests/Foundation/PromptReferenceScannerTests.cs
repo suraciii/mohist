@@ -19,7 +19,7 @@ public class PromptReferenceScannerTests
             tasks:
               - id: write-proposal
                 title: Write proposal
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.proposal }}
             checks: []
@@ -59,7 +59,7 @@ public class PromptReferenceScannerTests
             tasks:
               - id: review
                 title: Review
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.review }}
                 recovery:
@@ -69,7 +69,7 @@ public class PromptReferenceScannerTests
                       tasks:
                         - id: recover:fix
                           title: Fix
-                          uses: mohist/acp-agent
+                          uses: mohist/opencode
                           with:
                             prompt: ${{ prompts.auto-fix }}
                       retrySelf: true
@@ -91,12 +91,12 @@ public class PromptReferenceScannerTests
             tasks:
               - id: t1
                 title: T1
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.proposal }}
               - id: t2
                 title: T2
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.proposal }}
             checks: []
@@ -117,12 +117,12 @@ public class PromptReferenceScannerTests
             tasks:
               - id: t1
                 title: T1
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.deploy_checklist }}
               - id: t2
                 title: T2
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   prompt: ${{ prompts.build-task }}
             checks: []
@@ -143,7 +143,7 @@ public class PromptReferenceScannerTests
             tasks:
               - id: t1
                 title: T1
-                uses: mohist/acp-agent
+                uses: mohist/opencode
                 with:
                   options:
                     prompt: ${{ prompts.proposal }}

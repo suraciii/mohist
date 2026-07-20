@@ -27,7 +27,7 @@ function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonN
     id: rest.id ?? 'session-1',
     workflowRunId: 'workflow-run-1',
     sessionName: rest.sessionName ?? 'check',
-    runtimeSessionId: rest.runtimeSessionId ?? 'acp-1',
+    runtimeSessionId: rest.runtimeSessionId ?? 'runtime-1',
     projectId: 'project-1',
     issueNumber: 55,
     runnerId: 'runner-1',

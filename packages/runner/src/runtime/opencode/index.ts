@@ -6,10 +6,16 @@
  */
 
 export type {
+  RuntimeCancelFacts,
+  RuntimeCancelRequest,
+  RuntimeCancelResult,
   RuntimeDiagnostic,
   RuntimeDiagnosticSeverity,
   RuntimeError,
   RuntimeErrorKind,
+  RuntimeFollowupFacts,
+  RuntimeFollowupRequest,
+  RuntimeFollowupResult,
   RuntimeHealthCheck,
   RuntimeModelCatalog,
   RuntimeModelDescriptor,
@@ -20,6 +26,8 @@ export type {
   RuntimeSessionCreateResult,
   RuntimeSessionTarget,
   RuntimeTurnFacts,
+  RuntimeTurnEvent,
+  RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,

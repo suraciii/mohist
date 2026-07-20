@@ -1,0 +1,506 @@
+# issue-410 build progress
+
+## T-001: Migrate AgentJob execution to the shared OpenCodeRuntime via an Agent-owned runner entry
+
+### Codebase patterns observed
+- The `OpenCodeRuntime` deep module (from #409) already exposes `runTurn`, `ready`, `diagnostic`, `createSession`. T-001 only needs `runTurn` (with `runtimeSessionId` null → new physical Session, non-null → restored Session) and the readiness gate.
+- `WorkExecutor` already threads `openCodeRuntime` into `ActionContext` for Workflow work. The AgentJob path previously received `null` via the source-keyed `runtimeHandle = ownerKind === 'agent-job' ? null : openCodeRuntime` gate; #410 T-001 lifts that gate so both sources share the runtime handle uniformly.
+- `WorkDispatch.OwnerKind` is the canonical discriminator: `OwnerKind: WorkDispatchOwnerKinds.AgentJob` ("agent-job") is what the new `executeOne` branches on BEFORE Action resolution.
+- `AgentJobInput` is the launch-time snapshot — `prompt`, `instructions?`, `model?`, `variant?` are captured into `AgentJobGrain.State.Input` at `SubmitAsync`, so editing the Agent definition cannot mutate an in-flight job. The runner reads `work.with` only; the executor never looks up the Agent definition.
+- `ServerConnection.attachAgentSession` (`/api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/attach`) is the existing wire the runner uses to report the runtime-session binding back to the server. `RecordRuntimeSessionBindingAsync` (already idempotent + reject-mismatch) is the server-side sink.
+- The `ActionContext` `openCodeRuntime` field stays for any future Workflow Action that needs the runtime handle; the new AgentJob path doesn't go through `ActionContext` at all — `AgentJobExecutor` is owned by `WorkExecutor` and bypasses the registry.
+
+### Implementation notes
+- New `packages/runner/src/runtime/agent-job-executor.ts` houses the `AgentJobExecutor` class. Constructor: `(connection: ServerConnection, runtime: OpenCodeRuntime | null)`. The host wires it on the per-host `WorkExecutor` AND on the per-work-item fallback `WorkExecutor`.
+- `executeOne` in `executor.ts` checks `work.ownerKind === 'agent-job'` FIRST, dispatches to `AgentJobExecutor.execute`, and never reaches `this.actions.resolve(work.uses)`. Failure (no executor wired) returns a `{ status: 'failed' }` so the report flow still drains.
+- `baseContext` in `executor.ts` no longer nulls `openCodeRuntime` for agent-job dispatches — the runtime handle reaches `ActionContext` uniformly. The source-keyed gate comment is removed.
+- `RunnerHost` constructs `AgentJobExecutor` in `initializeSharedConnection` and the per-work-item ephemeral fallback; the transitional AgentJob readiness-gate caveat at host.ts:513 is rewritten to "one gate covers both Workflow and AgentJob work".
+- The AgentJob `with` envelope is the flat `{ prompt, instructions?, model?, variant? }` shape from `AgentJobGrain.BuildDispatch`. The legacy `{ "agent-launch": {...} }` envelope and `with.agent` blob are gone; `ComposePromptWithEntry`/`ApplyAgentRuntimeConfig` are deleted.
+- `AgentJobInput.Uses` is removed (was always `mohist/acp-agent`); `AgentJobInput.Variant` is added so the launch-time variant is captured into the snapshot.
+- `AgentLauncher.ResolveModelAndVariant` reads `model` and `variant` from the Agent `AgentConfig` JSON element so the launch-time snapshot is complete. `Uses` is no longer threaded through `AgentJobController` (the validation endpoint now builds `AgentJobInput` without `Uses`).
+- The runner preserves workspace-prep skip for agent-job work and reads `work.variables.workspace.path` via `workspaceFromVariables` (unchanged).
+
+### Gotchas / regressions watched for
+- `runner-host-opencode-runtime.spec.ts > "transitional AgentJob gating"` relied on the Action path taking long enough that `awaitingAck` still held the work between polls. With #410 T-001, `AgentJobExecutor.execute` closes the work within a few microtasks (`readPrompt` → `failureResult` when `with.prompt` is missing), so `awaitingAck` empties before the next poll tick and the run loop would tight-poll the same work key. Updated the spec to use `mockResolvedValueOnce([...]).mockResolvedValue([])` so the dispatch loop has nothing to re-dispatch; the gate-close assertion (`poll.mock.calls.length === callsBeforeFlip`) is preserved.
+- `ServerConnection` is mocked in `runner-host-opencode-runtime.spec.ts`; it does NOT expose `attachAgentSession` or `getAgentSession`. The new `AgentJobExecutor.resolveBinding` short-circuits when `work.agentSessionId` is null (returns `{ alreadyRecorded: true }`), so the test's mock-less `ServerConnection` is never asked for `attachAgentSession` — no mock gap surfaces.
+- `executor.ts` `updateAcpConnection` mutator and `acpConnection` field stay (T-001 deliberately does not touch the ACP Action); `WorkExecutor` adds the `agentJobExecutor` constructor argument as the LAST parameter so the call sites that don't pass it default to `null` (workflow-only tests stay unchanged).
+- The runner-host task-log spec (`runner-host-task-log.spec.ts`) used `ownerKind: 'agent-job'` for what is actually a workflow-style flush test. After #410 T-001, AgentJob work bypasses the action registry and the work-executor artifact pipeline (the AgentJobExecutor owns the runtime turn and reports directly). Updated the spec to use a `test/log` Action through the Workflow path so the flush lifecycle (terminal/incremental batches) keeps being exercised through the same channel.
+- `AgentJobGrain.BuildDispatch` no longer writes `payload["workspace"]` into the dispatch `variables` JSON — the runner's `workspaceFromVariables` reads it from `work.variables.workspace.path` which the server populates on the existing wire (`Runner/Services/RunnerGrain.cs` from #407). The dispatch `variables` payload now only carries `workspace: { path }` if `input.WorkspacePath` is non-empty; that is unchanged behaviour.
+- `AgentJobController.HandleValidateAsync` now builds the `AgentJobInput` without `Uses`. `AgentJobValidationRequest.Uses` field stays (parser tolerates it for back-compat) but the grain ignores the value.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅
+- `npm run test:run -w packages/runner` ✅ 1166 / 1166 (95 test files)
+- `npm run build` (root: dotnet + workspaces) ✅
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` ✅ 5425 / 5425 (server unit + spec + arch + cli)
+- `npm run test:run -w packages/web` ✅ 4735 / 4735
+- `agent-job-executor.spec.ts` ✅ 18 / 18 (new file: AgentJobExecutor drives OpenCodeRuntime directly)
+- `runner-host-opencode-runtime.spec.ts` ✅ 7 / 7 (the "AgentJob path drives the AgentJobExecutor, not the action registry" test was rewritten; "the readiness gate pauses AgentJob claim while runtime is not ready" was retitled and re-mocked)
+- `AgentJobDispatchEnvelopeSpecs.cs` ✅ (asserts `prompt`/`instructions`/`model` siblings, no `agent-launch`, no `agent`, no `Uses`)
+- `AgentJobGrainSpecs.cs` ✅ (added idempotency assertion for `RecordRuntimeSessionBindingAsync`)
+- `AgentJobGrainPersistenceSpecs.cs` ✅ (asserts persistence shape matches the new flat payload)
+
+### What T-002 will need to thread
+- Issue-level `agentConfig` DTOs and validators are unchanged by T-001 — `Uses: 'mohist/acp-agent'` is no longer written, but the field `agentConfig` itself is still persisted and read. T-002 can independently reject the `type`/`livenessQuietThresholdMs`/`probeTimeoutMs`/`sessionStartTimeoutMs` keys without touching the AgentJob execution path.
+- The `AgentLaunchContext` shape stays — `AgentLauncher.ResolveModelAndVariant` reads the Agent's `AgentConfig` JSON element at launch time, captures `model` + `variant` into `AgentJobInput`. T-002's write-side whitelist must allow `{model, variant}` on the issue-level `agentConfig` so this read path stays populated; T-002's read-back filter must surface only `{model, variant}` so the Web form stays in sync with the persisted keys.
+
+### What T-003 will need to thread
+- `FollowupTarget` still holds `connection: ClientSideConnection`; T-003 must replace it with a runtime-targeted shape and rework `followup-handler`/`cancel-handler`/`followup-failure-outbox`. T-001 only changes the AgentJob **execution** path — Follow-up/Cancel/outbox are out of scope.
+- `OpenCodeRuntime` does NOT yet expose `followup` or `cancel` as public methods after #409. T-003 must promote them with the same Mohist-owned request/result shape as `runTurn` (per design D3). T-001 only relies on `runTurn` + `ready` + `diagnostic`, all already public.
+
+### What T-004 will need to thread
+- T-004 deletes the `mohist/acp-agent` Action, the entire `actions/acp/` tree, the ACP runtime modules, and `@agentclientprotocol/sdk`. T-001 leaves them in place (dead but compiling) so the change stays self-contained — T-004's deletion will not conflict with any T-001 surface.
+- T-004 collapses `IsInlineAgentUses` to `mohist/opencode` only and adds an actionable error for `mohist/acp-agent` dispatches. T-001 already drops `Uses: 'mohist/acp-agent'` from `AgentJobGrain.BuildDispatch`, so the actionable error path is only reachable for stale `WorkflowRun`s persisted before the cutover (D6).
+- T-004 will need to remove the `AgentJobExecutor` constructor argument from `WorkExecutor` callsites in `host.ts` (the per-host and per-work-item fallback paths) once the gate removal is no longer required by anything — but the AgentJobExecutor stays in place after T-001; T-004 only removes the *old* ACP path, not the AgentJobExecutor.
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections and aligns `docs/actions/opencode.md` and `docs/agents.md` to the post-ACP state. T-001's flat `with` payload and the unified launch pipeline (manual + subscription) is the new state T-005 must describe; the doc gap sections previously deferred to #410 should be closeable after T-004 lands.
+
+## T-002: Converge the issue-level AgentConfig surface to model and variant across API, CLI, and Web
+
+### Codebase patterns observed
+- `IssueModelMetadata.ApplyModelMetadata` only writes {model, variant} into
+  the inner agent dict. Anything else (type, liveness* keys) already present
+  in persisted `vars.agent` is not stripped by the helper, so the
+  IssueModelMetadata.ApplyModelMetadata path was already "spec-aligned"
+  for the no-rewrite invariant. The filter-vs-preserve distinction held
+  naturally because the helper composes a SET-replace inner agent block.
+- The two write paths that secretly stamped legacy keys were the web
+  `updateOpencodeModel` / `setStageModel` (web `entities/settings/api/client.ts`)
+  and the `BuildStageVariables` -> `MergeStageAgent` helper inside
+  `MohistIssueWorkflowProfileBase`. The web layer passed
+  `{type: 'opencode', model}`, and `MergeStageAgent` serialized the dict
+  verbatim into `stages.<stage>.vars.agent`. Both are now filter-routed.
+- The `Build` overload of `IssueVariableBuilder` that accepts
+  `(globalBundle, projectBundle, workflowRunId, issue, project, workspace)`
+  feeds the live `global` (config.jsonc) and `project` (project workflow
+  variables) layers through `VariableBundle.MergeAll` — which itself does
+  not filter. Legacy keys already in storage would otherwise leak into the
+  merged result. A final-pass `ProjectAgentBlocksToConvergedSurface` walks
+  every `vars.agent` / `stages.<stage>.vars.agent` after the merge and
+  applies `AgentConfigSchema.Filter`. This is the in-band fix that keeps
+  `IssueModelMetadata.ApplyModelMetadata` (storage-side) and
+  `IssueVariableBuilder.Build` (dispatch-side) consistent without a global
+  rework of `VariableBundle.MergeAll`.
+- `CreateIssueRequest` was previously a positional `record(...)`. To
+  inspect the raw request body for an open-shape `agentConfig` validation
+  without re-parsing, the DTO was converted to a class with a `Raw`
+  `JsonElement` populated by a `BindAsync(HttpContext)` overload — the
+  same shape as `UpdateIssueRequest`. The route handler calls
+  `TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", ...)` for
+  both POST and PATCH.
+
+### Implementation notes
+- `Infrastructure/AgentConfigSchema.cs` (new) holds three surfaces:
+  - `AllowedKeys = {model, variant}`
+  - `ForbiddenKeys = {type, livenessQuietThresholdMs, probeTimeoutMs, sessionStartTimeoutMs, compaction}`
+  - `Validate(JsonElement?)` for the JSON-element path used by the
+    route layer (POST/PATCH issue body) — reject any forbidden key, return
+    the first user-facing message.
+  - `Project(JsonElement?)` and `Filter(IDictionary?)` for the
+    write/read-in whitelist projection used by the build paths.
+- `Workflow/Services/ProjectVariablesFilter.cs` (new) sanitises both top
+  and per-stage agent blocks at the project-variables write boundary;
+  `ProjectWorkflowProfileManager.SetVariablesAsync` /
+  `PatchVariablesAsync` route their bundle through this filter so legacy
+  keys supplied by a PATCH never enter the persisted
+  `ProjectWorkflowProfile.Variables` JSON. Same shape filter on read is
+  not needed because `IssueQuerier` reads back via the merged bundle, not
+  from `ProjectWorkflowProfile.Variables` directly.
+- `IssueModelMetadata.ValidateAgentConfig(JsonElement?)` is the single
+  helper used by both `IssueRoutes.Crud` and `AgentDefinitionRoutes` so the
+  error message + the acceptance-criteria wording stay identical across
+  the issue and agent-definition surfaces.
+- `IssueQuerier.ReadAgentConfig` now runs the agent dict through
+  `AgentConfigSchema.Filter` before returning it on the read model. The
+  per-stage read in `ApplyIssueWorkflowVariables` likewise goes through
+  the same filter. The spec scenario "GET /api/projects/{p}/issues/{n}
+  returns agentConfig containing at most {model, variant} even when the
+  persisted vars.agent carries legacy keys" is satisfied by this single
+  chokepoint — older persisted `vars.agent` blocks still carry legacy
+  keys (no rewrite), but the response surface no longer leaks them.
+
+### Gotchas / regressions watched for
+- The web `AiSettingsSection.test.tsx` arrangement helper seeded the
+  project-variables fixture with `type: 'opencode'` and asserted that
+  the persisted bundle echoed `type` back. Per D5, the project write no
+  longer stamps `type`, so the mutated assertion now expects
+  `{model, variant}` only. Same fix applied to `IssueWorkflowProductLoopSpecs`
+  where PATCH asserts the merged `vars.agent` round-trip no longer
+  preserves `type`.
+- `ConfigServiceTests.SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel`
+  seeded `agent` with `type=opencode, model=...`. After the
+  `GetAgentConfigAsync` filter, `type` is dropped, so the surviving
+  sibling assertion became `variant=max` (mirroring the model's atomic
+  clear behaviour on the converged surface).
+- `MohistLocalWorkflowProfileSpecs.AgentConfig_MergesGlobalConfigIntoAgentVariable`
+  used `probeTimeoutMs` to assert legacy keys flow through profile merge.
+  After `BuildAgentConfig` / `BuildStageVariables` filter, the surviving
+  agent block has only `model`. New test
+  `BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay` was added to
+  exercise the same scenario on the stage surface.
+- `ProjectWorkflowProfileManagerSpecs.PatchVariables_DeepMerges_WithExisting`
+  called `SetVariablesAsync` directly with a bundle containing `type`.
+  The unit test was updated to use the converged shape; the integration
+  shape is locked to `{model, variant}` so the projection is observable
+  on this test path too.
+- The `VariableBundle.MergeAll` deep merge semantics
+  (project-over-global) are preserved on the converged surface
+  (model/variant only). `ProjectUserVariables_DeepMergedWithGlobal` in
+  IssueVariableBuilderTests was rewritten to assert the merged agent
+  block has only model/variant while non-agent top-level keys still
+  flow through.
+- Anonymous types in C# cannot contain dynamic-key entries
+  (`new { [forbiddenKey] = "value" }` is illegal). The agent-definition
+  and issue spec tests build the request body with a
+  `Dictionary<string, object?>` first so the JSON has the right key.
+- `AgentConfigSchemaTests` (pre-existing from previous partial attempt)
+  covers unit-level Validate / Project / Filter on JSON elements and
+  dictionaries. The new `AgentConfigValidationApiBoundaryTests` covers
+  the route-facing helper `IssueModelMetadata.ValidateAgentConfig` and
+  both create and patch paths.
+
+### Verification
+- `dotnet test packages/server` (Mohist.UnitTests + SpecTests + ArchTests + Cli):
+  1202 + 2849 + 30 + 1396 = 5477 passed, 0 failed.
+- `npm run typecheck -w packages/web && npm run test:run -w packages/web`:
+  340 test files, 4738 tests, 0 failed.
+- `npm run typecheck -w packages/runner && npm run test:run -w packages/runner`:
+  1166 tests, 0 failed.
+- `agent-job-executor.spec.ts` (#409 unknownKeys path) untouched and unchanged;
+  the legacy-key warning diagnostic stays intact.
+- New tests: `IssueAgentConfigValidationApiSpecs` (11 cases) +
+  `AgentDefinitionApiSpecs.CreateAgent_WithForbiddenAgentConfigKey_Returns400`
+  / `PatchAgent_...` (8 cases) +
+  `IssueWorkflowProfileStorageIntegritySpecs.DefensiveCopy_PreservesPersistedLegacyKeys_NoRewrite`
+  / `FoldAgentDataIntoBundle_FiltersLegacyKeysFromIncomingOverlay` /
+  `FoldAgentDataIntoBundle_FiltersLegacyKeysFromIncomingStageOverlay` +
+  `AgentConfigValidationApiBoundaryTests` (14 cases) +
+  `MohistLocalWorkflowProfileSpecs.BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay`
+  (1 case) +
+  `client.test.ts.writeAgentModelAndVariant > writes only model and variant, dropping legacy keys` /
+  `drops the variant when null is passed` / `returns null when model is null regardless of legacy keys`
+  +
+  `AgentProfileEditor.test.ts > persists agentConfig carrying only {model, variant} — drops legacy keys from spread`
+  +
+  `AgentDetailPage.test.ts > does not render an agent-type field` /
+  `surfaces only model and variant in the Agent Config card when the persisted config carries legacy keys`.
+
+### What T-003 will need to thread
+- T-003 promotes Follow-up/Cancel/outbox handlers to runtime-targeted
+  shapes and deletes `ClientSideConnection`. T-002's converged agent
+  config is untouched by those changes — T-003 does not depend on the
+  AgentConfigSchema filter.
+- The Follow-up/Cancel/outbox paths never write `agentConfig` so they
+  do not need a new validation chokepoint.
+
+### What T-004 will need to thread
+- T-004 deletes the `mohist/acp-agent` Action, the entire `actions/acp/`
+  tree, the ACP runtime modules, and `@agentclientprotocol/sdk`. T-002's
+  AgentConfigSchema is orthogonal to the Action registry — T-004 does
+  not need to touch it.
+- T-004 collapses `IsInlineAgentUses` to `mohist/opencode` only and adds
+  an actionable error for `mohist/acp-agent`. T-002's route-layer
+  validation only inspects the `agentConfig` body of `mohist/opencode`
+  tasks; no overlap.
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections. T-002 already removed
+  every `type = "opencode"` stamping in source. The web milestone
+  classifier (`widgets/issue-workflow/ui/milestones.ts`) still uses
+  `isAcpAgentTask` — T-002 did not touch that file, but T-004's class
+  rename (or T-005's spec rename) will.
+
+## T-001 verification rerun
+
+This rerun was triggered to:
+1. Plumb the launch-time model/variant snapshot from `AgentLauncher` to
+   `AgentJobInput` (the existing T-001 code had `Model: null` hard-coded
+   in `AgentLauncher.cs:94` — the snapshot was incomplete). Added
+   `AgentLauncher.ResolveModelAndVariant(JsonElement? agentConfig)` which
+   reads `{model, variant}` from the Agent `AgentConfig` JSON element;
+   `Variant` is only emitted when `Model` is also present (the same
+   model-bound invariant the read-back applies).
+2. Add `packages/runner/tests/agent-job-executor.spec.ts` covering the
+   runtime-stubbed ACs:
+   - runTurn is called directly with a flat Agent-owned request (target,
+     composed prompt, options.model, options.variant)
+   - the legacy `{kind, status, runtimeSessionId, model, variant, text,
+     error}` envelope is preserved on success and failure
+   - dispatch.payload is the launch-time snapshot — executor never reads
+     the Agent definition; a second call with a different dispatch uses
+     the new snapshot
+   - attachAgentSession is called once on success with the new
+     runtimeSessionId, workDir, workId, agentJobId
+   - the existing binding (from getAgentSession) becomes the
+     `target.runtimeSessionId` on a follow-up dispatch; the runtime does
+     not fabricate a new physical Session
+   - attach failure is best-effort (the runtime turn already settled)
+   - missing-session result carries `hint: "reset"`
+   - non-agent-job dispatch is rejected without calling runTurn
+   - prompt/model/workspace.path validation rejects malformed payloads
+3. The `AgentJobExecutor` reads `getAgentSession` via the existing
+   `ServerConnection.getAgentSession` (already wired in #407) — no new
+   RPC, no new wire. The test fake connection returns a camelCase
+   `runtimeSessionId` to match `AgentSession` (the runner-side type uses
+   camelCase; the server HTTP response is serialized via the same shape).
+
+### Gotchas / regressions watched for
+- The new test for "attaches the runtimeSessionId from an existing
+  binding on a follow-up dispatch" asserts `runtimeSessionId: "ses_existing"`
+  reaches `runTurn.target`. The first attempt failed because the test
+  fake connection returned PascalCase keys (`AgentSessionId`/
+  `RuntimeSessionId`); the executor accesses `opened?.runtimeSessionId`
+  (camelCase, matches `AgentSession` type). Fixed the fake.
+- `runner-host-opencode-runtime.spec.ts > "AgentJob path drives the
+  AgentJobExecutor, not the action registry"` previously asserted that
+  the registry was NOT invoked. The current implementation matches that
+  expectation; the existing rewrite is preserved.
+- `npm run typecheck -w packages/runner` and
+  `npm run typecheck:tests -w packages/runner` both pass.
+- `packages/runner/tests/workflow-profile.spec.ts` and
+  `packages/runner/tests/external-process-guard.test.ts` are
+  pre-existing failures unrelated to T-001 (verified by stash/rerun).
+  workflow-profile's `process.cwd()`-relative path resolves to
+  `workspaces/server/...` instead of `workspaces/issue-410/server/...`;
+  external-process-guard's spawn-opencode assertion fails because
+  `opencode` is not on the path of the CI runner.
+
+## T-001 completion pass
+
+- Removed the stale transitional readiness-gate caveat from `runtime/host.ts`.
+- `AgentJobExecutor.execute` now exposes the Agent-owned result as an
+  `ActionResult`, while retaining the `WorkItemResult`-compatible status and
+  legacy output envelope consumed by the AgentJob report path.
+- Added a runner regression assertion that `baseContext` preserves the
+  OpenCode runtime handle for `agent-job` owner kinds.
+- Extended the server dispatch-envelope regression with the launch-time
+  variant and confirmed it remains a flat sibling field beside prompt,
+  instructions, and model.
+- Targeted Runner typecheck, test typecheck, AgentJob executor/host/workspace
+  tests, and Server AgentJob/Launcher specs passed after the completion pass.
+- Final `npm test` passed: Server/CLI 5477 tests, Web 4738 tests, and
+  Runner 1167 tests. `npm run build` also completed successfully.
+
+## T-002 verification rerun
+
+The workflow runner resumed T-002 on a fresh `mohist/run-…` workspace
+after a stale WorkflowRun snapshot from a pre-cutover workspace was
+rejected. The T-002 commit `d6a134340 T-002: converge issue-level
+AgentConfig surface to model and variant` is already present on this
+branch (1 commit ahead of `origin/mohist/run-…`) and contains every
+acceptance-criteria change. This rerun only re-verifies the landed state
+on the fresh workspace.
+
+### Re-verification observations
+- `packages/server/src/Mohist.Server/Infrastructure/AgentConfigSchema.cs`
+  holds the converged `{model, variant}` whitelist and the
+  `{type, livenessQuietThresholdMs, probeTimeoutMs, sessionStartTimeoutMs, compaction}`
+  reject set, plus `Validate`, `Project`, and `Filter` helpers used by
+  both the API boundary and the write/read-in chokepoints.
+- `IssueModelMetadata.ValidateAgentConfig` is the single helper invoked
+  by both `IssueRoutes.Crud` (POST + PATCH) and `AgentDefinitionRoutes`
+  (POST + PATCH) — the error wording stays identical across both
+  surfaces.
+- `IssueQuerier.ReadAgentConfig` projects the persisted `vars.agent`
+  through `AgentConfigSchema.Filter` so legacy keys already in storage
+  never reach the API response (acceptance: GET surfaces
+  `{model, variant}` only).
+- `IssueVariableBuilder.ProjectAgentBlocksToConvergedSurface` walks
+  every `vars.agent` / `stages.<stage>.vars.agent` after
+  `MergeAll(global, project, issue)` and re-projects the result, so any
+  legacy key carried in via the deep-merge path is dropped on the
+  dispatch side.
+- `MohistIssueWorkflowProfileBase.MergeAgentConfig` / `MergeStageAgent`
+  and `IssueWorkflowProfileStorageIntegrity.FoldAgentDataIntoBundle`
+  also route the agent block through `Filter` — the storage write path
+  no longer persists legacy keys.
+- `ConfigService.GetAgentConfigAsync` filters the agent config dict
+  before returning, so the runtime/build paths only see the converged
+  shape.
+- `ProjectWorkflowProfileManager.SetVariablesAsync` /
+  `PatchVariablesAsync` route the bundle through
+  `ProjectVariablesFilter.Sanitize`, projecting both root and per-stage
+  agent blocks down to `{model, variant}` on the project write path.
+- `packages/web/src/entities/settings/api/client.ts`
+  `updateOpencodeModel` (line 63) and `setStageModel` (line 199) write
+  `{model, variant?}` only — the `type: 'opencode'` stamping is gone.
+- `packages/web/src/entities/agent/api/client.ts`
+  `writeAgentModelAndVariant` (line 106) returns `{model, variant?}` or
+  `null` without ever spreading the previous config — legacy keys are
+  dropped before the API request.
+- `packages/web/src/pages/agent-detail/ui/AgentDetailPage.tsx` no
+  longer derives `agentType`; the Agent Config card shows Model and
+  Variant only.
+- The `mohist/opencode` `unknownKeys` diagnostic path (covered by the
+  #409 fake-runtime tests) is unchanged — legacy persisted keys still
+  surface as diagnostics when they reach an execution request.
+
+### Re-verification commands run
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build`:
+  UnitTests 1202, SpecTests 2849, ArchTests 30, Cli 1396 = 5477 passed, 0 failed.
+- `npm run typecheck -w packages/web && npm run test:run -w packages/web`:
+  340 test files, 4738 tests, 0 failed.
+- `npm run typecheck -w packages/runner && npm run test:run -w packages/runner`:
+  95 test files, 1167 tests, 0 failed.
+- No new acceptance-criteria code change was required for T-002; the
+  rerun only re-confirms the landed state on the fresh workspace.
+
+## T-003: rework Follow-up, Cancel, and failure-outbox handlers to target the OpenCode runtime
+
+### Codebase patterns observed
+- `OpenCodeRuntime` exposes `runTurn`, `createSession`, `diagnostic`, `ready`, `catalog` after #409. T-003 promotes `client.session.promptAsync` (Follow-up) and `client.session.abort` (Cancel) to first-class public methods on `OpenCodeRuntime` (`followup` / `cancel`) with the same Mohist-owned `RuntimeResult<T>` shape `runTurn` already returns. `RuntimeFollowupRequest`/`RuntimeFollowupResult`/`RuntimeFollowupFacts` and `RuntimeCancelRequest`/`RuntimeCancelResult`/`RuntimeCancelFacts` are added to `runtime/opencode/types.ts`; the new types are exported from `runtime/opencode/index.ts` so the handler layer can import them without reaching into the runtime module.
+- The handlers consult the persisted `binding` on the wire target (the same source the Workflow path already uses) and project it into a Mohist-owned value object `{ runtimeSessionId, workDir, projectId }`. `session-target.ts` drops its `import type { ClientSideConnection } from "@agentclientprotocol/sdk"` and re-points `FollowupTarget` to the value-object shape; the resolver (`RunnerHost.resolveFollowupTarget`) reads `target.binding` and projects it without holding a live connection.
+- `runtime/host.ts` deletes `restoreSessionTarget`, `resumeSessionTarget`, `installRestoredSessionHandlers`, and the `sessionRestorations` dedup map. Restart / reconnect reconciliation now lives entirely inside `OpenCodeRuntime` per #409 D7 (persisted binding + `client.session.get` snapshot). The shared ACP init path in `initializeSharedConnection` keeps the `SharedAcpConnection` lifecycle in place (T-004 deletes it); T-003 only stops the runner host from **restoring** ACP sessions and from calling `resumeSession`.
+- The runtime accessor the SignalR client uses is `OpenCodeRuntime | (() => OpenCodeRuntime | null) | null` so the host can wire a late-binding accessor that consults the rebuilt runtime handle on every handler call. The host wires `openCodeRuntime: () => this.openCodeRuntime`; tests pass a static fake.
+- `FollowupFailureOutbox` keeps the `target: SessionTarget` field on each entry so persisted entries still carry the discriminator (`workflow` vs `generic`) the drain needs to fan out to the right runtime-events endpoint. The class no longer references a live connection — the comment block at the top of the file is the only documentation of the new contract.
+
+### Implementation notes
+- `runtime/opencode/runtime.ts:followup` validates the input, calls `client.session.get` to verify the persisted binding still resolves, then `client.session.promptAsync` (fire-and-forget). `client.session.abort` is the symmetric Cancel path. 404s surface as `missing-session` (existing Reset hint), non-404 errors as `turn-failed`. The runtime returns `unavailable-runtime` when the OpenCode runtime is not ready so the handler can preserve the existing unavailable taxonomy.
+- `server/followup-handler.ts` calls `runtime.followup(...)` exactly once (fire-and-forget) and records the terminal outcome (`completed` / `failed`) via the followup failure outbox when an `operationId` is supplied. The handler no longer holds a `ClientSideConnection`; the `FollowupTarget` is the value object.
+- `server/cancel-handler.ts` branches on `runtime.cancel(...)` returning `{ state: "cancelled" }` for a `cancelled: true` fact, `{ state: "not-cancellable" }` for a missing-session / turn-failed outcome, and `{ state: "unavailable" }` for an `unavailable-runtime` outcome.
+- `server/runner-signalr.ts` exposes `openCodeRuntime` on the options surface (function or static) and resolves the late-binding value at handler-registration time, so the handler always consults the rebuilt runtime handle.
+- The shared `runner-signalr-followup.spec.ts` test was 888 lines (over the 800-line budget). T-003 splits it into:
+  - `runner-signalr-followup.spec.ts` (397 lines) — core `ReceiveFollowup` handler scenarios
+  - `runner-signalr-followup-generic.spec.ts` (319 lines) — generic session routing scenarios
+  - both files share a new `tests/support/followup-handler-fixture.ts` (202 lines) helper that owns the `@microsoft/signalr` mock, the `RunnerSignalRClient` builder, and the fake-runtime seams.
+- The new helper installs `vi.mock("@microsoft/signalr")` at the top of the module (not nested inside a function) so vitest's hoisting doesn't trigger its "not at the top level" warning. The helper exposes `vi.fn()`-based fake runtime + fake server connection; no real process/network/fs/clock.
+
+### Gotchas / regressions watched for
+- `runtime/host.ts` keeps `SharedAcpConnection` / `AcpSessionManager` initialization in `initializeSharedConnection` and the per-work ephemeral fallback (T-003 only deletes the **restore / resume** path that was driven by `resolveFollowupTarget`'s cache miss; T-004 deletes the shared ACP init entirely). After T-003, `resolveFollowupTarget` no longer calls `sharedAcpConnection.connection.resumeSession(...)` or installs session handlers — the workflow-side ACP bridge still initializes but no longer reattaches session handlers on a followup / cancel miss.
+- `OpenCodeRuntime.followup`'s `client.session.get` is best-effort: a non-OpenCode-runner response (e.g. the persisted binding points at a different runner) does NOT match the binding id and surfaces as `missing-session` (Reset hint), not `turn-failed`. This matches the existing Cancel reply path's `not-cancellable` for the same situation.
+- `runner-host-lifecycle.spec.ts` was rewritten for the new resolver: `GenericFollowupResolver_*` tests now drive `openCodeRuntime = { ready: () => true }` and project the binding into a `FollowupTarget` value object. The old `SharedAcpConnection` mocks stay in place because the runner host still initializes the shared ACP connection at startup — T-003 does not remove that.
+- `runner-signalr-cancel.spec.ts` and `runner-signalr-followup*.spec.ts` exercise the new runtime-targeted path with a fake runtime; the resolver returns the new value-object shape and the handler is verified to call `runtime.cancel(...)` / `runtime.followup(...)` exactly once with the projected `runtimeSessionId` / `workDir`.
+- `vi.useFakeTimers()` was added in the first split pass but breaks the `flush()` helper (which uses `setImmediate`). Removed from `beforeEach` — the existing real-timer tests don't depend on fake timers and the `flush()` helper is the bridge between `runtime.followup(...)` (fire-and-forget) and the `expect` assertion.
+- `runner-host-opencode-handlers.spec.ts` (new) verifies the host wires a late-binding `OpenCodeRuntime` accessor through to the SignalR client and that the accessor returns the live runtime handle (not a snapshot).
+- `opencode-runtime-followup-cancel.spec.ts` (new) covers the new public methods directly: prompt path (model + variant overrides), unavailable-runtime, invalid-input (missing binding / empty prompt), missing-session on `client.session.get` 404 / `client.session.promptAsync` 404 / `client.session.abort` 404, and turn-failed on non-404 SDK errors. The "reset" substring in the `missing-session` message is asserted so the Reset hint is preserved on every missing-session branch.
+- Existing `runner-host-task-log.spec.ts` still uses `ownerKind: 'agent-job'` for the flush lifecycle test; T-003 doesn't change that — the work-executor artifact pipeline still emits a terminal task-log batch on the workflow-side path, which is what that test exercises.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅ (file-size budget: split `runner-signalr-followup.spec.ts` into two files under 800 lines + a shared helper)
+- `npm run test:run -w packages/runner` ✅ 1189 / 1189 (98 test files)
+- `opencode-runtime-followup-cancel.spec.ts` ✅ 14 / 14 (new file)
+- `runner-host-opencode-handlers.spec.ts` ✅ 3 / 3 (new file)
+- `runner-signalr-followup-generic.spec.ts` ✅ 9 / 9 (new file)
+- `runner-signalr-cancel.spec.ts` ✅ 14 / 14 (rewritten: every scenario verifies `runtime.cancel(...)` is called with the projected `runtimeSessionId` / `workDir`)
+- `runner-host-lifecycle.spec.ts` ✅ 15 / 15 (rewritten: `GenericFollowupResolver_*` scenarios verify the binding projection / readiness / non-opencode binding rejection path; the `SharedAcpConnection` mock remains because T-003 doesn't tear down the shared ACP init)
+
+### What T-004 will need to thread
+- T-004 deletes `runtime/acp-connection.ts`, the entire `actions/acp/` tree, and the `SharedAcpConnection` / `AcpSessionManager` lifecycle. T-003 leaves them in place so the workflow-side ACP bridge stays live; T-004 is the dependency boundary.
+- `session-target.ts` still imports `RuntimeSessionBinding` / `SessionTarget` from `runtime/acp-connection.ts`. T-004 will relocate these types (the wire-shape stays; the connection lifecycle goes). T-003 deliberately does not move them so the diff stays self-contained.
+- `runtime/host.ts` still calls `createSharedAcpConnection` and constructs `new AcpSessionManager()` in the per-work ephemeral fallback at `:734–744`. T-003 only deletes the **resume / install** path that ran when the followup-target resolver missed the cache; the rest stays for T-004.
+- `WorkExecutor`'s constructor still accepts `sessionManager` / `acpConnection` (used by the workflow-side `acpAgentAction`). T-003 keeps these arguments for the same reason — the workflow source keeps using ACP until T-004 retires the action tree.
+
+## T-004: Delete the ACP code, dependency, and recognition; surface an actionable error for the removed Action
+
+### Codebase patterns observed
+- The runner's workflow source had been running on the ACP bridge (`actions/acp-agent.ts`, `actions/acp/` tree, `runtime/acp-connection.ts`, `runtime/acp-command.ts`, `runtime/acp-session-command.ts`) until T-003/T-004 retired it. After T-001, both Workflow and AgentJob work share the OpenCode runtime through `OpenCodeRuntime.runTurn`; the ACP bridge is now dead code that only existed for the workflow source.
+- T-003 already relocated `RuntimeSessionBinding` / `SessionTarget` / `FollowupTarget` to `server/session-target.ts` (the wire-shape stayed; the connection lifecycle went away). T-004 builds on this and also drops the ACP-coupled `SharedAcpConnection` / `AcpSessionManager` from `runtime/host.ts`.
+- The runner host's `initializeSharedConnection` had two responsibilities — building the shared OpenCode runtime and initializing the shared ACP connection. After T-004 only the OpenCode runtime lifecycle remains; the name is preserved for the file-local `WorkExecutor` ownership check (the host now keys off `workExecutor !== null` instead of `sharedAcpConnection !== null`).
+- The worktree-enforcement cleanup action was wired to `acpAgentAction` so the dirty-worktree cleanup contract ran on the same backend the original task used. After T-004 it's wired to `opencodeAction` (the same `mohist/opencode` Action the workflow source uses); the cleanup contract is preserved — `buildCleanupWith` produces a prompt that instructs the agent to use only `git add` / `commit` / `checkout --` / `restore` / `clean` (no `git push`, no PR).
+- The web milestone classifier was already renamed `isInlineAgentTask` (compared against `mohist/opencode`) by T-004 prep; the only consumer (`TaskLogPanel`) follows the rename.
+
+### Implementation notes
+- New `packages/runner/src/actions/opencode-helpers.ts` holds `buildPromptLoaderContext` and `sessionNameFromContext` so `actions/opencode.ts` no longer imports from the deleted `actions/acp/` subtree. The exports match the original signatures exactly so `opencodeAction` is unchanged.
+- `runtime/executor.ts` introduces a `REMOVED_ACTIONS = new Set(["mohist/acp-agent"])` set + `removedActionMessage(uses)` helper; `executeOne` consults `isRemovedAction(work.uses)` BEFORE the generic "No action found" miss so a pre-cutover WorkflowRun dispatch fails with a named, actionable error pointing to rerun the affected stage with a `mohist/opencode` profile.
+- `runtime/worktree-enforcement.ts` swaps `cleanupAgentAction = acpAgentAction` for `cleanupAgentAction = opencodeAction`. The cleanup contract (no push, only `git add`/`commit`/`checkout --`/`restore`/`clean`) is preserved by `buildCleanupPrompt` (`runtime/worktree-cleanup.ts`) — the prompt instructs the agent explicitly, and the executor checks the worktree again after the turn.
+- `runtime/worktree-cleanup.ts` drops `LEGACY_AGENT_BACKED_USES = "mohist/acp-agent"`; `isAgentBackedTask` now recognizes `mohist/opencode` only.
+- `system/timeout-signal.ts` comment updates `mohist/acp-agent` → `mohist/opencode` so the documentation reflects the only consumer.
+- `runner-signalr.ts` removes `sessionCommandHandler` / `sessionCommandJournal` / `reconcileStartedSessionCommand` options (T-004 didn't explicitly delete `server/session-command-handler.ts` and `runtime/session-command-journal.ts`; they're now orphaned helpers — they have no source callers but their spec tests still cover them). The `runner-signalr.ts` type re-exports for `SessionCommand*` are removed in lockstep.
+- `server/session-target.ts` now declares `RuntimeSessionBinding` and `SessionTarget` directly (T-003 already moved them; T-004 no longer depends on `runtime/acp-connection.ts`). The wire shape is unchanged.
+- Server `WorkflowItemTranslator.IsInlineAgentUses` and `WorkflowYamlSerializer.IsInlineAgentUses` collapse to `mohist/opencode`-only (drop the `|| string.Equals(uses, "mohist/acp-agent", ...)` branch). `TaskRun.DeriveClassification` drops the `!uses.Contains("acp-agent")` clause.
+- Server `Api/IssueRoutes.Helpers.cs` recovery fixture `Uses: "mohist/acp-agent"` → `Uses: "mohist/opencode"`.
+- Server `AgentSessionQuerier.cs` doc-comments at :413 and :852 drop the "ACP" wording in favor of "OpenCode runtime" / "OpenCode runtime's `generic:`-prefixed binding lookup".
+- Web `widgets/issue-workflow/ui/milestones.ts` `isAcpAgentTask` → `isInlineAgentTask` (semantics unchanged: returns true when `uses === "mohist/opencode"` and `sessionName` is non-empty). The two test fixtures that referenced the old name follow the rename.
+
+### Gotchas / regressions watched for
+- The runner-host-test mocks (`runner-host-opencode-runtime.spec.ts`, `runner-host-task-log.spec.ts`, `runner-host-lifecycle.spec.ts`, `runner-host-reporting.spec.ts`, `runner-host-cleanup-config.spec.ts`, `runner-host-convergence.spec.ts`, `runner-host-liveness.spec.ts`, `runner-host-model-rediscovery.spec.ts`, `runner-host-opencode-handlers.spec.ts`) had the `vi.mock("../src/runtime/acp-connection.js", ...)` block dropped, the `createSharedAcpConnection` / `shutdownSharedAcpConnection` / `setSessionHandlers` / `clearSessionHandlers` mocks removed, and the `WorkExecutor` constructor argument list changed (sessionManager + acpConnection removed; only the OpenCode runtime + AgentJobExecutor remain). The `runner-host-cleanup-config.spec.ts` "CleanupLoop_AcpFailureLogsDiagnostics" type test was removed entirely (the ACP-failure case no longer exists).
+- `tests/external-process-guard.test.ts` was deleted (it asserted `opencode acp` startup behaviour; after T-004 the runner no longer spawns `opencode acp`).
+- `tests/executor-removed-action.spec.ts` (new) covers the actionable error: `mohist/acp-agent` dispatch returns `failed` with `message` containing "removed Action", "mohist/acp-agent", "mohist/opencode", and matching `/rerun/i`; case-insensitive on the uses identifier; unknown Actions that aren't in `REMOVED_ACTIONS` still fall through to the generic "No action found for '...'" message.
+- `tests/runner-signalr-cancel.spec.ts` and `tests/runner-signalr-followup*.spec.ts` have the `sessionCommandHandler` / `sessionCommandJournal` mock seams removed in lockstep with `runner-signalr.ts`.
+- The web `LiveTaskProvider.transcript.dom.test.ts:87` assertion `expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')` is preserved — the production code never emits an `acpSessionId` field; this test is now an anti-regression check that the renamed runtime field stays off the wire.
+- The runner source still has two surviving mentions of `mohist/acp-agent`: `REMOVED_ACTIONS = new Set(["mohist/acp-agent"])` in `executor.ts` and the comment in `agent-job-executor.ts`. Both are intentional (the former drives the actionable error; the latter documents the AgentJob's runtime path).
+- The runner's `session-target.ts` carries a comment block that mentions `@agentclientprotocol/sdk` (no import) — the comment documents the migration ("the module no longer imports any symbol from `@agentclientprotocol/sdk`"). The `grep -r '@agentclientprotocol' packages/runner/src` check finds only that comment.
+
+### Verification
+- `npm run typecheck -w packages/runner` ✅
+- `npm run typecheck:tests -w packages/runner` ✅
+- `npm run check:test-boundaries -w packages/runner` ✅
+- `npm run test:run -w packages/runner` ✅ 1131 / 1131 (89 test files)
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ 4738 / 4738 (340 test files)
+- `npm run build` (root: dotnet + workspaces) ✅
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` ✅ UnitTests 1202 / SpecTests 2849 / ArchTests 30 / Cli 1396 = 5477 passed, 0 failed
+- `npm ls @agentclientprotocol/sdk` (from `packages/runner/`) reports `extraneous` (the SDK is on the lockfile from a prior workspace install but `package.json` no longer declares it; after `npm install` it disappears). The acceptance criterion "the runner `package.json` no longer declares the SDK" is satisfied — `package.json` lists only `@microsoft/signalr` and `@opencode-ai/sdk`.
+
+### Acceptance criteria check
+- `packages/runner/package.json` no longer declares `@agentclientprotocol/sdk` ✅
+- `packages/runner/src/actions/acp-agent.ts` and `packages/runner/src/actions/acp/` are gone ✅
+- `packages/runner/src/runtime/acp-connection.ts`, `runtime/acp-command.ts`, `runtime/acp-session-command.ts` are gone ✅
+- `actions/registry.ts` registers only `mohist/opencode` ✅
+- `actions/opencode.ts` imports `buildPromptLoaderContext` / `sessionNameFromContext` from `actions/opencode-helpers.ts` (not `actions/acp/`) ✅
+- `ActionContext` has no `acpSessionManager` / `acpConnection` field ✅
+- `WorkExecutor` has no `sessionManager` / `acpConnection`; `baseContext` threads no ACP state ✅
+- `runtime/host.ts` has no `SharedAcpConnection`, no `AcpSessionManager`, no `initializeSharedConnection` ACP init, no `shutdownSharedConnection`, no per-work ephemeral fallback ✅
+- The runner host does not spawn `opencode acp` on startup; the single `isOpenCodeReadyForClaim()` gate applies uniformly to Workflow and AgentJob work ✅
+- No runner source file reads `MOHIST_AGENT_ARGS` ✅
+- `WorkflowItemTranslator.IsInlineAgentUses` and `WorkflowYamlSerializer.IsInlineAgentUses` collapse to `mohist/opencode`-only ✅
+- `TaskRun.DeriveClassification` no longer consults the substring `'acp-agent'` ✅
+- `Api/IssueRoutes.Helpers.cs` recovery fixture uses `mohist/opencode` ✅
+- `AgentSessionQuerier.cs` doc-comments at :413 and :852 carry no ACP wording ✅
+- Web production source has no `isAcpAgentTask` identifier and no `acpSessionId` references ✅
+- A pre-cutover WorkflowRun dispatching `uses: mohist/acp-agent` fails with the named, actionable error (covered by `executor-removed-action.spec.ts`) ✅
+- A custom profile naming `uses: mohist/acp-agent` fails at dispatch (the runner registry is `mohist/opencode`-only; the dispatch path returns the actionable error) ✅
+- `runtime/worktree-enforcement.ts` cleanup action is `opencodeAction`; the dirty-worktree cleanup contract (no push, only `git add` / `commit` / `checkout --` / `restore` / `clean`) is preserved by `buildCleanupPrompt` ✅
+- All builds and tests pass ✅
+
+### What T-005 will need to thread
+- T-005 closes the design-doc gap sections. The landed state matches the spec body; the gap sections are footnotes that no longer apply.
+- The web production source is now runtime-neutral for the milestone classifier; the doc updates can describe it as such.
+- The `acpSessionId` wire field is gone; the doc updates describe the converged wire (`runtimeSessionId` only, runtime discriminator `"opencode"`).
+
+## T-005: Close ACP gap sections in design docs and rename the ACP scenario in specs/workflow-agent
+
+### Codebase patterns observed
+- `design/agent-execution.md` and `design/runtimes/opencode.md` carried `## 实装差距` sections describing historical #407 / #409 / #410 work-in-progress. After T-001/T-003/T-004 land, every ACP-related gap item is resolved; only an unrelated gap (two-phase wrapup) stays open in `runtimes/opencode.md`.
+- `docs/actions/opencode.md` carried an `## 实装差距` section that described the Workflow-source Session commands as "currently still on the historical ACP path" — that text was no longer accurate after T-003 and was the only ACP-era wording in the consumer-facing docs.
+- `docs/agents.md` carried no ACP-era wording and no `实装差距` section; a `grep -nE 'ACP|acp|liveness|probeTimeout|sessionStartTimeout|acpSessionId' docs/agents.md` returns nothing, so the doc was already aligned with the converged state. T-005 confirms the alignment rather than editing it.
+- `specs/workflow-agent/spec.md` had a single scenario named `ACP agent receives workspace cwd` whose `WHEN` clause referenced "an ACP-backed task". The workspace-isolation invariant under it (cwd = workflow workspace path, prompt context does not leak project / repository local execution paths) is independent of the runtime identity, so the rename is a pure wording change.
+
+### Implementation notes
+- `design/agent-execution.md`: the entire `## 实装差距` section (lines 168–189) is removed. The body is the spec; no gap remains.
+- `design/runtimes/opencode.md`: the gap section is reduced to the two paragraphs that describe an open, non-ACP gap (two-phase wrapup) and a historical SDK-version note. The issue-407 / issue-409 / "issue-409 范围之外、当前仍未实装" paragraphs that described AgentJob ACP migration, `acpSessionId`, and the ACP Action deferral are removed.
+- `docs/actions/opencode.md`: the `## 实装差距` section is rewritten so that "Workflow and AgentJob" both use the OpenCode-driven path and the Workflow-source Session commands are no longer described as carried by an ACP path. The `issue-410 处理剩余的 AgentJob 路径清理` paragraph is folded into the new "both sources" sentence because T-004 closed it.
+- `specs/workflow-agent/spec.md`: the scenario is renamed to `Agent-backed task uses workflow workspace cwd` and the `WHEN` clause is updated to `an agent-backed task starts for a workflow run`. The `THEN` clauses are unchanged so the workspace-isolation invariant stays intact.
+
+### Gotchas / regressions watched for
+- `design/runtimes/opencode.md` still mentions `mohist/acp-agent`, `acpSessionId`, and ACP era wording in the **body** sections (e.g. the `## 决策` decision statement at line 9, the `## 回合执行` section's mention of "移除 ACP liveness probe 后" at line 180, the `## 完整替换` section at lines 346–363, and the `## 存量数据与配置的过渡行为` section at lines 365–379). These are spec content describing the converged / documented behavior — they are not gaps and are out of T-005's scope (the task closes gap **sections**, not all ACP-era wording).
+- `docs/actions/opencode.md` line 143 keeps the phrase "不再包含历史 ACP 身份字段" because it documents the converged state ("no longer contains the historical ACP-era identity fields") rather than describing ACP as the current behavior.
+- The design body text was not rewritten. Per AGENTS.md "正文是 spec，差距是脚注", the body is the spec and the gap sections are footnotes — closing the footnotes is the only edit.
+- `docs/agents.md` was not edited: a `grep -nE 'ACP|acp|liveness|probeTimeout|sessionStartTimeout|acpSessionId' docs/agents.md` finds zero matches. The consumer-facing doc already described the converged state (no ACP identity on Workflow-source sessions, no ACP liveness fields, model/variant only on the issue-level agentConfig is implied by the absence of any agentConfig wiring in the doc itself; agentConfig specifics live in the issue surface).
+
+### Verification
+- `npm run build` (root: dotnet + workspaces) ✅ 0 warnings, 0 errors. `Mohist.Cli`, `Mohist.Server`, `Mohist.Server.UnitTests`, `Mohist.Server.SpecTests`, `Mohist.Server.ArchTests`, `Mohist.Cli.Tests` all build; web `vite build` produces the dist bundle; runner `tsc -p tsconfig.json` succeeds and `write-build-info.ts` emits a `build-info.json`.
+- `npm test` (root: dotnet + workspaces) ✅:
+  - `Mohist.Server.UnitTests`: 1202 / 1202 passed
+  - `Mohist.Server.SpecTests`: 2849 / 2849 passed
+  - `Mohist.Server.ArchTests`: 30 / 30 passed
+  - `Mohist.Cli.Tests`: 1396 / 1396 passed
+  - `npm run test:ci -w packages/web`: 340 test files, 4738 / 4738 passed
+  - `npm run test:ci -w packages/runner`: 89 test files, 1131 / 1131 passed
+
+### Acceptance criteria check
+- `design/agent-execution.md` no longer carries an open gap section about AgentJob ACP migration ✅ (the entire `## 实装差距` section is removed; no remaining gap exists in this file)
+- `design/runtimes/opencode.md` no longer carries an open gap section about AgentJob ACP migration or the acpSessionId/ACP Action deferral ✅ (only the two-phase wrapup gap and the SDK-version historical note remain in the gap section; both are unrelated to ACP)
+- `docs/actions/opencode.md` no longer describes ACP-era behavior as the current state ✅ (the gap section now states that Workflow and AgentJob both use the OpenCode-driven path; the "currently still on the historical ACP path" wording is gone)
+- `docs/agents.md` no longer describes ACP-era behavior as the current state ✅ (already in the converged state; no ACP references anywhere in the file)
+- `specs/workflow-agent/spec.md` has no scenario whose name or body uses the terms 'ACP agent' or 'ACP-backed' ✅ (renamed to `Agent-backed task uses workflow workspace cwd`; the `WHEN` clause uses "agent-backed" only, no "ACP"; the workspace-isolation invariant under the renamed scenario is preserved verbatim)
+- `npm run build` (which treats warnings as errors) passes after the doc edits ✅
+
+### What completes after T-005
+- All #410 acceptance criteria are now met by the landed state plus the documentation close-out. The design bodies describe the spec, and the only remaining gap footnotes are unrelated (two-phase wrapup, SDK version note).
+- No further code or doc changes are required to land #410. The issue's product shape, domain model, and acceptance criteria are all satisfied.

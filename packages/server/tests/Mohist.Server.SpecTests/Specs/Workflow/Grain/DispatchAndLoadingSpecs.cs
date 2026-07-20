@@ -205,11 +205,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                 [],
                 Variables: new Dictionary<string, JsonElement?>
                 {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.4" })
+                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
                 })
         ], Variables: new Dictionary<string, JsonElement?>
         {
-            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
+            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
         }));
 
         var (load, r1) = await PollWorkAnyAsync();
@@ -245,11 +245,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                 [],
                 Variables: new Dictionary<string, JsonElement?>
                 {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.4" })
+                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
                 })
         ], Variables: new Dictionary<string, JsonElement?>
         {
-            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
+            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
         }));
 
         var (dynamicTask, _) = await PollWorkAnyAsync();

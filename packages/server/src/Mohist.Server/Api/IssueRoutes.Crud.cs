@@ -60,6 +60,9 @@ public static partial class IssueRoutes
             if (TryValidateModelMetadata(req, out var modelError) is false)
                 return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
 
+            if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
+                return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
+
             var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
             if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && requestedWorkflowProfileId is null)
                 return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
@@ -210,6 +213,9 @@ public static partial class IssueRoutes
 
             if (TryValidateModelMetadataRawTypes(req.Raw, out var rawTypeError) is false)
                 return ApiResults.BadRequest(rawTypeError!, "invalid_model_metadata");
+
+            if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
+                return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
             // Workflow profile id: any present non-null value must refer to a
             // known registered profile. Null means "clear to inherit default"
@@ -488,6 +494,22 @@ public static partial class IssueRoutes
             return false;
         }
         return true;
+    }
+
+    private static bool TryValidateAgentConfigForbiddenKeys(JsonElement raw, string fieldName, out string? error)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty(fieldName, out var el))
+        {
+            error = null;
+            return true;
+        }
+        if (el.ValueKind == JsonValueKind.Null)
+        {
+            error = null;
+            return true;
+        }
+        error = IssueModelMetadata.ValidateAgentConfig(el);
+        return error is null;
     }
 
     private static async Task ApplyCreateModelMetadataAsync(

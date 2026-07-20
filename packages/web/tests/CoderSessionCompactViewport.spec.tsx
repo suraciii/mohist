@@ -85,7 +85,7 @@ function makeMockMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentS
   return {
     id: 'agent-session-12345678',
     sessionName: 'build',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     runtime: 'opencode',
     status: 'active',
     statusKind: 'live',
@@ -133,11 +133,11 @@ function makeCancelableSessionData(): SessionDataSourceResult {
     isError: false,
     notFound: false,
     sessionKey: 'build',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     meta: {
       sessionId: 'agent-session-12345678',
       sessionName: 'build',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       executionId: null,
       title: 'Build session',
       status: 'active',
@@ -202,7 +202,7 @@ function setupDefaults() {
     {
       id: 'sess-1',
       sessionName: 'build',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       executionId: 'exec-1',
       taskDescription: 'Build',
       status: 'active',

@@ -410,15 +410,15 @@ public class AgentSessionQuerier : IScopedService
     /// Resolves the cancel target for a generic (non-workflow)
     /// <see cref="AgentSession"/> (issue-129 T-005). Distinct from
     /// <see cref="ResolveGenericFollowupTargetAsync"/>: cancel is
-    /// best-effort over ACP, so the endpoint needs the runner id AND the
-    /// terminal-state verdict up front — if the session is already terminal
-    /// the server short-circuits without calling the runner at all. The
-    /// returned <see cref="GenericCancelTarget.TerminalState"/> is the
-    /// verbatim <c>status</c> field of the most recent
-    /// <c>session.closed</c> transcript event
-    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), so the HTTP
-    /// response can mirror the runner's reported state without inventing a
-    /// value.
+    /// best-effort over the runner's OpenCode runtime, so the endpoint
+    /// needs the runner id AND the terminal-state verdict up front —
+    /// if the session is already terminal the server short-circuits
+    /// without calling the runner at all. The returned
+    /// <see cref="GenericCancelTarget.TerminalState"/> is the verbatim
+    /// <c>status</c> field of the most recent <c>session.closed</c>
+    /// transcript event (<c>completed</c> / <c>failed</c> / <c>stopped</c>),
+    /// so the HTTP response can mirror the runner's reported state
+    /// without inventing a value.
     /// </summary>
     /// <remarks>
     /// Returns <c>null</c> when the session is unknown OR belongs to a
@@ -848,9 +848,9 @@ public sealed record FollowupTarget(
 /// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
 /// (issue-129 T-004). Identifies a session by its minted
 /// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
-/// <c>sessionName</c> pair to carry. The runner uses
-/// <see cref="SessionId"/> to look up the active ACP session entry under
-/// the <c>generic:</c> prefix in <c>AcpSessionManager</c>.
+/// <c>sessionName</c> pair to carry. The runner resolves the session
+/// through the OpenCode runtime's <c>generic:</c>-prefixed binding
+/// lookup at Follow-up / Cancel dispatch time.
 /// </summary>
 public sealed record GenericFollowupTarget(
     string RunnerId,

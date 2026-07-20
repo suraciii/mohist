@@ -214,9 +214,9 @@ public class MohistLocalWorkflowProfileSpecs
 
         using var document = JsonDocument.Parse(variables);
         var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
-        Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
+        Assert.False(agent.TryGetProperty("probeTimeoutMs", out _));
+        Assert.False(agent.TryGetProperty("type", out _));
     }
 
     [Fact]
@@ -269,6 +269,46 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.NotNull(stageVariables);
         Assert.True(stageVariables.ContainsKey("check"));
+    }
+
+    [Fact]
+    public void BuildStageVariables_FiltersLegacyKeysFromIncomingOverlay()
+    {
+        // Per #410 T-002 design D5: BuildStageVariables merges incoming
+        // stage-level agent config through the converged {model, variant}
+        // whitelist. Legacy ACP/liveness keys supplied on the call do not
+        // enter the stage.vars.agent block.
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Stage filter",
+        };
+
+        var stageVariables = profile.BuildStageVariables(
+            issue,
+            new Dictionary<string, Dictionary<string, object?>>
+            {
+                ["check"] = new()
+                {
+                    ["model"] = "openai/o3",
+                    ["variant"] = "xhigh",
+                    ["type"] = "opencode",
+                    ["compaction"] = new { strategy = "truncate" },
+                },
+            });
+
+        Assert.NotNull(stageVariables);
+        var checkStage = stageVariables!["check"];
+        var varsJson = checkStage["vars"];
+        Assert.NotNull(varsJson);
+        using var doc = JsonDocument.Parse(varsJson!);
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal("openai/o3", agent.GetProperty("model").GetString());
+        Assert.Equal("xhigh", agent.GetProperty("variant").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
+        Assert.False(agent.TryGetProperty("compaction", out _));
     }
 
     [Fact]
@@ -801,7 +841,7 @@ public class MohistLocalWorkflowProfileSpecs
                 recovery:
                   budget: 1
                   handlers:
-                    - when: output.output.promise=FAIL
+                    - when: output.promise=FAIL
                       tasks:
                         - id: recover:fix-review
                           title: Fix review
@@ -908,7 +948,7 @@ public class MohistLocalWorkflowProfileSpecs
         var recovery = aiReview.Recovery!;
         Assert.Equal(2, recovery.Budget);
         var handler = Assert.Single(recovery.Handlers);
-        Assert.Equal("output.output.promise=FAIL", handler.When);
+        Assert.Equal("output.promise=FAIL", handler.When);
         Assert.True(handler.RetrySelf);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);

@@ -85,8 +85,6 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
     registry,
     verifyOnlyWorkspaceManager({ path: workspacePath, branch: EXPECTED_BRANCH, changeDir: null }),
     { async report() {}, async uploadArtifact() { throw new Error("uploadArtifact should not be called") } } as unknown as ServerConnection,
-    {} as never,
-    null,
     workspacePath,
   )
 }
@@ -168,7 +166,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
             {
               when: "error.code=conflict",
               retrySelf: true,
-              tasks: [{ id: "resolve-rebase-conflicts", title: "Resolve rebase conflicts", uses: "mohist/acp-agent" }],
+              tasks: [{ id: "resolve-rebase-conflicts", title: "Resolve rebase conflicts", uses: "mohist/opencode" }],
             },
           ],
         },

@@ -158,14 +158,9 @@ OpenCode 判断。
 
 ## 实装差距
 
-`mohist/opencode` 已经在 Workflow 来源落地：Workflow 的回合直接由 OpenCode 驱动，
-内置 Profile 已切换到该 Action；Workflow 来源的配置、Session、命令结果与诊断
-不再包含历史 ACP 身份字段。
+`mohist/opencode` 已经在 Workflow 与 AgentJob 两条来源落地：回合由 OpenCode 直接
+驱动，内置 Profile 已切换到该 Action；Workflow 与 Agent 来源的配置、Session、
+命令结果与诊断不再包含历史 ACP 身份字段。
 
 issue-407 已交付稳定的 Session 身份、来源解析和 Compact、Reset、Follow-up、
 Cancel 的命令语义；Session 在这些操作后仍保持同一身份。
-
-issue-410 处理剩余的 AgentJob 路径清理，包括 Agent 来源 Session 中 ACP 痕迹与
-ACP 依赖的最终移除。Workflow 来源的 Session 命令（Follow-up / Compact /
-Reset / Cancel）当前仍由历史 ACP 路径承担；issue-409 内的 T-005 落地后，它们将
-改走 OpenCode 并共享同一套 Session 身份。

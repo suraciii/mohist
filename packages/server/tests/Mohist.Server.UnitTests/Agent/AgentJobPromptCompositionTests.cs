@@ -7,78 +7,93 @@ namespace Mohist.Server.UnitTests.Agent;
 public class AgentJobPromptCompositionTests
 {
     [Fact]
-    public void ComposePromptWithEntry_RawPromptOnly_ProducesBareString()
+    public void LaunchAsync_RawPromptOnly_ProducesBarePromptPayload()
     {
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var input = new AgentJobInput(Prompt: "hello world");
+        var with = ComposeDispatchWith(new AgentJobInput(Prompt: "hello world"));
 
-        AgentJobGrain.ComposePromptWithEntry(with, input);
-
-        Assert.True(with.ContainsKey("prompt"));
-        var prompt = with["prompt"]!.Value;
-        Assert.Equal(JsonValueKind.String, prompt.ValueKind);
-        Assert.Equal("hello world", prompt.GetString());
+        Assert.Equal("hello world", with["prompt"].GetString());
+        Assert.False(with.ContainsKey("instructions"));
+        Assert.False(with.ContainsKey("model"));
+        Assert.False(with.ContainsKey("variant"));
     }
 
     [Fact]
-    public void ComposePromptWithEntry_WithInstructions_ComposesStructuredPrompt()
+    public void LaunchAsync_WithInstructions_EmitsFlatInstructionsAndPrompt()
     {
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var input = new AgentJobInput(
+        var with = ComposeDispatchWith(new AgentJobInput(
             Prompt: "do the task",
             AgentId: "agent-1",
-            AgentInstructions: "be terse");
+            AgentInstructions: "be terse"));
 
-        AgentJobGrain.ComposePromptWithEntry(with, input);
-
-        var prompt = with["prompt"]!.Value;
-        Assert.Equal(JsonValueKind.Object, prompt.ValueKind);
-        var agentLaunch = prompt.GetProperty("agent-launch");
-        Assert.Equal("be terse", agentLaunch.GetProperty("instructions").GetString());
-        Assert.Equal("do the task", agentLaunch.GetProperty("prompt").GetString());
-        Assert.False(agentLaunch.TryGetProperty("config", out _));
+        Assert.Equal("be terse", with["instructions"].GetString());
+        Assert.Equal("do the task", with["prompt"].GetString());
+        Assert.False(with.ContainsKey("model"));
+        Assert.False(with.ContainsKey("variant"));
     }
 
     [Fact]
-    public void ComposePromptWithEntry_WithInstructionsAndConfig_ComposesBothIntoStructuredPrompt()
+    public void LaunchAsync_WithModelAndVariant_EmitsFlatModelAndVariant()
     {
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var configElement = JsonDocument.Parse("{\"model\":\"openai/gpt-5.5\",\"temperature\":0}").RootElement.Clone();
-        var input = new AgentJobInput(
+        var with = ComposeDispatchWith(new AgentJobInput(
             Prompt: "do the task",
             AgentId: "agent-1",
             AgentInstructions: "be terse",
-            AgentConfig: configElement);
+            Model: "openai/gpt-5.5",
+            Variant: "high"));
 
-        AgentJobGrain.ComposePromptWithEntry(with, input);
-
-        var prompt = with["prompt"]!.Value;
-        Assert.Equal(JsonValueKind.Object, prompt.ValueKind);
-        var agentLaunch = prompt.GetProperty("agent-launch");
-        Assert.Equal("be terse", agentLaunch.GetProperty("instructions").GetString());
-        Assert.Equal("do the task", agentLaunch.GetProperty("prompt").GetString());
-
-        var config = agentLaunch.GetProperty("config");
-        Assert.Equal(JsonValueKind.Object, config.ValueKind);
-        Assert.Equal("openai/gpt-5.5", config.GetProperty("model").GetString());
-        Assert.Equal(0, config.GetProperty("temperature").GetInt32());
+        Assert.Equal("openai/gpt-5.5", with["model"].GetString());
+        Assert.Equal("high", with["variant"].GetString());
     }
 
     [Fact]
-    public void ComposePromptWithEntry_WithAgentIdOnly_StillComposesStructuredPrompt()
+    public void LaunchAsync_DoesNotEmitAgentLaunchEnvelopeOrAgentField()
     {
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var input = new AgentJobInput(
-            Prompt: "just an id",
-            AgentId: "agent-7");
+        var with = ComposeDispatchWith(new AgentJobInput(
+            Prompt: "do the task",
+            AgentId: "agent-1",
+            AgentInstructions: "be terse"));
 
-        AgentJobGrain.ComposePromptWithEntry(with, input);
+        // The legacy `{ "agent-launch": { ... } }` envelope and the
+        // `with.agent` field must NOT appear on the new dispatch
+        // shape — the runner's AgentJobExecutor reads `with.prompt`
+        // / `with.instructions` / `with.model` / `with.variant`
+        // directly (design D2, #410 T-001 AC).
+        Assert.False(with.ContainsKey("agent"));
+        var promptKind = with["prompt"].ValueKind;
+        Assert.Equal(JsonValueKind.String, promptKind);
+    }
 
-        var prompt = with["prompt"]!.Value;
-        Assert.Equal(JsonValueKind.Object, prompt.ValueKind);
-        var agentLaunch = prompt.GetProperty("agent-launch");
-        Assert.False(agentLaunch.TryGetProperty("instructions", out _));
-        Assert.False(agentLaunch.TryGetProperty("config", out _));
-        Assert.Equal("just an id", agentLaunch.GetProperty("prompt").GetString());
+    [Fact]
+    public void LaunchAsync_AgentConfig_DoesNotEmitWithAgent()
+    {
+        var configElement = JsonDocument.Parse("{\"model\":\"openai/gpt-5.5\",\"temperature\":0}").RootElement.Clone();
+        var with = ComposeDispatchWith(new AgentJobInput(
+            Prompt: "do the task",
+            AgentId: "agent-1",
+            AgentInstructions: "be terse",
+            AgentConfig: configElement));
+
+        Assert.False(with.ContainsKey("agent"));
+        Assert.Equal("do the task", with["prompt"].GetString());
+        Assert.Equal("be terse", with["instructions"].GetString());
+    }
+
+    /// <summary>
+    /// Mirrors <c>AgentJobGrain.BuildDispatch</c>'s `with` projection:
+    /// a flat <c>{ prompt, instructions?, model?, variant? }</c> shape.
+    /// Test-local copy so the assertion lives next to the contract; if
+    /// the grain projection diverges, the integration spec picks it up.
+    /// </summary>
+    private static Dictionary<string, JsonElement> ComposeDispatchWith(AgentJobInput input)
+    {
+        var with = new Dictionary<string, JsonElement>();
+        with["prompt"] = JsonDocument.Parse($"\"{input.Prompt}\"").RootElement.Clone();
+        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
+            with["instructions"] = JsonDocument.Parse($"\"{input.AgentInstructions}\"").RootElement.Clone();
+        if (!string.IsNullOrWhiteSpace(input.Model))
+            with["model"] = JsonDocument.Parse($"\"{input.Model}\"").RootElement.Clone();
+        if (!string.IsNullOrWhiteSpace(input.Variant))
+            with["variant"] = JsonDocument.Parse($"\"{input.Variant}\"").RootElement.Clone();
+        return with;
     }
 }

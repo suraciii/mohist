@@ -321,7 +321,7 @@ public class ApprovalFeedbackTests
         var customTask = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback (custom)",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             With: customWith);
 
         run.RequestChanges("apply with custom task", NextFeedbackId(run), DateTimeOffset.UnixEpoch, [customTask]);
@@ -368,7 +368,7 @@ public class ApprovalFeedbackTests
         var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             With: new Dictionary<string, System.Text.Json.JsonElement?>
             {
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
@@ -388,7 +388,7 @@ public class ApprovalFeedbackTests
         var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             With: new Dictionary<string, System.Text.Json.JsonElement?>
             {
                 ["session"] = JsonSerializer.SerializeToElement("custom-session"),

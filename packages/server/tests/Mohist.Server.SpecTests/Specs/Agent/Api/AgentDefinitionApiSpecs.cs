@@ -106,7 +106,7 @@ public class AgentDefinitionApiSpecs
             name = "first-renamed",
             description = "after",
             instructions = "new instructions",
-            agentConfig = new { type = "opencode", model = "openai/gpt-5.5" },
+            agentConfig = new { model = "openai/gpt-5.5" },
             skills = new[] { "review", "debug" },
             maxConcurrentRuns = 3
         });
@@ -120,7 +120,7 @@ public class AgentDefinitionApiSpecs
         Assert.Equal("new instructions", patched.Instructions);
         Assert.Equal(["review", "debug"], patched.Skills);
         Assert.Equal(3, patched.MaxConcurrentRuns);
-        Assert.Equal("opencode", patched.AgentConfig!.Value.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-5.5", patched.AgentConfig!.Value.GetProperty("model").GetString());
         Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
         Assert.Equal(HttpStatusCode.BadRequest, immutable.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
@@ -231,6 +231,65 @@ public class AgentDefinitionApiSpecs
         Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
     }
 
+    [Theory]
+    [InlineData("type")]
+    [InlineData("livenessQuietThresholdMs")]
+    [InlineData("probeTimeoutMs")]
+    [InlineData("sessionStartTimeoutMs")]
+    [InlineData("compaction")]
+    public async Task CreateAgent_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
+    {
+        var project = await CreateProjectAsync("agent-create-forbidden");
+
+        var agentConfig = new Dictionary<string, object?>
+        {
+            [forbiddenKey] = "value",
+        };
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/agents",
+            new
+            {
+                name = $"agent-{forbiddenKey}",
+                description = "agent description",
+                instructions = "instructions",
+                agentConfig,
+                skills = Array.Empty<string>(),
+                maxConcurrentRuns = 1,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+        var error = body.GetProperty("error").GetString() ?? string.Empty;
+        Assert.Contains($"agentConfig.{forbiddenKey}", error);
+    }
+
+    [Theory]
+    [InlineData("type")]
+    [InlineData("livenessQuietThresholdMs")]
+    [InlineData("probeTimeoutMs")]
+    public async Task PatchAgent_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
+    {
+        var project = await CreateProjectAsync("agent-patch-forbidden");
+        var created = await _client.PostDataAsync<AgentDto>(
+            $"/api/projects/{project.Id}/agents", NewAgent("patch-target"));
+
+        var agentConfig = new Dictionary<string, object?>
+        {
+            [forbiddenKey] = "value",
+        };
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/agents/{created.Id}",
+            new
+            {
+                agentConfig,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
         await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
 
@@ -239,7 +298,7 @@ public class AgentDefinitionApiSpecs
         name,
         description = "agent description",
         instructions = $"instructions for {name}",
-        agentConfig = new { type = "opencode" },
+        agentConfig = new { model = "openai/gpt-5.6" },
         skills = new[] { "coding" },
         maxConcurrentRuns = 1
     };

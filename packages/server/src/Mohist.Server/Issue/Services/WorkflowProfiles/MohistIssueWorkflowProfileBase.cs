@@ -97,9 +97,17 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
             stageVariables[stage] = sections;
         }
 
+        // Per #410 T-002 design D5: project the incoming per-stage agent
+        // config down to the converged {model, variant} whitelist before
+        // writing into the stage vars. Legacy runtime/liveness keys supplied
+        // by callers MUST NOT enter stages.<stage>.vars.agent.
+        var filteredAgent = AgentConfigSchema.Filter(agentConfig);
+        if (filteredAgent is null)
+            return;
+
         sections["vars"] = sections.TryGetValue("vars", out var existingVars)
-            ? MergeVarsJson(existingVars, agentConfig)
-            : JSON.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig });
+            ? MergeVarsJson(existingVars, filteredAgent)
+            : JSON.Serialize(new Dictionary<string, object?> { ["agent"] = filteredAgent });
     }
 
     private static string MergeVarsJson(string existingJson, Dictionary<string, object?> agentConfig)
@@ -127,7 +135,9 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
     private static void MergeAgentConfig(Dictionary<string, object?> target, Dictionary<string, object?>? source)
     {
         if (source is null) return;
-        foreach (var (key, value) in source)
+        var filtered = AgentConfigSchema.Filter(source);
+        if (filtered is null) return;
+        foreach (var (key, value) in filtered)
         {
             if (value is null) continue;
             target[key] = NormalizeJsonValue(value);

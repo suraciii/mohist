@@ -64,8 +64,10 @@ internal sealed class UpdateTestFactory
         TimeSpan? serverReadyTimeout = null,
         string? userHome = null,
         TimeSpan? runnerIdentityTimeout = null,
+        TimeSpan? runnerIdentityPollInterval = null,
         Func<string?>? getLocalHostname = null,
-        string? unitDir = null)
+        string? unitDir = null,
+        TimeProvider? timeProvider = null)
     {
         var home = userHome ?? Root;
         return SourceCodeUpdater.CreateWithDefaults(
@@ -79,8 +81,10 @@ internal sealed class UpdateTestFactory
             serverReadyTimeout,
             getUserHome: home is null ? null : () => home,
             runnerIdentityTimeout: runnerIdentityTimeout,
+            runnerIdentityPollInterval: runnerIdentityPollInterval,
             getLocalHostname: getLocalHostname,
-            unitDir: unitDir);
+            unitDir: unitDir,
+            timeProvider: timeProvider);
     }
 
     public static string HealthySystemInfoJson(string runningGitHash = "abc123", string runnerStatus = "active")

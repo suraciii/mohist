@@ -1,5 +1,7 @@
 using System.Net;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli;
+using Mohist.Cli.Tests.Support;
 using Xunit;
 
 namespace Mohist.Cli.Tests.Update;
@@ -92,13 +94,20 @@ public class UpdateRunnerSpecs
         f.Files.AddDirectory("/repo/packages/runner/dist");
         f.Files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{hash}\",\"builtAt\":1700000000}}");
         f.Commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, hash + "\n", "");
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var handler = new RecordingHttpHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
         var updater = f.BuildUpdater(
-            new SequenceHttpHandler(HttpStatusCode.NotFound),
+            handler,
             unitDir: UpdateTestFactory.UnitDir,
-            runnerIdentityTimeout: TimeSpan.FromMilliseconds(100),
-            getLocalHostname: () => "test-host");
+            runnerIdentityTimeout: TimeSpan.FromSeconds(1),
+            getLocalHostname: () => "test-host",
+            timeProvider: time);
 
-        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+        var update = updater.UpdateRunnerAsync("/repo", dryRun: false);
+        await handler.WaitForRequestCountAsync(1);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var exitCode = await update;
 
         Assert.Equal(1, exitCode);
         Assert.Contains("runner-not-reconnected", f.Stderr.ToString());
@@ -114,13 +123,24 @@ public class UpdateRunnerSpecs
         f.Files.AddDirectory("/repo/packages/runner/dist");
         f.Files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{staleHash}\",\"builtAt\":1700000000}}");
         f.Commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, repoHead + "\n", "");
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var pendingResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new RecordingHttpHandler(async (_, ct) =>
+        {
+            await pendingResponse.Task.WaitAsync(ct);
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
         var updater = f.BuildUpdater(
-            new SequenceHttpHandler(HttpStatusCode.NotFound),
+            handler,
             unitDir: UpdateTestFactory.UnitDir,
-            runnerIdentityTimeout: TimeSpan.FromMilliseconds(100),
-            getLocalHostname: () => "test-host");
+            runnerIdentityTimeout: TimeSpan.FromSeconds(1),
+            getLocalHostname: () => "test-host",
+            timeProvider: time);
 
-        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+        var update = updater.UpdateRunnerAsync("/repo", dryRun: false);
+        await handler.WaitForRequestCountAsync(1);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var exitCode = await update;
 
         var actual = f.Stderr.ToString();
         Assert.Equal(1, exitCode);

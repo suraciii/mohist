@@ -98,7 +98,7 @@ function makeMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
   return {
     id: 'proj/wr/T-003.1',
     sessionName: 'T-003.1',
-    runtimeSessionId: 'acp-123',
+    runtimeSessionId: 'runtime-123',
     runtime: 'opencode',
     status: 'completed',
     statusKind: 'completed',
@@ -144,7 +144,7 @@ function makeSessionsForLookup() {
   return [{
     id: 'proj/wr/T-003.1',
     sessionName: 'T-003.1',
-    runtimeSessionId: 'acp-123',
+    runtimeSessionId: 'runtime-123',
     executionId: 'exec-T-003.1',
     taskDescription: 'Composer integration test',
     status: 'completed',

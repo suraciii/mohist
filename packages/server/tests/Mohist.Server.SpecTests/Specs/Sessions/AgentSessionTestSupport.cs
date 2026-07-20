@@ -48,7 +48,7 @@ public abstract class AgentSessionTestSupport
             {
                 var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
                 await workflow.AddTasksAsync(new AddTasksBatchRequest([
-                    new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+                    new AddTasksBatchItem("build-1", "Build task", "mohist/opencode")
                 ]));
                 await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
                 {
@@ -60,7 +60,7 @@ public abstract class AgentSessionTestSupport
                 continue;
             }
 
-            if (work.Uses == "mohist/acp-agent")
+            if (work.Uses == "mohist/opencode")
             {
                 if (expectedIssueNumber is null || work.IssueNumber == expectedIssueNumber)
                     return work;
@@ -88,7 +88,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",
             WorkId: $"work-{Guid.NewGuid():N}",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             WorkType: "task",
             Stage: "Build",
             Title: issueTitle,

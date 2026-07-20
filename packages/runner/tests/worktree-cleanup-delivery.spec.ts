@@ -100,8 +100,6 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
     registry,
     verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch, changeDir: null }),
     connection as never,
-    {} as never,
-    null,
     worktree.workDir,
   )
 }
@@ -112,7 +110,7 @@ function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem 
     workId: "build:agent.1",
     workType: "task",
     title: "Agent-backed task",
-    uses: "mohist/acp-agent",
+    uses: "mohist/opencode",
     with: { prompt: "do the work" },
     variables: {
       workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
@@ -229,7 +227,7 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const registry = buildRegistry({
-      "mohist/acp-agent": async () => {
+      "mohist/opencode": async () => {
         worktree.untracked = ["src/agent-output.ts"]
         return { output: null }
       },
@@ -315,7 +313,7 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const registry = buildRegistry({
-      "mohist/acp-agent": async () => {
+      "mohist/opencode": async () => {
         worktree.untracked = ["src/never-clean.ts"]
         return { output: null }
       },

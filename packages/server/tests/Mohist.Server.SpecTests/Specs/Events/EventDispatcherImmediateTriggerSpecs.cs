@@ -132,7 +132,7 @@ public class EventDispatcherImmediateTriggerSpecs
         {
             var sessionStore = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore>();
             var session = BuildAgentSession(sessionId);
-            await sessionStore.SaveAsync(session.Id, session, [new Mohist.Server.Sessions.Domain.AgentSessionRuntimeBound("acp-1", null)]);
+            await sessionStore.SaveAsync(session.Id, session, [new Mohist.Server.Sessions.Domain.AgentSessionRuntimeBound("runtime-1", null)]);
         }
 
         // Sanity check: the save actually persisted the event row.

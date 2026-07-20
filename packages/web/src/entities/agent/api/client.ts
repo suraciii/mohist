@@ -104,22 +104,17 @@ export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> |
 }
 
 export function writeAgentModelAndVariant(
-  current: Record<string, unknown> | null | undefined,
+  _current: Record<string, unknown> | null | undefined,
   model: string | null,
   variant: string | null,
 ): Record<string, unknown> | null {
-  const base: Record<string, unknown> = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {}
+  const next: Record<string, unknown> = {}
   if (model === null) {
-    delete base.model
-    delete base.variant
-  } else {
-    base.model = model
-    if (variant === null) {
-      delete base.variant
-    } else {
-      base.variant = variant
-    }
+    return null
   }
-  if (Object.keys(base).length === 0) return null
-  return base
+  next.model = model
+  if (variant !== null) {
+    next.variant = variant
+  }
+  return next
 }

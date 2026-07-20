@@ -160,7 +160,7 @@ public static partial class IssueRoutes
                         new TaskDefinition(
                             "recover:resolve-rebase-conflicts",
                             "Resolve rebase conflicts",
-                            Uses: "mohist/acp-agent",
+                            Uses: "mohist/opencode",
                             With: with),
                     ],
                     RetrySelf: false),

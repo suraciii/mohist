@@ -167,7 +167,7 @@ public abstract class AgentSessionRecoveryApiTestSupport
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",
             WorkId: $"work-{Guid.NewGuid():N}",
-            Uses: "mohist/acp-agent",
+            Uses: "mohist/opencode",
             WorkType: "task",
             Stage: "Build",
             Title: $"Session api {name}",

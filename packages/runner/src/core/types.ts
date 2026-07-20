@@ -241,18 +241,15 @@ export interface ActionContext {
   ownerKind?: string | null
   agentJobId?: string | null
   agentSessionId?: string | null
-  acpSessionManager?: import("../runtime/acp-connection.js").AcpSessionManager | null
-  acpConnection?: import("../runtime/acp-connection.js").SharedAcpConnection | null
   serverConnection?: import("../server/connection.js").ServerConnection | null
   /**
-   * Shared OpenCode runtime handle for the Workflow Inline Agent
-   * path. The Workflow source receives this; the AgentJob path
-   * keeps the ACP connection (above). The runtime owns the shared
+   * Shared OpenCode runtime handle for both the Workflow Inline Agent
+   * path and the AgentJob path. The runtime owns the shared
    * Server/Client lifecycle, readiness, and catalog; it is set by
-   * the runner host so `mohist/opencode` turns and follow-up
-   * commands can route through it. Null when the runtime is not
-   * yet ready or has rebuilt (recoverable by waiting for the runner
-   * to re-publish the handle).
+   * the runner host so `mohist/opencode` turns, AgentJob execution,
+   * and follow-up commands can route through it. Null when the
+   * runtime is not yet ready or has rebuilt (recoverable by waiting
+   * for the runner to re-publish the handle).
    */
   openCodeRuntime?: import("../runtime/opencode/index.js").OpenCodeRuntime | null
   /**

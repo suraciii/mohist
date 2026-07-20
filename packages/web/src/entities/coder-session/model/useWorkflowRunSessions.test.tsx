@@ -96,7 +96,7 @@ describe('useWorkflowRunSessions', () => {
 
   describe('event handlers', () => {
     it('usage.updated applies contextUsagePercent and healthStatus to matched session', async () => {
-      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -114,7 +114,7 @@ describe('useWorkflowRunSessions', () => {
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
-          runtimeSessionId: 'acp-1',
+          runtimeSessionId: 'runtime-1',
           runtime: 'opencode',
           contextUsagePercent: 72,
           healthStatus: 'yellow',
@@ -129,8 +129,8 @@ describe('useWorkflowRunSessions', () => {
 
     it('refetches sessions when a runtime binding changes', async () => {
       _sessionsResponses = [
-        [session({ id: 'sess-1', runtimeSessionId: 'acp-old' })],
-        [session({ id: 'sess-1', runtimeSessionId: 'acp-new' })],
+        [session({ id: 'sess-1', runtimeSessionId: 'runtime-old' })],
+        [session({ id: 'sess-1', runtimeSessionId: 'runtime-new' })],
       ]
 
       const queryClient = createQueryClient()
@@ -143,7 +143,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       await flush()
-      expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-old')
+      expect(result.current.sessions[0]?.runtimeSessionId).toBe('runtime-old')
 
       act(() => {
         dispatchAgentEvent('com.mohist.agent-session.runtime-bound', {
@@ -154,7 +154,7 @@ describe('useWorkflowRunSessions', () => {
 
       await flush()
       expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
-      expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-new')
+      expect(result.current.sessions[0]?.runtimeSessionId).toBe('runtime-new')
     })
 
     it('ignores runtime events without a physical binding', async () => {
@@ -191,7 +191,7 @@ describe('useWorkflowRunSessions', () => {
     })
 
     it('updates terminal status from a current runtime session event', async () => {
-      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'runtime-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -207,7 +207,7 @@ describe('useWorkflowRunSessions', () => {
       act(() => {
         dispatchAgentEvent('session.closed', {
           sessionId: 'sess-1',
-          runtimeSessionId: 'acp-1',
+          runtimeSessionId: 'runtime-1',
           runtime: 'opencode',
           status: 'completed',
         })
@@ -219,7 +219,7 @@ describe('useWorkflowRunSessions', () => {
     it('ignores a stale terminal event for the current logical session', async () => {
       _sessionsData = [session({
         id: 'sess-1',
-        runtimeSessionId: 'acp-current',
+        runtimeSessionId: 'runtime-current',
         status: 'running',
       })]
       const queryClient = createQueryClient()
@@ -236,7 +236,7 @@ describe('useWorkflowRunSessions', () => {
       act(() => {
         dispatchAgentEvent('session.closed', {
           sessionId: 'sess-1',
-          runtimeSessionId: 'acp-old',
+          runtimeSessionId: 'runtime-old',
           runtime: 'opencode',
           status: 'completed',
         })
@@ -248,7 +248,7 @@ describe('useWorkflowRunSessions', () => {
     it('ignores a stale physical runtime event for the current logical session', async () => {
       _sessionsData = [session({
         id: 'sess-1',
-        runtimeSessionId: 'acp-current',
+        runtimeSessionId: 'runtime-current',
         status: 'running',
         usage: { contextUsagePercent: 30 },
       })]
@@ -266,7 +266,7 @@ describe('useWorkflowRunSessions', () => {
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
-          runtimeSessionId: 'acp-old',
+          runtimeSessionId: 'runtime-old',
           runtime: 'opencode',
           contextUsagePercent: 99,
         })

@@ -27,14 +27,14 @@ public class RuntimeSettingsSpecs
 
         await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
         {
-            vars = new { agent = new { type = "opencode", model = "openai/gpt-4o" } }
+            vars = new { agent = new { model = "openai/gpt-4o" } }
         });
         await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
         {
             stages = new
             {
-                plan = new { vars = new { agent = new { type = "opencode", model = "anthropic/claude" } } },
-                build = new { vars = new { agent = new { type = "opencode", model = "openai/gpt-4o" } } }
+                plan = new { vars = new { agent = new { model = "anthropic/claude" } } },
+                build = new { vars = new { agent = new { model = "openai/gpt-4o" } } }
             }
         });
 

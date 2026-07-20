@@ -192,11 +192,12 @@ public static class IssueWorkflowProfileStorageIntegrity
     {
         VariableBundle result = baseBundle;
 
-        if (agentConfig is not null && agentConfig.Count > 0)
+        var filteredAgent = AgentConfigSchema.Filter(agentConfig);
+        if (filteredAgent is not null && filteredAgent.Count > 0)
         {
             var topLevelVars = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["agent"] = agentConfig,
+                ["agent"] = filteredAgent,
             };
             var topElement = JSON.SerializeToElement(topLevelVars);
             result = VariableBundle.Patch(result, new VariableBundle(Vars: topElement));
@@ -211,11 +212,16 @@ public static class IssueWorkflowProfileStorageIntegrity
                     throw new InvalidOperationException(
                         $"Invalid stage name or null agent config for stage '{stage}'");
 
+                var filteredStageAgent = AgentConfigSchema.Filter(stageAgent);
+                if (filteredStageAgent is null || filteredStageAgent.Count == 0)
+                    continue;
+
                 var stageVarsElement = JSON.SerializeToElement(
-                    new Dictionary<string, object?>(StringComparer.Ordinal) { ["agent"] = stageAgent });
+                    new Dictionary<string, object?>(StringComparer.Ordinal) { ["agent"] = filteredStageAgent });
                 stages[stage] = new StageVariables(stageVarsElement);
             }
-            result = VariableBundle.Patch(result, new VariableBundle(Stages: stages));
+            if (stages.Count > 0)
+                result = VariableBundle.Patch(result, new VariableBundle(Stages: stages));
         }
 
         return result;

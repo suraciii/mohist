@@ -172,6 +172,53 @@ describe('AgentDetailPage', () => {
       expect(screen.getByText('high')).toBeInTheDocument()
     })
 
+    it('does not render an agent-type field (no "opencode" string anywhere on the surface)', async () => {
+      // Per #410 T-002 design D5: the agent-detail page must not read or
+      // display the legacy `type` key from agentConfig. Earlier behaviour
+      // rendered `<type> · <model> · <variant>` on the title row; the
+      // converged surface shows model/variant only.
+      mockAgent(
+        makeAgent({
+          agentConfig: {
+            model: 'gpt-4',
+            variant: 'high',
+            type: 'opencode',
+          } as AgentInfo['agentConfig'],
+        }),
+      )
+      renderPage()
+      const page = await screen.findByTestId('agent-detail-page')
+      // The agent-type chip lives on the subtitle row inside the page
+      // header; assert the page-level text never contains the legacy
+      // "opencode" value, while model/variant remain visible.
+      const pageText = page.textContent ?? ''
+      expect(pageText).toMatch(/gpt-4/)
+      expect(pageText).toMatch(/high/)
+      expect(pageText).not.toMatch(/opencode/)
+    })
+
+    it('surfaces only model and variant in the Agent Config card when the persisted config carries legacy keys', async () => {
+      mockAgent(
+        makeAgent({
+          agentConfig: {
+            type: 'opencode',
+            livenessQuietThresholdMs: 1200000,
+            probeTimeoutMs: 30000,
+            model: 'gpt-4',
+            variant: 'high',
+          } as AgentInfo['agentConfig'],
+        }),
+      )
+      renderPage()
+      const config = await screen.findByTestId('agent-detail-config')
+      expect(config).toHaveTextContent('gpt-4')
+      expect(config).toHaveTextContent('high')
+      // Legacy keys are not surfaced in the Agent Config card at all.
+      expect(config.textContent ?? '').not.toMatch(/opencode/)
+      expect(config.textContent ?? '').not.toMatch(/liveness/i)
+      expect(config.textContent ?? '').not.toMatch(/probe/i)
+    })
+
     it('renders skills metadata', async () => {
       mockAgent(makeAgent())
       renderPage()

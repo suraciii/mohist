@@ -11,7 +11,7 @@ import { setScopedValue } from './support/scoped-property'
 function renderTranscript(rawTurns: Parameters<typeof projectSessionToDisplayTurns>[0]['turns'], isRunning: boolean) {
   const displayTurns = projectSessionToDisplayTurns({
     id: 'session-1',
-    runtimeSessionId: 'acp-123',
+    runtimeSessionId: 'runtime-123',
     executionId: null,
     taskDescription: null,
     status: 'live',
@@ -23,7 +23,7 @@ function renderTranscript(rawTurns: Parameters<typeof projectSessionToDisplayTur
     title: null,
     metadata: {
       sessionId: 'session-1',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       runtime: null,
       executionId: null,
       title: null,
@@ -63,7 +63,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -74,7 +74,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: ' More content',
           sessionId: 'session-123',
         })
@@ -103,7 +103,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -115,7 +115,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: ' More content',
           sessionId: 'session-123',
         })
@@ -133,7 +133,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -158,7 +158,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -170,7 +170,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: 'New streaming content',
           sessionId: 'session-123',
         })
@@ -187,7 +187,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -198,7 +198,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: 'New streaming content',
           sessionId: 'session-123',
         })
@@ -213,7 +213,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -225,7 +225,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: 'New content',
           sessionId: 'session-123',
         })
@@ -261,7 +261,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -272,7 +272,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: ' More content',
           sessionId: 'session-123',
         })
@@ -338,7 +338,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
       const { result } = renderHookWithQueryClient(() => useSessionTranscript({
         issueNumber: 123,
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         initialTurns,
         isRunning: true,
       }))
@@ -347,7 +347,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: 'First chunk',
           sessionId: 'session-123',
         })
@@ -357,7 +357,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         dispatchAgentEvent('coder_text_chunk', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           text: ' second chunk',
           sessionId: 'session-123',
         })

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Grains;
@@ -45,7 +46,8 @@ public static class IssueVariableBuilder
         WorkspaceIdentity workspace)
     {
         var builtIn = BuildBuiltInContext(workflowRunId, issue, project, workspace);
-        return VariableBundle.MergeAll(globalBundle, projectBundle, builtIn);
+        var merged = VariableBundle.MergeAll(globalBundle, projectBundle, builtIn);
+        return ProjectAgentBlocksToConvergedSurface(merged);
     }
 
     public static VariableBundle Build(
@@ -55,11 +57,12 @@ public static class IssueVariableBuilder
         WorkspaceIdentity workspace,
         Dictionary<string, object?>? agentConfig = null)
     {
-        var userDefaults = agentConfig is null
+        var filteredAgentConfig = AgentConfigSchema.Filter(agentConfig);
+        var userDefaults = filteredAgentConfig is null
             ? VariableBundle.Empty
             : FromRoot(new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
             {
-                ["agent"] = JSON.SerializeToElement(agentConfig),
+                ["agent"] = JSON.SerializeToElement(filteredAgentConfig),
             });
 
         return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project, workspace);
@@ -273,6 +276,104 @@ public static class IssueVariableBuilder
         var varsJson = JSON.Serialize(variables);
         var varsElement = JSON.DeserializeElement(varsJson);
         return new VariableBundle(varsElement);
+    }
+
+    /// <summary>
+    /// Final-pass projection: walk the merged variable bundle and project
+    /// every <c>vars.agent</c> / <c>stages.&lt;stage&gt;.vars.agent</c>
+    /// block down to the converged <c>{model, variant}</c> whitelist.
+    /// Per #410 T-002 design D5, the <c>vars.agent</c> surface only carries
+    /// <c>{model, variant}</c>; legacy runtime/liveness keys carried via any
+    /// read-in path (ConfigService.GetAgentConfigAsync,
+    /// ProjectWorkflowProfileManager.SetVariablesAsync project write path,
+    /// already-persisted bundle) MUST be projected away before
+    /// <c>vars.agent</c> reaches a downstream dispatch. Legacy keys in
+    /// underlying storage remain byte-equivalent — this filter only acts
+    /// on the live merged bundle for dispatch.
+    /// </summary>
+    private static VariableBundle ProjectAgentBlocksToConvergedSurface(VariableBundle bundle)
+    {
+        var newVars = FilterAgentInVars(bundle.Vars);
+        var newStages = FilterStages(bundle.Stages);
+        var varsChanged = !JsonElementNullableTextEquals(newVars, bundle.Vars);
+        var stagesChanged = !ReferenceEquals(newStages, bundle.Stages);
+
+        if (!varsChanged && !stagesChanged) return bundle;
+
+        return new VariableBundle(newVars, newStages);
+    }
+
+    private static Dictionary<string, StageVariables>? FilterStages(Dictionary<string, StageVariables>? stages)
+    {
+        if (stages is null || stages.Count == 0) return stages;
+        var changed = false;
+        var result = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in stages)
+        {
+            if (kvp.Value.Vars is null)
+            {
+                result[kvp.Key] = kvp.Value;
+                continue;
+            }
+
+            var filtered = FilterAgentInVars(kvp.Value.Vars);
+            if (JsonElementNullableTextEquals(filtered, kvp.Value.Vars))
+            {
+                result[kvp.Key] = kvp.Value;
+            }
+            else
+            {
+                changed = true;
+                result[kvp.Key] = new StageVariables(filtered);
+            }
+        }
+        return changed ? result : stages;
+    }
+
+    private static JsonElement? FilterAgentInVars(JsonElement? vars)
+    {
+        if (!vars.HasValue) return vars;
+        if (vars.Value.ValueKind != JsonValueKind.Object) return vars;
+        if (!vars.Value.TryGetProperty("agent", out var agent) || agent.ValueKind != JsonValueKind.Object)
+            return vars;
+
+        var filteredDict = AgentConfigSchema.Filter(
+            JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), WorkflowVariableJson.Options));
+        if (filteredDict is null)
+        {
+            if (agent.EnumerateObject().Any())
+            {
+                var withoutAgent = new Dictionary<string, object?>(StringComparer.Ordinal);
+                foreach (var prop in vars.Value.EnumerateObject())
+                {
+                    if (!string.Equals(prop.Name, "agent", StringComparison.Ordinal))
+                        withoutAgent[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
+                }
+                return JsonSerializer.SerializeToElement(withoutAgent, WorkflowVariableJson.Options);
+            }
+            return vars;
+        }
+
+        var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var prop in vars.Value.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, "agent", StringComparison.Ordinal))
+            {
+                dict[prop.Name] = filteredDict;
+            }
+            else
+            {
+                dict[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
+            }
+        }
+        return JsonSerializer.SerializeToElement(dict, WorkflowVariableJson.Options);
+    }
+
+    private static bool JsonElementNullableTextEquals(JsonElement? a, JsonElement? b)
+    {
+        if (!a.HasValue && !b.HasValue) return true;
+        if (!a.HasValue || !b.HasValue) return false;
+        return a.Value.GetRawText() == b.Value.GetRawText();
     }
 
     private static Dictionary<string, JsonElement?> ToRootDictionary(VariableBundle bundle)

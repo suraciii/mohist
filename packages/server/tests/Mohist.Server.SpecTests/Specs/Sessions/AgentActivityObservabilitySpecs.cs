@@ -226,9 +226,9 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
                     Status = "Running",
                     Tasks = new[]
                     {
-                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/acp-agent" },
-                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Running", Uses = "mohist/acp-agent" },
-                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Pending", Uses = "mohist/acp-agent" }
+                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/opencode" },
+                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Running", Uses = "mohist/opencode" },
+                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Pending", Uses = "mohist/opencode" }
                     },
                     Checks = Array.Empty<object>()
                 }
@@ -288,7 +288,7 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
                     Status = "Completed",
                     Tasks = new[]
                     {
-                        new { Id = "plan-1", DefinitionId = "plan-1", Attempt = 1, Title = "Plan 1", Status = "Completed", Uses = "mohist/acp-agent" }
+                        new { Id = "plan-1", DefinitionId = "plan-1", Attempt = 1, Title = "Plan 1", Status = "Completed", Uses = "mohist/opencode" }
                     },
                     Checks = Array.Empty<object>()
                 },
@@ -300,10 +300,10 @@ public class AgentActivityObservabilitySpecs : AgentSessionTestSupport
                     Status = "Running",
                     Tasks = new[]
                     {
-                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/acp-agent" },
-                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Completed", Uses = "mohist/acp-agent" },
-                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Running", Uses = "mohist/acp-agent" },
-                        new { Id = "task-4", DefinitionId = "task-4", Attempt = 1, Title = "Task 4", Status = "Pending", Uses = "mohist/acp-agent" }
+                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/opencode" },
+                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Completed", Uses = "mohist/opencode" },
+                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Running", Uses = "mohist/opencode" },
+                        new { Id = "task-4", DefinitionId = "task-4", Attempt = 1, Title = "Task 4", Status = "Pending", Uses = "mohist/opencode" }
                     },
                     Checks = Array.Empty<object>()
                 }

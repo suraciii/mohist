@@ -272,7 +272,7 @@ describe('coderRecoveryStatusReducer', () => {
     const next = coderRecoveryStatusReducer(state, {
       issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       status: 'recovering',
       attempt: 2,
       reason: 'lost contact',
@@ -300,7 +300,7 @@ describe('coderRecoveryStatusReducer', () => {
     const next = coderRecoveryStatusReducer(state, {
       issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       status: 'recovered',
       attempt: 2,
     }, ENV)
@@ -314,7 +314,7 @@ describe('coderRecoveryStatusReducer', () => {
     const next = coderRecoveryStatusReducer(emptyTimelineState(), {
       issueNumber: 1,      projectId: 'p',
       executionId: 'exec-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       status: 'recovering',
       attempt: 1,
     }, ENV)

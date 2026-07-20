@@ -12,7 +12,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -21,7 +21,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-read-1',
         toolName: 'Read',
@@ -34,7 +34,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-read-2',
         toolName: 'Read',
@@ -54,7 +54,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-read-1',
         toolName: 'Read',
@@ -67,7 +67,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-read-2',
         toolName: 'Read',
@@ -96,7 +96,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -105,7 +105,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-ident',
         toolName: 'grep',
@@ -125,7 +125,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-ident',
         toolName: 'grep',
@@ -152,7 +152,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -168,7 +168,7 @@ describe('Live-then-refetch transcript equivalence', () => {
         dispatchAgentEvent('coder_tool_call', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           sessionId: 'session-123',
           toolCallId: item.id,
           toolName: item.tool,
@@ -190,7 +190,7 @@ describe('Live-then-refetch transcript equivalence', () => {
         dispatchAgentEvent('coder_tool_call', {
           issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
-          runtimeSessionId: 'acp-123',
+          runtimeSessionId: 'runtime-123',
           sessionId: 'session-123',
           toolCallId: item.id,
           toolName: item.tool,
@@ -220,7 +220,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -229,7 +229,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Reading files...',
         sessionId: 'session-123',
       })
@@ -239,7 +239,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-file',
         toolName: 'read',
@@ -252,7 +252,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Done reading.',
         sessionId: 'session-123',
       })
@@ -262,7 +262,7 @@ describe('Live-then-refetch transcript equivalence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-file',
         toolName: 'read',

@@ -88,7 +88,7 @@ public class AgentSessionDomainTests
     {
         var session = CreateSession();
 
-        session.AttachPhysicalSession("acp-1", "intent-model", "/work", "/change", 123, TestTime.UtcDateTime);
+        session.AttachPhysicalSession("runtime-1", "intent-model", "/work", "/change", 123, TestTime.UtcDateTime);
         session.ApplyUsage(10, 5, 15, 1, 2, 0.01, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
         var json = JsonSerializer.Serialize(session);
 

@@ -251,7 +251,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const payload = {
       projectId: 'project-1',
       executionId: 'execution-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       ...partialPayload,
     }
 
@@ -304,7 +304,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const payload = {
       projectId: 'project-1',
       executionId: 'execution-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       ...partialPayload,
     }
 

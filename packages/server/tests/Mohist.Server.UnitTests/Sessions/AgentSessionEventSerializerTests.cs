@@ -9,7 +9,7 @@ public class AgentSessionEventSerializerTests
     [Fact]
     public void BusType_RuntimeBound_ReturnsReverseDnsConstant()
     {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionRuntimeBound("acp-1"));
+        var busType = AgentSessionEventSerializer.BusType(new AgentSessionRuntimeBound("runtime-1"));
 
         Assert.Equal(EventCatalog.ReverseDns.AgentSessionRuntimeBound, busType);
     }

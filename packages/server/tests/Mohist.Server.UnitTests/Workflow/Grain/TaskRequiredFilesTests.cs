@@ -119,7 +119,7 @@ public class TaskRequiredFilesTests
     [Fact]
     public void DeriveClassification_ForAgentTask_UsesUserFacing()
     {
-        var classification = TaskRunExtensions.DeriveClassification("mohist/acp-agent", null);
+        var classification = TaskRunExtensions.DeriveClassification("mohist/opencode", null);
         Assert.Equal(TaskClassification.UserFacing, classification);
 
         classification = TaskRunExtensions.DeriveClassification("anthropic/claude", null);
@@ -143,12 +143,12 @@ public class TaskRequiredFilesTests
             DefinitionId = "proposal",
             Attempt = 1,
             Title = "Generate proposal",
-            Uses = "mohist/acp-agent",
+            Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,
             RequiredFiles = requiredFiles,
-            Classification = TaskRunExtensions.DeriveClassification("mohist/acp-agent", requiredFiles)
+            Classification = TaskRunExtensions.DeriveClassification("mohist/opencode", requiredFiles)
         };
 
         Assert.NotNull(taskRun.RequiredFiles);
@@ -173,7 +173,7 @@ public class TaskRequiredFilesTests
             DefinitionId = "design",
             Attempt = 1,
             Title = "Create design",
-            Uses = "mohist/acp-agent",
+            Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,
@@ -205,7 +205,7 @@ public class TaskRequiredFilesTests
             DefinitionId = "proposal",
             Attempt = 1,
             Title = "Generate proposal",
-            Uses = "mohist/acp-agent",
+            Uses = "mohist/opencode",
             WithInput = withDict,
             ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,

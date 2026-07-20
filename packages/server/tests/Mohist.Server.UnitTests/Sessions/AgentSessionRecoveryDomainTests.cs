@@ -13,7 +13,7 @@ public class AgentSessionRecoveryDomainTests
         var session = CreateSession();
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-old",
+            AgentRuntimeSessionId = "runtime-old",
             BoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
             UsageSummary = new AgentUsageSummary
             {
@@ -24,14 +24,14 @@ public class AgentSessionRecoveryDomainTests
         };
         var now = new DateTime(2026, 6, 10, 1, 2, 3, DateTimeKind.Utc);
 
-        var events = session.RebindRuntimeSession("acp-new", contextWindowUsedAfter: 5_000, contextWindowSizeAfter: 200_000, now);
+        var events = session.RebindRuntimeSession("runtime-new", contextWindowUsedAfter: 5_000, contextWindowSizeAfter: 200_000, now);
 
-        Assert.Equal("acp-new", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("runtime-new", session.Status.AgentRuntimeSessionId);
         Assert.Equal(now, session.Status.BoundAt);
         Assert.Equal(5_000, session.Status.UsageSummary!.ContextWindowUsed);
         Assert.Equal(200_000, session.Status.UsageSummary!.ContextWindowSize);
         var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
-        Assert.Equal("acp-new", Assert.IsType<AgentSessionRuntimeBound>(bound.Value).AgentRuntimeSessionId);
+        Assert.Equal("runtime-new", Assert.IsType<AgentSessionRuntimeBound>(bound.Value).AgentRuntimeSessionId);
     }
 
     [Fact]
@@ -42,31 +42,31 @@ public class AgentSessionRecoveryDomainTests
         var secondBoundAt = new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc);
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-1",
+            AgentRuntimeSessionId = "runtime-1",
             BoundAt = firstBoundAt,
             RuntimeSessionLineage = new[]
             {
-                new RuntimeSessionLineageEntry("acp-1", firstBoundAt)
+                new RuntimeSessionLineageEntry("runtime-1", firstBoundAt)
             }
         };
 
         var events = session.RebindRuntimeSession(
-            newAgentSessionId: "acp-2",
+            newAgentSessionId: "runtime-2",
             contextWindowUsedAfter: 5_000,
             contextWindowSizeAfter: 200_000,
             now: secondBoundAt);
 
         var lineage = session.Status.RuntimeSessionLineage!;
         Assert.Equal(2, lineage.Count);
-        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("runtime-1", lineage[0].AgentRuntimeSessionId);
         Assert.Equal(firstBoundAt, lineage[0].BoundAt);
-        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal("runtime-2", lineage[1].AgentRuntimeSessionId);
         Assert.Equal(secondBoundAt, lineage[1].BoundAt);
 
         var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(bound.Value);
-        Assert.Equal("acp-2", runtimeBound.AgentRuntimeSessionId);
-        Assert.Equal("acp-1", runtimeBound.PreviousAgentRuntimeSessionId);
+        Assert.Equal("runtime-2", runtimeBound.AgentRuntimeSessionId);
+        Assert.Equal("runtime-1", runtimeBound.PreviousAgentRuntimeSessionId);
     }
 
     [Fact]
@@ -78,29 +78,29 @@ public class AgentSessionRecoveryDomainTests
         // current AgentRuntimeSessionId and BoundAt.
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-legacy",
+            AgentRuntimeSessionId = "runtime-legacy",
             BoundAt = legacyBoundAt,
             RuntimeSessionLineage = null
         };
         var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
 
         var events = session.RebindRuntimeSession(
-            newAgentSessionId: "acp-after",
+            newAgentSessionId: "runtime-after",
             contextWindowUsedAfter: 5_000,
             contextWindowSizeAfter: 200_000,
             now: now);
 
         var lineage = session.Status.RuntimeSessionLineage!;
         Assert.Equal(2, lineage.Count);
-        Assert.Equal("acp-legacy", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("runtime-legacy", lineage[0].AgentRuntimeSessionId);
         Assert.Equal(legacyBoundAt, lineage[0].BoundAt);
-        Assert.Equal("acp-after", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal("runtime-after", lineage[1].AgentRuntimeSessionId);
         Assert.Equal(now, lineage[1].BoundAt);
 
         var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(bound.Value);
-        Assert.Equal("acp-after", runtimeBound.AgentRuntimeSessionId);
-        Assert.Equal("acp-legacy", runtimeBound.PreviousAgentRuntimeSessionId);
+        Assert.Equal("runtime-after", runtimeBound.AgentRuntimeSessionId);
+        Assert.Equal("runtime-legacy", runtimeBound.PreviousAgentRuntimeSessionId);
     }
 
     [Fact]
@@ -109,14 +109,14 @@ public class AgentSessionRecoveryDomainTests
         var session = CreateSession();
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-keep",
+            AgentRuntimeSessionId = "runtime-keep",
             RuntimeSessionLineage = new[]
             {
-                new RuntimeSessionLineageEntry("acp-keep", new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc))
+                new RuntimeSessionLineageEntry("runtime-keep", new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc))
             }
         };
 
-        var events = session.RebindRuntimeSession("acp-keep", null, null, TestTime.UtcDateTime);
+        var events = session.RebindRuntimeSession("runtime-keep", null, null, TestTime.UtcDateTime);
 
         Assert.Empty(events);
         Assert.Single(session.Status.RuntimeSessionLineage!);
@@ -129,24 +129,24 @@ public class AgentSessionRecoveryDomainTests
         var firstBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-1",
+            AgentRuntimeSessionId = "runtime-1",
             BoundAt = firstBoundAt,
             RuntimeSessionLineage = new[]
             {
-                new RuntimeSessionLineageEntry("acp-1", firstBoundAt)
+                new RuntimeSessionLineageEntry("runtime-1", firstBoundAt)
             }
         };
         var secondAt = firstBoundAt.AddMinutes(10);
         var thirdAt = firstBoundAt.AddMinutes(20);
 
-        session.RebindRuntimeSession("acp-2", null, null, secondAt);
-        session.RebindRuntimeSession("acp-3", null, null, thirdAt);
+        session.RebindRuntimeSession("runtime-2", null, null, secondAt);
+        session.RebindRuntimeSession("runtime-3", null, null, thirdAt);
 
         var lineage = session.Status.RuntimeSessionLineage!;
         Assert.Equal(3, lineage.Count);
-        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
-        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
-        Assert.Equal("acp-3", lineage[2].AgentRuntimeSessionId);
+        Assert.Equal("runtime-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("runtime-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal("runtime-3", lineage[2].AgentRuntimeSessionId);
         Assert.Equal(secondAt, lineage[1].BoundAt);
         Assert.Equal(thirdAt, lineage[2].BoundAt);
     }
@@ -159,12 +159,12 @@ public class AgentSessionRecoveryDomainTests
         var secondBoundAt = firstBoundAt.AddMinutes(10);
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-2",
+            AgentRuntimeSessionId = "runtime-2",
             BoundAt = secondBoundAt,
             RuntimeSessionLineage = new[]
             {
-                new RuntimeSessionLineageEntry("acp-1", firstBoundAt),
-                new RuntimeSessionLineageEntry("acp-2", secondBoundAt)
+                new RuntimeSessionLineageEntry("runtime-1", firstBoundAt),
+                new RuntimeSessionLineageEntry("runtime-2", secondBoundAt)
             }
         };
 
@@ -172,9 +172,9 @@ public class AgentSessionRecoveryDomainTests
 
         Assert.NotNull(lineage);
         Assert.Equal(2, lineage!.Count);
-        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("runtime-1", lineage[0].AgentRuntimeSessionId);
         Assert.Equal(firstBoundAt.ToString("o"), lineage[0].BoundAt);
-        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal("runtime-2", lineage[1].AgentRuntimeSessionId);
         Assert.Equal(secondBoundAt.ToString("o"), lineage[1].BoundAt);
     }
 
@@ -188,7 +188,7 @@ public class AgentSessionRecoveryDomainTests
         // it can distinguish "no chain" from "unbound".
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-legacy",
+            AgentRuntimeSessionId = "runtime-legacy",
             BoundAt = legacyBoundAt,
             RuntimeSessionLineage = null
         };
@@ -197,7 +197,7 @@ public class AgentSessionRecoveryDomainTests
 
         Assert.NotNull(lineage);
         var entry = Assert.Single(lineage!);
-        Assert.Equal("acp-legacy", entry.AgentRuntimeSessionId);
+        Assert.Equal("runtime-legacy", entry.AgentRuntimeSessionId);
         Assert.Equal(legacyBoundAt.ToString("o"), entry.BoundAt);
     }
 
@@ -226,12 +226,12 @@ public class AgentSessionRecoveryDomainTests
         var session = CreateSession();
         session.Status = session.Status with
         {
-            AgentRuntimeSessionId = "acp-keep"
+            AgentRuntimeSessionId = "runtime-keep"
         };
 
-        var events = session.RebindRuntimeSession("acp-keep", null, null, TestTime.UtcDateTime);
+        var events = session.RebindRuntimeSession("runtime-keep", null, null, TestTime.UtcDateTime);
 
-        Assert.Equal("acp-keep", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("runtime-keep", session.Status.AgentRuntimeSessionId);
         Assert.Empty(events);
     }
 

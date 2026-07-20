@@ -27,7 +27,7 @@ function renderTimelineHook() {
   return renderHook(
     () => useSessionTimeline(123, {
       id: 'coder-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       executionId: null,
       taskDescription: null,
       status: 'active',
@@ -265,7 +265,7 @@ describe('useSessionTimeline context health events', () => {
     act(() => {
       dispatchAgentEvent('usage.updated', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         contextWindowUsed: 45_000,
         contextWindowSize: 100_000,
         contextUsagePercent: 72,
@@ -287,7 +287,7 @@ describe('useSessionTimeline context health events', () => {
     act(() => {
       dispatchAgentEvent('context_health_update', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         contextWindowUsed: 72_000,
         contextWindowSize: 100_000,
         contextUsagePercent: 72,
@@ -309,7 +309,7 @@ describe('useSessionTimeline context health events', () => {
     act(() => {
       dispatchAgentEvent('compaction_event', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         contextWindowUsedAfter: 90_000,
         contextWindowSize: 100_000,
         recordedAt: '2024-01-01T00:00:00.000Z',
@@ -332,6 +332,7 @@ describe('useSessionTimeline event-wiring integration', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
@@ -428,7 +429,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         roundLabel: 'Stale runtime',
         roundIndex: 0,
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-old',
+        runtimeSessionId: 'runtime-old',
       })
     })
 
@@ -578,7 +579,7 @@ describe('useSessionTimeline event-wiring integration', () => {
       dispatchAgentEvent('coder_recovery_status', {
         issueNumber: 123,        projectId: 'proj-1',
         executionId: 'exec-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'recovering',
         attempt: 2,
         reason: 'lost contact',
@@ -601,7 +602,7 @@ describe('useSessionTimeline event-wiring integration', () => {
       dispatchAgentEvent('coder_recovery_status', {
         issueNumber: 123,        projectId: 'proj-1',
         executionId: 'exec-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'recovered',
         attempt: 2,
       })
@@ -628,7 +629,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         activeProbeVersion: 3,
@@ -663,7 +664,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         satisfiedProbeVersion: 7,
@@ -676,7 +677,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         probeVersion: 9,
@@ -688,7 +689,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
       })
@@ -713,7 +714,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         status: 'failed',
         lastDataAt: '2024-01-01T00:00:00.000Z',
         failureReason: 'no response',
@@ -746,7 +747,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('compaction_event', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         strategy: 'summary',
         contextWindowUsedBefore: 950_000,
         contextWindowUsedAfter: 400_000,
@@ -873,7 +874,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('tool_call.started', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         toolName: 'read',
         state: 'started',
         toolCallId: 'call-1',
@@ -895,7 +896,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('tool_call.updated', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         toolName: 'read',
         state: 'timeout',
         toolCallId: 'call-1',
@@ -912,7 +913,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     act(() => {
       dispatchAgentEvent('tool_call.completed', {
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
         toolName: 'read',
         state: 'completed',
         toolCallId: 'call-1',
@@ -946,7 +947,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'hello ' },
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
       })
       dispatchAgentEvent('plan_session_update', {
         issueNumber: 123,        projectId: 'proj-1',
@@ -955,7 +956,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'world' },
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
       })
     })
 
@@ -996,7 +997,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'first ' },
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
       })
     })
 
@@ -1021,7 +1022,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'second' },
         sessionId: 'coder-1',
-        runtimeSessionId: 'acp-1',
+        runtimeSessionId: 'runtime-1',
       })
     })
 

@@ -38,8 +38,6 @@ const FIXED_TIME = "2026-07-01T00:00:00.000Z"
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 
 const forceReconnect = vi.fn(async () => undefined)
-const createSharedAcpConnection = vi.fn()
-const shutdownSharedAcpConnection = vi.fn()
 const registryTransitions = vi.hoisted(() => ({
   markEligible: vi.fn(),
   remove: vi.fn(),
@@ -133,16 +131,6 @@ vi.mock("../src/runtime/workspace-registry.js", async (importOriginal) => {
   }
 })
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    key(_workflowRunId: string, _sessionName: string) { return `${_workflowRunId}:${_sessionName}` }
-    get(_key: string) { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
-  },
-  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
-}))
 
 beforeEach(() => {
   installReadyRuntimeFactory()
@@ -152,14 +140,6 @@ beforeEach(() => {
   }
   registryTransitions.markEligible.mockReset().mockImplementation((workflowRunId: string) => registryEvents.eligible.push(workflowRunId))
   registryTransitions.remove.mockReset().mockImplementation((workflowRunId: string) => registryEvents.removed.push(workflowRunId))
-  createSharedAcpConnection.mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers: vi.fn(),
-    clearSessionHandlers: vi.fn(),
-    shutdown: shutdownSharedAcpConnection,
-  })
-  shutdownSharedAcpConnection.mockResolvedValue(undefined)
 })
 
 function configureHost(statusResponder: StatusResponder = async () => ({})): HostEvents {
@@ -190,14 +170,6 @@ function configureHost(statusResponder: StatusResponder = async () => ({})): Hos
   })
   fetchConfig.mockReset().mockResolvedValue(null)
   forceReconnect.mockReset().mockResolvedValue(undefined)
-  createSharedAcpConnection.mockReset().mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers: vi.fn(),
-    clearSessionHandlers: vi.fn(),
-    shutdown: shutdownSharedAcpConnection,
-  })
-  shutdownSharedAcpConnection.mockReset().mockResolvedValue(undefined)
   return events
 }
 

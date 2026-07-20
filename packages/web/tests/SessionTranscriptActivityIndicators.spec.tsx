@@ -243,7 +243,7 @@ describe('useSessionTranscript clears streaming flag when session stops running'
       const t = useSessionTranscript({
         issueNumber: 426,
         sessionId: 'session-426',
-        runtimeSessionId: 'acp-426',
+        runtimeSessionId: 'runtime-426',
         initialTurns: initial,
         isRunning,
       })
@@ -258,7 +258,7 @@ describe('useSessionTranscript clears streaming flag when session stops running'
         issueNumber: 426,
         projectId: 'proj-426',
         executionId: 'exec-426',
-        runtimeSessionId: 'acp-426',
+        runtimeSessionId: 'runtime-426',
         sessionId: 'session-426',
         text: 'live chunk',
       })
@@ -291,7 +291,7 @@ describe('useSessionTranscript clears streaming flag when session stops running'
       const t = useSessionTranscript({
         issueNumber: 426,
         sessionId: 'session-426',
-        runtimeSessionId: 'acp-426',
+        runtimeSessionId: 'runtime-426',
         initialTurns,
         isRunning,
       })
@@ -347,7 +347,7 @@ describe('useSessionTranscript clears streaming flag when session stops running'
         issueNumber: 426,
         projectId: 'proj-426',
         executionId: 'exec-426',
-        runtimeSessionId: 'acp-426',
+        runtimeSessionId: 'runtime-426',
         sessionId: 'session-426',
         text: 'streaming',
       })

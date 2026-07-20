@@ -474,7 +474,7 @@ function work(workflowRunId: string, baseBranch = "master") {
     workflowRunId,
     workId: "proposal.1",
     workType: "task",
-    uses: "mohist/acp-agent",
+    uses: "mohist/opencode",
     variables: {
       mohist: { runId: workflowRunId },
       issue: { number: 9 },

@@ -185,7 +185,6 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         if (existingPayload.TryGetProperty("runtimeSessionId", out var runtimeSessionId))
             Assert.True(runtimeSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(runtimeSessionId.GetString()));
         Assert.Equal("opencode", existingPayload.GetProperty("runtime").GetString());
-        Assert.False(existingPayload.TryGetProperty("acpSessionId", out _));
         Assert.False(existingPayload.TryGetProperty("coderSessionId", out _));
 
         await _fixture.Client.PostOkAsync(

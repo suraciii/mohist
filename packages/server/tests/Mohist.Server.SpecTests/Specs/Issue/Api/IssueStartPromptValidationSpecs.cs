@@ -31,7 +31,7 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
                 tasks:
                   - id: missing-prompt-task
                     title: Missing prompt task
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                     with:
                       prompt: ${{ prompts.does-not-exist }}
                 checks: []
@@ -63,7 +63,7 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
                 tasks:
                   - id: multi-missing-prompt-task
                     title: Multi missing prompt task
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                     with:
                       prompt: ${{ prompts.ghost-one }} and ${{ prompts.ghost-two }}
                 checks: []
@@ -96,7 +96,7 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
                 tasks:
                   - id: known-prompt-task
                     title: Known prompt task
-                    uses: mohist/acp-agent
+                    uses: mohist/opencode
                     with:
                       prompt: ${{ prompts.proposal }}
                 checks: []

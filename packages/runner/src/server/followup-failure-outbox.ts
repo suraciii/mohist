@@ -1,7 +1,16 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { SessionTarget } from "../runtime/acp-connection.js"
+import type { SessionTarget } from "./session-target.js"
 import type { ServerConnection } from "./connection.js"
+
+// Issue-410 T-003 / design D3: the followup failure outbox is now a
+// pure Mohist-owned delivery primitive. It branches on `target.kind`
+// only (workflow → `workflowAgentSessionRuntimeEvents`; generic →
+// `agentSessionRuntimeEvents`) and never references a live connection.
+// The runtime session id is the record's own `runtimeSessionId` field, resolved
+// out-of-band by the runner host when the original followup was
+// attempted. Persisted entries remain queryable across restarts; entries with
+// historical bindings still flow through the same kind branch.
 
 const DEFAULT_FOLLOWUP_FAILURE_OUTBOX_FILE = ".mohist/runner-state/followup-failures.json"
 const RETRY_DELAY_MS = 2_000

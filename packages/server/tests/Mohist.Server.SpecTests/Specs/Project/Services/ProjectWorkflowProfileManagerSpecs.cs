@@ -158,9 +158,15 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task PatchVariables_DeepMerges_WithExisting()
     {
+        // Per #410 T-002 design D5: SetVariablesAsync / PatchVariablesAsync
+        // run the project write through ProjectVariablesFilter, which
+        // projects every vars.agent / stages.<stage>.vars.agent block down
+        // to the converged {model, variant} whitelist. Legacy keys
+        // supplied on either side of the patch are stripped before
+        // persistence.
         var initial = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
-                new { agent = new { type = "opencode", model = "sonnet-4" } })));
+                new { agent = new { model = "sonnet-4", variant = "high" } })));
         await _manager.SetVariablesAsync("proj-patch", initial);
 
         var patch = new VariableBundle(
@@ -172,7 +178,7 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 

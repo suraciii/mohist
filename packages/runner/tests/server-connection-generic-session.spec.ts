@@ -24,12 +24,12 @@ function options() {
 
 describe("ServerConnection.getAgentSession (generic)", () => {
   it("GetAgentSession_HitsGenericSessionUrl", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "acp-1", runtime: "opencode", workDir: "D:/work" }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "runtime-1", runtime: "opencode", workDir: "D:/work" }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.getAgentSession("project-1", "session-abc", new AbortController().signal)
 
-    expect(result).toEqual({ runtimeSessionId: "acp-1", runtime: "opencode", workDir: "D:/work" })
+    expect(result).toEqual({ runtimeSessionId: "runtime-1", runtime: "opencode", workDir: "D:/work" })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc$/)
     expect(init.method).toBe("GET")
@@ -56,12 +56,12 @@ describe("ServerConnection.getAgentSession (generic)", () => {
 
 describe("ServerConnection.openAgentSession (generic)", () => {
   it("OpenAgentSession_PostsToGenericOpenUrl_AndReturnsSession", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "acp-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "runtime-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.openAgentSession("project-1", "session-abc", { workId: "work-1", workType: "agent-job" }, new AbortController().signal)
 
-    expect(result).toEqual({ runtimeSessionId: "acp-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" })
+    expect(result).toEqual({ runtimeSessionId: "runtime-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/open$/)
     expect(init.method).toBe("POST")
@@ -83,12 +83,12 @@ describe("ServerConnection.attachAgentSession (generic)", () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
     const connection = new ServerConnection(options())
 
-    await connection.attachAgentSession("project-1", "session-abc", { runtimeSessionId: "acp-1", workDir: "D:/work" }, new AbortController().signal)
+    await connection.attachAgentSession("project-1", "session-abc", { runtimeSessionId: "runtime-1", workDir: "D:/work" }, new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/attach$/)
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ runtimeSessionId: "acp-1", workDir: "D:/work" })
+    expect(JSON.parse(init.body as string)).toEqual({ runtimeSessionId: "runtime-1", workDir: "D:/work" })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)
   })
 })
@@ -98,14 +98,14 @@ describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
     const connection = new ServerConnection(options())
 
-    await connection.agentSessionRuntimeEvents("project-1", "session-abc", { workId: "work-1", workType: "agent-job", stage: "agent", runtimeSessionId: "acp-1", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] }, new AbortController().signal)
+    await connection.agentSessionRuntimeEvents("project-1", "session-abc", { workId: "work-1", workType: "agent-job", stage: "agent", runtimeSessionId: "runtime-1", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] }, new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/runtime-events$/)
     expect(init.method).toBe("POST")
     const body = JSON.parse(init.body as string)
     expect(body).toMatchObject({
-      runtimeSessionId: "acp-1",
+      runtimeSessionId: "runtime-1",
       runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }],
     })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)

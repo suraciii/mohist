@@ -15,7 +15,7 @@ function Wrapper({
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
-    runtimeSessionId: 'acp-84',
+    runtimeSessionId: 'runtime-84',
     runtime: 'opencode',
     initialTurns: events,
     isRunning,
@@ -79,7 +79,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
         text: ' live',
       })
@@ -98,7 +98,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-old',
+        runtimeSessionId: 'runtime-old',
         runtime: 'opencode',
         text: ' stale',
       })
@@ -126,7 +126,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'other-runtime',
         text: ' stale',
       })
@@ -142,7 +142,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
         text: ' live',
       })
@@ -169,7 +169,7 @@ describe('useSessionTranscript', () => {
       act(() => {
         const baseDetail = {
           sessionId: 'session-84',
-          runtimeSessionId: 'acp-84',
+          runtimeSessionId: 'runtime-84',
           runtime: 'opencode',
           text: delta.text,
         }
@@ -197,7 +197,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
         text: 'usage:',
       })
@@ -205,7 +205,7 @@ describe('useSessionTranscript', () => {
     act(() => {
       dispatchAgentEvent('reasoning.delta', {
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
         text: 'thinking about it',
       })
@@ -215,7 +215,7 @@ describe('useSessionTranscript', () => {
         issueNumber: 84,
         projectId: 'proj-test',
         sessionId: 'session-84',
-        runtimeSessionId: 'acp-84',
+        runtimeSessionId: 'runtime-84',
         runtime: 'opencode',
         text: '\n\nLet me check the docs.',
       })

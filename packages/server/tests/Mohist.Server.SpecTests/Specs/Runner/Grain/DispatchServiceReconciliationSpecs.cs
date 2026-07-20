@@ -71,7 +71,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
                 new TaskDefinition(
                     "recover:fix-review-findings",
                     "Fix review findings",
-                    "mohist/acp-agent",
+                    "mohist/opencode",
                     With("""{"session":"check","prompt":"fix","agent":"${{ vars.agent }}"}""")),
             ],
             checks: [],

@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(), uploadTaskLog: vi.fn(), fetchConfig: vi.fn(async () => null),
   startSignalR: vi.fn(), stopSignalR: vi.fn(), getConnectionId: vi.fn(() => "conn-1"),
   probeLiveness: vi.fn(async () => true), forceReconnect: vi.fn(async () => undefined),
-  createSharedAcpConnection: vi.fn(), shutdownSharedAcpConnection: vi.fn(),
 }))
 
 vi.mock("../src/server/connection.js", () => ({
@@ -43,17 +42,6 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get() { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
-  },
-  createSharedAcpConnection: (...args: unknown[]) => mocks.createSharedAcpConnection(...args),
-}))
 
 describe("RunnerHost periodic model rediscovery", () => {
   let root: string
@@ -74,14 +62,6 @@ describe("RunnerHost periodic model rediscovery", () => {
     mocks.poll.mockImplementation(async () => { polled.resolve(undefined); return [] })
     mocks.startSignalR.mockResolvedValue(undefined)
     mocks.stopSignalR.mockResolvedValue(undefined)
-    mocks.createSharedAcpConnection.mockResolvedValue({
-      connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-      processPid: 99999,
-      setSessionHandlers: vi.fn(),
-      clearSessionHandlers: vi.fn(),
-      shutdown: mocks.shutdownSharedAcpConnection,
-    })
-    mocks.shutdownSharedAcpConnection.mockResolvedValue(undefined)
     runtime = installFakeOpenCodeRuntimeFactory({ catalog: baseline })
   })
 

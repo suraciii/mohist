@@ -61,7 +61,7 @@ export function getOpencodeModel(projectId?: string | null) {
 }
 
 export function updateOpencodeModel(projectId: string | null | undefined, model: string | null, variant?: string | null) {
-  const agent: Record<string, unknown> = { type: 'opencode', model }
+  const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
   return patchProjectWorkflowVariables(projectId, { vars: { agent } })
     .then((variables) => ({
@@ -197,7 +197,7 @@ export function getStageModels(projectId?: string | null) {
 }
 
 export function setStageModel(projectId: string | null | undefined, stage: string, model: string | null, variant?: string | null) {
-  const agent: Record<string, unknown> = { type: 'opencode', model }
+  const agent: Record<string, unknown> = { model }
   if (variant !== undefined) agent.variant = variant
   return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } })
     .then((variables) => ({

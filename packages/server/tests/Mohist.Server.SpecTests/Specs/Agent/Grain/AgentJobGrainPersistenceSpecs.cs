@@ -54,9 +54,14 @@ public sealed class AgentJobGrainPersistenceSpecs
             .PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(dispatch);
         var with = JsonSerializer.Deserialize<JsonElement>(dispatch!.With!);
-        Assert.Equal(
-            "openai/gpt-5.6",
-            with.GetProperty("prompt").GetProperty("agent-launch").GetProperty("config").GetProperty("model").GetString());
+        // The AgentConfig is no longer surfaced into the dispatch `with`
+        // envelope; the runtime receives the Agent-owned flat payload
+        // `{ prompt, instructions?, model?, variant? }` and ignores
+        // AgentConfig for execution. Traceability lives on
+        // `State.AgentConfigJson` (#410 T-001 D2).
+        Assert.Equal("persist me", with.GetProperty("prompt").GetString());
+        Assert.False(with.TryGetProperty("agent", out _));
+        Assert.False(with.TryGetProperty("agent-launch", out _));
     }
 
     [Fact]

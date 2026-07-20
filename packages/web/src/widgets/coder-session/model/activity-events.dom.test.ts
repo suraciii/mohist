@@ -126,7 +126,7 @@ describe('buildActivityEvents', () => {
   it('classifies agent session lifecycle events and context exhaustion as failure', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.runtime-bound', data: { agentRuntimeSessionId: 'acp-1' } }),
+        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.runtime-bound', data: { agentRuntimeSessionId: 'runtime-1' } }),
         makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.context-exhausted', data: { failureCategory: 'context exhaustion', contextUsagePercent: 96 } }),
       ],
       sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
