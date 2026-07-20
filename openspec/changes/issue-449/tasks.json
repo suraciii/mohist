@@ -33,30 +33,33 @@
       "id": "T-002",
       "title": "Make routed Named Agent launches workspace-complete and idempotently fail preflight",
       "spec": "specs/routing-dispatch/spec.md#a-routed-agent-launch-uses-the-triggering-workflow-workspace, specs/routing-dispatch/spec.md#missing-routed-workspace-fails-explicitly, specs/routing-dispatch/spec.md#routed-launch-preparation-is-first-writer-fenced, specs/routing-dispatch/spec.md#matching-and-prompt-rendering-remain-envelope-only, specs/routing-dispatch/spec.md#existing-non-routing-workspace-behavior-is-preserved",
-      "description": "Add post-match routing execution-context resolution that validates WorkflowRun project/issue/epic ownership, prefers explicit run lineage, and uses an issue's currently bound nonterminal run only when workflow lineage is absent. Fence redelivery by persisting a canonical prepared AgentJob launch plan before Session open, then open Session from that returned plan and activate it for normal dispatch or durable preflight failure without sending malformed work to a Runner.",
+      "description": "Add post-match routing execution-context resolution that validates WorkflowRun project/issue/epic ownership, prefers explicit run lineage, and uses an issue's currently bound nonterminal run only when workflow lineage is absent. Persist a canonical prepared AgentJob plan with a durable recovery reminder before Session open; AgentJob then idempotently opens Session from that plan and reaches launch-ready dispatch or durable preflight failure without rereading mutable routing or Agent state.",
       "acceptanceCriteria": [
         "A matched `com.mohist.workflow.run.failed` event with `workflowrunid` launches one AgentSession and AgentJob whose work directory and dispatched `workspace.path` both equal the persisted WorkflowRun workspace",
         "An event with issue lineage but no workflow run id resolves only that issue's currently bound nonterminal WorkflowRun and dispatches its non-empty path",
         "An explicit workflow run id is authoritative: a missing workspace fails visibly and never falls forward to a newer issue WorkflowRun; an issue-only terminal/stale binding is not reused",
         "A WorkflowRun whose project, issue, or epic conflicts with event lineage, or whose workspace path is null/blank, produces a workspace-unavailable preflight failure and no Runner assignment",
         "A hit with no resolvable workspace creates one stable failed AgentJob and AgentSession carrying an actionable `workspace-unavailable` reason plus trigger event/rule correlation, and creates no Runner assignment or workspace-less WorkDispatch",
-        "EnsurePreparedAsync stores one canonical executable-or-failed launch plan before Session open; prepared jobs cannot auto-dispatch on activation",
-        "Redelivery opens Session from the canonical plan returned by the AgentJob rather than newly resolved caller values, producing one job/session/close and preventing later workspace or lineage overwrite",
+        "EnsurePreparedAsync registers AgentJob recovery before persisting one canonical executable-or-failed plan; orphan reminders self-remove and prepared jobs remain non-dispatchable until Session acknowledgement",
+        "Immediate, OnActivate, and reminder recovery idempotently open Session from the persisted plan, then persist launch-ready before dispatch or enter durable terminal delivery for preflight failure",
+        "A crash after plan persistence followed by rule edit/archive and Agent deactivation still completes the original executable or failed plan without routing reevaluation",
+        "Redelivery, when present, reuses the canonical AgentJob plan rather than newly resolved caller values, producing one job/session/close and preventing later workspace or lineage overwrite",
         "Routed AgentSession metadata retains issue number, epic number when present, trigger event id, trigger rule id, and workspace path for normal and failed launches",
         "`mo routing test` and real dispatch select the same rules and Agents for identical inputs; workspace and Issue/Workflow reads occur only after selection and never affect match, ordering, `continue`, or prompt rendering",
         "Manual Named Agent launch with an explicit workspace and Inline Agent `mohist/opencode` workspace behavior remain unchanged in regression specs",
         "The runner's existing missing-workspace rejection remains covered as a defensive contract, while routing composition specs prove the normal routed path no longer reaches it",
+        "Crash-injection specs cover process loss after preparation and after Session open, mutable rule/Agent changes before recovery, orphan reminder cleanup, and executable plus preflight-failed dispositions without wall-clock polling",
         "Focused AgentJob grain, AgentLauncher, routing dispatch, and runner contract tests pass; `npm test`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner` complete successfully"
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Ownership-validating post-match routing context resolver, prepared-launch first-writer protocol and handler integration, canonical shared launcher activation/failure composition, and focused tests, with no runner production-code change",
+      "output": "Ownership-validating routing context resolver, AgentJob-owned prepared-plan reminder/recovery protocol, immutable routed Session open and launch-ready/terminal transitions, handler integration, and focused crash-recovery tests, with no runner production-code change",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "Implement design decisions 1-3. Keep Agent as a leaf and add a narrow Workflow routing-context read that returns ownership lineage, status, and workspace. Persist the launch plan before Session open; do not derive paths from layout, inspect runner-local files, merge replay metadata, submit then race `FailAsync`, or change manual launch semantics."
+      "notes": "Implement design decisions 1-3. Keep Agent as a leaf and add a narrow Workflow routing-context read that returns ownership lineage, status, and workspace. Register recovery before plan persistence and let AgentJob advance the stored plan; do not depend on event redelivery, derive paths from layout, inspect runner-local files, merge replay metadata, submit then race `FailAsync`, or change manual launch semantics."
     },
     {
       "id": "T-003",

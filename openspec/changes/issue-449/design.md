@@ -61,9 +61,11 @@ The resolver does not derive paths from `MohistWorkspaceLayout`, inspect the fil
 
 ### 2. Represent unresolved workspace as an idempotent AgentJob terminal outcome
 
-Extend the shared launch pipeline with a routed preparation protocol. `AgentLauncher` composes one `RoutedAgentLaunchPlan` containing the AgentJob snapshot, complete Session open command, trigger metadata, and either `Executable` or `PreflightFailed(reason, category)` disposition. `IAgentJobGrain.EnsurePreparedAsync` persists the first plan under the existing stable event/rule job key and returns that canonical plan on every replay. A prepared job is not dispatchable and `OnActivateAsync` does not auto-dispatch it. The launcher durably opens the AgentSession from the returned canonical plan, then calls `ActivatePreparedAsync`; activation either enables normal dispatch or terminalizes the job without assigning Runner work. Use category `workspace-unavailable` for invalid execution context.
+Extend the shared launch pipeline with a routed preparation protocol. `AgentLauncher` composes one `RoutedAgentLaunchPlan` containing the AgentJob snapshot, complete immutable Session open command, trigger metadata, and either `Executable` or `PreflightFailed(reason, category)` disposition. `IAgentJobGrain.EnsurePreparedAsync` registers the durable `agent-job-recovery` reminder before persisting the first plan under the existing stable event/rule job key, then returns that canonical plan on every replay. A reminder that finds no persisted recovery fence unregisters itself, covering reminder registration followed by failed state persistence.
 
-Persisting the plan before Session open is the first-writer fence: an unresolved first delivery cannot acquire a later workspace, and an executable first delivery cannot be redirected by changed issue state. A crash between plan persistence, Session open, and activation leaves the durable event unacknowledged; redelivery resumes the same plan. Existing manual launches retain their strict random-id submission path and do not use routing preparation.
+`AdvancePreparedLaunchAsync` is invoked on the fast path after preparation and from both `OnActivateAsync` and the recovery reminder. It reads only the persisted plan; it never reloads a routing rule or live Agent definition. It calls a routed Session open command that creates the Session once or validates the exact persisted source labels, metadata, and work directory on replay. For an executable plan, Session acknowledgement is followed by a persisted `LaunchReady` transition; only then may normal dispatch run. For a preflight-failed plan, Session acknowledgement is followed by the durable terminal-delivery protocol. The recovery reminder remains registered until the prepared fence has become `LaunchReady` or `PendingSessionClose`; a stale tick with no recovery fence unregisters itself.
+
+Persisting the plan before Session open is the first-writer fence and the durable recovery handoff: an unresolved first delivery cannot acquire a later workspace, an executable first delivery cannot be redirected by changed issue state, and a crash does not depend on event redelivery. If redelivery occurs, it may call `EnsurePreparedAsync` again, but subsequent rule archival, rule edits, or Agent deactivation cannot prevent AgentJob's reminder/activation path from completing the claimed plan. Existing manual launches retain their strict random-id submission path and do not use routing preparation.
 
 Every AgentJob terminal transition uses one durable delivery protocol. Before saving terminal state, the grain stores a `PendingSessionClose` payload containing a stable delivery id (`agent-job:{jobKey}:terminal`), status, exit code, failure reason/category, and a single recorded timestamp, and registers a durable Orleans reminder. It then saves terminal state and attempts delivery. `ReportResultAsync` for an already-terminal job repairs a pending close before returning rather than rejecting it immediately; activation and reminder ticks do the same. A reminder tick that reloads state with no pending delivery unregisters the orphan reminder, covering reminder registration followed by failed terminal-state persistence.
 
@@ -78,6 +80,7 @@ Add an AgentSession terminal command keyed by the stable delivery id. The comman
 - Submit a workspace-less job and let the runner reject it: rejected because it preserves the current contract disagreement and consumes runner capacity for invalid server-composed work.
 - Open Session before claiming the idempotent AgentJob: rejected because Session merge semantics can accept a later workspace while AgentJob keeps the first input, producing divergent audit and execution state.
 - Rely on report/event redelivery without a pending-close reminder: rejected because AgentJob terminal state currently short-circuits report replay and no future activation is guaranteed.
+- Rely on routing event redelivery to resume a prepared plan: rejected because redelivery reevaluates mutable rule and Agent state and can skip a plan already claimed by AgentJob.
 
 ### 3. Preserve routed lineage on AgentSession metadata
 
@@ -145,6 +148,7 @@ Focused coverage will include:
 - routing dispatch composition for explicit WorkflowRun workspace, issue-only fallback, and unresolved workspace;
 - no runner assignment for a pre-dispatch failure and idempotent replay with one job/session/close fact;
 - first-writer behavior when issue-current-workspace resolution changes between deliveries;
+- prepared-plan recovery after process loss and subsequent routing-rule/Agent mutation;
 - AgentJob grain terminal persistence and close retry behavior;
 - generic session summary/API reason-category separation, successful omission, and latest-terminal-fact selection;
 - AgentOps issue-feed canonical AgentJob-close selection, unrelated-close exclusion, complete envelope, equal-time ordering, and global newest-N limiting;
@@ -155,6 +159,7 @@ Focused coverage will include:
 
 - `[Risk] An explicit event references an old or missing WorkflowRun while the issue now has a newer run` -> Treat explicit `workflowrunid` as authoritative and fail visibly; never fall forward to unrelated work.
 - `[Risk] Issue-only event redelivery resolves a different current workspace` -> Stable event/rule job identity and first-writer semantics preserve the original persisted launch outcome.
+- `[Risk] Rule or Agent state changes after AgentJob claims a plan but before Session open` -> AgentJob owns a durable prepared-state reminder and advances only the persisted plan, independent of routing reevaluation.
 - `[Risk] AgentJob terminal save succeeds but AgentSession close persistence fails` -> Persist `PendingSessionClose`, keep a durable reminder until synchronous Session acknowledgement, and retry the stable delivery id across activation loss and report replay.
 - `[Risk] Persisted workspace identity points to a directory already cleaned on the runner` -> Keep filesystem authority on the runner; the turn may fail with an actionable runtime/workspace reason, but it will no longer fail because dispatch omitted the path.
 - `[Risk] New session events alter issue-feed limit results for existing clients` -> Merge before applying the limit, retain chronological ordering and the existing envelope shape, and add only failed routed outcomes required by the spec.
@@ -165,7 +170,7 @@ Focused coverage will include:
 ## Migration Plan
 
 1. Add the durable AgentJob pending-close/reminder protocol and synchronous idempotent AgentSession terminal command; migrate every AgentJob terminal path and verify persistence-failure recovery.
-2. Add the ownership-validating routing launch-context resolver and prepared-launch first-writer fence, then switch routed launch to prepare -> canonical Session open -> activate. Keep the runner workspace requirement unchanged.
+2. Add the ownership-validating routing launch-context resolver and AgentJob-owned prepared-launch recovery fence, then switch routed launch to register reminder -> persist plan -> idempotent Session open -> persist launch-ready or terminal transition. Keep the runner workspace requirement unchanged.
 3. Add issue/epic metadata to routed launch contexts and the AgentOps issue-feed assembler; switch the issue events API to the assembler while preserving WorkflowRun event filtering.
 4. Add `FailureReason` to the generic AgentSession DTO/query and update CLI rendering and contract tests.
 5. Deploy the server before or together with the CLI. Older CLIs ignore the additive summary field; the updated CLI against an older server simply has no reason to render.
@@ -175,4 +180,4 @@ Rollback requires the server to report no outstanding `PendingSessionClose` reco
 
 ## Open Questions
 
-None. The triggering event's ownership-validated explicit WorkflowRun is authoritative; issue-current-run lookup is used only when explicit lineage is absent and only for a nonterminal bound run. Workspace resolution occurs after envelope-only routing selection, and routed launch identity is fenced before Session open.
+None. The triggering event's ownership-validated explicit WorkflowRun is authoritative; issue-current-run lookup is used only when explicit lineage is absent and only for a nonterminal bound run. Workspace resolution occurs after envelope-only routing selection, routed launch identity is fenced before Session open, and AgentJob recovery no longer depends on mutable routing redelivery.

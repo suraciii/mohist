@@ -40,7 +40,7 @@ A matched routing hit for which no valid execution context can be resolved SHALL
 
 ### Requirement: Routed launch preparation is first-writer fenced
 
-An idempotent routed launch SHALL persist one canonical launch plan, keyed by project id, event id, and rule id, before opening its AgentSession or making work dispatchable. The plan SHALL include the AgentJob input, Session launch metadata and work directory, and either an executable disposition or a preflight failure. Redelivery SHALL reuse that persisted plan and SHALL NOT merge newly resolved workspace or lineage values into the Session or AgentJob.
+An idempotent routed launch SHALL persist one canonical launch plan, keyed by project id, event id, and rule id, before opening its AgentSession or making work dispatchable. The plan SHALL include the AgentJob input, Session launch metadata and work directory, and either an executable disposition or a preflight failure. Persisting the plan SHALL establish a durable AgentJob-owned recovery trigger that can open the Session and activate or fail the plan without reevaluating routing rules or current Agent status. Redelivery SHALL reuse that persisted plan and SHALL NOT merge newly resolved workspace or lineage values into the Session or AgentJob.
 
 #### Scenario: Unresolved first delivery remains canonical
 
@@ -52,7 +52,19 @@ An idempotent routed launch SHALL persist one canonical launch plan, keyed by pr
 
 - **WHEN** a routed executable launch plan has been persisted but its AgentSession has not yet been durably opened from that plan
 - **THEN** the AgentJob SHALL remain non-dispatchable
-- **AND** redelivery SHALL complete the same Session open before enabling dispatch
+- **AND** the AgentJob recovery trigger SHALL idempotently open the Session from the persisted plan before enabling dispatch
+
+#### Scenario: Prepared launch recovers after routing state changes
+
+- **WHEN** the process fails after persisting a routed launch plan but before Session open, and the matching rule is changed or archived or the Agent becomes inactive before recovery
+- **THEN** AgentJob recovery SHALL continue the original persisted plan without reevaluating that mutable routing or Agent state
+- **AND** an executable plan SHALL reach dispatch after its Session is durably opened
+
+#### Scenario: Prepared preflight failure recovers without event redelivery
+
+- **WHEN** the process fails after persisting a workspace-unavailable plan but before its AgentSession and terminal outcome are recorded
+- **THEN** AgentJob recovery SHALL open the Session from the persisted failed plan and enter the durable terminal-delivery protocol
+- **AND** recovery SHALL NOT require the triggering event to match the routing table again
 
 ### Requirement: Matching and prompt rendering remain envelope-only
 
