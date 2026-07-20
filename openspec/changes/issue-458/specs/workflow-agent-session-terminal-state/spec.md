@@ -1,6 +1,6 @@
 ### Requirement: Every executed Workflow OpenCode turn reports a terminal outcome
 
-After a Workflow-source OpenCode turn finishes against an associated physical runtime session, the runner SHALL attempt to report exactly one `session.closed` event to the same Workflow AgentSession. A successful runtime turn SHALL report `status: completed`; a failed, interrupted, or timed-out runtime turn SHALL report `status: failed`.
+After a Workflow-source OpenCode turn whose `session.input` was accepted finishes against an associated physical runtime session, the runner SHALL attempt to report exactly one `session.closed` event to the same Workflow AgentSession. A successful runtime turn SHALL report `status: completed`; a failed, interrupted, or timed-out runtime turn SHALL report `status: failed`. A turn whose input report was rejected SHALL NOT report a close that could be attached to a prior turn.
 
 The terminal event SHALL be reported only after all input and projected runtime-event upload attempts for that turn have settled. When the server accepts and persists the terminal event, Workflow session reads SHALL resolve the latest turn to `completed` or `failed` from that event and MUST NOT continue to present it as running.
 
@@ -24,7 +24,7 @@ The terminal event SHALL be reported only after all input and projected runtime-
 
 ### Requirement: Reused Workflow AgentSessions converge after each turn
 
-When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSession, each turn SHALL record its own input and runtime activity and SHALL attempt its own terminal event. Before accepting activity that resumes a session after `session.closed`, the system MUST persist the pending prior turn as a distinct transcript turn. This boundary MUST NOT depend on a persistence timer firing, elapsed wall time, runner delay, or an explicit test-only flush. Starting a later turn MUST allow the session to record new activity, and the later turn's accepted terminal event SHALL determine the session's latest completed or failed state.
+When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSession, each turn SHALL record its own input and runtime activity and SHALL attempt its own terminal event. Before accepting the later turn's `session.input`, the system MUST persist the pending prior turn as a distinct transcript turn. This boundary MUST NOT depend on a persistence timer firing, elapsed wall time, runner delay, or an explicit test-only flush. Starting a later turn MUST allow the session to record new activity, and the later turn's accepted terminal event SHALL determine the session's latest completed or failed state.
 
 #### Scenario: A later turn reuses a completed Workflow session
 
@@ -40,10 +40,10 @@ When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSessi
 - **AND** each turn SHALL retain its own input and activity
 - **AND** the first turn's input and parts MUST NOT be overwritten, merged into the second turn, or assigned to the second input
 
-#### Scenario: Prior turn persistence fails before resume
+#### Scenario: Prior turn persistence fails before later input
 
-- **WHEN** new activity would resume a Workflow AgentSession after `session.closed` but persistence of the pending prior turn fails
-- **THEN** the system SHALL reject that new activity without appending it to the pending prior turn
+- **WHEN** a later turn's `session.input` arrives after `session.closed` but persistence of the pending prior turn fails
+- **THEN** the system SHALL reject that input without appending it to the pending prior turn
 - **AND** the pending prior turn SHALL remain available for a later persistence attempt
 
 ### Requirement: Terminal reporting failure does not control Workflow completion

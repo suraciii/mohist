@@ -28,9 +28,28 @@ The reported runtime events SHALL preserve the observable facts produced by the 
 - **THEN** the runner SHALL report the missing normalized events produced by final-response reconciliation
 - **AND** it MUST NOT duplicate content already reported from the live event stream
 
+### Requirement: Session input creates a deterministic transcript boundary
+
+Before accepting a `session.input` while prior transcript data is pending for the same logical AgentSession, the system MUST persist that prior data as a distinct transcript turn. The boundary MUST NOT depend on a persistence timer firing, elapsed wall time, runner delay, or an explicit test-only flush.
+
+#### Scenario: Back-to-back inputs retain separate turns
+
+- **WHEN** two Workflow turn event sequences begin with separate `session.input` events on the same logical and physical AgentSession without advancing time or manually flushing between them
+- **THEN** the transcript SHALL contain two distinct turns in input order
+- **AND** each turn SHALL retain its own input and accepted activity
+- **AND** the first input and its parts MUST NOT be overwritten, merged into the second turn, or assigned to the second input
+
+#### Scenario: Prior transcript persistence fails before a new input
+
+- **WHEN** a later `session.input` arrives while prior transcript data is pending and persistence of that prior data fails
+- **THEN** the system SHALL reject the later input without replacing the pending prior input or appending the later input to the prior turn
+- **AND** the pending prior data SHALL remain available for a later persistence attempt
+
 ### Requirement: Transcript reporting is best-effort and independent of the turn result
 
 Workflow AgentSession event uploads SHALL be best-effort. An upload failure MUST be made observable for diagnosis, but MUST NOT prevent the OpenCode prompt from running, change a successful turn to failed, replace the turn's runtime failure, or prevent the Workflow task from receiving the runtime result. Failed uploads SHALL NOT be retried or written to a local fallback by this change.
+
+The runner MUST NOT report assistant, tool, usage, model, or terminal events for a turn whose `session.input` report was rejected. This prevents orphan events from being attached to a previously closed turn while preserving the OpenCode result.
 
 #### Scenario: Initial input upload fails
 
@@ -38,6 +57,7 @@ Workflow AgentSession event uploads SHALL be best-effort. An upload failure MUST
 - **THEN** the runner SHALL still execute the OpenCode turn and return its runtime result
 - **AND** the reporting failure SHALL be observable
 - **AND** the runner SHALL NOT retry or locally persist the failed upload
+- **AND** the runner SHALL NOT report later runtime or terminal events for that unrecorded turn
 
 #### Scenario: Runtime event upload fails after the turn starts
 
