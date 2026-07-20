@@ -14,7 +14,12 @@ interface RecoveryConfig {
 }
 
 export class UnresolvedFailureReferenceError extends Error {
-  constructor(message: string, readonly path: string, readonly recoveryTaskId: string) {
+  constructor(
+    message: string,
+    readonly path: string,
+    readonly recoveryTaskId: string,
+    readonly promptKey?: string,
+  ) {
     super(message)
     this.name = "UnresolvedFailureReferenceError"
   }
@@ -52,7 +57,7 @@ export function tryRecovery(
       renderedHandlerTasks.push(renderRecoveryTask(task, failureContext, effectiveVariables))
     } catch (error) {
       if (error instanceof UnresolvedFailureReferenceError) {
-        return failureResult(work, formatFailureDiagnostic(task.id, error.path))
+        return failureResult(work, formatFailureDiagnostic(task.id, error, failureContext))
       }
       throw error
     }
@@ -289,7 +294,14 @@ function renderFieldString(
     if (body === undefined) {
       throw new Error("Recovery task references ${{ prompts." + key + " }} but the prompt body is not available in the dispatch context")
     }
-    return expandFailureValue(body, failureContext)
+    try {
+      return expandFailureValue(body, failureContext)
+    } catch (error) {
+      if (error instanceof UnresolvedFailureReferenceError) {
+        throw new UnresolvedFailureReferenceError(error.message, error.path, error.recoveryTaskId, key)
+      }
+      throw error
+    }
   }
   return expandFailureString(value, failureContext)
 }
@@ -302,8 +314,27 @@ function resolvePromptBody(variables: JsonObject | null, key: string): JsonValue
   return body ?? undefined
 }
 
-function formatFailureDiagnostic(recoveryTaskId: string, path: string): string {
-  return `recovery task '${recoveryTaskId}' references unresolved failure path '${path}'. Ensure the triggering action emits the referenced field in its output or error.`
+function formatFailureDiagnostic(
+  recoveryTaskId: string,
+  error: UnresolvedFailureReferenceError,
+  failureContext: JsonObject,
+): string {
+  const prompt = error.promptKey ? ` in Prompt '${error.promptKey}'` : ""
+  return `recovery task '${recoveryTaskId}'${prompt} references unresolved failure expression '${"${{ " + error.path + " }}"}'. ` +
+    `Available failure context: ${availableFailureContext(failureContext)}.`
+}
+
+function availableFailureContext(failureContext: JsonObject): string {
+  const output = describeFailureValue(failureContext.output)
+  const error = describeFailureValue(failureContext.error)
+  return `failure.output ${output}; failure.error ${error}`
+}
+
+function describeFailureValue(value: JsonValue | undefined): string {
+  if (value === null || value === undefined) return "is unavailable"
+  if (!isObject(value)) return `is ${typeof value}`
+  const fields = Object.keys(value).sort()
+  return fields.length === 0 ? "has no fields" : `fields [${fields.join(", ")}]`
 }
 
 function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {

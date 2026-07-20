@@ -307,8 +307,6 @@ public sealed record IssueWorkflowProfileResponse(
     string UpdatedAt,
     string TemplateSource);
 
-public sealed record IssuePromptUpsertRequest(string? Body);
-
 /// <summary>
 /// Single bucket in the completion time-series. <c>Boundary</c> is the
 /// ISO calendar boundary that the bucket represents (yyyy-MM-dd for

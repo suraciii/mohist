@@ -18,4 +18,15 @@ public class BuiltInPromptStructureTests
             Assert.False(string.IsNullOrWhiteSpace(template.Body), $"{key}: Body is required");
         }
     }
+
+    [Fact]
+    public void FixPrChecksPrompt_UsesProjectPrContextAndFailureError()
+    {
+        var body = new FilePromptLoader().LoadAllTemplates()["fix-pr-checks"].Body;
+
+        Assert.Contains("${{ vars.github.pr.number }}", body);
+        Assert.Contains("${{ vars.github.pr.url }}", body);
+        Assert.Contains("${{ failure.error.message }}", body);
+        Assert.DoesNotContain("${{ failure.output", body);
+    }
 }

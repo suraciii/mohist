@@ -153,59 +153,6 @@ public class IssueWorkflowProfileManager : IScopedService
     }
 
     // =======================================================================
-    // Prompts
-    // =======================================================================
-
-    public async Task<Dictionary<string, string>> GetPromptsAsync(string projectId, int issueNumber)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await FindProfileAsync(db, projectId, issueNumber);
-        return profile?.Prompts ?? new(StringComparer.Ordinal);
-    }
-
-    public async Task SetPromptAsync(string projectId, int issueNumber, string key, string body)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new ArgumentException("key is required", nameof(key));
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.IssueNumber == issueNumber);
-
-        if (profile is null)
-        {
-            profile = CreateProfile(projectId, issueNumber);
-            profile.Variables = VariableBundle.Empty.ToJson();
-            profile.Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body };
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
-            db.IssueWorkflowProfiles.Add(profile);
-        }
-        else
-        {
-            profile.Prompts[key] = body;
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await db.SaveChangesAsync();
-    }
-
-    public async Task DeletePromptAsync(string projectId, int issueNumber, string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new ArgumentException("key is required", nameof(key));
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.IssueNumber == issueNumber);
-
-        if (profile is null) return;
-
-        if (!profile.Prompts.Remove(key)) return;
-        profile.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync();
-    }
-
-    // =======================================================================
     // Helpers
     // =======================================================================
 

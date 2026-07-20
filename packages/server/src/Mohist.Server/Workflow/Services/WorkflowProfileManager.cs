@@ -424,22 +424,13 @@ public class WorkflowProfileManager : IScopedService
     // Prompts
     // =======================================================================
 
-    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, int? issueNumber = null)
+    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-        var iid = issueNumber ?? context.IssueNumber;
 
-        // 1. issue prompts
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, context.RunExists));
-        if (issueProfile is not null)
-        {
-            if (issueProfile.Prompts.TryGetValue(key, out var body))
-                return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, "issue");
-        }
-
-        // 2. project prompts
+        // Project prompts replace builtin bodies by key.
         if (!string.IsNullOrWhiteSpace(pid))
         {
             var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
@@ -455,7 +446,6 @@ public class WorkflowProfileManager : IScopedService
             }
         }
 
-        // 3. system prompts
         var systemTemplatesMap = _promptLoader.LoadAllTemplates();
         if (systemTemplatesMap.TryGetValue(key, out var sys))
             return new ResolvedPrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
@@ -463,12 +453,11 @@ public class WorkflowProfileManager : IScopedService
         return null;
     }
 
-    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, int? issueNumber = null)
+    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-        var iid = issueNumber ?? context.IssueNumber;
 
         var systemTemplates = _promptLoader.LoadAllTemplates();
         Dictionary<string, string> projectPrompts;
@@ -485,28 +474,13 @@ public class WorkflowProfileManager : IScopedService
             projectPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        Dictionary<string, string> issuePrompts;
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, context.RunExists));
-        if (issueProfile is not null)
-            issuePrompts = issueProfile.Prompts;
-        else
-            issuePrompts = new Dictionary<string, string>(StringComparer.Ordinal);
-
         var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
         foreach (var k in projectPrompts.Keys)
-            keys.Add(k);
-        foreach (var k in issuePrompts.Keys)
             keys.Add(k);
 
         var results = new List<ResolvedPrompt>();
         foreach (var key in keys)
         {
-            if (issuePrompts.TryGetValue(key, out var issueBody))
-            {
-                results.Add(new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, issueBody, "issue"));
-                continue;
-            }
-
             if (projectPrompts.TryGetValue(key, out var body))
             {
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";

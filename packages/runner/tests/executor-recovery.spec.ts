@@ -54,4 +54,62 @@ describe("recovery action error protocol", () => {
     }), { status: "completed", output: JSON.stringify({ promise: "FAIL" }) })
     expect(result).toMatchObject({ status: "completed", addTasks: [{ id: "fix" }] })
   })
+
+  it("resolves the fix-pr-checks Prompt while preserving vars and expanding failure.error.message", () => {
+    const result = tryRecovery(work({
+      budget: 1,
+      handlers: [{
+        when: "error.code=pr-checks-failed",
+        tasks: [{
+          id: "recover:fix-pr-checks",
+          uses: "mohist/opencode",
+          with: { prompt: "${{ prompts.fix-pr-checks }}" },
+        }],
+        retrySelf: false,
+      }],
+    }), {
+      status: "failed",
+      error: { code: "pr-checks-failed", message: "PR checks failed" },
+    }, {
+      prompts: {
+        "fix-pr-checks": "Repair PR #${{ vars.github.pr.number }} (${{ vars.github.pr.url }}): ${{ failure.error.message }}",
+      },
+      github: { pr: { number: 42, url: "https://github.example/pr/42" } },
+    })
+
+    expect(result).toMatchObject({
+      status: "completed",
+      addTasks: [{
+        id: "recover:fix-pr-checks",
+        with: {
+          prompt: "Repair PR #${{ vars.github.pr.number }} (${{ vars.github.pr.url }}): PR checks failed",
+        },
+      }],
+    })
+  })
+
+  it("reports the Prompt, expression, and available failure context when recovery rendering fails", () => {
+    const result = tryRecovery(work({
+      budget: 1,
+      handlers: [{
+        when: "error.code=pr-checks-failed",
+        tasks: [{
+          id: "recover:fix-pr-checks",
+          with: { prompt: "${{ prompts.fix-pr-checks }}" },
+        }],
+        retrySelf: false,
+      }],
+    }), {
+      status: "failed",
+      error: { code: "pr-checks-failed", message: "PR checks failed" },
+    }, {
+      prompts: { "fix-pr-checks": "PR #${{ failure.output.prNumber }}" },
+    })
+
+    expect(result).toMatchObject({ status: "failed", error: { code: "recovery-reference-unresolved" } })
+    expect(result?.message).toContain("Prompt 'fix-pr-checks'")
+    expect(result?.message).toContain("${{ failure.output.prNumber }}")
+    expect(result?.message).toContain("failure.output is unavailable")
+    expect(result?.message).toContain("failure.error fields [code, message]")
+  })
 })

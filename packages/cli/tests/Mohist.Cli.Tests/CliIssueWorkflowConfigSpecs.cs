@@ -37,7 +37,7 @@ public class CliIssueWorkflowConfigSpecs
         Assert.True(found, $"expected key '{expectedKey}' to be present in '{varsKey}' with JSON null value");
     }
 
-    private static object SampleProfile(bool includePrompts = true) => new
+    private static object SampleProfile() => new
     {
         issueNumber = 42,
         projectId = "proj_abc",
@@ -60,16 +60,11 @@ public class CliIssueWorkflowConfigSpecs
                 ["plan"] = new { vars = new Dictionary<string, object> { ["baz"] = "qux" } },
             },
         },
-        prompts = includePrompts ? new Dictionary<string, string>
-        {
-            ["greeting"] = "Hello {{ name }}!",
-            ["plan_prompt"] = "Plan with {{ foo }}.",
-        } : null,
         updatedAt = "2026-06-26T00:00:00Z",
     };
 
     [Fact]
-    public async Task ConfigHelp_ListsFourSubcommands()
+    public async Task ConfigHelp_ListsThreeSubcommandsWithoutPromptCommands()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
         var exitCode = await MohistCliCommands.RunAsync(
@@ -80,29 +75,18 @@ public class CliIssueWorkflowConfigSpecs
         Assert.Contains("get", stdout);
         Assert.Contains("set", stdout);
         Assert.Contains("clear", stdout);
-        Assert.Contains("preview", stdout);
+        Assert.DoesNotContain("preview", stdout);
+        Assert.DoesNotContain("--prompt", stdout);
     }
 
     [Fact]
-    public async Task ConfigGet_TableMode_SendsGetRequestAndRendersThreeSections()
+    public async Task ConfigGet_TableMode_SendsGetRequestAndRendersTemplateAndVariables()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
             {
                 return RecordingHttpHandler.Json(new { success = true, data = SampleProfile() });
-            }
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts")
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new Dictionary<string, string>
-                    {
-                        ["greeting"] = "Hello {{ name }}!",
-                        ["plan_prompt"] = "Plan with {{ foo }}.",
-                    },
-                });
             }
             return null!;
         });
@@ -113,66 +97,20 @@ public class CliIssueWorkflowConfigSpecs
         Assert.Equal(0, exitCode);
         var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
         Assert.Contains(getReqs, r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile");
-        Assert.Contains(getReqs, r => r.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts");
         var stdout = output.ToString();
         Assert.Contains("template:", stdout);
         Assert.Contains("variables:", stdout);
-        Assert.Contains("prompts:", stdout);
         Assert.Contains("name: workflow", stdout);
         Assert.Contains("foo", stdout);
-        Assert.Contains("plan_prompt", stdout);
-        Assert.Contains("Hello {{ name }}!", stdout);
     }
 
     [Fact]
-    public async Task ConfigGet_TableMode_FetchesProfileThenPrompts()
+    public async Task ConfigGet_JsonMode_EmitsProfileWithoutPrompts()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
-            {
                 return RecordingHttpHandler.Json(new { success = true, data = SampleProfile() });
-            }
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts")
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new Dictionary<string, string>(),
-                });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
-        Assert.Equal(2, getReqs.Count);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile", getReqs[0].RequestUri?.PathAndQuery);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts", getReqs[1].RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigGet_JsonMode_EmitsProfileWithPrompts()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
-                return RecordingHttpHandler.Json(new { success = true, data = SampleProfile(includePrompts: false) });
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts")
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new Dictionary<string, string>
-                    {
-                        ["greeting"] = "Hello {{ name }}!",
-                        ["plan_prompt"] = "Plan with {{ foo }}.",
-                    },
-                });
-            }
             return null!;
         });
 
@@ -183,12 +121,10 @@ public class CliIssueWorkflowConfigSpecs
         var stdout = output.ToString();
         Assert.Contains("\"issueNumber\":", stdout);
         Assert.Contains("\"profileId\":", stdout);
-        Assert.Contains("\"prompts\":", stdout);
-        Assert.Contains("\"plan_prompt\":", stdout);
+        Assert.DoesNotContain("\"prompts\":", stdout);
         var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
-        Assert.Equal(2, getReqs.Count);
+        Assert.Single(getReqs);
         Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile", getReqs[0].RequestUri?.PathAndQuery);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts", getReqs[1].RequestUri?.PathAndQuery);
     }
 
     [Fact]
@@ -272,175 +208,6 @@ public class CliIssueWorkflowConfigSpecs
         Assert.Contains("Issue 42 not found", error.ToString());
         var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
         Assert.Single(getReqs);
-    }
-
-    [Fact]
-    public async Task ConfigGet_TableMode_ServerErrorOnPrompts_SurfacesErrorAndExitsNonZero()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
-                return RecordingHttpHandler.Json(new { success = true, data = SampleProfile(includePrompts: false) });
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts")
-            {
-                return RecordingHttpHandler.JsonError(
-                    "Prompt list unavailable",
-                    code: "prompt_list_failed",
-                    statusCode: HttpStatusCode.InternalServerError);
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("Prompt list unavailable", error.ToString());
-        Assert.Equal(2, handler.Requests.Count(r => r.Method == HttpMethod.Get));
-    }
-
-    [Fact]
-    public async Task ConfigPreview_TableMode_SendsPostAndPrintsRenderedText()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan_prompt/preview")
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        rendered = "Plan with bar.",
-                        missing = new string[] { },
-                        depth = 1,
-                    },
-                });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan_prompt", "-o", "table"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan_prompt/preview", postReq.RequestUri?.PathAndQuery);
-        Assert.Equal("Plan with bar.", output.ToString().Trim());
-    }
-
-    [Fact]
-    public async Task ConfigPreview_JsonMode_EmitsRawPayload()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Post)
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        rendered = "Plan with bar.",
-                        missing = new string[] { },
-                        depth = 1,
-                    },
-                });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan_prompt", "-o", "json"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("\"rendered\":", stdout);
-        Assert.Contains("Plan with bar.", stdout);
-    }
-
-    [Fact]
-    public async Task ConfigPreview_AcceptsProjectAndProjectIdAlias()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Post)
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { rendered = "x", missing = new string[] { }, depth = 0 },
-                });
-            return null!;
-        });
-
-        var byName = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan_prompt", "--project", "proj_abc"], output, error, fs, executor);
-        Assert.Equal(0, byName);
-        var postReq1 = handler.Requests.Last(r => r.Method == HttpMethod.Post);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan_prompt/preview", postReq1.RequestUri?.PathAndQuery);
-
-        var byId = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan_prompt", "--project-id", "proj_abc"], output, error, fs, executor);
-        Assert.Equal(0, byId);
-        var postReq2 = handler.Requests.Last(r => r.Method == HttpMethod.Post);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan_prompt/preview", postReq2.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigPreview_PromptKeyIsUrlEscaped()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Post)
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { rendered = "ok", missing = new string[] { }, depth = 0 },
-                });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan prompt"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan%20prompt/preview", postReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigPreview_PromptKeyContainingSlash_IsRejectedBeforeRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "bad/key"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigPreview_ServerError_SurfacesErrorAndExitsNonZero()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Post)
-            {
-                return RecordingHttpHandler.JsonError(
-                    "Prompt 'plan_prompt' not found",
-                    code: "prompt_not_found",
-                    statusCode: HttpStatusCode.NotFound);
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "preview", "42", "plan_prompt"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("Prompt 'plan_prompt' not found", error.ToString());
     }
 
     [Fact]
@@ -652,152 +419,7 @@ public class CliIssueWorkflowConfigSpecs
     }
 
     [Fact]
-    public async Task ConfigSet_PromptInline_PutsBody()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "You are..." } });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "greeting=You are..."], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting", putReq.RequestUri?.PathAndQuery);
-        var body = JsonNode.Parse(putReq.Body!) as JsonObject;
-        Assert.Equal("You are...", body!["body"]?.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task ConfigSet_PromptInline_TableMode_RendersPromptResponse()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "You are..." } });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "greeting=You are...", "-o", "table"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("prompt: greeting", stdout);
-        Assert.Contains("You are...", stdout);
-    }
-
-    [Fact]
-    public async Task ConfigSet_PromptInline_JsonMode_EmitsPromptResponseJson()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "You are..." } });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "greeting=You are...", "-o", "json"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("\"key\":", stdout);
-        Assert.Contains("\"greeting\"", stdout);
-        Assert.Contains("\"body\":", stdout);
-    }
-
-    [Fact]
-    public async Task ConfigSet_PromptAtFile_ReadsFileAndPutsBody()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "Hello from file." } });
-            }
-            return null!;
-        });
-        fs.AddFile("/prompts/greeting.md", "Hello from file.");
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "greeting=@/prompts/greeting.md"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
-        var body = JsonNode.Parse(putReq.Body!) as JsonObject;
-        Assert.Equal("Hello from file.", body!["body"]?.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task ConfigSet_PromptKey_IsUrlEscaped()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Put)
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "plan prompt=hi"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan%20prompt", putReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigSet_PromptKeyContainingSlash_IsRejectedBeforeRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "bad/key=hi"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigSet_VarWithInvalidPromptKey_MakesNoRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["issue", "workflow", "config", "set", "42", "--var", "foo=bar", "--prompt", "bad/key=hi"],
-            output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigSet_TemplateAndVarWithMissingPromptFile_MakesNoRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-        fs.AddFile("/wf.yaml", "name: workflow\n");
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["issue", "workflow", "config", "set", "42", "--template", "@/wf.yaml", "--var", "foo=bar", "--prompt", "greeting=@/missing.md"],
-            output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("could not read file", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigSet_Composite_IssuesAllThreeRequests()
+    public async Task ConfigSet_Composite_IssuesTemplateAndVariablesRequests()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
@@ -811,17 +433,15 @@ public class CliIssueWorkflowConfigSpecs
             http,
             ["issue", "workflow", "config", "set", "42",
                 "--template", "@/wf.yaml",
-                "--var", "foo=bar",
-                "--prompt", "greeting=hi"],
+                "--var", "foo=bar"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var puts = handler.Requests.Where(r => r.Method == HttpMethod.Put).ToList();
         var patches = handler.Requests.Where(r => r.Method == HttpMethod.Patch).ToList();
-        Assert.Equal(2, puts.Count);
+        Assert.Single(puts);
         Assert.Single(patches);
         Assert.Contains(puts, p => p.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/template");
-        Assert.Contains(puts, p => p.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting");
         Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/variables", patches[0].RequestUri?.PathAndQuery);
     }
 
@@ -849,19 +469,6 @@ public class CliIssueWorkflowConfigSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
         Assert.Contains("<stage>.k=v", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigSet_MalformedPromptNoEquals_PrintsErrorAndExitsNonZero()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--prompt", "novalue"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("key=body", error.ToString());
     }
 
     [Fact]
@@ -1094,157 +701,6 @@ public class CliIssueWorkflowConfigSpecs
     }
 
     [Fact]
-    public async Task ConfigClear_Prompt_DeletesPrompt()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-            {
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", "greeting"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting", deleteReq.RequestUri?.PathAndQuery);
-        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-    }
-
-    [Fact]
-    public async Task ConfigClear_Prompt_TableMode_RendersDeletedPrompt()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-                return RecordingHttpHandler.Json(new { success = true });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", "greeting", "-o", "table"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("prompt: greeting", stdout);
-        Assert.Contains("deleted: yes", stdout);
-    }
-
-    [Fact]
-    public async Task ConfigClear_Prompt_JsonMode_EmitsDeletedPromptJson()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
-                return RecordingHttpHandler.Json(new { success = true });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", "greeting", "-o", "json"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("\"key\":", stdout);
-        Assert.Contains("\"greeting\"", stdout);
-        Assert.Contains("\"deleted\": true", stdout);
-        Assert.DoesNotContain("OK", stdout);
-    }
-
-    [Fact]
-    public async Task ConfigClear_PromptKey_IsUrlEscaped()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Delete)
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", "plan prompt"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan%20prompt", deleteReq.RequestUri?.PathAndQuery);
-    }
-
-    [Fact]
-    public async Task ConfigClear_PromptKeyContainingSlash_IsRejectedBeforeRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", "bad/key"], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigClear_VarWithInvalidPromptKey_MakesNoRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["issue", "workflow", "config", "clear", "42", "--var", "foo", "--prompt", "bad/key"],
-            output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigClear_TemplateWithInvalidPromptKey_MakesNoRequest()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["issue", "workflow", "config", "clear", "42", "--template", "--prompt", "bad/key"],
-            output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not contain '/'", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigClear_VarAndPrompt_IssuesBothAndLeavesOthersIntact()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
-        {
-            if (req.Method == HttpMethod.Patch || req.Method == HttpMethod.Delete)
-                return RecordingHttpHandler.Json(new { success = true, data = new { } });
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["issue", "workflow", "config", "clear", "42",
-                "--var", "foo",
-                "--prompt", "greeting"],
-            output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/variables", patchReq.RequestUri?.PathAndQuery);
-        var patchBody = JsonNode.Parse(patchReq.Body!) as JsonObject;
-        AssertVariableSetToJsonNull(patchBody, "vars", "foo");
-
-        var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
-        Assert.Equal("/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting", deleteReq.RequestUri?.PathAndQuery);
-
-        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Put);
-    }
-
-    [Fact]
     public async Task ConfigClear_VarAndTemplate_IssuesBoth()
     {
         var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
@@ -1339,19 +795,6 @@ public class CliIssueWorkflowConfigSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
         Assert.Contains("empty key", error.ToString());
-    }
-
-    [Fact]
-    public async Task ConfigClear_EmptyPromptKey_PrintsErrorAndExitsNonZero()
-    {
-        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--prompt", ""], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Empty(handler.Requests);
-        Assert.Contains("must not be empty", error.ToString());
     }
 
     [Fact]

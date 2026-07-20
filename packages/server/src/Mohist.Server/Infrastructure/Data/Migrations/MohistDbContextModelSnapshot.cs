@@ -1311,12 +1311,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int>("IssueNumber")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Prompts")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("{}");
-
                     b.Property<string>("SourceTemplateId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");

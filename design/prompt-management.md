@@ -107,6 +107,5 @@ Issue 和 WorkflowRun 不提供 Prompt API。
 
 - 当前 Project Prompt 同时暴露 `/templates`、`/workflow-profile/prompts` 等重复路径；目标
   只保留 Project `/prompts` resource。
-- 当前实现仍允许 Issue-scoped Prompt overrides；目标模型删除对应存储、API、CLI 和 UI。
 - 当前部分 Profile 解析代码会预先组装 Prompt map；目标实现只传 key，并在执行时读取
   单个 Project Prompt。

@@ -279,12 +279,12 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (string.IsNullOrWhiteSpace(effectiveProfileId))
             throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
 
-        var effectiveProfile = _profiles.Get(effectiveProfileId);
-        var mergedPrompts = effectiveProfile is MohistIssueWorkflowProfileBase mohistProfile
-            ? await mohistProfile.GetMergedPromptsAsync(issue.ProjectId)
-            : new Dictionary<string, string>(StringComparer.Ordinal);
-
-        await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
+        var availablePrompts = await _workflowProfileManager.LoadPromptsAsync(
+            wrId,
+            projectId: issue.ProjectId);
+        EnsurePromptsReferencesResolve(
+            definition,
+            availablePrompts.Select(prompt => prompt.Key).ToHashSet(StringComparer.Ordinal));
 
         // T1: persist the issue's built-in calling context on the issue
         // profile. Global (config.jsonc) and project Variables are NOT baked
@@ -302,9 +302,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.ProjectId, issue.Number);
         var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
         await _issueProfileManager.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
-
-        foreach (var (key, body) in mergedPrompts)
-            await _issueProfileManager.SetPromptAsync(issue.ProjectId, issue.Number, key, body);
 
         return (repositoryContext, workspace, new IssueWorkStartedContext(
             issue.ProjectId,
@@ -1238,7 +1235,9 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         return undelivered;
     }
 
-    private async Task EnsurePromptsReferencesResolveAsync(Workflow.Domain.Definition.WorkflowDefinition definition, IReadOnlyDictionary<string, string> mergedPrompts)
+    private static void EnsurePromptsReferencesResolve(
+        Workflow.Domain.Definition.WorkflowDefinition definition,
+        IReadOnlySet<string> availablePromptKeys)
     {
         var referencedKeys = PromptReferenceScanner.Scan(definition);
         if (referencedKeys.Count == 0) return;
@@ -1247,7 +1246,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         foreach (var key in referencedKeys)
         {
             var topLevel = key.Split('.', 2)[0];
-            if (!mergedPrompts.ContainsKey(topLevel))
+            if (!availablePromptKeys.Contains(topLevel))
                 missing.Add(key);
         }
         if (missing.Count > 0)

@@ -1,6 +1,4 @@
 using System.CommandLine;
-using System.Text.Json.Nodes;
-
 namespace Mohist.Cli;
 
 internal static partial class IssueCommands
@@ -67,9 +65,8 @@ internal static partial class IssueCommands
 
     private static Command BuildWorkflowConfig(MohistCliApi api)
     {
-        var config = new Command("config", "Issue workflow configuration overrides (template / variables / prompts)");
+        var config = new Command("config", "Issue workflow configuration overrides (template / variables)");
         config.Subcommands.Add(BuildWorkflowConfigGet(api));
-        config.Subcommands.Add(BuildWorkflowConfigPreview(api));
         config.Subcommands.Add(BuildWorkflowConfigSet(api));
         config.Subcommands.Add(BuildWorkflowConfigClear(api));
         return config;
@@ -77,7 +74,7 @@ internal static partial class IssueCommands
 
     private static Command BuildWorkflowConfigGet(MohistCliApi api)
     {
-        var cmd = new Command("get", "Show the issue's full workflow profile (template / variables / prompts)");
+        var cmd = new Command("get", "Show the issue's workflow profile (template / variables)");
         var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -102,29 +99,19 @@ internal static partial class IssueCommands
 
                 var profilePath = ProjectIssuesPath(
                     resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile");
-                var promptsPath = ProjectIssuesPath(
-                    resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile/prompts");
-
-                return await PrintWorkflowProfileAsync(api, profilePath, promptsPath, mode);
+                return await PrintWorkflowProfileAsync(api, profilePath, mode);
             }
         });
         return cmd;
     }
 
-    private static async Task<int> PrintWorkflowProfileAsync(MohistCliApi api, string profilePath, string promptsPath, string mode)
+    private static async Task<int> PrintWorkflowProfileAsync(MohistCliApi api, string profilePath, string mode)
     {
         var (exitCode, dataNode) = await api.GetDataOrPrintErrorAsync(profilePath);
         if (exitCode != 0)
             return exitCode;
         if (dataNode is null)
             return 1;
-
-        var (promptsExitCode, promptsData) = await api.GetDataOrPrintErrorAsync(promptsPath);
-        if (promptsExitCode != 0)
-            return promptsExitCode;
-        if (promptsData is null)
-            return 1;
-        dataNode["prompts"] = promptsData.DeepClone();
 
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
@@ -135,56 +122,9 @@ internal static partial class IssueCommands
         return await api.RenderTableAsync(dataNode, MohistCliApi.TableShape.WorkflowProfile);
     }
 
-    private static Command BuildWorkflowConfigPreview(MohistCliApi api)
-    {
-        var cmd = new Command("preview", "Render a prompt under the issue's current variables and template");
-        var numberArg = NumberArg();
-        var keyArg = new Argument<string>("key") { Description = "Prompt key (e.g. plan_prompt)" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(numberArg);
-        cmd.Arguments.Add(keyArg);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var number = ctx.GetValue(numberArg);
-            var key = ctx.GetValue(keyArg);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            var output = ctx.GetValue(outputOpt);
-            return PreviewAsync();
-
-            async Task<int> PreviewAsync()
-            {
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    api.Error.WriteLine("prompt key is required");
-                    return 1;
-                }
-                if (key.Contains('/'))
-                {
-                    api.Error.WriteLine($"prompt key '{key}' must not contain '/'");
-                    return 1;
-                }
-                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
-                if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                return await api.PrintPostWithOutputAsync(
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile/prompts/{Uri.EscapeDataString(key!)}/preview"),
-                    new { },
-                    mode,
-                    nameof(MohistCliApi.TableShape.WorkflowProfilePreview));
-            }
-        });
-        return cmd;
-    }
-
     private static Command BuildWorkflowConfigClear(MohistCliApi api)
     {
-        var cmd = new Command("clear", "Composite config removals (template / variables / prompts)");
+        var cmd = new Command("clear", "Composite config removals (template / variables)");
         var numberArg = NumberArg();
         var templateOpt = new Option<bool>("--template")
         {
@@ -195,17 +135,11 @@ internal static partial class IssueCommands
             Description = "Remove a variable by key. Use '<stage>.k' for stage-scoped variables. Repeatable; merged into one PATCH /workflow-profile/variables with each key set to null.",
             AllowMultipleArgumentsPerToken = true,
         };
-        var promptOpt = new Option<string[]?>("--prompt")
-        {
-            Description = "Remove a prompt by key. Repeatable; one DELETE /workflow-profile/prompts/<key> per occurrence.",
-            AllowMultipleArgumentsPerToken = true,
-        };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(templateOpt);
         cmd.Options.Add(varOpt);
-        cmd.Options.Add(promptOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -213,21 +147,19 @@ internal static partial class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var vars = ctx.GetValue(varOpt);
-            var prompts = ctx.GetValue(promptOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var templateProvided = IsOptionProvided(ctx, templateOpt);
             var varProvided = ctx.GetResult(varOpt) is not null;
-            var promptProvided = ctx.GetResult(promptOpt) is not null;
             return ClearAsync();
 
             async Task<int> ClearAsync()
             {
-                var hasAnyClear = templateProvided || varProvided || promptProvided;
+                var hasAnyClear = templateProvided || varProvided;
                 if (!hasAnyClear)
                 {
-                    api.Error.WriteLine("nothing to clear — pass at least one of --template, --var, or --prompt");
+                    api.Error.WriteLine("nothing to clear — pass at least one of --template or --var");
                     return 1;
                 }
 
@@ -242,7 +174,6 @@ internal static partial class IssueCommands
                     $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile");
 
                 var varsPatchBody = new Dictionary<string, object?>(StringComparer.Ordinal);
-                var promptKeys = new List<string>();
 
                 if (varProvided)
                 {
@@ -284,25 +215,6 @@ internal static partial class IssueCommands
                         varsPatchBody["stages"] = stagesPayload;
                 }
 
-                if (promptProvided)
-                {
-                    foreach (var key in prompts!)
-                    {
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not be empty");
-                            return 1;
-                        }
-                        if (key.Contains('/'))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not contain '/'");
-                            return 1;
-                        }
-
-                        promptKeys.Add(key);
-                    }
-                }
-
                 if (varProvided)
                 {
                     var patchExit = await api.PrintPatchWithOutputAsync(
@@ -322,24 +234,6 @@ internal static partial class IssueCommands
                         nameof(MohistCliApi.TableShape.WorkflowProfile));
                     if (deleteExit != 0)
                         return deleteExit;
-                }
-
-                if (promptProvided)
-                {
-                    foreach (var key in promptKeys)
-                    {
-                        var promptExit = await api.PrintDeleteWithOutputAsync(
-                            $"{issuePath}/prompts/{Uri.EscapeDataString(key)}",
-                            mode,
-                            nameof(MohistCliApi.TableShape.WorkflowProfilePrompt),
-                            new JsonObject
-                            {
-                                ["key"] = key,
-                                ["deleted"] = true,
-                            });
-                        if (promptExit != 0)
-                            return promptExit;
-                    }
                 }
 
                 return 0;

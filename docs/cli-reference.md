@@ -410,8 +410,8 @@ mo update runner                    仅升级执行器
 
 - 当前 `mo project workflow template` 与 `mo project workflow config` 仍把 Profile、
   Variables 和 Prompts 分成旧 template/config 结构；目标命令面以本文三个独立资源组为准。
-- 当前 `mo issue workflow config` 仍支持 inline template 和 Issue Prompt；目标命令面只
-  保留 Profile 选择与 Issue Variables。
+- 当前 `mo issue workflow config` 仍支持 inline template；目标命令面只保留 Profile
+  选择与 Issue Variables。
 - **查单条动词未收敛**：本文的目标动词是 `get`，当前实装中 issue / project / epic / agent 等主要资源用的是 `show`（`get` 已用于 skills、template、config 等）。操作类文档（快速上手、Issue 管理等）按当前实装写 `show`，保证示例可直接运行；动词收敛到 `get` 随各命令组改进 issue 推进。
 - issue-407 已交付两种来源统一的 Compact / Reset 命令面。`compact` 原地压缩并保持
   当前 Runtime Session；`reset` 只在 Session 空闲且原绑定仍为当前绑定时建立没有旧上下文的

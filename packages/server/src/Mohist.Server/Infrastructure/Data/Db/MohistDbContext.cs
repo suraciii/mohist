@@ -700,13 +700,6 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueNumber).IsRequired();
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
-            entity.Property(e => e.Prompts)
-                .HasConversion(
-                    v => JSON.Serialize(v),
-                    v => JSON.DeserializeDictionary(v))
-                .IsRequired()
-                .HasDefaultValue(new Dictionary<string, string>());
-            entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber }).IsUnique();
         });
 

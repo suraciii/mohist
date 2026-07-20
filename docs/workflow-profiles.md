@@ -197,7 +197,6 @@ CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只�
   目标模型会统一为 Project 的 Workflow Profile collection。
 - 当前有活动 Workflow 时还不能更换 Issue 的 Profile；目标行为允许提前选择下一次运行
   使用的 Profile，同时保持当前运行不变。
-- 当前 Issue 仍支持 Prompt override；目标模型只保留 Project Prompt。
 - 当前进行中的 Workflow 还没有完整保存启动时的 Workflow Definition；目标行为是
   Definition snapshot 固定，运行时仍可产生新的任务，Variables 和 Prompts 继续按各自
   时机解析。
