@@ -96,6 +96,8 @@ When an existing Workflow-origin OpenCode idle Follow-up, Compact, or Reset wins
 
 Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow-origin Compact and Reset command delivery SHALL also carry optional project, WorkflowRun, and session-name identity resolved by the Session authority; generic AgentSession commands SHALL omit it. The owning Runner SHALL use that identity to consult the Workflow coordinator even when no prior Workflow open has populated process-local Session mappings.
 
+After Runner restart clears ended in-process command leases, Workflow open and bind SHALL still reject same-binding or replacement admission while the AgentSession authority has an unresolved Follow-up, Compact, or Reset reservation. A persisted terminal command outcome MAY be cleared before admission; unresolved state MUST remain fenced until idempotent command retry or abandon settles it. The Workflow Action SHALL expose this rejection as actionable `session-binding-failed`.
+
 #### Scenario: Concurrent tasks on one Session are serialized
 
 - **WHEN** two Workflow tasks concurrently target the same logical Pi AgentSession
@@ -136,6 +138,12 @@ Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow
 - **WHEN** the Runner process restarts after an unconfirmed in-process Pi interruption
 - **THEN** the new PiRuntime and coordinator SHALL start with empty execution-quarantine state
 - **AND** persisted reporting or missing-session state SHALL continue to apply independently
+
+#### Scenario: Restart cannot bypass an unresolved command reservation
+
+- **WHEN** the Runner restarts after Compact or Reset changes Runtime state but before Server completion is acknowledged
+- **THEN** Workflow open and bind SHALL reject same-binding or replacement admission with actionable `session-binding-failed` while the Server reservation is unresolved
+- **AND** admission SHALL resume only after idempotent command retry or abandon settles that reservation
 
 #### Scenario: A command reservation acquired first blocks Workflow bind
 
