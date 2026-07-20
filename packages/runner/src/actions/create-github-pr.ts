@@ -1,4 +1,4 @@
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
@@ -176,8 +176,9 @@ export async function openOrReusePr(
 
 export function buildCreateGitHubPrOutput(output: CreateGitHubPrOutput): ActionResult {
   if (output.status === "completed") {
-    const { errorCode: _errorCode, message: _message, ...success } = output
-    return succeed(JSON.stringify(success))
+    const { errorCode: _errorCode, message: _message, output: _output, steps, ...rest } = output
+    const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
+    return succeed(success)
   }
   return actionFail(output.errorCode ?? "create-pr-failed", output.message ?? output.output, { exitCode: 1 })
 }

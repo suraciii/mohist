@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource } from "./delivery-context.js"
@@ -75,9 +75,14 @@ async function processAction(context: ActionContext): Promise<ActionResult> {
   const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
   if (!command) return fail("invalid-input", "Process action requires command")
   const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
-  return result.exitCode === 0
-    ? succeed(result.stdout.trim(), { exitCode: result.exitCode })
-    : fail("process-failed", result.stderr.trim() || `Process exited with code ${result.exitCode}`, { exitCode: result.exitCode })
+  if (result.exitCode === 0) {
+    const output: JsonObject = {
+      stdout: result.stdout.trim(),
+      exitCode: result.exitCode,
+    }
+    return succeed(output, { exitCode: result.exitCode })
+  }
+  return fail("process-failed", result.stderr.trim() || `Process exited with code ${result.exitCode}`, { exitCode: result.exitCode })
 }
 
 async function scriptAction(context: ActionContext): Promise<ActionResult> {
@@ -93,7 +98,8 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
     if (result.exitCode !== 0) {
       return fail(result.status === "timeout" ? "timeout" : "script-failed", `Script failed: ${firstLine(run)}${result.stderr.trim() ? `: ${trim(result.stderr)}` : ""}`, { exitCode: result.exitCode })
     }
-    return succeed(JSON.stringify({ kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }), { exitCode: result.exitCode })
+    const output: JsonObject = { kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }
+    return succeed(output, { exitCode: result.exitCode })
   } finally {
     await deleteFile(file)
   }
@@ -103,7 +109,7 @@ async function artifactExistsAction(context: ActionContext): Promise<ActionResul
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return fail("invalid-input", "Artifact check requires 'path'")
   const found = exists(path)
-  const output = JSON.stringify({ kind: "artifact-exists", path, exists: found })
+  const output: JsonObject = { kind: "artifact-exists", path, exists: found }
   return found ? succeed(output) : fail("artifact-missing", `Artifact missing: ${path}`)
 }
 
@@ -114,7 +120,7 @@ async function markerAction(context: ActionContext): Promise<ActionResult> {
   if (!exists(path)) return fail("artifact-missing", `Marker file missing: ${path}`)
   const content = await readText(path)
   const found = matchesMarker(content, expect)
-  const output = JSON.stringify({ kind: "marker", path, marker: expect, found })
+  const output: JsonObject = { kind: "marker", path, marker: expect, found }
   return found ? succeed(output) : fail("marker-missing", `Marker missing in ${path}`)
 }
 
@@ -176,7 +182,8 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
 
 function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null, conflictFiles: string[], checkedAt: string): ActionResult {
   if (!canMerge) return fail("merge-not-ready", error ?? "Merge is not ready", { exitCode })
-  return succeed(JSON.stringify({ kind: "merge-ready", targetBranch: baseBranch, strategy: "squash", baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles, checkedAt }), { exitCode })
+  const output: JsonObject = { kind: "merge-ready", targetBranch: baseBranch, strategy: "squash", baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles, checkedAt }
+  return succeed(output, { exitCode })
 }
 
 function firstLine(value: string) {

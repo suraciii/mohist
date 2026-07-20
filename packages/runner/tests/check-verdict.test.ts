@@ -69,7 +69,7 @@ describe("Check verdict validation", () => {
   })
 
   it("AllChecksPass_ReturnsPassStatus", async () => {
-    mockAction({ output: "Marker found in /tmp/test-work/review.md" })
+    mockAction({ output: { kind: "marker", found: true } })
     const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "/tmp/test-work/review.md", expect: "<promise>PASS</promise>" } }])
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("pass")

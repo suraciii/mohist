@@ -56,7 +56,7 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(moCalls).toEqual([
@@ -160,7 +160,7 @@ describe("mohist/merge-github-pr action", () => {
       target: "master",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.prNumber).toBe(9)
@@ -311,7 +311,7 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(checksCalls).toBeGreaterThanOrEqual(3)
@@ -357,7 +357,7 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThan(1)
@@ -402,7 +402,7 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBe(3)
@@ -525,7 +525,7 @@ describe("mohist/merge-github-pr action", () => {
       prNumber: 42,
       subject: "Issue title",
     }, { project: { id: "proj_1", path: PROJECT_PATH } }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls.every((call) => call.cwd === WORKSPACE_PATH)).toBe(true)
@@ -597,7 +597,7 @@ describe("mohist/merge-github-pr action", () => {
         await vi.advanceTimersByTimeAsync(15_000)
         await vi.advanceTimersByTimeAsync(15_000)
         const result = await resultPromise
-        const output = JSON.parse(result.output ?? "{}")
+        const output = result.output as Record<string, unknown>
 
         expect(result.error).toBeUndefined()
         const checksCalls = ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup")
@@ -610,7 +610,7 @@ describe("mohist/merge-github-pr action", () => {
           prUrl: "https://github.com/example/repo/pull/42",
           mergeCommitSha: "merge-sha-1",
         })
-        const stepNames = output.steps.map((step: { name: string }) => step.name)
+        const stepNames = (output.steps as Array<{ name: string }>).map((step) => step.name)
         expect(stepNames.filter((name: string) => name === "gh-pr-checks").length).toBe(3)
       } finally {
         vi.useRealTimers()
@@ -656,7 +656,7 @@ describe("mohist/merge-github-pr action", () => {
         await vi.advanceTimersByTimeAsync(15_000)
         await vi.advanceTimersByTimeAsync(15_000)
         const result = await resultPromise
-        const output = JSON.parse(result.output ?? "{}")
+        const output = result.output as Record<string, unknown>
 
         expect(result.error).toBeUndefined()
         expect(mergeStateCalls).toBe(3)
@@ -757,7 +757,7 @@ describe("mohist/merge-github-pr action", () => {
           method: "squash",
           subjectFrom: "issue.title",
         }))
-        const output = JSON.parse(result.output ?? "{}")
+        const output = result.output as Record<string, unknown>
 
         expect(result.error).toBeUndefined()
         expect(ghCalls).toContain("gh pr view 42 --json statusCheckRollup")

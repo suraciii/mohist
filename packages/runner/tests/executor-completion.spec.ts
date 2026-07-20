@@ -39,7 +39,7 @@ function execute(result: ActionResult) {
 
 describe("Action result boundary", () => {
   it("preserves successful output", async () => {
-    await expect(execute(succeed(JSON.stringify({ promise: "PASS" })))).resolves.toMatchObject({ status: "completed", output: JSON.stringify({ promise: "PASS" }) })
+    await expect(execute(succeed({ promise: "PASS" }))).resolves.toMatchObject({ status: "completed", output: { promise: "PASS" } })
   })
 
   it("preserves an Action timeout without evaluating completion", async () => {

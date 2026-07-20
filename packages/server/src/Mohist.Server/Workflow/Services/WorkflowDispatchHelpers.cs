@@ -96,25 +96,16 @@ internal static class WorkflowDispatchHelpers
             : 1;
     }
 
-    internal static List<CheckResult> ParseCheckResults(string? output)
+    internal static List<CheckResult> ParseCheckResults(JsonElement? output)
     {
-        if (string.IsNullOrWhiteSpace(output)) return [];
+        if (!output.HasValue) return [];
+        var root = output.Value;
 
-        try
-        {
-            using var doc = JsonDocument.Parse(output);
-            var root = doc.RootElement;
+        if (root.ValueKind == JsonValueKind.Array)
+            return root.EnumerateArray().Select(ParseSingleCheckResult).Where(r => r is not null).Cast<CheckResult>().ToList();
 
-            if (root.ValueKind == JsonValueKind.Array)
-                return root.EnumerateArray().Select(ParseSingleCheckResult).Where(r => r is not null).Cast<CheckResult>().ToList();
-
-            var single = ParseSingleCheckResult(root);
-            return single is not null ? [single] : [];
-        }
-        catch
-        {
-            return [];
-        }
+        var single = ParseSingleCheckResult(root);
+        return single is not null ? [single] : [];
     }
 
     internal static CheckResult? ParseSingleCheckResult(JsonElement element)

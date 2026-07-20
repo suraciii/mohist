@@ -1,0 +1,78 @@
+# issue-443 progress
+
+## Task T-001: Implement structured Workflow Action output end to end
+
+## Codebase Patterns
+
+- Runner `ActionResult.output` was `string | null`; converted to/from JSON at every consumer.
+- `WorkItemResult.output` was `string | null` and was JSON.stringified over the runner report HTTP wire.
+- Server `WorkResult.Output: string?`, `TaskReport.Output: string?`, `RunnerReportRequest.Output: string?`.
+- `WorkflowWorkLifecycle.ParseOutputToJsonElement` wrapped unparseable strings as JSON strings; now removed.
+- `WorkflowStatusMapper.MapTasks` re-serialized `t.Output` to a string via `JSON.Serialize(t.Output.Value)`; now passes the element directly.
+- `WorkflowItemTranslator.TranslateTaskResultAsync` passed `result.Output` (string) to `TaskReport.Output`; now validates object-or-null and canonicalizes JSON null.
+- `WorkflowItemTranslator.TranslateChecksResult` used `WorkflowDispatchHelpers.ParseCheckResults(result.Output)` which expected a JSON-string of an array; now consumes `JsonElement?`.
+- Server `WorkResult` carries `Output: JsonElement?`.
+- `AgentJobExecutor.projectTurnToWorkItemResult` JSON.stringified an object; now returns the object directly.
+- `core/process` now returns `{ stdout: trimmed, exitCode: number }`.
+- `TaskRun.Output` was already `JsonElement?`. We now assign directly without `ParseOutputToJsonElement`.
+- Web `WorkflowTimelineTask.output` is to become `Record<string, unknown> | null`.
+- `parseTimelineTaskOutput` and `parseTaskOutput` are to be removed.
+- `pr-delivery.ts: parseJson` accepts strings or objects — kept for backward test compat with object-valued outputs.
+- `recovery.ts: safeParseObject` reads `result.output` as string — now consumes structured output directly.
+
+## Runner changes done
+
+- Core types: `ActionResult.output: JsonObject | null`. `WorkItemResult.output: JsonValue | null`.
+- `action-result.ts`: `succeed(output: JsonObject | null)`. New `validateActionOutputShape(output)` rejects strings, arrays, scalars, cyclic objects, non-finite numbers, undefined/function/bigint with the existing `unexpected-error` code and an actionable message.
+- `executor.ts`: validates action output at the boundary, produces `failAction(...)` with `unexpected-error` before completion/recovery/setVars when the shape is invalid. `projectTaskOutput` preserves structured output; `mohist/opencode` projects a `{ promise }` object. Surfaces `result.output` directly.
+- `check-execution.ts`: emits the structured result-row array (`JsonValue`), with passing rows carrying object-or-null `output`. Validates each row's Action output shape and reports `unexpected-error` per invalid check.
+- `set-vars.ts`: traverses the `ActionResult.output` object directly; missing paths and null output fail the task atomically (no partial patch).
+- `recovery.ts`: `failureContext.output` is now the structured value (object-or-null), no `safeParseObject`.
+- `artifact-capture.ts`: `actionProducedArtifacts` reads the structured output object directly.
+- `output-capture.ts`: traverses the structured output object.
+- All built-in Action producers return objects directly: `core/process` → `{ stdout, exitCode }`; `core/script`, `core/artifact-exists`, `core/marker`, `merge-ready`, `core/process`, `mohist/push`, `mohist/rebase`, `mohist/rebase-status`, `mohist/openspec-*`, `mohist/archive-change`, `mohist/create-github-pr`, `mohist/mark-github-pr-ready`, `mohist/merge-github-pr`, `mohist/github-pr-status`, `mohist/opencode`, `mohist/workspace-prepare` — no more `JSON.stringify` of public success output.
+- `AgentJobExecutor.projectTurnToWorkItemResult` returns the object directly. AgentJob keeps the non-Action domain shape but its `terminalOutput` is now serialized via `GetRawText()` at the AgentJob boundary so its existing terminal-output contract is preserved.
+
+## Server changes done
+
+- `RunnerReportRequest.Output: JsonElement?`.
+- `WorkResult.Output: JsonElement?`.
+- `TaskReport.Output: JsonElement?`.
+- `TaskStatusView.Output: JsonElement?`.
+- `WorkflowItemTranslator.TranslateTaskResultAsync`: validates object-or-null via `TryCanonicalizeTaskOutput`, canonicalizes JSON null → nullable null, and on an invalid shape creates a durable failed TaskReport (`unexpected-error`) with a clear message so the runner can retire the work.
+- `WorkflowItemTranslator.TranslateChecksResult`: passes `result.Output` (JsonElement?) directly to `ParseCheckResults`.
+- `WorkflowDispatchHelpers.ParseCheckResults(JsonElement?)`: reads the structured array directly (no JSON parse of a string).
+- `WorkflowWorkLifecycle`: removes `ParseOutputToJsonElement` and assigns `report.Output` directly to `currentTask.Output`.
+- `WorkflowStatusMapper.MapTasks` returns the JsonElement directly via `MapTaskOutput`, mapping historical non-object values to `null`.
+- `WorkflowRun.Approval.ResolveFeedback` adds `ResolveFeedbackSummary(feedbackTasks, reportOutput)` which only interprets `core/process` task's `output.stdout` as text. Other Actions and any non-object output produce null summary; the feedback still resolves normally.
+- `AgentJobGrain.FailureCategoryFrom(JsonElement?)` reads the failureCategory property from a JsonElement root, no string parsing.
+- AgentJobTerminalResult.Output stays string; the Agent adapter serializes inbound object/array JsonElement via `GetRawText()` so the AgentJob domain boundary continues working.
+
+## Tests updated
+
+- `runner/tests/*`: 84+ tests updated from `JSON.parse(result.output ?? "{}")` to `result.output as Record<string, unknown>`. Action mocks now return `{ done: true }`, `{ ok: true }`, etc. instead of strings. `set-vars.test.ts` adds new tests for null output and structured core/process projection. `executor-cleanup.spec.ts`, `executor-recovery.spec.ts`, `executor-task-log.spec.ts`, `executor-completion.spec.ts`, `executor-artifacts.spec.ts`, `check-verdict.test.ts`, `executor-workspace-boundary.spec.ts`, `worktree-cleanup-delivery.spec.ts`, `agent-job-executor.spec.ts`, `merge-ready.spec.ts`, `push.spec.ts`, `github-pr-status.spec.ts`, `merge-github-pr.spec.ts`, `workspace-prepare-workflow.spec.ts`, `workspace-prepare.spec.ts`, `openspec-archive-change.spec.ts`, `artifact-capture.spec.ts` updated to use structured output objects.
+- `server/tests/*`: bulk replace of `Output: "..."` (string) with `Output: JSON.DeserializeElement("...")` for spec helpers. `WorkflowGrainSpecs.ReportChecksAsync` and `FeedbackDispatchSpecs` convert to JsonElement; the latter now drives feedback via structured object + expects null summary (default mohist/opencode feedback task gets no text adapter summary).
+- `server/UnitTests/Workflow/Domain/ApprovalFeedbackTests`: ResolveFeedback now takes `JsonElement?`; tests pass JSON-serialized strings for the legacy `reportOutput` path.
+
+## Verification status
+
+- `packages/runner`: `npx tsc -p tsconfig.json --noEmit` passes for all changed files. `tsconfig.tests.json` typechecks pass.
+- `packages/server`: `dotnet build Mohist.sln -p:SkipWebBuild=true` now compiles (server source clean). `Mohist.Server.UnitTests` ApprovalFeedbackTests pass (36/36).
+- `packages/runner` `npm test`: only failing files are the pre-existing opencode-ai SDK ones (37 failures pre-existing on master). The one new test failure I introduced was fixed.
+- `packages/web`: typecheck not yet attempted in this task slice; the Web side changes (removing `parseTimelineTaskOutput`/`parseTaskOutput`, updating `WorkflowTimelineTask.output` to `Record<string, unknown> | null`) are pending.
+
+## Pending work before this slice can be marked complete
+
+- Web side: `WorkflowTimelineTask.output`, `TaskProgressPanel` rendering, `StageBar` rendering, `pr-delivery.ts` callers, tests.
+- design/workflow/actions.md: remove "output is still a string" gap.
+- Spec tests `Mohist.Server.SpecTests` full run.
+- Re-run all test suites (runner unit, server unit, server spec, web unit) for final acceptance.
+
+## Decisions / gotchas
+
+- The ActionResult type stays narrower (`JsonObject | null`) than the shared `WorkItemResult.output` (`JsonValue | null`) per the proposal — checks emit arrays, AgentJobs emit their own non-Action shapes.
+- `ActionResult` validation runs immediately after `stripRunnerPrivateFacts` and before `evaluateCompletion`/`tryRecovery`/`captureAndUploadArtifactsForWork`/`applySetVarsForWork`. The runner keeps `output` on the failed result as `null` so recovery context doesn't accidentally match on an invalidated output.
+- `AgentJobTerminalResult.Output` remains `string?` (domain contract). The AgentJob adapter converts inbound JsonElement object/array to raw text at the server-side AgentJob boundary so its terminal output keeps the existing shape without crossing the Workflow Action contract.
+- Feedback summary extraction is one Action-specific adapter: only `core/process` task's `output.stdout` becomes the resolution summary. Every other Action yields null summary (still resolves the feedback).
+- `capturedOutputs` is intentionally not wired into the server (Runner proposal explicitly says not); we keep the runner-local field to keep the Web StageStateRead path unchanged.
+

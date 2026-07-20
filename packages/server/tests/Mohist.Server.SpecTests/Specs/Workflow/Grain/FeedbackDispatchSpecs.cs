@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -163,18 +164,24 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.StartsWith("apply-feedback.", feedbackTask.WorkId);
 
         const string resolutionBody = "## Feedback Resolution\n1. src/file.cs:10 Added retry handling\n2. src/file.cs:55 Wired the new branch\n\n## Verification\n- Unit tests pass";
+        var processOutput = JsonSerializer.SerializeToElement(new
+        {
+            stdout = resolutionBody,
+            exitCode = 0,
+        });
         await ReportAsync(
             feedbackRunner,
             feedbackTask.WorkId,
-            new WorkResult("completed", Output: resolutionBody));
+            new WorkResult("completed", Output: processOutput));
 
         var run = await LoadRunAsync();
         var feedback = run.Feedback.Single(f => f.Id == feedbackId);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, feedback.Status);
         Assert.Equal(feedbackTask.WorkId, feedback.ResolutionTaskId);
-        Assert.Equal(
-            "1. src/file.cs:10 Added retry handling\n2. src/file.cs:55 Wired the new branch",
-            feedback.ResolutionSummary);
+        // The default feedback task uses mohist/opencode, so its structured
+        // output is not adapted to text under the new contract. The
+        // summary stays null while the feedback still resolves.
+        Assert.Null(feedback.ResolutionSummary);
         Assert.NotNull(feedback.ResolvedAt);
 
         var (rerunCheck, rerunRunner) = await PollWorkAnyAsync();
@@ -224,7 +231,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         await ReportAsync(
             feedbackRunner,
             feedbackTask.WorkId,
-            new WorkResult("completed", Output: "agent finished without writing a summary"));
+            new WorkResult("completed", Output: JSON.DeserializeElement("agent finished without writing a summary")));
 
         var run = await LoadRunAsync();
         var feedback = run.Feedback.Single(f => f.Id == feedbackId);

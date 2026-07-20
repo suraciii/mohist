@@ -73,7 +73,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
       loggerPresent = ctx.log !== null && ctx.log !== undefined
       ctx.log?.write("action:rebase", "rebasing commit a1b2c3")
       ctx.log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
-      return { output: JSON.stringify({ rebase: "ok" }) }
+      return { output: { rebase: "ok" } }
     })
     const { collector } = await runWith(registry)
     expect(loggerPresent).toBe(true)
@@ -92,7 +92,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
   })
 
   it("PassesWorkspacePreparationOutputThroughWorkspacePrepSource", async () => {
-    const registry = makeRegistry(async () => ({ output: "ok" }))
+    const registry = makeRegistry(async () => ({ output: { ok: true } }))
     const workspaceManager = verifyOnlyWorkspaceManager(
       { path: workDir, branch: null, changeDir: null },
       (log) => log?.write("workspace-prep", "clone output from workspace preparation"),
@@ -135,7 +135,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
         combinedOutput: "",
       }
     })
-    const registry = makeRegistry(async () => ({ output: "ok" }))
+    const registry = makeRegistry(async () => ({ output: { ok: true } }))
 
     const { collector } = await runWith(registry, buildWork({ variables: { workspace: { path: workDir, branch: "main", changeDir: null } } }))
 
@@ -188,16 +188,16 @@ describe("WorkExecutor forwards action output to the task log", () => {
     const registry = makeRegistry(async (ctx) => {
       ctx.log?.write("action:health-check", "ok")
       return {
-        output: JSON.stringify({
+        output: {
           kind: "health-check",
           gitOutput: "out-line-1\nout-line-2",
-        }),
+        },
         exitCode: 0,
       }
     })
     const { result, collector } = await runWith(registry)
     expect(gitSinkSeen).toBe(true)
-    expect(result.output).toContain("gitOutput")
+    expect(result.output).toMatchObject({ kind: "health-check" })
     expect(collector.flush().entries.map((e) => e.source)).toContain("action:health-check")
   })
 

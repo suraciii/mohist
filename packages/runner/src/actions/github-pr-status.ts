@@ -1,4 +1,4 @@
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
@@ -94,8 +94,9 @@ function combinedGhOutput(result: { stdout: string; stderr: string }): string {
 
 function buildOutput(payload: GitHubPrStatusOutput, failureCode = "pr-status-failed"): ActionResult {
   if (payload.status === "verified") {
-    const { message: _message, ...success } = payload
-    return succeed(JSON.stringify(success))
+    const { message: _message, output: _output, steps, ...rest } = payload
+    const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
+    return succeed(success)
   }
   return fail(failureCode, payload.message ?? `PR #${payload.prNumber ?? "?"} status check failed`)
 }

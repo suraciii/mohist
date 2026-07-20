@@ -223,7 +223,7 @@ describe("worktree cleanup before delivery", () => {
       expect(prompt).toMatch(/do NOT push to any remote/i)
       expect(prompt).toContain("src/agent-output.ts")
       commitCleanup(worktree, ["src/agent-output.ts"], "cleanup-sha")
-      return { output: JSON.stringify({ commitSha: "cleanup-sha" }) }
+      return { output: { commitSha: "cleanup-sha" } }
     })
 
     const registry = buildRegistry({
@@ -246,7 +246,7 @@ describe("worktree cleanup before delivery", () => {
     const rebaseCalls: string[] = []
     installRebaseMockGit(rebaseCalls)
     const rebaseResult = await rebaseAction(rebaseContext())
-    const rebaseOutput = JSON.parse(rebaseResult.output ?? "{}")
+    const rebaseOutput = rebaseResult.output as Record<string, unknown>
 
     expect(rebaseResult.error).toBeUndefined()
     expect(rebaseCalls).toEqual([
@@ -286,7 +286,7 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const pushResult = await pushAction(pushContext())
-    const pushOutput = JSON.parse(pushResult.output ?? "{}")
+    const pushOutput = pushResult.output as Record<string, unknown>
     expect(pushResult.error).toBeUndefined()
     expect(pushOutput).toMatchObject({
       kind: "push",

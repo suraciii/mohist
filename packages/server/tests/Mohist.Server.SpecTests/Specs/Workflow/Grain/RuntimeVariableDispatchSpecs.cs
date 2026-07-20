@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
@@ -32,7 +33,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            Output: "{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}"));
+            Output: JSON.DeserializeElement("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}")));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.StartsWith("specs.", specs.WorkId);
@@ -77,7 +78,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         var (proposal, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            Output: "{\"openspecName\":\"runtime-value\"}"));
+            Output: JSON.DeserializeElement("{\"openspecName\":\"runtime-value\"}")));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.NotNull(specs.Variables);

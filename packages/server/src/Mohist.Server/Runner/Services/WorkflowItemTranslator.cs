@@ -384,7 +384,7 @@ EpicNumber: ReadEpicNumber(run),
                 return new InboundReport.Task(new TaskReport(
                     WorkId: workId,
                     Status: TaskReportStatus.Failed,
-                    Output: result.Output,
+                    Output: null,
                     Artifacts: null,
                     Detail: bindResult.Error ?? "artifact binding failed",
                     Error: result.Error));
@@ -395,10 +395,24 @@ EpicNumber: ReadEpicNumber(run),
                 .ToList();
         }
 
+        // Workflow task output must be object-or-null. An invalid shape is
+        // converted to a durable failed task report so the runner can retire
+        // the work instead of looping forever with an incompatible payload.
+        if (!TryCanonicalizeTaskOutput(result.Output, out var validatedOutput, out var shapeError))
+        {
+            return new InboundReport.Task(new TaskReport(
+                WorkId: workId,
+                Status: TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: artifacts,
+                Detail: shapeError,
+                Error: new ExecutionError("unexpected-error", shapeError)));
+        }
+
         return new InboundReport.Task(new TaskReport(
             WorkId: workId,
             Status: status,
-            Output: result.Output,
+            Output: validatedOutput,
             Artifacts: artifacts,
             Detail: detail,
             AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null,
@@ -409,6 +423,24 @@ EpicNumber: ReadEpicNumber(run),
     {
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         return new InboundReport.Checks(new CheckReport(item.Stage, results));
+    }
+
+    /// <summary>
+    /// Canonicalize a Workflow task output element to the storage contract:
+    /// object-or-null. An explicit JSON null becomes nullable null; a
+    /// missing value becomes nullable null. Any other shape (array,
+    /// scalar, string) fails the call so the caller can convert it into a
+    /// durable failed task report.
+    /// </summary>
+    internal static bool TryCanonicalizeTaskOutput(JsonElement? output, out JsonElement? canonical, out string error)
+    {
+        if (!output.HasValue) { canonical = null; error = ""; return true; }
+        var element = output.Value;
+        if (element.ValueKind == JsonValueKind.Null) { canonical = null; error = ""; return true; }
+        if (element.ValueKind == JsonValueKind.Object) { canonical = element.Clone(); error = ""; return true; }
+        canonical = null;
+        error = "Runner reported an invalid Action output shape. Successful Action output must be a JSON object or null.";
+        return false;
     }
 
     private static TaskReportStatus ResolveTaskReportStatus(WorkResult result) =>

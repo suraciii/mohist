@@ -305,7 +305,7 @@ public class AgentJobDispatchRouteSpecs
                 new WorkResult(
                     Status: "completed",
                     Message: "ok",
-                    Output: "{\"hello\":\"world\"}",
+                    Output: JSON.DeserializeElement("{\"hello\":\"world\"}"),
                     ExitCode: 0,
                     ArtifactUploadIds: new[] { "artifact-a" }));
             WakeAgentJobValidationAwaiter();
@@ -362,7 +362,7 @@ public class AgentJobDispatchRouteSpecs
                 new WorkResult(
                     Status: "failed",
                     Message: "runner reported failure",
-                    Output: "{\"error\":\"x\"}",
+                    Output: JSON.DeserializeElement("{\"error\":\"x\"}"),
                     ExitCode: 1));
             WakeAgentJobValidationAwaiter();
 

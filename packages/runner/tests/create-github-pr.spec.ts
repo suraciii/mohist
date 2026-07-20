@@ -171,7 +171,7 @@ describe("mohist/create-github-pr action", () => {
       titleFrom: "issue.title",
       bodyFrom: "issue.body",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(gitCalls).toEqual([])
@@ -289,7 +289,7 @@ describe("mohist/create-github-pr action", () => {
       titleFrom: "issue.title",
       bodyFrom: "issue.body",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls).toContain("gh pr edit 7 --title Fresh issue title --body Fresh issue body")
@@ -345,7 +345,7 @@ describe("mohist/create-github-pr action", () => {
       title: "Issue title",
       body: "Issue body",
     }, { project: { id: "proj_1", path: PROJECT_PATH } }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls.map((call) => call.cwd)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
@@ -391,7 +391,7 @@ describe("mohist/create-github-pr action", () => {
       title: "Issue title",
       body: "Issue body",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(gitCalls).toEqual([])
@@ -455,7 +455,7 @@ describe("mohist/create-github-pr action", () => {
       body: "Open, review, and merge a GitHub PR.",
       draft: false,
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(ghCalls.some((call) => call.startsWith("gh pr create ") && call.endsWith("--draft"))).toBe(false)

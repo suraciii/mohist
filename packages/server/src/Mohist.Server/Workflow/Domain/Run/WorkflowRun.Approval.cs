@@ -202,7 +202,7 @@ public static partial class WorkflowRunExtensions
             return events;
         }
 
-        public ApprovalFeedback? ResolveFeedback(string feedbackId, string taskId, string? output, DateTimeOffset now)
+        public ApprovalFeedback? ResolveFeedback(string feedbackId, string taskId, JsonElement? output, DateTimeOffset now)
         {
             var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
             if (feedback is null) return null;
@@ -214,11 +214,7 @@ public static partial class WorkflowRunExtensions
             if (feedbackTasks.Count == 0 || feedbackTasks.Any(task => task.Status != TaskRunStatus.Completed))
                 return null;
 
-            var summary = feedbackTasks
-                .Select(task => task.Output)
-                .FirstOrDefault(value => value is { ValueKind: JsonValueKind.String })
-                ?.GetString()
-                ?? output;
+            var summary = ResolveFeedbackSummary(feedbackTasks, output);
 
             var resolved = feedback with
             {
@@ -232,5 +228,34 @@ public static partial class WorkflowRunExtensions
             if (idx >= 0) run.Feedback[idx] = resolved;
             return resolved;
         }
+    }
+
+    /// <summary>
+    /// Derive the feedback resolution summary input string from completed
+    /// feedback tasks. Only <c>core/process</c> output is interpreted as
+    /// text via its explicit <c>output.stdout</c> adapter; every other
+    /// Action produces a <c>null</c> candidate. The first non-null
+    /// candidate wins. A fallback <paramref name="output"/> string (from
+    /// the inbound report) is reserved for historical compat and never
+    /// JSON-serializes an arbitrary object into summary text.
+    /// </summary>
+    private static string? ResolveFeedbackSummary(IReadOnlyList<TaskRun> feedbackTasks, JsonElement? reportOutput)
+    {
+        foreach (var task in feedbackTasks)
+        {
+            var uses = task.Uses?.Trim().ToLowerInvariant();
+            if (uses != "core/process") continue;
+            if (!task.Output.HasValue) continue;
+            var output = task.Output.Value;
+            if (output.ValueKind != JsonValueKind.Object) continue;
+            if (!output.TryGetProperty("stdout", out var stdoutElement)) continue;
+            if (stdoutElement.ValueKind != JsonValueKind.String) continue;
+            return stdoutElement.GetString();
+        }
+
+        if (reportOutput.HasValue && reportOutput.Value.ValueKind == JsonValueKind.String)
+            return reportOutput.Value.GetString();
+
+        return null;
     }
 }

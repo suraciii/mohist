@@ -251,14 +251,17 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var projectId = "proj-result-1";
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
-        var result = new WorkResult("completed", Output: "{\"ok\":true}");
+        var result = new WorkResult("completed", Output: JSON.DeserializeElement("{\"ok\":true}"));
 
         var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
         Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         Assert.Equal("task-1.1", task.Value.WorkId);
-        Assert.Equal("{\"ok\":true}", task.Value.Output);
+        Assert.True(task.Value.Output.HasValue);
+        Assert.Equal(JsonValueKind.Object, task.Value.Output!.Value.ValueKind);
+        Assert.True(task.Value.Output.Value.TryGetProperty("ok", out var okProp));
+        Assert.True(okProp.GetBoolean());
         Assert.Null(task.Value.Detail);
     }
 
@@ -289,7 +292,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null,
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
-        var result = new WorkResult("completed", Output: "{}");
+        var result = new WorkResult("completed", Output: JSON.DeserializeElement("{}"));
 
         var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
@@ -328,7 +331,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null,
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
-        var result = new WorkResult("completed", Output: "{}", ArtifactUploadIds: [uploadId]);
+        var result = new WorkResult("completed", Output: JSON.DeserializeElement("{}"), ArtifactUploadIds: [uploadId]);
 
         var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
@@ -347,7 +350,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
             [new CheckItem("check-1", "Check 1", "spec/check")]);
-        var output = JsonSerializer.Serialize(new[]
+        var output = JsonSerializer.SerializeToElement(new[]
         {
             new { name = "check-1", status = "pass", message = (string?)null! },
             new { name = "check-2", status = "fail", message = "nope" },

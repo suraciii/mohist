@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -168,7 +169,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, review1.WorkId, new WorkResult(
             "completed",
-            Output: """{"promise":"FAIL"}""",
+            Output: JSON.DeserializeElement("""{"promise":"FAIL"}"""),
             ArtifactUploadIds: [firstUploadId],
             AddTasks:
             [
@@ -200,7 +201,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
             "review-round-2: PASS");
         await ReportAsync(r3, review2.WorkId, new WorkResult(
             "completed",
-            Output: """{"promise":"PASS"}""",
+            Output: JSON.DeserializeElement("""{"promise":"PASS"}"""),
             ArtifactUploadIds: [secondUploadId]));
 
         return new RecoveryLoopRun(review1.WorkflowRunId, workIds);
