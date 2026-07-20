@@ -11,6 +11,8 @@ Workflow Action adapter 与 AgentJob executor 共享的基础能力；与 Agent 
 
 - [OpenCode](opencode.md) —— `OpenCodeRuntime`、SDK 选择、物理 Session 生命周期、
   回合执行与 Session 命令。
+- [Pi](pi.md) —— `PiRuntime`、进程内 SDK 接入、物理 Session 生命周期、回合执行与
+  Session 命令；与 OpenCode 平行的独立深模块。
 
 相关边界：
 
@@ -18,5 +20,4 @@ Workflow Action adapter 与 AgentJob executor 共享的基础能力；与 Agent 
   和输入输出契约。
 - [`../../docs/actions/`](../../docs/actions/README.md) 定义面向使用者的各 Action 产品契约。
 
-未来设计 Pi 等 Runtime 时，再为它增加独立文件；当前不为假想的共同点提前建立通用
-Runtime 接口。
+新增 Runtime 时为它增加独立文件；不为假想的共同点提前建立通用 Runtime 接口。

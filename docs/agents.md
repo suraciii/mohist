@@ -21,12 +21,12 @@ Action 不在 Agent 资源层：`mohist/opencode` 描述一次工作如何交给
 
 | 使用路径 | 是否有 Agent 身份 | 谁负责本次工作 | 如何执行 | AgentSession 来源 |
 |---|---|---|---|---|
-| Workflow 直接调用 | 否；这是 Inline Agent | TaskRun | `mohist/opencode` Action | Workflow |
+| Workflow 直接调用 | 否；这是 Inline Agent | TaskRun | 执行后端 Action（`mohist/opencode`、`mohist/pi`） | Workflow |
 | 启动 Mohist Agent | 是；使用已保存的 Mohist Agent | AgentJob | Mohist Agent 的内部执行入口 | Agent launch |
 
-两条路径可以使用同一种 OpenCode 能力和同一种 AgentSession 模型，但不会共享 Agent
-身份或工作生命周期。Workflow 通过 `mohist/opencode` Action 调用 OpenCode；Mohist Agent
-由 AgentJob 执行，只在底层复用 OpenCode 能力，并不反过来调用 Workflow Action。
+两条路径可以使用同一种执行后端能力和同一种 AgentSession 模型，但不会共享 Agent
+身份或工作生命周期。Workflow 通过执行后端 Action 调用 OpenCode 或 Pi；Mohist Agent
+由 AgentJob 执行，只在底层复用执行后端能力，并不反过来调用 Workflow Action。
 
 ## Inline Agent
 
@@ -103,10 +103,14 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。具体执行方式由当�
 ## 当前范围
 
 - `mohist/opencode`：直接通过 OpenCode 执行一个回合；Workflow 直接使用时形成 Inline Agent。
-- `mohist/pi`：未来直接通过 Pi 执行，和 `mohist/opencode` 处于同一层。
+- `mohist/pi`：直接通过 Pi 执行一个回合，和 `mohist/opencode` 处于同一层。
 
-当前阶段只推进 `mohist/opencode`。`mohist/agent` 不在本次范围内；它保留给后续
+`mohist/opencode` 已实装；`mohist/pi` 已有[产品契约](actions/pi.md)，实装由对应
+issue 推进。`mohist/agent` 不在本次范围内；它保留给后续
 Mohist Agent 专项设计，本篇不定义它的输入、复用或等待语义。
 
-`mohist/opencode` 的具体配置见 [`mohist/opencode` Action](actions/opencode.md)。Mohist Agent
-事件响应见 [Agent 事件路由](event-routing.md)。
+Mohist Agent 的配置中包含执行后端选择（OpenCode 或 Pi）；启动时后端随 Agent snapshot
+固定到 AgentJob，执行中编辑 Agent 不改变已经开始的执行。
+
+各 Action 的具体配置见 [`mohist/opencode`](actions/opencode.md) 与
+[`mohist/pi`](actions/pi.md)。Mohist Agent 事件响应见 [Agent 事件路由](event-routing.md)。

@@ -107,7 +107,7 @@
 
 ## Runtime 集成
 
-- [runtimes/](runtimes/README.md) — 外部执行后端的进程、SDK、物理 Session、事件与兼容性边界；当前包括 OpenCode。
+- [runtimes/](runtimes/README.md) — 外部执行后端的进程、SDK、物理 Session、事件与兼容性边界；当前包括 OpenCode 与 Pi。
 
 ## Workflow 核心域
 
