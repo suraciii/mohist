@@ -94,3 +94,4 @@
 - Check-set follow-up verification passes: `npm test` (including 2,878 server specs, 4,929 Web tests, and 1,162 runner tests).
 - Added active-suite coverage for actual fake-process `core/process` execution through `setVars`, typed process fields in later dispatch variables, and configured `core/process` approval-feedback summary adaptation for plain, sectioned, empty, null, and non-adapted output.
 - Core-process coverage verification passes: `npm test` (including 1,259 server unit tests, 2,879 server specs, 4,929 Web tests, and 1,163 runner tests).
+- Review follow-up narrows `StageTaskState.output` and `WorkflowTask.output` to structured object-or-null, matching timeline task output and preventing serialized output strings from entering task-detail state. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass (365 files, 4,929 tests).
