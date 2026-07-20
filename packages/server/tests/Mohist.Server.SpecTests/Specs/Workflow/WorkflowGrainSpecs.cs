@@ -279,7 +279,7 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ReportChecksAsync(string runnerId, WorkDispatch checksWork, params (string Name, string Status, string? Message)[] checkResults)
     {
-        var output = JsonSerializer.Serialize(checkResults.Select(cr => new Dictionary<string, string?>
+        var output = JsonSerializer.SerializeToElement(checkResults.Select(cr => new Dictionary<string, string?>
         {
             ["name"] = cr.Name,
             ["status"] = cr.Status,

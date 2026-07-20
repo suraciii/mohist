@@ -20,17 +20,6 @@ export function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-export function parseTimelineTaskOutput(raw: string | null | undefined): unknown {
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  if (!trimmed) return null
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return raw
-  }
-}
-
 export function formatOriginLabel(origin?: WorkItemOrigin | null): string | null {
   if (!origin) return null
   const source = origin.source === 'builtin' ? 'built-in' : origin.source

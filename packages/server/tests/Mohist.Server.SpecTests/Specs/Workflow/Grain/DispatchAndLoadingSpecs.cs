@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
@@ -521,7 +522,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             checks: [new("check-1", "Check 1", "spec/check")]));
 
         var (rebase, runnerId) = await PollWorkAnyAsync();
-        await ReportAsync(runnerId, rebase.WorkId, new WorkResult("failed", "rebase failed", Output: """
+        await ReportAsync(runnerId, rebase.WorkId, new WorkResult("failed", "rebase failed", Output: JSON.DeserializeElement("""
         {
           "kind": "rebase",
           "status": "failed",
@@ -530,7 +531,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
           "conflicts": [],
           "resolveAttempts": 0
         }
-        """));
+        """)));
 
         var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
         Assert.Equal("Failed", status);

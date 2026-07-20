@@ -35,7 +35,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context())
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(calls).toEqual([
@@ -92,7 +92,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(calls).toEqual([
@@ -205,7 +205,7 @@ describe("mohist/rebase", () => {
       squash: true,
       message: "Complete issue #217",
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(calls).toEqual([
@@ -473,7 +473,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context())
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(calls).toEqual([
@@ -687,7 +687,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
@@ -762,7 +762,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("Rebase operation timed out")

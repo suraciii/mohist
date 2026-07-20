@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -168,7 +169,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
-        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: JSON.DeserializeElement("[{\"name\":\"check-1\",\"status\":\"pass\"}]")));
 
         Assert.Null(await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null)));
     }
@@ -233,7 +234,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var check = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
-        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: JSON.DeserializeElement("[{\"name\":\"check-1\",\"status\":\"pass\"}]")));
     }
 
     [Fact]
@@ -273,7 +274,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var check = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
-        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: JSON.DeserializeElement("[{\"name\":\"check-1\",\"status\":\"pass\"}]")));
 
         var anotherRunnerId = await RegisterRunnerAsync();
         var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);

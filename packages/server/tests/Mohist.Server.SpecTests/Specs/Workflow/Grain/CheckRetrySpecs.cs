@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -66,7 +67,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, verify.WorkId, new WorkResult(
             "completed",
-            Output: """{"errorCode":"script-failed"}""",
+            Output: JSON.DeserializeElement("{\"errorCode\":\"script-failed\"}"),
             AddTasks:
             [
                 new RuntimeTaskInput("recover:fix-ci", "Fix CI verification", "spec/fix"),

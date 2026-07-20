@@ -60,7 +60,7 @@ public sealed record WorkItem(
 public sealed record TaskReport(
     [property: Id(0)] string WorkId,
     [property: Id(1)] TaskReportStatus Status,
-    [property: Id(2)] string? Output,
+    [property: Id(2)] System.Text.Json.JsonElement? Output,
     [property: Id(3)] IReadOnlyList<ArtifactRef>? Artifacts,
     [property: Id(4)] string? Detail = null,
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,

@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
@@ -32,7 +33,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            Output: "{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}"));
+            Output: JSON.DeserializeElement("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}")));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.StartsWith("specs.", specs.WorkId);
@@ -46,6 +47,33 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("issue-97", openspecName.GetString());
         Assert.True(outputs.TryGetProperty("changeDir", out var changeDir));
         Assert.Equal("openspec/changes/issue-97", changeDir.GetString());
+    }
+
+    [Fact]
+    public async Task Dispatch_AfterCoreProcessOutput_ExposesTypedTaskOutputFields()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+            [
+                new("process", "Run process", "core/process"),
+                new("consume", "Consume process output", "spec/task")
+            ],
+            [])
+        ]));
+
+        var (process, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, process.WorkId, new WorkResult(
+            "completed",
+            Output: JSON.DeserializeElement("""{"stdout":"artifact.zip","exitCode":0}""")));
+
+        var (consume, _) = await PollWorkAnyAsync();
+        Assert.NotNull(consume.Variables);
+        var variables = JsonSerializer.Deserialize<JsonElement>(consume.Variables);
+        var output = variables.GetProperty("tasks").GetProperty("process").GetProperty("outputs");
+        Assert.Equal("artifact.zip", output.GetProperty("stdout").GetString());
+        Assert.Equal(JsonValueKind.Number, output.GetProperty("exitCode").ValueKind);
+        Assert.Equal(0, output.GetProperty("exitCode").GetInt32());
     }
 
     [Fact]
@@ -77,7 +105,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         var (proposal, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            Output: "{\"openspecName\":\"runtime-value\"}"));
+            Output: JSON.DeserializeElement("{\"openspecName\":\"runtime-value\"}")));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.NotNull(specs.Variables);

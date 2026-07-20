@@ -167,7 +167,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       log?.write("action:test", "line before completion")
       actionStarted.resolve()
       await release.promise
-      return { output: "ok" }
+      return { output: { ok: true } }
     })
 
     const controller = new AbortController()
@@ -240,7 +240,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       // flushes before either work completes.
       await gate.promise
       await release.promise
-      return { output: "ok" }
+      return { output: { ok: true } }
     })
 
     const controller = new AbortController()

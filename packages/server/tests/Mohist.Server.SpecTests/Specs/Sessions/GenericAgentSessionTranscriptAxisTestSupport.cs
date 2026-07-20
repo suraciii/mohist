@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -116,7 +117,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             new Mohist.Server.Runner.Grains.WorkResult(
                 Status: "completed",
                 Message: "ok",
-                Output: "{}",
+                Output: JSON.DeserializeElement("{}"),
                 ArtifactUploadIds: null,
                 ExitCode: 0));
         Assert.True(report.Accepted, "AgentJob rejected completed report");
@@ -261,7 +262,7 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             new Mohist.Server.Runner.Grains.WorkResult(
                 Status: "completed",
                 Message: "ok",
-                Output: "{}",
+                Output: JSON.DeserializeElement("{}"),
                 ArtifactUploadIds: null,
                 ExitCode: 0));
         Assert.True(report.Accepted, "AgentJob rejected drain report");

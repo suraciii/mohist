@@ -102,11 +102,11 @@ function basePrMetadataTimeline(workflowRunId: string) {
             status: 'completed' as const,
             startedAt: '2026-01-01T00:30:00Z',
             completedAt: '2026-01-01T00:45:00Z',
-            output: JSON.stringify({
+            output: {
               kind: 'publish-via-pr',
               prNumber: 42,
               prUrl: 'https://github.com/example/repo/pull/42',
-            }),
+            },
           },
         ],
         checks: [],

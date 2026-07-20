@@ -1,5 +1,5 @@
 import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
-import { isObject, safeParseObject } from "../core/json.js"
+import { isObject } from "../core/json.js"
 import { getPath } from "../core/json-path.js"
 
 interface RecoveryHandler {
@@ -41,7 +41,7 @@ export function tryRecovery(
     : clampRemaining(rawRemaining, recovery.budget)
   if (remaining <= 0) return null
 
-  const output = safeParseObject(result.output)
+  const output = structuredOutputForFailure(result.output)
   const failureContext: JsonObject = {
     output,
     error: result.error ? { code: result.error.code, message: result.error.message } : null,
@@ -349,6 +349,11 @@ function failureResult(work: RenderedWorkItem, message: string): WorkItemResult 
 
 function clampRemaining(value: number, budget: number): number {
   return Math.min(budget, Math.max(0, Math.floor(value)))
+}
+
+function structuredOutputForFailure(output: JsonValue | null | undefined): JsonValue {
+  if (output === null || output === undefined) return null
+  return output
 }
 
 function stringField(obj: JsonObject, key: string): string | null {

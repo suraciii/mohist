@@ -239,7 +239,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { prompt: "<promise>PASS</promise>" } as never,
     })
     const result = await opencodeAction(context)
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
     expect(output.promise).toBeUndefined()
     expect(output.kind).toBe("opencode")
   })

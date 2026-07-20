@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
@@ -17,7 +17,7 @@ import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.j
 import { tryRecovery } from "./recovery.js"
 import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
-import { isActionFailure } from "../actions/action-result.js"
+import { isActionFailure, validateActionOutputShape } from "../actions/action-result.js"
 import {
   evaluateCompletion,
   promiseValue,
@@ -190,11 +190,17 @@ export class WorkExecutor {
       // never be serialized into WorkItemResult.output, recovery matching,
       // setVars projections, captured outputs, or artifacts (design D4).
       const { publicActionResult, turnFact } = stripRunnerPrivateFacts(result)
-      const actionSucceeded = !isActionFailure(publicActionResult)
+      const validationFailure = !isActionFailure(publicActionResult)
+        ? validateActionOutputShape(publicActionResult.output)
+        : null
+      const validatedResult: ActionResult = validationFailure
+        ? failAction(publicActionResult, validationFailure)
+        : publicActionResult
+      const actionSucceeded = !isActionFailure(validatedResult)
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
         : null
-      const projected = projectTaskOutput(work, publicActionResult, completion)
+      const projected = projectTaskOutput(work, validatedResult, completion)
       const normalized = normalize(work, projected)
       const recoveryResult = tryRecovery(work, normalized, variables)
       if (recoveryResult) return recoveryResult
@@ -221,8 +227,8 @@ export class WorkExecutor {
         if (recoveryResult) return recoveryResult
         return worktreeResult
       }
-      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, publicActionResult, variables, signal)
-      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, publicActionResult)
+      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
+      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
       return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
     } catch (error) {
       return failure(work, errorMessage(error))
@@ -349,7 +355,7 @@ function projectTaskOutput(
   if (PROMISE_PROJECTED_ACTIONS.has(uses)) {
     if (completion === null) return { status: "completed", output: null, exitCode: result.exitCode }
     const value = promiseValue(completion.matched ?? null)
-    const projectedOutput = value !== null ? JSON.stringify({ promise: value }) : null
+    const projectedOutput: JsonObject | null = value !== null ? { promise: value } : null
     if (!completion.satisfied) {
       return {
         status: failureStatus(work),
@@ -372,6 +378,14 @@ function projectTaskOutput(
     }
   }
   return { status: "completed", output: result.output, exitCode: result.exitCode }
+}
+
+function failAction(result: ActionResult, message: string): ActionResult {
+  const error = { code: "unexpected-error", message }
+  if ("exitCode" in result && typeof result.exitCode === "number") {
+    return { error, exitCode: result.exitCode }
+  }
+  return { error }
 }
 
 /**

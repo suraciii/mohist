@@ -302,12 +302,7 @@ public class AgentJobDispatchRouteSpecs
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
                 workId,
-                new WorkResult(
-                    Status: "completed",
-                    Message: "ok",
-                    Output: "{\"hello\":\"world\"}",
-                    ExitCode: 0,
-                    ArtifactUploadIds: new[] { "artifact-a" }));
+                new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
             WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
@@ -359,11 +354,7 @@ public class AgentJobDispatchRouteSpecs
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
                 workId,
-                new WorkResult(
-                    Status: "failed",
-                    Message: "runner reported failure",
-                    Output: "{\"error\":\"x\"}",
-                    ExitCode: 1));
+                new WorkResult("failed", "runner reported failure", JSON.DeserializeElement("{\"error\":\"x\"}"), 1));
             WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
@@ -413,7 +404,7 @@ public class AgentJobDispatchRouteSpecs
                     ownerKind = WorkDispatchOwnerKinds.AgentJob,
                     agentJobId = jobKey,
                     message = "ok from http",
-                    output = "{\"hello\":\"http\"}",
+                    output = new { hello = "http" },
                     exitCode = 0,
                     artifactUploadIds = new[] { "artifact-http" },
                 });

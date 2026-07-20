@@ -69,9 +69,21 @@ describe("Check verdict validation", () => {
   })
 
   it("AllChecksPass_ReturnsPassStatus", async () => {
-    mockAction({ output: "Marker found in /tmp/test-work/review.md" })
+    mockAction({ output: { kind: "marker", found: true } })
     const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "/tmp/test-work/review.md", expect: "<promise>PASS</promise>" } }])
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("pass")
+  })
+
+  it("invalid check output is reported without serializing the rejected value", async () => {
+    const output: Record<string, unknown> = {}
+    output.self = output
+    mockAction({ output } as unknown as ActionResult)
+
+    const result = await executor.execute(makeCheckWork([{ name: "cyclic", uses: "test/action" }]), new AbortController().signal)
+
+    expect(result).toMatchObject({ status: "fail", error: { code: "unexpected-error" } })
+    expect(() => JSON.stringify(result)).not.toThrow()
+    expect(result.output).toEqual([{ name: "cyclic", status: "fail", message: expect.any(String) }])
   })
 })

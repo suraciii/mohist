@@ -22,7 +22,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.kind).toBe("openspec-artifacts")

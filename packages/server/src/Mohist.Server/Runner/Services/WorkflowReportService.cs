@@ -64,7 +64,7 @@ public sealed class WorkflowReportService : IScopedService
                 var rejectionAck = await workflow.ReceiveTaskReportAsync(workerId, workId, new TaskReport(
                     workId,
                     TaskReportStatus.Failed,
-                    result.Output,
+                    Output: null,
                     Artifacts: null,
                     Detail: $"Recovery follow-up rejected: {ex.Message}"));
                 return (rejectionAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());

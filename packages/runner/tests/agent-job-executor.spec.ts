@@ -207,7 +207,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    const parsed = JSON.parse(result.output ?? "{}")
+    const parsed = result.output as Record<string, unknown>
     expect(parsed.kind).toBe("opencode")
     expect(parsed.status).toBe("success")
     expect(parsed.runtimeSessionId).toBe("ses_xyz")
@@ -453,7 +453,8 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
     expect(result.message).toBe("OpenCode turn failed")
-    expect(JSON.parse(result.output ?? "{}").diagnostics).toEqual(expect.arrayContaining([
+    const diagnostics = (result.output as Record<string, unknown>).diagnostics as Array<{ code: string; message: string }>
+    expect(diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "turn-failed", message: "attach endpoint offline" }),
     ]))
   })
@@ -569,7 +570,7 @@ describe("AgentJobExecutor surfaces a missing-session turn as a Reset hint", () 
     const work = buildAgentJobWork({ agentSessionId: "session-orphan" })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
-    const parsed = JSON.parse(result.output ?? "{}")
+    const parsed = result.output as Record<string, unknown>
     expect(parsed.kind).toBe("opencode")
     expect(parsed.status).toBe("failure")
     expect(parsed.runtimeSessionId).toBeNull()
@@ -596,7 +597,7 @@ describe("AgentJob work-result projection", () => {
     expect(workResult.status).toBe("completed")
     expect(workResult.exitCode).toBe(0)
     expect(workResult.error).toBeUndefined()
-    const parsed = JSON.parse(workResult.output ?? "{}")
+    const parsed = workResult.output as Record<string, unknown>
     expect(parsed.status).toBe("success")
     expect(parsed.runtimeSessionId).toBe("ses_a")
     expect(parsed.text).toBe("yes")
@@ -612,7 +613,7 @@ describe("AgentJob work-result projection", () => {
     expect(workResult.status).toBe("failed")
     expect(workResult.error).toEqual({ code: "turn-failed", message: "boom" })
     expect(workResult.exitCode).toBe(1)
-    const parsed = JSON.parse(workResult.output ?? "{}")
+    const parsed = workResult.output as Record<string, unknown>
     expect(parsed.status).toBe("failure")
     expect(parsed.error).toBe("boom")
   })

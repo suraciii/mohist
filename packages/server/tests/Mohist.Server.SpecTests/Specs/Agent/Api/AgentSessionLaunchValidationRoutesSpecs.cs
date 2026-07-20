@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -300,7 +301,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
                 new WorkResult(
                     Status: "completed",
                     Message: "generic job completed",
-                    Output: "{}",
+                    Output: JSON.DeserializeElement("{}"),
                     ArtifactUploadIds: null,
                     ExitCode: 0));
             Assert.True(report.Accepted, "AgentJob rejected completed report");

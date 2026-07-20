@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
@@ -62,7 +63,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var beforeCheck = beforeReport.Stages.Single().Checks.Single();
 
         await ReportAsync(otherRunnerId, checkWork.WorkflowRunId, checkWork.WorkId,
-            new WorkResult("pass", Output: "[]"));
+            new WorkResult("pass", Output: JSON.DeserializeElement("[]")));
 
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();

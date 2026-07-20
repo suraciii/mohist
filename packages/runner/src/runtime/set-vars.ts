@@ -8,19 +8,18 @@ export interface SetVarsResult {
 
 export function extractSetVars(
   setVars: Record<string, string> | null | undefined,
-  output: string | null | undefined,
+  output: JsonValue | null | undefined,
 ): SetVarsResult {
   if (!setVars || Object.keys(setVars).length === 0) return { vars: null }
 
-  const parsed = parseOutput(output)
-  if (parsed === null) {
-    return { vars: null, error: "task output is empty or not valid JSON" }
+  if (output === null || output === undefined) {
+    return { vars: null, error: "task output is null; cannot project setVars source paths" }
   }
-  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (typeof output !== "object" || Array.isArray(output)) {
     return { vars: null, error: "task output is not a JSON object" }
   }
 
-  const outputObj = parsed as JsonObject
+  const outputObj = output as JsonObject
   const result: JsonObject = {}
 
   for (const [targetPath, sourcePath] of Object.entries(setVars)) {
@@ -38,13 +37,4 @@ export function extractSetVars(
 function stripOutputPrefix(path: string): string {
   const prefix = "output."
   return path.startsWith(prefix) ? path.slice(prefix.length) : path
-}
-
-function parseOutput(output: string | null | undefined): JsonValue | null {
-  if (!output || !output.trim()) return null
-  try {
-    return JSON.parse(output) as JsonValue
-  } catch {
-    return null
-  }
 }
