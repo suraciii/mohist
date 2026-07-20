@@ -6,7 +6,7 @@ Today the Runner has one execution backend. `RunnerHost` constructs one `OpenCod
 
 Workflow AgentSession infrastructure is mostly runtime-neutral, but its Runner API is not. `RunnerRoutes` hard-codes `opencode` in Workflow Session open and attach calls, while `AgentSessionGrain.IsRuntimeRegistered` recognises only OpenCode. The persisted model already has the fields Pi needs: stable logical `sessionId`, runtime, `runtimeSessionId`, immutable `workDir`, Runner identity, and append-only runtime lineage. For Pi, `runtimeSessionId` is the absolute Pi JSONL session-file path.
 
-There is also an observability gap in the current Workflow Action path: `OpenCodeRuntime.runTurn` supports an observer and the Server accepts Workflow runtime events, but `opencodeAction` does not connect them. Pi must report `session.input`, text/reasoning, tool, model, and usage facts so the existing runtime-neutral transcript and Session UI can render the turn.
+There is also an observability gap in the current Workflow Action path: `OpenCodeRuntime.runTurn` supports an observer and the Server accepts Workflow runtime events, but `opencodeAction` does not connect them. The current runtime-event request has no idempotency identity and usage is applied additively, so simply retrying an ambiguous POST could double-count facts. Pi must therefore add ordered durable delivery, not only connect an observer, so the existing runtime-neutral transcript and Session UI remain complete across transport loss and Runner restart.
 
 Pi is a fast-moving 0.x SDK and requires Node >= 22.19. The implementation is therefore gated by pinning a real SDK version and smoke-verifying the exact creation, persistence, prompt, event, model, interruption, trust, and catalog surfaces before product code is written. Default tests cannot use the real SDK environment, provider network, physical Session store, process, or wall clock.
 
@@ -20,6 +20,7 @@ Stakeholders are Workflow users selecting `mohist/pi`, Runner operators supplyin
 - Persist a Pi binding before the first prompt and reuse it by WorkflowRun/session name across tasks, retries, model changes, cleanup turns, and Runner restart.
 - Keep project-local Pi resources untrusted while allowing Runner-user global Pi configuration, provider authentication, and repository instruction files.
 - Populate the existing AgentSession transcript, tool, model, and usage views with Pi facts.
+- Deliver normalized Session facts through a durable ordered outbox and idempotent Server cursor without replaying Prompt execution.
 - Raise and enforce the Runner's Node floor to 22.19.
 
 **Non-Goals:**
@@ -74,24 +75,24 @@ Add `actions/pi.ts` and register it in `createDefaultRegistry`. The adapter foll
 
 Move the genuinely runtime-neutral prompt-loader/session-name helpers out of `opencode-helpers.ts` or rename that module; do not share Action input types. Add `piRuntime` to `ActionContext`, `WorkExecutor`, `baseContext`, check contexts, and cleanup contexts. Add `mohist/pi` to `PROMISE_PROJECTED_ACTIONS` and the agent-backed cleanup classifier, so the existing completion and worktree enforcement pipelines remain authoritative.
 
-Input parsing accepts only non-empty resolved prompt text plus optional `session` and an `options` object. It splits `options.model` at the first slash, keeps `variant` independent, treats null as omitted, and passes unknown option names to runtime diagnostics. It never reads `vars.agent` unless the Workflow expansion explicitly placed that object in `options`. Legacy `with.agent`, `with.kind`, and `with.type` continue to fail in Server dispatch validation.
+Input parsing accepts only non-empty resolved prompt text plus optional `session` and an `options` object. Omitted/null `session` uses Work ID; a present string is trimmed and must remain non-empty; whitespace-only and non-string values fail `invalid-input` before any Session creation and are never stringified. It splits `options.model` at the first slash, keeps `variant` independent, treats null as omitted, and passes unknown option names to runtime diagnostics. It never reads `vars.agent` unless the Workflow expansion explicitly placed that object in `options`. Legacy `with.agent`, `with.kind`, and `with.type` continue to fail in Server dispatch validation.
 
 The adapter maps `unavailable-runtime` -> `runtime-unavailable`, `missing-session` -> `runtime-session-missing`, and `deadline-exceeded` -> `timeout`; it preserves `invalid-input`, `incompatible-runtime`, `interrupted`, and `turn-failed`, and owns `session-workspace-mismatch` / `session-binding-failed`. These are Action errors only. Diagnostics, provider text, model, usage, and physical identity never enter Action output.
 
-Server validation and presentation use an explicit inline-Agent Action set containing `mohist/opencode` and `mohist/pi`. Replace OpenCode substring checks in `TaskRun.DeriveClassification`, `WorkflowItemTranslator`, `WorkflowYamlSerializer`, parent-issue-context dispatch, and the Web milestone classifier. Error messages refer to the selected Action rather than naming OpenCode.
+Server validation and presentation use an explicit inline-Agent Action set containing `mohist/opencode` and `mohist/pi`. Replace OpenCode substring checks in `TaskRun.DeriveClassification`, `WorkflowItemTranslator`, `WorkflowYamlSerializer`, parent-issue-context dispatch, and the Web milestone classifier. Before changing parent-context dispatch code, update the architecture-owned `design/workflow/task-dispatch.md` rule from OpenCode-only to the explicit inline-Agent Action set; then preserve its existing plan/task/parent guards. Error messages refer to the selected Action rather than naming OpenCode.
 
 **Rationale:** Action selection is already the Workflow runtime selector, while completion belongs to `WorkExecutor`. **Alternatives considered:** adding `options.runtime` was rejected because it creates two conflicting selectors; extracting a generic Inline Agent Action was rejected because only prompt loading, Session naming, and executor completion are stable shared knowledge.
 
 ### D5. Make Workflow Session binding runtime-aware and race-safe
 
-Extend only the Workflow Runner Session requests with an explicit required `runtime` (`opencode` or `pi`). Keep generic AgentJob routes hard-coded to OpenCode in this issue. Split the shared attach DTO if necessary so AgentJob callers do not acquire Pi fields accidentally.
+Extend only the Workflow Runner Session requests with an explicit required `runtime` (`opencode` or `pi`). The Server contract and the existing `mohist/opencode` caller migrate atomically: OpenCode sends `runtime: "opencode"` on open and the observed expected-current runtime/session on bind, with regression tests preserving its current behavior. Keep generic AgentJob routes hard-coded to OpenCode in this issue. Split the shared attach DTO so AgentJob callers do not acquire Pi fields accidentally.
 
 Add a narrow AgentSession grain command for Workflow runtime binding with:
 - target runtime, physical `runtimeSessionId`, work directory, model, and Runner;
 - the `expectedRuntimeSessionId` and expected runtime observed by the preceding open;
-- these atomic outcomes: first attach; idempotent same-binding success; expected cross-runtime rebind with lineage append; stale/conflicting binding rejection; same-runtime different physical ID rejection with a Reset hint.
+- these atomic outcomes: first attach; idempotent same-binding success; expected cross-runtime rebind in either direction with lineage append; stale/conflicting binding rejection; same-runtime different physical ID rejection with a Reset hint.
 
-The command reuses the existing `AttachPhysicalSession` and `RebindRuntimeSession` domain transitions but is not a public Reset and does not create a Session-command reservation. The expected-current fields prevent two Actions from replacing each other's binding. `AgentSessionGrain.IsRuntimeRegistered` adds `pi`; historical fallback remains unchanged.
+The command reuses the existing `AttachPhysicalSession` and `RebindRuntimeSession` domain transitions but is not a public Reset and does not create a Session-command reservation. The expected-current fields prevent two Actions from replacing each other's binding. Before any cross-runtime rebind, the Runner must prove the old binding's D8 outbox is empty so already-recorded facts cannot become stale after replacement. `AgentSessionGrain.IsRuntimeRegistered` adds `pi`; historical fallback remains unchanged.
 
 The Pi Action binding sequence is:
 
@@ -114,6 +115,8 @@ Add a keyed promise queue owned by the Pi Workflow adapter/coordinator, keyed by
 
 `PiRuntime` also protects each cached physical SDK Session against overlapping prompt calls as a defensive invariant, but the outer logical queue is authoritative because two unbound tasks have no physical path yet. Cleanup turns resolve the same key and therefore continue after the original turn on the same binding.
 
+If abort cannot be confirmed, `PiRuntime` marks the cached physical path quarantined before returning interruption-unconfirmed. The logical queue can settle the failed TaskRun, but admission checks reject every later turn on that path with `unavailable-runtime`; other paths remain independent. A later subscribed stop observation clears quarantine. Runner process restart also clears it safely because process termination has ended every in-process Pi turn. This prevents queue release from creating physical overlap without holding one unresolved promise forever.
+
 **Rationale:** a physical-ID-only lock cannot prevent two first turns from creating and racing different bindings, while a work-directory lock over-serializes unrelated Sessions. **Alternatives considered:** rejecting the second turn was rejected because the requirement is serialization, not failure; a distributed Server lease was rejected because Workflow dispatch already assigns work to one Runner and the invariant only coordinates in-process execution against a Runner-owned SDK object.
 
 ### D7. Keep turn policy shared as pure rules, not a shared runtime
@@ -124,11 +127,11 @@ Extract only genuinely runtime-neutral policy from OpenCode into small pure modu
 
 At warning time Pi uses `steer`; at deadline it first fixes `deadline-exceeded`, then calls `abort` and checks subscribed lifecycle state plus `isStreaming`. A late prompt resolution cannot change the fixed result. An external Action signal follows the same interruption cleanup but maps to `interrupted`. An unconfirmed stop produces an interruption-unconfirmed diagnostic. No failure path resubmits a prompt.
 
-Pi `auto_retry_start` facts feed the shared provider policy. Quota/balance/billing wording fails on first occurrence; recoverable retries fail at the configured threshold (default five); lower attempts remain Pi-owned. Pi-native terminal errors are read from the final assistant message and normalized to `turn-failed`. The physical binding remains intact for all provider and deadline failures.
+Pi `auto_retry_start` facts feed the shared provider policy. Quota/balance/billing wording fails on first occurrence; recoverable retries fail at the configured threshold (default five); lower attempts remain Pi-owned. `cli.ts` parses `MOHIST_PROVIDER_RETRY_THRESHOLD` as a positive integer and `MOHIST_PROVIDER_NON_RECOVERABLE_TERMS` as a JSON array of non-empty literal strings. The latter are escaped and matched case-insensitively in addition to built-ins; operator regex is never evaluated. Invalid configuration leaves Pi not-ready with an actionable diagnostic. `RunnerHost` builds one policy object and passes it to both OpenCode and Pi so defaults and overrides have one authority. Pi-native terminal errors are read from the final assistant message and normalized to `turn-failed`. The physical binding remains intact for all provider and deadline failures.
 
 **Rationale:** sharing policy prevents OpenCode and Pi semantics from drifting while leaving protocol and lifecycle complexity inside each deep module. **Alternatives considered:** duplicating pattern and deadline logic was rejected because one product rule would gain two authorities; extracting a common `AgentRuntime` was rejected because it would expose a lowest-common-denominator lifecycle API.
 
-### D8. Project Pi events through a Workflow Session reporter
+### D8. Project Pi events through a durable Workflow Session outbox
 
 `runtime/pi/event-projection.ts` converts smoke-verified Pi events into existing Mohist event types:
 - message text/thinking -> `message.delta` / `reasoning.delta`;
@@ -139,15 +142,17 @@ Pi `auto_retry_start` facts feed the shared provider policy. Quota/balance/billi
 
 The projector keeps per-message text/usage state and per-tool fingerprints so duplicate SDK callbacks produce no second delta. At prompt completion it reconciles the final Session messages through the same projector, filling missed final text/usage without making events a completion authority.
 
-Add a Workflow-specific reporter that knows `(projectId, workflowRunId, sessionName, workId, stage, runtimeSessionId)`. After D5 binding succeeds, it persists `session.input` before prompt admission. Runtime events are queued in arrival order and posted to `workflowAgentSessionRuntimeEvents`; the queue is flushed before the Action returns. Each POST uses a short bounded signal independent of the runtime's deadline cleanup so timeout facts can still drain. The Server's existing current-binding check rejects stale events, and its transcript/usage/model projections remain unchanged.
+Add a `WorkflowSessionEventOutbox` abstraction with a production file-backed adapter under `<runnerRoot>/.mohist/runner-state/` and an in-memory fake for tests. One stream is identified by logical AgentSession plus physical binding; each record has a monotonically increasing sequence and the normalized event payload. Appending a record is durable before delivery is attempted. Startup reloads pending streams and the host drains them in order independently of work-result reporting.
 
-Input/binding persistence failure prevents prompt admission. Once a prompt has been admitted, a later event transport failure is logged as an observability diagnostic and does not convert success into a retryable task failure, because retrying could duplicate side effects. The final message reconciliation and bounded event flush reduce, but cannot eliminate, that audit gap.
+The Server runtime-event command carries stream identity and sequence. AgentSession state stores the last applied sequence for the current binding. Under the same aggregate transition that applies transcript/usage/model facts, it ignores and acknowledges `sequence <= lastApplied`, accepts only `lastApplied + 1`, and rejects a gap or stale binding before state mutation. This makes an ambiguous POST safe to retry without double-counting usage or text.
 
-**Rationale:** a source-specific reporter reuses the canonical Session API without importing AgentJob ownership or completion semantics. **Alternatives considered:** reusing `AgentJobExecutor`'s observer was rejected because it carries AgentJob IDs and output ownership; failing and retrying the TaskRun after any event POST failure was rejected because prompt admission is not idempotent.
+After D5 binding succeeds, `session.input` is appended and must receive a Server acknowledgement before prompt admission. After admission, projected events are appended to the durable outbox in order; the Action waits until its projector queue is durably appended, then makes a bounded drain attempt before returning. Delivery failure does not flip the TaskRun or replay the Prompt: the durable record remains and background/startup drain retries it. Before the next turn or a runtime rebind on the same logical Session, the old stream must drain completely. Thus transport failure can delay Session visibility but cannot permanently discard required audit facts.
+
+**Rationale:** a source-specific durable outbox reuses the canonical Session API without importing AgentJob ownership or completion semantics, and cursor dedup makes ambiguous delivery safe. **Alternatives considered:** reusing `AgentJobExecutor`'s observer was rejected because it carries AgentJob IDs and output ownership; logging and discarding failed events was rejected because it violates Session audit requirements; failing and retrying the TaskRun after any event POST failure was rejected because prompt admission is not idempotent.
 
 ### D9. Update packaging and narrow Web classification only
 
-Update root and Runner Node engine constraints, the Runner dependency/lockfile, CI's Node setup to an explicit >=22.19 release, and the Docker builder's Node installation so root `npm ci` satisfies the engine even though that image builds only Web. Do not rely on a distro's unspecified Node 22 minor.
+Update root and Runner Node engine constraints, `CONTRIBUTING.md`, the Runner dependency/lockfile, CI's Node setup to an explicit >=22.19 release, and the Docker builder's Node installation so root `npm ci` satisfies the engine even though that image builds only Web. Do not rely on a distro's unspecified Node 22 minor.
 
 The Web change is limited to treating `mohist/pi` as an Inline Agent task for Session/task-log milestones. Transcript, lineage, runtime, tool, and usage DTOs are already runtime-neutral. No Pi model selector or credential UI is added.
 
@@ -158,7 +163,8 @@ The Web change is limited to treating `mohist/pi` as an Inline Agent task for Se
 The Pi module exposes a factory seam that can construct fake model services, Session managers, AgentSessions, and event streams. Runner tests use fake timers and virtual paths; they do not touch Pi's real Session store. Coverage is split by responsibility:
 - Pi runtime unit/spec tests: readiness including empty catalog, trust/resource setup, create/open/cache, literal prompt, model/thinking changes, event dedup/reconciliation, provider policy, warning/deadline/abort confirmation, missing file, and no replay.
 - Pi Action specs: recursive input expansion, no hidden `vars.agent`, unknown-key diagnostics, binding-before-prompt, error mapping, private final text, promise projection, and cleanup reuse.
-- Server specs/unit tests: runtime-aware Workflow open/bind, expected-binding races, cross-runtime lineage, workspace mismatch, Pi registration, stale event rejection, transcript/tool/usage projection, classification, and parent context.
+- Server specs/unit tests: runtime-aware Workflow open/bind, existing OpenCode caller migration, expected-binding races, symmetric cross-runtime lineage, workspace mismatch, Pi registration, stream sequence duplicate/gap/stale rejection, transcript/tool/usage projection, classification, and parent context.
+- Outbox tests: durable append before send, input acknowledgement before Prompt, ambiguous acknowledgement retry, ordered gap recovery, Runner restart drain, pre-rebind drain, and bounded post-admission delivery failure without Prompt replay.
 - Web tests: Pi inline-Agent classification and milestone rendering.
 
 Run Runner typecheck/tests, Server tests, and Web typecheck/tests required by the repository. The one real SDK smoke is an explicit implementation gate and is not part of default test suites.
@@ -172,24 +178,28 @@ Run Runner typecheck/tests, Server tests, and Web typecheck/tests required by th
 - [Pi readiness blocks unrelated OpenCode and AgentJob claims] -> Treat an empty credentialed catalog as ready, retry failed initialization with an actionable diagnostic, and keep the combined gate explicit until a future scheduler supports capability-aware claiming.
 - [Runner crash before Pi writes the first assistant message leaves a bound path with no file] -> Preserve the binding and fail later restore with `runtime-session-missing`; require explicit Reset rather than fabricating continuity.
 - [Two first turns race to create different physical Sessions] -> Serialize by logical Workflow Session before open/create/bind and also guard the bind with expected-current state in the AgentSession grain.
+- [An unconfirmed abort leaves the old Pi turn running] -> Quarantine that physical path, reject later admission on it, and clear quarantine only on observed stop or Runner process restart.
 - [Binding succeeds but the Runner crashes before prompt admission] -> The next turn safely restores an empty or existing Session; no prompt replay is needed.
-- [Event delivery fails after a prompt has executed] -> Reconcile final messages, flush events with bounded independent requests, log an observability diagnostic, and do not retry the task automatically.
+- [Event delivery fails after a prompt has executed] -> Durably append ordered facts locally, retry through a Server cursor that deduplicates ambiguous delivery, drain on restart/before the next same-Session turn, and never retry the Prompt.
 - [Duplicate SDK callbacks inflate transcript or usage] -> Deduplicate in the Pi projector by smoke-verified message/tool identity and emit usage deltas from snapshots.
 - [Absolute session-file paths expose host layout in existing Session metadata] -> Keep the path in the already-authorized runtime binding field and diagnostics only; do not place it in Action output or user-authored Workflow variables.
 - [Provider exhaustion wording is not recognized] -> Share the configurable pattern set and fall back to the bounded consecutive-retry threshold; retain original provider text in diagnostics.
 - [Node 22.19 floor breaks CI or image builds using an older Node 22 minor] -> Pin CI and Docker builder Node versions before adding the dependency; fail installation early rather than shipping an unsupported runtime.
+- [Required Workflow bind fields break the existing OpenCode caller] -> Migrate the shared Server wire and `mohist/opencode` caller atomically and pin both runtime-switch directions with regression tests.
 - [Rollback leaves persisted Pi bindings unreadable by an older Runner] -> Keep stored Session rows queryable; older code will treat runtime `pi` as unavailable and require restoring the new Runner before execution resumes.
 
 ## Migration Plan
 
-1. Pin the Pi SDK and Node >=22.19, update the lockfile/CI/Docker toolchains, run the real SDK smoke, and commit `sdk-smoke-verification.json`. Stop and reconcile the runtime design if the smoke differs.
+1. Pin the Pi SDK and Node >=22.19, update `CONTRIBUTING.md` plus the lockfile/CI/Docker toolchains, run the real SDK smoke, and commit `sdk-smoke-verification.json`. Stop and reconcile the runtime design if the smoke differs.
 2. Implement `runtime/pi` behind fake SDK services, including readiness, untrusted resource loading, Session cache/restore, event projection, deadlines, provider policy, and error normalization.
-3. Add the runtime-aware Workflow Session open/bind contract and Pi runtime registration in the Server. Land expected-binding and lineage tests before connecting the Action.
-4. Add `piRuntime` to Runner host/executor context, combined readiness gating, the keyed logical Session queue, Workflow reporter, `mohist/pi` Action, promise projection, and cleanup reuse. Leave AgentJob and Session handlers unchanged.
-5. Update Server classification/validation/parent-context selection and the narrow Web inline-Agent classifier.
-6. Run the required Runner, Server, and Web checks. Add one fake-backed Workflow spec that exercises open -> bind -> input/events -> final text -> promise output end to end without real external dependencies.
-7. Deploy Runner and Server together because the new Action sends runtime-aware Workflow Session requests. No database rewrite is required; existing OpenCode bindings remain valid, and Pi bindings are created on first Pi use.
-8. Rollback by reverting the change and redeploying the previous Runner/Server pair. Existing OpenCode workflows continue normally. Workflow tasks already authored with `mohist/pi` will fail as unknown and persisted Pi Sessions remain audit-only until the Pi-capable version is restored; no automatic downgrade or binding rewrite is attempted.
+3. Add the runtime-aware Workflow Session open/bind contract and event stream cursor in the Server; migrate `mohist/opencode` atomically; land expected-binding, symmetric lineage, duplicate/gap, and OpenCode regression tests.
+4. Add the durable Workflow Session event outbox and host startup/background drain with fake-store tests.
+5. Update `design/workflow/task-dispatch.md`, then update Server classification/validation/parent-context selection to the explicit inline-Agent Action set.
+6. Add `piRuntime` to Runner host/executor context, combined readiness gating, the keyed logical Session queue/quarantine, outbox-backed reporter, `mohist/pi` Action, promise projection, and cleanup reuse. Leave AgentJob and Session handlers unchanged.
+7. Update the narrow Web inline-Agent classifier.
+8. Run the required Runner, Server, and Web checks. Add one fake-backed Workflow spec that exercises open -> bind -> durable input/events -> final text -> promise output end to end without real external dependencies.
+9. Deploy Runner and Server together because the new Action sends runtime-aware Workflow Session requests. Existing OpenCode bindings remain valid; the Server state schema gains a current-binding event cursor, and Pi bindings/outbox streams are created on first Pi use.
+10. Rollback by reverting the change and redeploying the previous Runner/Server pair after draining the event outbox. Existing OpenCode workflows continue normally. Workflow tasks already authored with `mohist/pi` will fail as unknown and persisted Pi Sessions remain audit-only until the Pi-capable version is restored; no automatic downgrade or binding rewrite is attempted.
 
 ## Open Questions
 
