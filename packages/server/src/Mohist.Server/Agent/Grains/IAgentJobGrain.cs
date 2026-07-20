@@ -3,7 +3,7 @@ using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
-public interface IAgentJobGrain : IGrainWithStringKey
+public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 {
     Task<bool> IsWorkRunnableAsync(string runnerId, string workId);
     Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result);
@@ -40,7 +40,40 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(2)] string? CurrentWorkId,
     [property: Id(3)] string? FailureReason,
     [property: Id(4)] int DispatchAttempts = 0,
-    [property: Id(5)] bool RunnerAccepted = false);
+    [property: Id(5)] bool RunnerAccepted = false,
+    [property: Id(6)] bool HasPendingSessionClose = false);
+
+/// <summary>
+/// Durable payload persisted on the AgentJob grain for a pending
+/// terminal close delivery to the owning AgentSession. The AgentJob
+/// keeps this record until the AgentSession has synchronously persisted
+/// the idempotently identified <c>session.closed</c> transcript fact
+/// (see design decision 2). <see cref="DeliveryId"/> is the stable
+/// correlation key the AgentSession stores on the close event and uses
+/// to deduplicate retried deliveries; the format is
+/// <c>agent-job:{jobKey}:terminal</c> so retries always land on the
+/// same close record.
+/// </summary>
+[GenerateSerializer]
+public sealed record PendingSessionClose(
+    [property: Id(0)] string DeliveryId,
+    [property: Id(1)] string Status,
+    [property: Id(2)] int? ExitCode,
+    [property: Id(3)] string? FailureReason,
+    [property: Id(4)] string? FailureCategory,
+    [property: Id(5)] DateTimeOffset RecordedAt);
+
+public static class AgentJobSessionDeliveryIds
+{
+    public static string TerminalDeliveryId(string jobKey) =>
+        $"agent-job:{jobKey}:terminal";
+}
+
+public static class AgentJobFailureReasons
+{
+    public const string RunnerUnavailable = "runner-unavailable";
+    public const string ReportTimeout = "report-timeout";
+}
 
 public enum AgentJobStatus
 {
@@ -109,9 +142,3 @@ public sealed record AgentJobTerminalResult(
     [property: Id(3)] string[]? ArtifactUploadIds,
     [property: Id(4)] string? FailureReason,
     [property: Id(5)] int? ExitCode);
-
-public static class AgentJobFailureReasons
-{
-    public const string RunnerUnavailable = "runner-unavailable";
-    public const string ReportTimeout = "report-timeout";
-}

@@ -4,7 +4,8 @@ public sealed record AgentSessionTranscriptSummary(
     string? ResolvedModel,
     string? FailureCategory,
     int? ToolCallCount,
-    int? ToolErrorCount)
+    int? ToolErrorCount,
+    string? FailureReason = null)
 {
-    public static readonly AgentSessionTranscriptSummary Empty = new(null, null, null, null);
+    public static readonly AgentSessionTranscriptSummary Empty = new(null, null, null, null, null);
 }

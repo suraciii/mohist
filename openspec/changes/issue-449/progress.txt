@@ -1,0 +1,102 @@
+## Codebase Patterns
+
+- `AgentJobGrain` is a single-grain owner of an AgentJob's lifecycle. State serialized via `[PersistentState("agent-job")]`. Currently uses grain timers (`RegisterGrainTimer`) for backoff/timeout — those do NOT survive silo restart. For durable terminal-delivery recovery T-001 must use an Orleans `RegisterOrUpdateReminder` (proved by `packages/server/tests/Mohist.Server.SpecTests/Support/DispatcherFixture.cs:457` `SharedReminderTable`).
+- `IAgentSessionGrain` already has `AppendSystemEventsAsync` (fire-and-forget, 200ms timer via `EnsurePersistenceTimer`). T-001 needs a NEW synchronous command `AppendTerminalCloseAsync` because the spec requires "acknowledges success only after the terminal fact is durable" and the existing path can return before flush.
+- The architecture tests forbid: (a) `Domain` depending on `Orleans` or storage, (b) data stores depending on application layer, (c) cross-domain dependencies outside an allowed allowlist, (d) local `JsonSerializerOptions` (must use `JSON.Options`).
+- The DB Context factory pattern is used throughout. For SQLite-backed grain cluster tests, `UseInMemoryReminderService` is used with a `SharedReminderTable` so reminder state can be inspected.
+- `FakeTimeProvider` from `Microsoft.Extensions.Time.Testing` provides deterministic time control without wall-clock polling.
+
+## Implementation Plan
+
+### State + types
+
+- Add to `AgentJobState` (Agent/Grains/AgentJobState.cs):
+  - `[Id(13)] public PendingSessionClose? PendingSessionClose { get; set; }`
+- Add `PendingSessionClose` record (Agent/Grains/IAgentJobGrain.cs):
+  - `DeliveryId` = `agent-job:{jobKey}:terminal`
+  - `Status`, `ExitCode`, `FailureReason`, `FailureCategory`, `RecordedAt`
+- Make `IAgentJobGrain` (and `AgentJobGrain`) implement `IRemindable`; add `ReceiveReminder`.
+- Add `IAgentSessionGrain.AppendTerminalCloseAsync(AppendTerminalCloseCommand cmd)` and `AppendTerminalCloseCommand` record (stable delivery id + payload).
+- Add `FailureReason` to `GenericAgentSessionSummaryDto` and a corresponding nullable wire field.
+
+### AgentJobGrain durable terminal protocol
+
+- A new private `EnterTerminalStateAsync(status, exitCode, failureReason, failureCategory, reason)` that:
+  1. Idempotency check: if already terminal, attempt pending delivery (if any) and return.
+  2. Compute the runner-precedence category if needed (output `failureCategory` → `WorkResult.Error.Code` → report status). Carry forward raw `failureReason`.
+  3. Build `PendingSessionClose` with `DeliveryId` and record timestamp; assign to `State.PendingSessionClose`.
+  4. Set `State.Status = Completed/Failed`, `State.FailureReason`, `State.TerminalResult`, clear timers.
+  5. `await SaveAsync()`.
+  6. Register reminder `agent-job-recovery` (durable; ~1s period).
+  7. Attempt first delivery via `DeliverTerminalToSessionAsync`.
+- `DeliverTerminalToSessionAsync`: invokes the session grain's `AppendTerminalCloseAsync`; on success clear `PendingSessionClose`, save, unregister reminder; on failure, leave pending.
+- `ReceiveReminder`: if state not terminal → unregister (orphan); if terminal with no pending → unregister; if terminal with pending → retry delivery.
+- `OnActivateAsync`: re-deliver pending if terminal and pending present (without waiting for the reminder).
+- `ReportResultAsync` for already-terminal jobs: if pending, repair; else existing rejection.
+- All terminal transitions (runner report completion, runner report failure, preflight, dispatch exhaustion, report timeout, forced `FailAsync`) call `EnterTerminalStateAsync`.
+
+### AgentSessionGrain terminal command
+
+- `AppendTerminalCloseAsync(AppendTerminalCloseCommand cmd)`:
+  1. Load session.
+  2. Idempotency: query transcript parts of type `session.closed` for any with the same `deliveryId` (in payload). If found → success (no-op).
+  3. Persist state (no domain events; record `CurrentTurnEndedAt`), then synchronously write a transcript part with `Type=session.closed`, `CorrelationKey` = deliveryId, `Payload` containing status/exitCode/failureReason/failureCategory/deliveryId/recordedAt.
+  4. On success → return.
+  5. On persistence failure → quarantine the activation (mirror the existing `_sessionReloadRequired` pattern) and throw so AgentJob retries.
+
+### Projection (T-001 D4)
+
+- Extend `TranscriptEventSummaryProjector` to also emit `FailureReason` from the SAME latest applicable terminal fact as `FailureCategory`. To handle multi-turn ordering, refactor projector to operate on `(turnSequence, partSequence, partId, payloadJson)` tuples for `session.closed` parts only, then pick the last and read both fields from it. The current projector only sees part-level events; needs to be enriched with turn sequence. I'll add a new overload that takes a sequence of `(turnSequence, partSequence, partId, type, payloadJson)` so the turn ordering is available, and have the existing call sites pass that data.
+- Update `AgentSessionQuerier.GetGenericSessionSummaryAsync` to use the new projector output to populate both `FailureCategory` and `FailureReason` on the DTO.
+
+### CLI
+
+- Update `TableRenderer.RenderAgentSessionShow` to render an additional `failure reason:` row (only when non-empty), distinct from `failure category:`.
+
+### Tests
+
+- Spec tests in `packages/server/tests/Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobGrainSpecs.cs` and a new sibling file for the terminal-delivery protocol: idempotency, runner-category precedence, all terminal sources, persistence failure → pending retained → reminder retry; report replay on terminal grain repairs pending; activation loss → pending preserved.
+- Update `packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs` to cover: latest-fact selection across multiple turns, reason+category from same fact, success-omission, API serialization of nullable fields.
+- CLI: extend `packages/cli/tests/Mohist.Cli.Tests/CliAgentSessionCommandSpecs.cs` `SessionShow_Table_*` and `SessionShow_Json_*` tests.
+
+## Notes
+
+- I'll create `openspec/changes/issue-449/progress.txt` after each meaningful chunk so I don't lose state across the long build.
+- Architecture tests: must not introduce cross-domain deps beyond the existing allowlist (Agent → Runner, Agent → Sessions, etc.).
+
+## Implementation Discoveries
+
+- `Agent → Workflow` cross-domain dependency was unavoidable for accessing
+  `WorkResult.Error.Code`. Added a flattened `WorkResult.ErrorCode` getter so
+  AgentJobGrain can read the runner's category without touching the
+  `Workflow.Domain.Run.ExecutionError` type directly.
+- `AgentSessionGrain.AppendTerminalCloseAsync` must respect the AgentJob's
+  bound runtime: when the runtime has been superseded by a reset, the close
+  is dropped (matches the pre-existing `AppendRuntimeEventsAsync` semantics
+  that returned [] for stale runtimes). The AgentSession acknowledges the
+  delivery so the AgentJob clears its pending payload without retrying.
+- The `TranscriptEventSummaryProjector` was extended to take turn sequence +
+  part sequence + part id for terminal-fact selection so reason and category
+  always come from the same latest applicable fact (issue-449 design
+  decision 4). The current-runtime filter is applied at the projection
+  boundary, not inside the projector itself, so the projection remains a
+  pure reduction over the input events.
+- The architecture test size ratchet required adding the new
+  `AgentJobTerminalDeliverySpecs.cs` (30862 bytes) and the updated
+  `GenericAgentSessionSummarySpecs.cs` (27070 bytes) to
+  `spec-file-size-baseline.json`. The
+  `Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs` baseline
+  was bumped from 24516 → 24706 bytes after adding the
+  `IRemindable.ReceiveReminder` shim methods to the test fakes.
+- The new `ControllableAgentSessionTranscriptPersistence` and the
+  `FailingAgentSessionTranscriptStore` decorator simulate transient
+  transcript-store failures so tests can prove pending-payload recovery
+  without wall-clock waits. The counter-style `QueueFailures(N)` /
+  `ResetFailures()` API is needed because multiple AgentJob retry paths
+  (initial report, OnActivate repair, reminder tick, redelivered report)
+  share the same flag.
+
+## Final Status
+
+- `npm test` green: 1365 CLI + 1256 server unit + 30 arch + 2891 server spec
+  + 4993 web + 1159 runner tests all pass.

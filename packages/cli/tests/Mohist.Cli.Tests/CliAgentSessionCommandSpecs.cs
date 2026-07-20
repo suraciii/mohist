@@ -933,6 +933,7 @@ public class CliAgentSessionCommandSpecs
                     createdAt = "2026-06-26T10:00:00Z",
                     lastActivityAt = "2026-06-26T10:05:00Z",
                     resolvedModel = "gpt-5",
+                    failureReason = (string?)null,
                     failureCategory = (string?)null,
                     toolCallCount = 12,
                     toolErrorCount = 1,
@@ -962,16 +963,158 @@ public class CliAgentSessionCommandSpecs
         Assert.Equal(HttpMethod.Get, request.Method);
         Assert.Equal("/api/projects/proj_test/agent-sessions/sess_123", request.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
-        Assert.Contains("agent:       agent_456 (reviewer)", stdout, StringComparison.Ordinal);
-        Assert.Contains("status:      running", stdout, StringComparison.Ordinal);
-        Assert.Contains("created:     2026-06-26T10:00:00Z", stdout, StringComparison.Ordinal);
-        Assert.Contains("model:       gpt-5", stdout, StringComparison.Ordinal);
-        Assert.Contains("tool calls:  12", stdout, StringComparison.Ordinal);
-        Assert.Contains("tool errors: 1", stdout, StringComparison.Ordinal);
-        Assert.Contains("tokens:      3210 (input 2000, output 1210)", stdout, StringComparison.Ordinal);
-        Assert.Contains("cost:        0.05 USD", stdout, StringComparison.Ordinal);
+        Assert.Contains("agent:             agent_456 (reviewer)", stdout, StringComparison.Ordinal);
+        Assert.Contains("status:            running", stdout, StringComparison.Ordinal);
+        Assert.Contains("created:           2026-06-26T10:00:00Z", stdout, StringComparison.Ordinal);
+        Assert.Contains("model:             gpt-5", stdout, StringComparison.Ordinal);
+        Assert.Contains("tool calls:        12", stdout, StringComparison.Ordinal);
+        Assert.Contains("tool errors:       1", stdout, StringComparison.Ordinal);
+        Assert.Contains("tokens:            3210 (input 2000, output 1210)", stdout, StringComparison.Ordinal);
+        Assert.Contains("cost:              0.05 USD", stdout, StringComparison.Ordinal);
         Assert.Contains("issue #42", stdout, StringComparison.Ordinal);
         Assert.Contains("repo: core", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("failure reason", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("failure category", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_Table_RendersFailureReasonAndCategoryAsDistinctRows()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_failed",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "failed",
+                    createdAt = "2026-06-26T10:00:00Z",
+                    lastActivityAt = "2026-06-26T10:05:00Z",
+                    resolvedModel = "gpt-5",
+                    failureReason = "AgentJob requires 'workspace.path' in dispatch variables",
+                    failureCategory = "invalid-input",
+                    toolCallCount = 4,
+                    toolErrorCount = 1,
+                    contextRefs = new
+                    {
+                        issueNumber = 42,
+                        epicNumber = (string?)null,
+                        repository = "core",
+                        workspacePath = "/tmp/ws",
+                    },
+                    usage = new { },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_failed", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:            failed", stdout, StringComparison.Ordinal);
+        Assert.Contains(
+            "failure reason:    AgentJob requires 'workspace.path' in dispatch variables",
+            stdout,
+            StringComparison.Ordinal);
+        Assert.Contains("failure category:  invalid-input", stdout, StringComparison.Ordinal);
+        // Reason and category are distinct rows so a single failure
+        // surfaces both the actionable text and the machine-groupable
+        // category without one replacing the other.
+        Assert.Contains("AgentJob requires 'workspace.path' in dispatch variables", stdout, StringComparison.Ordinal);
+        Assert.Contains("invalid-input", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_Table_OmitsFailureReasonAndCategory_OnSuccessfulSession()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_ok",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "completed",
+                    createdAt = "2026-06-26T10:00:00Z",
+                    lastActivityAt = "2026-06-26T10:05:00Z",
+                    resolvedModel = "gpt-5",
+                    toolCallCount = 4,
+                    toolErrorCount = 0,
+                    usage = new { },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_ok", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("status:            completed", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("failure reason", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("failure category", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_Json_PreservesFailureReasonAndCategoryFields()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_failed",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "failed",
+                    createdAt = "2026-06-26T10:00:00Z",
+                    lastActivityAt = "2026-06-26T10:05:00Z",
+                    failureReason = "AgentJob requires 'workspace.path' in dispatch variables",
+                    failureCategory = "invalid-input",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_failed", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"failureReason\": \"AgentJob requires 'workspace.path' in dispatch variables\"",
+            stdout, StringComparison.Ordinal);
+        Assert.Contains("\"failureCategory\": \"invalid-input\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_Json_OmitsFailureFields_OnSuccessfulSession()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_ok",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "completed",
+                    createdAt = "2026-06-26T10:00:00Z",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_ok", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        // Nullable failure fields are dropped from the wire when the
+        // Session completed successfully — the JSON must not include
+        // them with null values.
+        Assert.DoesNotContain("failureReason", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("failureCategory", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -197,6 +197,7 @@ internal sealed partial class TableRenderer
         var createdAt = StringOf(data, "createdAt");
         var lastActivityAt = StringOf(data, "lastActivityAt");
         var resolvedModel = StringOf(data, "resolvedModel");
+        var failureReason = StringOf(data, "failureReason");
         var failureCategory = StringOf(data, "failureCategory");
         var toolCallCount = NumberOf(data, "toolCallCount");
         var toolErrorCount = NumberOf(data, "toolErrorCount");
@@ -211,19 +212,21 @@ internal sealed partial class TableRenderer
         var costText = string.IsNullOrEmpty(costAmount) ? "" : $"{costAmount} {costCurrency}".Trim();
         var tokenText = FormatTokenUsage(inputTokens, outputTokens, totalTokens);
 
-        _out.WriteLine($"agent:       {agentId} ({agentName})");
-        _out.WriteLine($"status:      {status}");
-        _out.WriteLine($"created:     {createdAt}");
-        _out.WriteLine($"last active: {lastActivityAt}");
-        _out.WriteLine($"model:       {resolvedModel}");
+        _out.WriteLine($"agent:             {agentId} ({agentName})");
+        _out.WriteLine($"status:            {status}");
+        _out.WriteLine($"created:           {createdAt}");
+        _out.WriteLine($"last active:       {lastActivityAt}");
+        _out.WriteLine($"model:             {resolvedModel}");
+        if (!string.IsNullOrEmpty(failureReason))
+            _out.WriteLine($"failure reason:    {failureReason}");
         if (!string.IsNullOrEmpty(failureCategory))
-            _out.WriteLine($"failure:     {failureCategory}");
-        _out.WriteLine($"tool calls:  {toolCallCount}");
-        _out.WriteLine($"tool errors: {toolErrorCount}");
+            _out.WriteLine($"failure category:  {failureCategory}");
+        _out.WriteLine($"tool calls:        {toolCallCount}");
+        _out.WriteLine($"tool errors:       {toolErrorCount}");
         if (!string.IsNullOrEmpty(tokenText))
-            _out.WriteLine($"tokens:      {tokenText}");
+            _out.WriteLine($"tokens:            {tokenText}");
         if (!string.IsNullOrEmpty(costText))
-            _out.WriteLine($"cost:        {costText}");
+            _out.WriteLine($"cost:              {costText}");
         if (contextRefs is not null)
         {
             var issueNumber = NumberOf(contextRefs, "issueNumber");
@@ -240,7 +243,7 @@ internal sealed partial class TableRenderer
             if (!string.IsNullOrEmpty(workspacePath))
                 parts.Add($"ws: {workspacePath}");
             if (parts.Count > 0)
-                _out.WriteLine($"context:     {string.Join(", ", parts)}");
+                _out.WriteLine($"context:           {string.Join(", ", parts)}");
         }
     }
 

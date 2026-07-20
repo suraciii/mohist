@@ -16,4 +16,5 @@ public sealed class AgentJobState
     [Id(10)] public string? AgentConfigJson { get; set; }
     [Id(11)] public bool RunnerAccepted { get; set; }
     [Id(12)] public string? RuntimeSessionId { get; set; }
+    [Id(13)] public PendingSessionClose? PendingSessionClose { get; set; }
 }

@@ -183,6 +183,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
     public Task FailAsync(string reason) => Task.CompletedTask;
+    public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
 internal sealed class PendingAgentJobGrain : IAgentJobGrain
@@ -212,6 +213,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         _failureReason = reason;
         return Task.CompletedTask;
     }
+    public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
 internal sealed class SingleAgentJobGrainFactory : IGrainFactory

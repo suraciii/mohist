@@ -550,9 +550,18 @@ public class AgentSessionQuerier : IScopedService
         var session = record.Session;
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { session.Id }, ct: ct);
         var transcriptEvents = ToTranscriptProjectionsInSequenceOrder(loaded);
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
+        var runtimeSessionId = session.Status.AgentRuntimeSessionId;
 
         var summary = TranscriptEventSummaryProjector.Summarize(
-            transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
+            transcriptEvents
+                .Where(e => IsApplicableToCurrentRuntime(e, turnSequenceByTurnId, runtimeSessionId, loaded))
+                .Select(e => new TranscriptSummaryEvent(
+                    TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
+                    Sequence: e.Sequence,
+                    PartId: e.Id.ToString(),
+                    Type: e.Type,
+                    PayloadJson: e.PayloadJson)));
 
         var terminalFacts = await LoadTerminalFactsAsync(db, [record], ct);
         var status = ResolveAgentSessionListStatus(record, terminalFacts.GetValueOrDefault(session.Id));
@@ -570,12 +579,26 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             summary.ResolvedModel,
             summary.FailureCategory,
+            summary.FailureReason,
             summary.ToolCallCount,
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
             AgentSessionDtoMapper.BuildLineageDto(session),
             AgentSessionJsonHelper.StatusName(session, Now()) != "active");
+    }
+
+    private static bool IsApplicableToCurrentRuntime(
+        TranscriptEventProjection projection,
+        IReadOnlyDictionary<long, long> turnSequenceByTurnId,
+        string? currentRuntimeSessionId,
+        TranscriptPartLoaderResult loaded)
+    {
+        _ = turnSequenceByTurnId;
+        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return true;
+        var turn = loaded.Turns.FirstOrDefault(t => t.Id == projection.TurnId);
+        return turn is not null
+            && string.Equals(turn.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal);
     }
 
     public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(
@@ -618,8 +641,14 @@ public class AgentSessionQuerier : IScopedService
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { domainSession.Id }, ct: ct);
         var transcriptEvents = ToTranscriptProjectionsInSequenceOrder(loaded);
         var partCount = transcriptEvents.Count;
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
         var eventSummary = TranscriptEventSummaryProjector.Summarize(
-            transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
+            transcriptEvents.Select(e => new TranscriptSummaryEvent(
+                TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
+                Sequence: e.Sequence,
+                PartId: e.Id.ToString(),
+                Type: e.Type,
+                PayloadJson: e.PayloadJson)));
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = AgentSessionJsonHelper.Usage(domainSession);
         var lineage = AgentSessionDtoMapper.BuildLineageDto(domainSession);
@@ -834,6 +863,7 @@ public class AgentSessionQuerier : IScopedService
 internal sealed record TranscriptEventProjection
 {
     public long Id { get; init; }
+    public long TurnId { get; init; }
     public string SessionId { get; init; } = string.Empty;
     public long Sequence { get; init; }
     public string Type { get; init; } = string.Empty;
