@@ -838,3 +838,12 @@ Decisions / gotchas for downstream tasks:
 - Added `SessionDetailShell.followup-queue.spec.tsx`, which submits in one
   session and rerenders the shell for a sibling session before new transcript
   content arrives. The sibling composer remains interactive.
+
+## Wide Navigation Initial Render Fix (2026-07-20)
+
+- `useMediaQuery` now reads the browser's current match synchronously when no
+  test override is active, while retaining `false` when browser APIs are
+  unavailable. The header no longer briefly renders narrow prev/next controls
+  beside the CSS-visible `xl` sibling sidebar.
+- Added hook and shell specs for an unoverridden initial `matchMedia` wide
+  result, and retained the test seam and no-`matchMedia` fallback behavior.
