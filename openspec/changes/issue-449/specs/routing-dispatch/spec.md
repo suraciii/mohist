@@ -87,6 +87,29 @@ For a routed launch whose event carries issue lineage, the resulting AgentSessio
 - **THEN** the resulting AgentSession SHALL retain the issue number, triggering event id, and routing rule id
 - **AND** those values SHALL remain available after the AgentJob reaches a terminal state
 
+### Requirement: Routed failure events have stable envelope and ordering semantics
+
+The issue event feed SHALL project each failed routed AgentSession as one CloudEvent-shaped `session.closed` entry. Its numeric `id` SHALL be the source-local terminal transcript-part id; `eventId` SHALL be the stable value `{sessionId}:closed:{partId}`; `source` SHALL be the canonical AgentSession source; `subject` SHALL be the Session id; `time` SHALL be the terminal part's persisted last-seen time; `specVersion` SHALL be `1.0`; and `dataContentType` SHALL be `application/json`. Extensions SHALL include canonical project and issue lineage. Data SHALL preserve terminal status, exit code, failure reason/category and add Session id, Agent id/name, trigger event id, and trigger rule id.
+
+The feed SHALL select the newest global `limit` entries across Issue, valid WorkflowRun, and routed AgentSession sources, then return those entries in ascending order. Both selection and output SHALL use one total ordering key: time, origin rank (`issue` before `workflow-run` before `agent-session`), source ordinal, source-local numeric id, then event id ordinal. Equal timestamps and colliding numeric ids across stores SHALL therefore remain deterministic.
+
+#### Scenario: Projected routed failure has complete stable envelope
+
+- **WHEN** a routed AgentSession for issue 42 persists a failed terminal part with id 9
+- **THEN** the issue feed SHALL contain one `session.closed` entry whose `eventId` is `{sessionId}:closed:9` and whose time comes from that part
+- **AND** the entry SHALL carry the specified source, subject, spec version, content type, project/issue extensions, terminal data, Agent identity, and trigger correlation
+
+#### Scenario: Limit selects newest entries globally
+
+- **WHEN** Issue, WorkflowRun, and routed AgentSession sources together contain more entries than the requested limit
+- **THEN** the feed SHALL select the newest entries across all sources before returning results
+- **AND** SHALL return the selected entries in ascending total-key order
+
+#### Scenario: Equal-time cross-store entries are deterministic
+
+- **WHEN** entries from different stores have equal timestamps and colliding numeric ids
+- **THEN** repeated reads SHALL return the same order determined by origin rank, source, numeric id, and event id
+
 ### Requirement: Existing non-routing workspace behavior is preserved
 
 This change SHALL NOT alter the workspace supplied by the manual Named Agent launch path when the caller provides one, and SHALL NOT alter workspace preparation or selection for Inline Agent execution through the `mohist/opencode` action.

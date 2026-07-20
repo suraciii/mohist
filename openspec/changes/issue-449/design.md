@@ -65,7 +65,7 @@ Extend the shared launch pipeline with a routed preparation protocol. `AgentLaun
 
 Persisting the plan before Session open is the first-writer fence: an unresolved first delivery cannot acquire a later workspace, and an executable first delivery cannot be redirected by changed issue state. A crash between plan persistence, Session open, and activation leaves the durable event unacknowledged; redelivery resumes the same plan. Existing manual launches retain their strict random-id submission path and do not use routing preparation.
 
-Every AgentJob terminal transition uses one durable delivery protocol. Before saving terminal state, the grain stores a `PendingSessionClose` payload containing a stable delivery id (`agent-job:{jobKey}:terminal`), status, exit code, failure reason/category, and a single recorded timestamp, and registers a durable Orleans reminder. It then saves terminal state and attempts delivery. `ReportResultAsync` for an already-terminal job repairs a pending close before returning rather than rejecting it immediately; activation and reminder ticks do the same.
+Every AgentJob terminal transition uses one durable delivery protocol. Before saving terminal state, the grain stores a `PendingSessionClose` payload containing a stable delivery id (`agent-job:{jobKey}:terminal`), status, exit code, failure reason/category, and a single recorded timestamp, and registers a durable Orleans reminder. It then saves terminal state and attempts delivery. `ReportResultAsync` for an already-terminal job repairs a pending close before returning rather than rejecting it immediately; activation and reminder ticks do the same. A reminder tick that reloads state with no pending delivery unregisters the orphan reminder, covering reminder registration followed by failed terminal-state persistence.
 
 Add an AgentSession terminal command keyed by the stable delivery id. The command detects an already-persisted delivery across all Session turns, otherwise appends the terminal fact and synchronously flushes Session state/events and transcript before acknowledging. It throws on persistence failure. After acknowledgement, AgentJob clears `PendingSessionClose`, saves, and unregisters the reminder. A crash after Session commit but before clearing the AgentJob marker causes an idempotent retry; a crash before Session commit leaves the reminder active. The same protocol covers normal reports, preflight failure, dispatch exhaustion, report timeout, and forced failure.
 
@@ -92,9 +92,9 @@ The first persisted launch plan is canonical on redelivery. AgentSession is alwa
 
 ### 4. Project failure reason and category from one terminal fact
 
-Extend the internal `TerminalFact` projection to parse `failureCategory` alongside its existing `failureReason`, status, completion time, and exit code. `GetGenericSessionSummaryAsync` uses the latest applicable terminal fact for both failure fields and adds `FailureReason` to `GenericAgentSessionSummaryDto`; transcript summary projection remains responsible for model and tool counts.
+Extend the internal `TerminalFact` projection to parse `failureCategory` alongside its existing `failureReason`, status, completion time, and exit code. `GetGenericSessionSummaryAsync` uses the latest applicable terminal fact for both failure fields and adds `FailureReason` to `GenericAgentSessionSummaryDto`; transcript summary projection remains responsible for model and tool counts. Terminal reduction first applies the existing current-runtime applicability filter, then orders by transcript turn sequence, part sequence, and part id. Part-local sequence alone is insufficient because it restarts in each turn.
 
-Taking both fields from the same terminal fact prevents a current failure reason from being paired with a category left by an older Runtime Session lineage entry. The API addition is nullable and additive. `RenderAgentSessionShow` prints distinct `failure reason` and `failure category` rows. JSON mode requires no special transformation because it already emits the server payload.
+Taking both fields from the same terminal fact prevents a current failure reason from being paired with a category left by an older Runtime Session lineage entry. For runner-reported failure, `AgentJobGrain` persists category precedence as output JSON `failureCategory` -> `WorkResult.Error.Code` -> report status. This maps the runner's pre-execution `invalid-input` error correctly; projection alone cannot recover a code discarded at report handling. The API addition is nullable and additive. `RenderAgentSessionShow` prints distinct `failure reason` and `failure category` rows. JSON mode requires no special transformation because it already emits the server payload.
 
 AgentJob failure paths used by this change must all close the generic AgentSession through the shared terminal helper. The new no-dispatch failure command uses that helper; existing dispatch-exhaustion and report-timeout paths already do. Any forced AgentJob failure path covered by generic-session visibility should be converged on the same helper rather than persisting job state alone.
 
@@ -103,6 +103,7 @@ AgentJob failure paths used by this change must all close the generic AgentSessi
 - Add `failureReason` to `TranscriptEventSummaryProjector` and keep category from its independent scan: rejected because independently reduced values can come from different terminal attempts.
 - Query AgentJob state from the session API: rejected because AgentSession already owns the persisted terminal observation and the read would introduce a reverse lookup from session to work owner.
 - Replace `failureCategory` with the reason: rejected because category remains useful for machine grouping while reason is operator-facing evidence.
+- Keep deriving category only from output JSON: rejected because runner preflight failures carry category in `WorkResult.Error.Code` and otherwise collapse to generic `failed`.
 
 ### 5. Assemble routed failures into the issue feed in AgentOps
 
@@ -112,7 +113,17 @@ Add an issue-scoped assembler under `AgentOps/Services`. It combines:
 - WorkflowRun events through `WorkflowEventQuerier.ListWorkflowEventsAsync`, preserving Workflow's invalidated-control-event filtering;
 - failed `session.closed` transcript parts for generic AgentSessions matching project, agent-launch issue label, and non-empty trigger event/rule labels.
 
-The assembler merges all sources chronologically and applies the requested limit after the merge. A projected routed failure uses the existing event response shape with `type: "session.closed"`, the canonical AgentSession source/subject, and data containing status, session id, Agent id/name, failure reason/category, trigger event id, and trigger rule id. This is a read projection only; it does not append an Issue event or copy Session authority into another aggregate.
+The assembler projects a failed routed Session into the existing `StoredCloudEventDto` shape as follows:
+
+- `id`: terminal transcript-part id (source-local, not globally unique);
+- `eventId`: `{sessionId}:closed:{partId}`;
+- `source`: `AgentSessionEventPersistence.AgentSessionSource(sessionId)`;
+- `type`: `session.closed`; `subject`: Session id;
+- `time`: terminal part `LastSeenAt`; `specVersion`: `1.0`; `dataContentType`: `application/json`;
+- extensions: canonical `projectid` and `issue` lineage;
+- data: original terminal status, exit code, reason, and category plus Session id, Agent id/name, trigger event id, and trigger rule id.
+
+Each source query loads at most its newest `limit` candidates, which is sufficient to determine the global newest `limit`. Define one ascending total key `(time, originRank, source ordinal, source-local id, eventId ordinal)`, where origin rank is Issue, WorkflowRun, then AgentSession. Merge candidates, take the greatest `limit` by the exact reverse key, then return that selected set by the ascending key. This resolves equal timestamps and numeric-id collisions across stores without pretending `id` is global. This is a read projection only; it does not append an Issue event or copy Session authority into another aggregate.
 
 `WorkflowEventRoutes` delegates the issue endpoint to this AgentOps assembler. `WorkflowEventQuerier` keeps WorkflowRun-specific selection and invalidation logic but no longer owns cross-domain issue-feed composition. The CLI already prints issue events as returned JSON, so no new CLI event renderer is needed.
 
@@ -133,7 +144,7 @@ Focused coverage will include:
 - first-writer behavior when issue-current-workspace resolution changes between deliveries;
 - AgentJob grain terminal persistence and close retry behavior;
 - generic session summary/API reason-category separation, successful omission, and latest-terminal-fact selection;
-- AgentOps issue-feed inclusion and exclusion matrix plus API envelope shape;
+- AgentOps issue-feed inclusion/exclusion, complete envelope, equal-time ordering, and global newest-N limiting;
 - CLI table and JSON output for generic session failures;
 - existing runner missing-workspace validation as a defensive contract, manual launch behavior, Inline Agent behavior, and architecture dependency tests.
 
@@ -156,7 +167,7 @@ Focused coverage will include:
 5. Deploy the server before or together with the CLI. Older CLIs ignore the additive summary field; the updated CLI against an older server simply has no reason to render.
 6. No relational database migration or historical backfill is required. New AgentJob/AgentSession state fields are additive JSON/Orleans serializer fields; existing state and `session.closed` JSON shapes remain readable.
 
-Rollback is code-only. The new failed jobs and terminal facts use existing persisted state fields and remain readable by the previous server; rolling back removes the additional issue-feed projection and summary field but does not require data cleanup. The runner requires no deployment or rollback change.
+Rollback requires the server to report no outstanding `PendingSessionClose` records and no AgentJob terminal reminders before the old binary is restored; normally each reminder is removed immediately after Session acknowledgement. If pending deliveries cannot drain, deploy a compatibility drain build rather than rolling directly to code that does not implement the reminder. Once drained, rollback is code-only: additive state fields and terminal facts remain readable, and removing the issue-feed projection and summary field requires no data cleanup. The runner requires no deployment or rollback change.
 
 ## Open Questions
 

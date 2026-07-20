@@ -1,6 +1,6 @@
 ### Requirement: Generic AgentSession summaries expose the AgentJob failure reason
 
-The generic AgentSession summary SHALL expose the persisted AgentJob failure reason as `failureReason` whenever the AgentJob ends in failure. The failure reason SHALL be the actionable reason recorded by the AgentJob terminal result or its `session.closed` event, and SHALL be distinct from `failureCategory`. This requirement applies to runner-reported failures and server-originated AgentJob failures, including dispatch exhaustion and report timeout.
+The generic AgentSession summary SHALL expose the persisted AgentJob failure reason as `failureReason` whenever the AgentJob ends in failure. The failure reason SHALL be the actionable reason recorded by the AgentJob terminal result or its `session.closed` event, and SHALL be distinct from `failureCategory`. For a runner report, AgentJob SHALL derive the category in this order: structured `failureCategory` in output JSON, `WorkResult.Error.Code`, then the report status as fallback. This requirement applies to runner-reported failures and server-originated AgentJob failures, including dispatch exhaustion and report timeout.
 
 #### Scenario: Runner-reported failure carries reason and category
 
@@ -8,6 +8,18 @@ The generic AgentSession summary SHALL expose the persisted AgentJob failure rea
 - **THEN** the generic AgentSession summary SHALL report status `failed`
 - **AND** `failureReason` SHALL equal `AgentJob requires 'workspace.path' in dispatch variables`
 - **AND** `failureCategory` SHALL equal `invalid-input`
+
+#### Scenario: Structured output category takes precedence
+
+- **WHEN** a failed runner report carries output `failureCategory` `context_exhausted`, error code `runtime-failed`, and status `failed`
+- **THEN** the persisted `failureCategory` SHALL equal `context_exhausted`
+- **AND** the lower-precedence error code and status SHALL NOT replace it
+
+#### Scenario: Runner error code precedes status fallback
+
+- **WHEN** a failed runner report has no structured output category and carries error code `invalid-input`
+- **THEN** the persisted `failureCategory` SHALL equal `invalid-input`
+- **AND** report status `failed` SHALL be used only when both structured category and error code are absent
 
 #### Scenario: Server-originated AgentJob failure carries its reason
 
@@ -20,6 +32,12 @@ The generic AgentSession summary SHALL expose the persisted AgentJob failure rea
 - **WHEN** an AgentJob completes successfully and its generic AgentSession summary is read
 - **THEN** the summary SHALL NOT report a non-empty `failureReason`
 - **AND** SHALL NOT fabricate a failure category
+
+#### Scenario: Latest terminal fact follows transcript turn order
+
+- **WHEN** a generic AgentSession has terminal facts in two applicable transcript turns and the newer turn's terminal part has a smaller part-local sequence than the older turn's part
+- **THEN** the summary SHALL select reason and category from the newer turn
+- **AND** SHALL order terminal facts by turn sequence, then part sequence, then part id
 
 ### Requirement: The generic AgentSession API preserves failure details
 
