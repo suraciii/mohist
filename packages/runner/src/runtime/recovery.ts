@@ -2,7 +2,7 @@ import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemRes
 import { isObject, safeParseObject } from "../core/json.js"
 
 interface RecoveryHandler {
-  when: string
+  when?: string
   tasks: AddTaskInput[]
   retrySelf: boolean
 }
@@ -36,12 +36,11 @@ export function tryRecovery(
   if (remaining <= 0) return null
 
   const output = safeParseObject(result.output)
-  if (!output) return null
-
-  const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
+  const handler = (output ? recovery.handlers.find((h) => h.when !== undefined && matchesWhen(h.when, output)) : undefined)
+    ?? (result.status === "failed" ? recovery.handlers.find((h) => h.when === undefined) : undefined)
   if (!handler) return null
 
-  const failureContext: JsonObject = output
+  const failureContext: JsonObject = output ?? {}
   const effectiveVariables = variables ?? work.variables ?? null
   const renderedHandlerTasks: AddTaskInput[] = []
   for (const task of handler.tasks) {
@@ -77,7 +76,7 @@ export function tryRecovery(
   const label = work.title?.trim() || work.uses || work.workId
   return {
     status: "completed",
-    message: `${label} failed (${handler.when}); recovery scheduled`,
+    message: `${label} failed (${handler.when ?? "default"}); recovery scheduled`,
     output: result.output,
     addTasks,
   }
@@ -100,8 +99,9 @@ export function readRecoveryConfig(recovery: JsonObject | null | undefined): Rec
   const handlers: RecoveryHandler[] = []
   for (const raw of rawHandlers) {
     if (!isObject(raw)) continue
-    const when = stringField(raw, "when")
-    if (!when) continue
+    const rawWhen = raw["when"]
+    if (rawWhen !== undefined && (typeof rawWhen !== "string" || rawWhen.trim().length === 0)) continue
+    const when = typeof rawWhen === "string" ? rawWhen : undefined
     handlers.push({
       when,
       tasks: readAddTasks(raw["tasks"]),

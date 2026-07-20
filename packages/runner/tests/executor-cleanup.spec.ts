@@ -170,6 +170,31 @@ describe("WorkExecutor clean worktree invariant", () => {
     })
   })
 
+  it("schedulesDefaultRecoveryWhenVerificationLeavesTheWorktreeDirty", async () => {
+    markWorktreeDirty("package-lock.json")
+    const executor = buildExecutor(makeRegistry(async () => ({ status: "success", message: "verified" })))
+
+    const result = await executor.execute(buildWork({
+      recovery: {
+        budget: 2,
+        handlers: [{
+          tasks: [{ id: "recover:fix-ci", title: "Fix CI verification", uses: "mohist/opencode" }],
+          retrySelf: true,
+        }],
+      },
+      recoveryRemaining: null,
+    }), new AbortController().signal)
+
+    expect(result).toMatchObject({
+      status: "completed",
+      message: "Cleanup test task failed (default); recovery scheduled",
+      addTasks: [
+        { id: "recover:fix-ci", title: "Fix CI verification" },
+        { id: "work-1", recoveryRemaining: 1 },
+      ],
+    })
+  })
+
   it("failsDeterministicTaskWithStagedAndUntrackedCategories", async () => {
     // Three file categories must all appear in the structured
     // evidence: staged (added to index), unstaged (modified), and

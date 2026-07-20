@@ -178,7 +178,7 @@ export class WorkExecutor {
       }
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
       if (endCheck.kind === "violation") {
-        return endCheck.result
+        return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
       const evidenceStack: BranchStabilityEvidence[] = [startCheck.evidence, endCheck.evidence]
       const worktreeResult = await enforceCleanWorktree(
@@ -193,6 +193,8 @@ export class WorkExecutor {
         log,
       )
       if (worktreeResult.status !== "completed") {
+        const recoveryResult = tryRecovery(work, worktreeResult, variables)
+        if (recoveryResult) return recoveryResult
         return promiseProjected
           ? worktreeResult
           : attachBranchStabilityEvidence(worktreeResult, evidenceStack)

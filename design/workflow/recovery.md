@@ -1,8 +1,9 @@
 # Task Recovery
 
 任务执行后，runner executor 用 `when` 表达式匹配 Action output 字段，构造恢复任务并经
-`addTasks` 返回，引擎机械插入。恢复是任务完成方式的一部分，不是失败后的补救：匹配与
-任务成败无关，成功任务的输出命中 `when: promise=FAIL` 同样触发恢复。
+`addTasks` 返回，引擎机械插入。恢复是任务完成方式的一部分，不是失败后的补救：显式匹配与
+任务成败无关，成功任务的输出命中 `when: promise=FAIL` 同样触发恢复。省略 `when` 的默认
+handler 则只处理失败结果，包括 executor 在 Action 完成后形成的最终失败。
 
 语法与作者可见语义（budget、first-match、`retrySelf`、人工 retry 开新一轮）见
 [docs 的 recovery 节](../../docs/workflow-definition.md#recovery--失败恢复)。本篇定义
@@ -14,8 +15,8 @@
   `recovery` 对引擎是透传的任务属性。
 - recovery 配置从 YAML 到 runner 全程只读。剩余预算是配置之外的每 attempt 执行状态
   （`recoveryRemaining`），不是被改写的配置副本。
-- 匹配发生在 runner executor：`when` 匹配 Action output 的任意字段；Action 对恢复
-  零感知。
+- 匹配发生在 runner executor：显式 `when` 匹配 Action output 的任意字段；最后一个省略
+  `when` 的 handler 只匹配失败结果；Action 对恢复零感知。
 - 恢复任务是真实的 Workflow 任务，出现在 graph、时间线与状态中。
 - 触发恢复的任务以 completed 结束：它产出了后续工作。
 - 恢复任务模板中的 `${{ failure.* }}` 由 runner 构造时就地展开，见
@@ -23,9 +24,9 @@
 
 | 层 | 职责 |
 |---|---|
-| workflow YAML | 声明 `budget` 与 `handlers`（`when`、`tasks`、`retrySelf`） |
+| workflow YAML | 声明 `budget` 与 `handlers`（可选 `when`、`tasks`、`retrySelf`） |
 | Action | 返回普通 output，零恢复感知 |
-| runner executor | 匹配 `when`；显式 `null` 取满额 `budget`，数值 clamp 到声明范围，字段缺失按普通结果处理；构造 `addTasks` |
+| runner executor | 先匹配显式 `when`，再为失败结果匹配默认 handler；显式 `null` 取满额 `budget`，数值 clamp 到声明范围；构造 `addTasks` |
 | 引擎 | 机械插入 `addTasks`；把 `recoveryRemaining` 当不透明的每 attempt 状态透传；人工 retry 只从定义性字段重建 |
 
 ## 剩余预算（recoveryRemaining）
@@ -80,7 +81,8 @@ if recoveryRemaining is absent:
 remaining = recoveryRemaining is null
     ? recovery.budget
     : clamp(recoveryRemaining, 0, recovery.budget)
-handler = recovery.handlers.find(h => matchesWhen(h.when, output))
+handler = recovery.handlers.find(h => h.when && matchesWhen(h.when, output))
+    ?? (result.failed ? recovery.handlers.find(h => h.when is absent) : null)
 
 if handler && remaining > 0:
     addTasks = handler.tasks with their own full recoveryRemaining
@@ -92,8 +94,9 @@ if result.success:
 return failed
 ```
 
-负值 clamp 到 0，超过声明的值 clamp 到声明值。命中 handler 消耗一次额度；未命中
-不消耗。声明永不改写。
+默认 handler 最多一个且必须最后，因而不会遮蔽显式匹配。它在 executor 已形成失败结果后
+匹配，所以工作区、分支等 Action 之后的最终检查失败也能走同一条恢复路径。负值 clamp 到
+0，超过声明的值 clamp 到声明值。命中 handler 消耗一次额度；未命中不消耗。声明永不改写。
 
 ## WorkResult
 

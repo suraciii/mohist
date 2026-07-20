@@ -178,14 +178,13 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: errorCode=script-failed
-              tasks:
-                - id: recover:fix-tests
-                  title: Fix failing tests/build
+            - tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
                   uses: mohist/opencode
                   with:
                     session: build
-                    prompt: ${{ prompts.fix-tests }}
+                    prompt: ${{ prompts.fix-ci }}
                     options: ${{ vars.agent }}
               retrySelf: true
       - id: push

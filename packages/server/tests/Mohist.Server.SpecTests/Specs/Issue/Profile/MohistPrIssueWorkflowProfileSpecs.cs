@@ -296,9 +296,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(verify.Recovery);
         Assert.True(verify.Recovery!.Budget >= 2);
         var handler = Assert.Single(verify.Recovery.Handlers);
-        Assert.Equal("errorCode=script-failed", handler.When);
+        Assert.Null(handler.When);
         Assert.True(handler.RetrySelf);
-        Assert.Equal("recover:fix-tests", Assert.Single(handler.Tasks).Id);
+        Assert.Equal("recover:fix-ci", Assert.Single(handler.Tasks).Id);
         Assert.Equal("HEAD", ReadStringWith(prBuild.Tasks.Single(t => t.Id == "push"), "source"));
     }
 
@@ -472,7 +472,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var recoveryIds = allTaskIds.Where(id => id.StartsWith("recover:", StringComparison.Ordinal)).ToList();
         Assert.Contains("recover:fix-plan-review", recoveryIds);
-        Assert.Contains("recover:fix-tests", recoveryIds);
+        Assert.Contains("recover:fix-ci", recoveryIds);
         Assert.Contains("recover:fix-review-findings", recoveryIds);
         Assert.Contains("recover:rebase", recoveryIds);
         Assert.Contains("recover:push", recoveryIds);
@@ -595,7 +595,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
         Assert.Contains("when: errorCode=conflict", emitted);
-        Assert.Contains("when: errorCode=script-failed", emitted);
+        Assert.Contains("id: recover:fix-ci", emitted);
+        Assert.Contains("prompt: ${{ prompts.fix-ci }}", emitted);
         Assert.Contains("retrySelf: true", emitted);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");

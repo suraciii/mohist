@@ -1,0 +1,52 @@
+---
+name: "Fix CI"
+description: "Diagnoses and fixes a failed CI verification"
+tags: [build, verify]
+stage: build
+---
+
+<artifact id="fix-ci">
+
+<task>
+The verify check did not complete successfully. Diagnose the actual cause before changing code.
+Inspect `git status` and `git diff` first, then inspect the verification output and reproduce the relevant failure.
+Fix the root cause: this can be an implementation or test defect, build configuration, or an unintended side effect left by verification. Do not merely commit or revert generated changes to hide the failure.
+Run the relevant verification again and confirm the worktree is clean before finishing.
+</task>
+
+<dependencies>
+Read the context files before fixing:
+- `${{ openspecChangeDir }}/proposal.md`
+- `${{ openspecChangeDir }}/design.md`
+- `${{ openspecChangeDir }}/tasks.json`
+- relevant specs under `${{ openspecChangeDir }}/specs/`
+- `${{ openspecChangeDir }}/progress.txt` if it exists
+</dependencies>
+
+<instruction>
+1. Inspect the worktree and identify whether existing changes are intended task work or verification side effects.
+2. Read the failed verification output and reproduce only the affected command or suite.
+3. Fix the underlying code, test, or build configuration. Keep intended task changes; do not use `.gitignore`, weaker assertions, or cleanup-only commits to bypass verification.
+4. Re-run the affected verification and the focused checks covering the changed area.
+5. Confirm no Git-visible changes were created solely by verification, then commit the completed task work. Do not push.
+</instruction>
+
+<repair_policy>
+- Do not weaken assertions or remove tests to make them pass.
+- Do not make unrelated changes.
+- Stay within the scope of the current change as described in proposal.md and tasks.json.
+- If the cause is external or cannot be resolved in this workspace, leave the evidence intact and finish unfinished.
+</repair_policy>
+
+<progress_tracking>
+`${{ openspecChangeDir }}/progress.txt` is this issue's working memory.
+Record noteworthy discoveries as you work. Before finishing, review and record the key result.
+</progress_tracking>
+
+<completion>
+When you have completed all work for this task, output `<promise>done</promise>`
+at the end of your response. If you have NOT completed the task, output
+`<promise>unfinished</promise>` instead.
+</completion>
+
+</artifact>

@@ -77,7 +77,7 @@ stages[1].tasks[0].recovery.handlers[0]: handler 需要声明 tasks 或 retrySel
 | artifacts | `files[].path` 非空 |
 | setVars | key 非空；值必须是 `output.` 开头的输出字段路径 |
 | recovery | `budget` 为非负整数；`handlers` 非空、有序 |
-| handler | `when` 形如 `field=value`，两侧非空；至少声明 `tasks` 或 `retrySelf` 之一 |
+| handler | 可选 `when` 形如 `field=value`，两侧非空；缺省时为唯一且最后一个默认 handler；至少声明 `tasks` 或 `retrySelf` 之一 |
 | check | `id` 非空且在 stage 内唯一；`uses` 必填 |
 | 模板 | 所有 `${{ }}` 可解析；根命名空间必须在产品参考的表内；`failure.*` 只允许出现在 recovery handler 的 tasks 内 |
 | 模板 | `tasks.<id>` 引用的 id 必须是 definition 中声明的任务 |

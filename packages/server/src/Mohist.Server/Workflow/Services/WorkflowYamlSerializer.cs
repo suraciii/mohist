@@ -161,20 +161,31 @@ public static class WorkflowYamlSerializer
         }
 
         var handlers = new List<RecoveryHandlerDefinition>();
+        var hasDefaultHandler = false;
         if (recoveryMap.TryGetValue("handlers", out var handlersValue) && handlersValue is not null)
         {
             var handlersList = handlersValue as List<object?>;
             if (handlersList is null)
                 throw new InvalidOperationException($"Workflow task '{taskId}' recovery.handlers must be a list");
 
-            foreach (var handlerEntry in handlersList)
+            for (var handlerIndex = 0; handlerIndex < handlersList.Count; handlerIndex++)
             {
+                var handlerEntry = handlersList[handlerIndex];
                 var handlerMap = Normalize(handlerEntry) as Dictionary<string, object?>;
                 if (handlerMap is null) continue;
 
-                var when = String(handlerMap, "when");
-                if (string.IsNullOrWhiteSpace(when))
-                    throw new InvalidOperationException($"Workflow task '{taskId}' recovery handler requires 'when'");
+                var hasWhen = handlerMap.ContainsKey("when");
+                var when = NullIfEmpty(String(handlerMap, "when"));
+                if (hasWhen && when is null)
+                    throw new InvalidOperationException($"Workflow task '{taskId}' recovery handler 'when' requires a non-empty field=value expression");
+                if (when is null)
+                {
+                    if (hasDefaultHandler)
+                        throw new InvalidOperationException($"Workflow task '{taskId}' recovery allows at most one default handler");
+                    hasDefaultHandler = true;
+                    if (handlerIndex != handlersList.Count - 1)
+                        throw new InvalidOperationException($"Workflow task '{taskId}' recovery default handler must be last");
+                }
 
                 var handlerTasks = new List<TaskDefinition>();
                 if (handlerMap.TryGetValue("tasks", out var tasksValue) && tasksValue is not null)
@@ -186,7 +197,7 @@ public static class WorkflowYamlSerializer
                 }
 
                 var retrySelf = handlerMap.TryGetValue("retrySelf", out var rs) && rs is bool b && b;
-                handlers.Add(new RecoveryHandlerDefinition(when!, handlerTasks, retrySelf));
+                handlers.Add(new RecoveryHandlerDefinition(when, handlerTasks, retrySelf));
             }
         }
 
@@ -382,11 +393,15 @@ public static class WorkflowYamlSerializer
         map["recovery"] = new Dictionary<string, object?>
         {
             ["budget"] = recovery.Budget,
-            ["handlers"] = recovery.Handlers.Select(h => (object?)new Dictionary<string, object?>
+            ["handlers"] = recovery.Handlers.Select(h =>
             {
-                ["when"] = h.When,
-                ["tasks"] = h.Tasks.Select(ToTaskMap).ToList(),
-                ["retrySelf"] = h.RetrySelf,
+                var handler = new Dictionary<string, object?>
+                {
+                    ["tasks"] = h.Tasks.Select(ToTaskMap).ToList(),
+                    ["retrySelf"] = h.RetrySelf,
+                };
+                if (h.When is not null) handler["when"] = h.When;
+                return (object?)handler;
             }).ToList(),
         };
     }

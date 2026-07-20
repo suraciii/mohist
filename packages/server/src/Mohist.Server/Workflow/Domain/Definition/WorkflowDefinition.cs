@@ -26,7 +26,7 @@ public sealed record RecoveryDefinition(
     IReadOnlyList<RecoveryHandlerDefinition> Handlers);
 
 public sealed record RecoveryHandlerDefinition(
-    string When,
+    string? When,
     IReadOnlyList<TaskDefinition> Tasks,
     bool RetrySelf);
 

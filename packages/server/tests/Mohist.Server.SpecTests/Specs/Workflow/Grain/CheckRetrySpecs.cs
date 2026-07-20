@@ -45,8 +45,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
                     "errorCode=script-failed",
                     [
                         new TaskDefinition(
-                            "recover:fix-tests",
-                            "Fix failing tests",
+                            "recover:fix-ci",
+                            "Fix CI verification",
                             "spec/fix")
                     ],
                     RetrySelf: true)
@@ -69,12 +69,12 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
             Output: """{"errorCode":"script-failed"}""",
             AddTasks:
             [
-                new RuntimeTaskInput("recover:fix-tests", "Fix failing tests", "spec/fix"),
+                new RuntimeTaskInput("recover:fix-ci", "Fix CI verification", "spec/fix"),
                 new RuntimeTaskInput("verify", "Verify", "spec/verify", Recovery: recovery, RecoveryRemaining: 0)
             ]));
 
         var (fix, r2) = await PollWorkAnyAsync();
-        Assert.Equal("recover:fix-tests.1", fix.WorkId);
+        Assert.Equal("recover:fix-ci.1", fix.WorkId);
         await ReportAsync(r2, fix.WorkId, "completed");
 
         var (retry, _) = await PollWorkAnyAsync();
