@@ -96,7 +96,7 @@ When an existing Workflow-origin OpenCode idle Follow-up, Compact, or Reset wins
 
 Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow-origin Compact and Reset command delivery SHALL also carry optional project, WorkflowRun, and session-name identity resolved by the Session authority; generic AgentSession commands SHALL omit it. The owning Runner SHALL use that identity to consult the Workflow coordinator even when no prior Workflow open has populated process-local Session mappings.
 
-After Runner restart clears ended in-process command leases, Workflow open and bind SHALL still reject same-binding or replacement admission while the AgentSession authority has an unresolved Follow-up, Compact, or Reset reservation. A persisted terminal command outcome MAY be cleared before admission; unresolved state MUST remain fenced until idempotent command retry or abandon settles it. The Workflow Action SHALL expose this rejection as actionable `session-binding-failed`.
+After Runner restart clears ended in-process command leases, Workflow open and bind SHALL still reject same-binding or replacement admission while the AgentSession authority has an unresolved Follow-up, Compact, or Reset reservation. A persisted terminal command outcome SHALL NOT block admission, but open/bind MUST NOT clear that operation-ID receipt before the waiting public route reads it; only command receipt acknowledgement or existing idempotency/next-command cleanup may remove it. Unresolved state MUST remain fenced until idempotent command retry or abandon settles it. The Workflow Action SHALL expose this rejection as actionable `session-binding-failed`.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -144,6 +144,12 @@ After Runner restart clears ended in-process command leases, Workflow open and b
 - **WHEN** the Runner restarts after Compact or Reset changes Runtime state but before Server completion is acknowledged
 - **THEN** Workflow open and bind SHALL reject same-binding or replacement admission with actionable `session-binding-failed` while the Server reservation is unresolved
 - **AND** admission SHALL resume only after idempotent command retry or abandon settles that reservation
+
+#### Scenario: Workflow admission preserves a completed command receipt
+
+- **WHEN** Compact or Reset completion is persisted and its Runner lease releases before the waiting public route reads the outcome
+- **THEN** a queued Workflow open MAY proceed because the command is terminal but MUST NOT clear its operation-ID receipt
+- **AND** the public route SHALL still read the persisted outcome exactly once before command-owned cleanup
 
 #### Scenario: A command reservation acquired first blocks Workflow bind
 
