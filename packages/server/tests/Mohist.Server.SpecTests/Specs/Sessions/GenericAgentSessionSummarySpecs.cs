@@ -251,7 +251,7 @@ public class GenericAgentSessionSummarySpecs
             Id = sessionId,
             State = stateJson,
             RunnerId = $"runner-{sessionId}",
-            AgentSessionId = "acp-" + sessionId,
+            AgentSessionId = "session-" + sessionId,
             Status = "opened",
             CreatedAt = CreatedAt,
         };
@@ -262,7 +262,7 @@ public class GenericAgentSessionSummarySpecs
             var turn = new AgentSessionTranscriptTurnRow
             {
                 SessionId = sessionId,
-                RuntimeSessionId = "acp-" + sessionId,
+                RuntimeSessionId = "runtime-" + sessionId,
                 Sequence = 1,
                 StartedAt = CreatedAt,
                 UpdatedAt = CreatedAt.AddMinutes(5),
@@ -331,7 +331,7 @@ public class GenericAgentSessionSummarySpecs
         var turn = new AgentSessionTranscriptTurnRow
         {
             SessionId = sessionId,
-            RuntimeSessionId = "acp-" + sessionId,
+            RuntimeSessionId = "runtime-" + sessionId,
             Sequence = 1,
             StartedAt = CreatedAt,
             UpdatedAt = CreatedAt.AddMinutes(5),
@@ -406,7 +406,7 @@ public class GenericAgentSessionSummarySpecs
             Id = SessionIdWorkflow,
             State = stateJson,
             RunnerId = $"runner-{SessionIdWorkflow}",
-            AgentSessionId = "acp-" + SessionIdWorkflow,
+            AgentSessionId = "session-" + SessionIdWorkflow,
             Status = "opened",
             CreatedAt = CreatedAt,
         });
