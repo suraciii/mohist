@@ -1,0 +1,32 @@
+{
+  "project": "mohist-local",
+  "description": "Provide each sub-issue Plan Inline Agent with its parent's current title and body as read-only background while preserving child scope authority and all ordinary-issue and non-Plan behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver parent background to sub-issue Plan agents",
+      "spec": "specs/sub-issue-plan-context/spec.md",
+      "description": "Implement the complete parent-context path from the Issue read side through API-boundary poll-response assembly into `mohist/opencode` prompt composition. Resolve only the current parent title/body for child Plan tasks, label it as read-only background with the child body authoritative for scope, preserve existing prompts when context is absent, and update the canonical issue-breakdown and task-dispatch design documentation.",
+      "acceptanceCriteria": [
+        "A narrow Issue read operation resolves a child's projected `ParentIssueNumber` to the parent Issue's current title and body without assembling or exposing parent comments, attachments, artifacts, children, status, or sibling data; an ordinary issue returns no parent context.",
+        "The API poll route performs the cross-domain enrichment while mapping `WorkDispatch` to `WorkDispatchResponse`; `WorkflowItemTranslator`, the Orleans-serialized `WorkDispatch`, Workflow domain types, and `WorkflowRun` metadata/state remain unchanged, so no forbidden `Runner -> Issue` dependency is introduced.",
+        "The plain HTTP `WorkDispatchResponse` carries one additive optional `ParentIssueContextResponse` with title/body only, and runner `WorkDispatchResponse`, `RenderedWorkItem`, `ActionContext`, poll mapping, and executor propagation preserve that shape without placing it in task `with`, variables, prompts, or persisted state.",
+        "The poll response mapper resolves and populates parent context only for task work with `stage = plan` and `uses = mohist/opencode` whose current issue has a resolvable parent; checks, Build/Check/Integrate tasks, other actions, AgentJob work, detached children, and ordinary Plan issues carry no effective parent context.",
+        "For every applicable Plan turn, `mohist/opencode` prepends a deterministic block containing JSON-encoded parent title/body and explicit instructions that it is read-only background and the current child issue body controls delivery scope, then submits the original resolved task prompt unchanged after that block.",
+        "When parent context is absent, the exact resolved prompt submitted to `OpenCodeRuntime.runTurn` remains unchanged from current behavior; the action does not query Issues, infer parenthood, or rely on prior AgentSession turns.",
+        "Server specs cover parent resolution, current-value reads, detachment, API poll-response Plan/opencode gating, ordinary Plan, non-Plan, checks, unrelated actions, HTTP wire mapping, the title/body-only context shape, and architecture-suite compliance without real external dependencies or wall-clock time.",
+        "Runner tests cover poll decoding, executor-to-ActionContext propagation, parent-only text and authority labels in the submitted OpenCode prompt, JSON-safe arbitrary Markdown/delimiters, repetition on each applicable turn, and byte-for-byte prompt preservation when context is absent.",
+        "`design/issue-breakdown.md` no longer lists Plan background injection as an unresolved implementation path, and `design/workflow/task-dispatch.md` records the optional parent-context dispatch source, stage/action gate, and runner prompt-composition ownership without adding a public template namespace.",
+        "No database migration, public Issue API/CLI/Web change, Orleans `WorkDispatch` change, WorkflowRun metadata/state change, parent-child lifecycle change, approval change, architecture allowlist change, or external dependency is introduced.",
+        "`npm run typecheck -w packages/runner`, `npm test -w packages/runner`, and `npm test` pass with all new and existing coverage green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "End-to-end sub-issue Plan parent-context delivery through the server HTTP poll response and runner OpenCode prompt, canonical design documentation updates, and focused server/runner regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep this as one atomic vertical slice: the Issue resolver, API response mapper/DTO, runner transport, and OpenCode prompt consumer are unusable independently. The API mapping boundary may depend on both Issue reads and Runner output; do not make `Mohist.Server.Runner` depend on `Mohist.Server.Issue` or alter the architecture allowlist. Preserve Workflow zero-awareness, keep `WorkDispatch` unchanged, use a purpose-built title/body HTTP value rather than a generic related-issue graph, do not add a Body projection or migration, and do not fetch the parent through `mo issue show`. Missing/corrupt relationship policy is outside this change. The single-task dependency graph is acyclic by construction."
+    }
+  ]
+}

@@ -358,6 +358,8 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
   }
+  if (Object.prototype.hasOwnProperty.call(dispatch, "parentIssueContext"))
+    work.parentIssueContext = dispatch.parentIssueContext
   if (Object.prototype.hasOwnProperty.call(dispatch, "recoveryRemaining"))
     work.recoveryRemaining = dispatch.recoveryRemaining
   return work

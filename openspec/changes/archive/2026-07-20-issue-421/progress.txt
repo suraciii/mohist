@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- `IssueQuerier` is the narrow Issue read-side boundary and may deserialize Issue state for fields such as body without expanding the full `IssueReadModel` collections.
+- `RunnerRoutes` is the cross-domain composition boundary for poll HTTP DTOs; `Mohist.Server.Runner` must not depend on `Mohist.Server.Issue`, and Orleans `WorkDispatch` remains unchanged.
+- Runner poll-only execution context flows `WorkDispatchResponse` -> `RenderedWorkItem` -> `ActionContext`; it does not belong in `with`, variables, prompts, or persisted workflow/session state.
+
+## T-001
+
+- Added current parent title/body resolution from the child's projected `ParentIssueNumber`; ordinary and detached issues return no context.
+- Parent context is populated only for workflow-owned task dispatches with `stage = plan` and `uses = mohist/opencode` while mapping the HTTP poll response.
+- `mohist/opencode` treats the server gate as authoritative and prepends a deterministic JSON block on every turn carrying context; absent context returns the resolved prompt unchanged.
+- The workflow workspace initially had no Node dependencies installed; `npm ci` was required before runner verification and did not change tracked dependency files.
+- IssueQuerierSpecs-style "update an init-only Issue" must rebuild via a fresh `DomainIssue { ... }` (Issue properties are `init`-only); tests serialize the new instance back through `IssueStore.Serialize`. Direct mutation such as `issue.Title = ...` does not compile.
+- `Mohist.Server.Api` is intentionally outside the domain matrix in `ArchitectureRules.cs`; using `RunnerRoutes` (it lives in `Mohist.Server.Api`) as the cross-domain composition boundary is what keeps `Runner → Issue` dependency forbidden while still letting the poll route enrich the HTTP DTO. No architecture rule needs to change.

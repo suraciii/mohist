@@ -69,6 +69,27 @@ public class IssueQuerier : IScopedService
         return await LoadIssueAsync(db, projectId, number);
     }
 
+    public async Task<ParentIssueContext?> GetParentIssueContextAsync(string projectId, int issueNumber)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) || issueNumber <= 0) return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parentNumber = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
+            .Select(row => row.ParentIssueNumber)
+            .FirstOrDefaultAsync();
+        if (parentNumber is null) return null;
+
+        var parentState = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == parentNumber)
+            .Select(row => row.State)
+            .FirstOrDefaultAsync();
+        if (string.IsNullOrEmpty(parentState)) return null;
+
+        var parent = IssueStore.Deserialize(parentState);
+        return parent is null ? null : new ParentIssueContext(parent.Title, parent.Body);
+    }
+
     /// <summary>
     /// Reverse lookup: returns the project-scoped issue reference
     /// bound to <paramref name="workflowRunId"/>, or <c>null</c> when no

@@ -1,4 +1,4 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
 import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
@@ -9,6 +9,12 @@ import { actionErrorMessage, fail, succeed } from "./action-result.js"
 export const OPENCODE_USES = "mohist/opencode"
 
 export const DEFAULT_TURN_DEADLINE_MS = 60 * 60 * 1000
+
+export function composeOpencodePrompt(prompt: string, parentIssueContext?: ParentIssueContext | null): string {
+  if (!parentIssueContext) return prompt
+  const parent = JSON.stringify({ title: parentIssueContext.title, body: parentIssueContext.body })
+  return `Parent issue context (read-only background; JSON):\n${parent}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${prompt}`
+}
 
 export interface OpencodeOptions {
   model?: string
@@ -68,6 +74,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   if (typeof prompt !== "string" || !prompt.trim()) {
     return fail("invalid-input", "mohist/opencode requires 'prompt' that resolves to non-empty text")
   }
+  prompt = composeOpencodePrompt(prompt, context.parentIssueContext)
 
   const optionsParse = parseOpencodeInput(context.with ?? null)
   if (optionsParse.kind === "failure") return optionsParse.result

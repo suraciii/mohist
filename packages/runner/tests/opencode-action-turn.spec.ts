@@ -186,6 +186,51 @@ describe("opencodeAction — happy path + turn fact", () => {
     expect(result.turnFact).toEqual({ finalAssistantText: "hello from opencode" })
   })
 
+  it("prepends JSON-safe read-only parent background on every applicable turn", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    const parentIssueContext = {
+      title: "Parent </parent> \"title\"",
+      body: "## Requirement\n```json\n{ \"delimiter\": \"${{ child.scope }}\" }\n```\n---END---",
+    }
+    const originalPrompt = "  original child task prompt\n<artifact id=\"child\">keep exactly</artifact>  "
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      stage: "plan",
+      parentIssueContext,
+      with: { prompt: originalPrompt } as never,
+    })
+
+    await opencodeAction(context)
+    await opencodeAction({ ...context, workId: "work-2" })
+
+    const expected = `Parent issue context (read-only background; JSON):\n${JSON.stringify(parentIssueContext)}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${originalPrompt}`
+    const submitted = client.sessionPrompt.mock.calls.map((call) => {
+      const request = call[0] as { parts: Array<{ type: string; text: string }> }
+      return request.parts.map((part) => part.text).join("")
+    })
+    expect(submitted).toEqual([expected, expected])
+    expect(submitted[0]).toContain(JSON.stringify(parentIssueContext))
+    expect(submitted[0]).toMatch(/read-only background/i)
+    expect(submitted[0]).toMatch(/current child issue body.*authoritative.*controls delivery scope/i)
+    expect(submitted[0]?.endsWith(originalPrompt)).toBe(true)
+  })
+
+  it("submits the resolved prompt byte-for-byte when parent context is absent", async () => {
+    const { runtime, client } = buildRuntime()
+    await ensureReady(runtime)
+    const originalPrompt = "  exact prompt\nwith markdown --- and trailing spaces  "
+
+    await opencodeAction(baseContext({
+      openCodeRuntime: runtime,
+      stage: "plan",
+      with: { prompt: originalPrompt } as never,
+    }))
+
+    const request = client.sessionPrompt.mock.calls[0]?.[0] as { parts: Array<{ type: string; text: string }> }
+    expect(request.parts.map((part) => part.text).join("")).toBe(originalPrompt)
+  })
+
   it("Action does not synthesize { promise } in its output (executor projects it from markers)", async () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)

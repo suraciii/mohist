@@ -27,6 +27,7 @@ status: accepted 2026-07-15
 
 - 父子关系、状态汇总、复合推进全部落在 **Issue 子域**（work organization）。
 - **Workflow 零感知**：子 issue 的 WorkflowRun 与普通 issue 无异；父 issue 不创建 WorkflowRun。不变式"Issue → Workflow 单向、Workflow 不知道 issue"保持。
+- 子 issue 的 Plan Inline Agent 背景在派发 HTTP 响应边界按需组装：仅解析父 issue 当前标题与 body，不进入 WorkflowRun、Workflow WorkDispatch 或 task input；runner 的 `mohist/opencode` Action 负责将其标为只读背景，并保持子 issue body 为交付范围权威。完整派发规则见 [`workflow/task-dispatch.md`](workflow/task-dispatch.md)。
 - 仓库集合与 default 解析属于 **Project Space**（repo binding 本就归它）；任务派发时目标仓库解析为 repo path + base branch 注入，替代"从 project 取唯一仓库"。
 - 父子是不同 Issue 聚合，经领域事件协调（子 issue 终态/reopen 事件 → 父重算并推进兄弟），与 `WorkflowRunCompleted → CompleteIssue` 同风格。见 [`workflow/issue-coordination.md`](workflow/issue-coordination.md)。
 
@@ -54,6 +55,5 @@ status: accepted 2026-07-15
 
 ## 开放问题（单独立项）
 
-1. **Plan 背景注入**：子 issue Plan 时注入父 issue 标题与 body，依赖 runner 支持"派发输入携带关联 issue 上下文"，实现路径与 [`workflow/task-dispatch.md`](workflow/task-dispatch.md) 对齐。
-2. **multi-checkout**：一个 issue 同时检出多个仓库（联调型工作）明确不做；产品 spec 以"最后一个联调子 issue"覆盖，真实需求出现再评估。
-3. **Web UI**：看板上父卡片按 status 定位（无 stage）、进度徽标与 blocked 提示的具体形态，归 [`web-ui.md`](web-ui.md) 细化。
+1. **multi-checkout**：一个 issue 同时检出多个仓库（联调型工作）明确不做；产品 spec 以"最后一个联调子 issue"覆盖，真实需求出现再评估。
+2. **Web UI**：看板上父卡片按 status 定位（无 stage）、进度徽标与 blocked 提示的具体形态，归 [`web-ui.md`](web-ui.md) 细化。
