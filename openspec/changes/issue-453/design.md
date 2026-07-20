@@ -44,7 +44,7 @@ Alternative considered: extend `RuntimeActionKind` and `deriveRuntimeDecision` w
 
 ### Use one action controller for both responsive presentations
 
-The issue detail page will create the runtime mutation adapter once and bind the composed descriptors to one action controller. The controller will own command dispatch, pending/error lookup, recoverable versus terminal Stop selection, Stop confirmation, and send-back feedback validation. Desktop will render the full action list inline; the narrow bottom bar will retain a compact primary affordance and open an action sheet containing the complete action list and decision context.
+The issue detail page will create the runtime mutation adapter once and bind the composed descriptors to one action controller. The controller will own command dispatch, pending/error lookup, recoverable versus terminal Stop selection, Stop confirmation, and send-back feedback validation. It will overlay pending mutation state on the pure descriptor as a rendered disabled state with an operation-specific progress label and reason. Desktop will render the full action list inline; the narrow bottom bar will retain a compact primary affordance and open an action sheet containing the complete action list and decision context.
 
 The desktop region and mobile sheet may use different layout components, but they will consume the same descriptors and controller. The mobile launcher remains reachable even when the primary command is disabled, preventing a disabled primary action from hiding enabled secondary actions or its explanation.
 
@@ -68,7 +68,7 @@ Alternative considered: keep the repeated values but restyle them as less promin
 
 ### Treat disabled explanations as visible content
 
-Runtime presentation code will replace implementation-jargon fallbacks with action- and state-specific product reasons. The canonical action renderer will show a disabled reason as helper text associated through `aria-describedby`; pointer tooltips may supplement but will not replace visible text. Disabled destructive actions will use a neutral disabled treatment rather than retaining live destructive emphasis.
+Runtime presentation code will replace implementation-jargon fallbacks with action- and state-specific product reasons. The canonical action renderer will show a disabled reason as helper text associated through `aria-describedby`; pointer tooltips may supplement but will not replace visible text. When the controller marks an action pending, the renderer will use a specific progress label such as `Approving...` or `Closing...` and a visible helper reason that another request is unavailable until the operation finishes; the associated status will use `aria-live="polite"`. Disabled destructive actions will use a neutral disabled treatment rather than retaining live destructive emphasis.
 
 Rebase remains in `BranchBar` because it is tied to branch/workspace evidence rather than the issue decision action list. `BranchBar` will apply the same contract: derive a reason for workspace checking, unavailable status, or conflict resolution; render it visibly; and neutralize disabled styling. This narrow duplication is preferable to introducing a shared cross-domain action abstraction for two components.
 
@@ -95,6 +95,7 @@ Alternative considered: keep a disabled transcript placeholder until a session b
 - `[Risk] Session ordering selects the wrong transcript` -> Use explicit status priority and timestamp/name ordering rather than API array order; retain the sessions panel for access to all sessions.
 - `[Risk] Removing InlineApproval regresses evidence or review reports` -> Remove only mutation controls and keep StepList evidence rendering covered by existing workflow-view specifications.
 - `[Risk] Visible helper text increases action-surface height` -> Use compact action rows and disclosure on narrow screens; do not hide reasons behind hover-only affordances.
+- `[Risk] Mutation-pending controls become disabled without satisfying the reason contract` -> Treat pending as a rendered unavailable state with a progress label, visible associated reason, polite announcement, and desktop/mobile controller tests.
 - `[Trade-off] Rebase remains outside the canonical action list` -> Keep it next to branch evidence, but apply the same disabled-reason and visual-state rules and cover it in the capability tests.
 
 ## Migration Plan

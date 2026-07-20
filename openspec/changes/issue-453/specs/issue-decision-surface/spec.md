@@ -79,7 +79,7 @@ On a narrow phone viewport, the page SHALL expose every action applicable to the
 
 ### Requirement: Unavailable actions are honest and accessible
 
-Every action shown but unavailable SHALL display a visible, accessible reason in product language and SHALL be visually unmistakable as disabled. A reason MUST be readable without inspecting the DOM and MUST NOT contain implementation terms including "projection", "surface", or "backend". These rules SHALL apply across desktop and narrow viewports, including disabled Stop and Rebase controls.
+Every action shown but unavailable SHALL display a visible, accessible reason in product language and SHALL be visually unmistakable as disabled. A reason MUST be readable without inspecting the DOM and MUST NOT contain implementation terms including "projection", "surface", or "backend". When an action is temporarily unavailable because its request is pending, its progress label and associated reason SHALL identify the operation in progress and that another request cannot be made until it finishes. These rules SHALL apply across desktop and narrow viewports, including disabled Stop and Rebase controls.
 
 #### Scenario: Disabled runtime action explains its availability
 
@@ -98,6 +98,13 @@ Every action shown but unavailable SHALL display a visible, accessible reason in
 - **WHEN** any unavailable action reason is displayed
 - **THEN** the reason SHALL describe the user's situation or required next condition
 - **AND** it MUST NOT contain the terms "projection", "surface", or "backend"
+
+#### Scenario: Pending action explains its temporary disabled state
+
+- **WHEN** a workflow or issue lifecycle action is disabled because its request is pending
+- **THEN** the action SHALL visibly identify the operation in progress
+- **AND** an accessible associated reason SHALL explain that another request is unavailable until the operation finishes
+- **AND** the control SHALL look disabled on desktop and narrow viewports
 
 ### Requirement: The decision surface never presents an unexplained dead end
 
