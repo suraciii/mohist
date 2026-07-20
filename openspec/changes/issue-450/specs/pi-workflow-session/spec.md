@@ -90,6 +90,8 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. The Workflow executor SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL retain one task lease through Prompt completion, successful completion checks, any worktree cleanup turn, and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current task lifecycle reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine both the physical Pi Session and the logical serialization key before the current operation leaves the boundary. Later work MUST NOT start a Prompt or runtime rebind on that logical AgentSession until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
+Existing Session commands SHALL NOT be allowed to start idle work on a binding while a Workflow task is preparing, rebinding, between its original and cleanup Prompts, or durably reporting. A guarded bind SHALL reject without mutation when Follow-up, Compact, or Reset command state is pending or active. When the Workflow lease wins first, the owning Runner SHALL reject command admission during preparation; only an existing OpenCode Follow-up MAY steer after the Runtime has synchronously reserved the physical Session for the active Prompt. Compact and Reset SHALL remain idle-only. These admission rules MUST NOT add Pi command routing in this issue.
+
 #### Scenario: Concurrent tasks on one Session are serialized
 
 - **WHEN** two Workflow tasks concurrently target the same logical Pi AgentSession
@@ -118,6 +120,24 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 - **WHEN** a Pi turn's interruption is unconfirmed and a later Workflow task selects OpenCode for the same logical AgentSession
 - **THEN** the shared logical-Session boundary SHALL reject the later task as runtime unavailable before rebind
 - **AND** no OpenCode Prompt SHALL start until Pi stop is observed or the Runner process restarts
+
+#### Scenario: A command reservation acquired first blocks Workflow bind
+
+- **WHEN** Follow-up, Compact, or Reset reserves or starts work on the current binding before a Workflow runtime bind reaches the AgentSession authority
+- **THEN** the bind SHALL reject without replacing the binding or sealing its Action stream
+- **AND** the Workflow Action MUST NOT submit a Prompt
+
+#### Scenario: Workflow preparation acquired first blocks idle commands
+
+- **WHEN** a Workflow task holds the logical-Session lease but has not established an active Runtime Prompt slot, or is between work and cleanup Prompts
+- **THEN** Follow-up, Compact, and Reset admission SHALL return a definite not-started or busy result
+- **AND** no command SHALL start against the old or new physical binding
+
+#### Scenario: Active OpenCode Follow-up has no pre-Prompt race
+
+- **WHEN** an existing OpenCode Follow-up arrives after the Runtime has reserved the physical Session and the Workflow lease is in `prompt-active`
+- **THEN** it MAY steer the already-active OpenCode turn under existing behavior
+- **AND** there SHALL be no state in which the Follow-up can start an idle Prompt before the Workflow Prompt is admitted
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
