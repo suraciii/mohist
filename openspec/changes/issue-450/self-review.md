@@ -1,59 +1,67 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: current issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the repository's architecture, current OpenCode Workflow path, and testing rules. This review does not modify the plan artifacts.
+Scope: current issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts and repository architecture/testing rules. This review modifies no plan artifact.
 
 ## Findings
 
-### F-1 High: The design permits permanent loss of Session audit facts that the issue and spec require
+### F-1 Critical: The durable Session event protocol has no implementation task
 
-The issue requires assistant text, tool calls, and usage to be visible in the Session page. `specs/pi-workflow-session/spec.md:98-111` consequently requires every Pi Workflow turn to report those facts and makes duplicate delivery idempotent. However, `design.md:142-144` says a post-admission event transport failure is only logged and explicitly accepts an audit gap; `tasks.json:90` carries the same lossy behavior into T-004.
+The revised Session spec requires a durable Runner outbox, stable stream identity and monotonic sequence, an idempotent Server cursor, duplicate acknowledgement, gap recovery, startup/restart drain, and a pre-rebind drain barrier (`specs/pi-workflow-session/spec.md:110-147`). D8 designs those components explicitly (`design.md:134-151`), and migration steps 3-4 separate the Server cursor from the Runner outbox (`design.md:195-196`).
 
-This allows a task to succeed while permanently missing the exact transcript/tool/usage evidence in the acceptance criteria. The plan must define a durable, idempotent delivery or later reconciliation path that does not replay the Prompt, and T-004 must test pre-admission input failure, post-admission transport failure, ambiguous delivery, retry/dedup, and bounded drain behavior. If observability is intentionally best-effort, the issue/spec contract would have to change instead; the current artifacts cannot promise both.
+`tasks.json` still represents the earlier lossy reporter. T-003 owns only stale-binding event rejection (`tasks.json:66-68`), while T-004 asks the reporter to flush and log post-admission delivery failures (`tasks.json:90`) but never owns durable append-before-send, the file-backed store, sequence/cursor persistence, duplicate/gap behavior, background/startup drain, or restart recovery. Its end-to-end coverage likewise mentions only stale-event rejection (`tasks.json:95`). The required audit guarantee can therefore be omitted while every task criterion passes. The task graph must assign the Server cursor and Runner outbox as explicit, dependency-ordered work with deterministic fake-store tests.
 
-### F-2 High: An unconfirmed abort can release the queue while the prior turn is still running
+### F-2 Critical: T-003 breaks the existing OpenCode Workflow caller instead of migrating it atomically
 
-`specs/pi-workflow-session/spec.md:83-96` forbids overlapping Workflow turns on one logical AgentSession. `design.md:111-115` releases the keyed queue when the operation settles, while `design.md:119-125` and `specs/pi-runtime/spec.md:93-113` allow the operation to settle with an interruption-unconfirmed result when Pi cannot be proven stopped.
+T-003 makes Workflow open require `runtime` and bind require expected-current fields (`tasks.json:60-63`) but never updates or regression-tests the existing `mohist/opencode` caller. That caller currently sends neither field (`packages/runner/src/actions/opencode.ts:96-108,135-145`). D5 explicitly requires the Server wire and OpenCode caller to migrate atomically and requires both runtime-switch directions to be covered (`design.md:86-95,166,188`).
 
-Nothing then quarantines the physical Session or blocks the next queued task, so the next Prompt can start while the previous turn may still execute. The design must define the post-unconfirmed-abort admission state: retain the lease until stop is observed, quarantine the binding, or reject later work with an actionable recovery path. The selected behavior needs deterministic concurrency tests in T-002/T-004.
+As written, T-003 is not independently deliverable despite its note (`tasks.json:76`): it can break the only working Workflow Inline Agent path before T-004 starts. Its one directional "different runtime to pi" criterion (`tasks.json:62`) also omits the normative Pi-to-another-runtime case (`specs/pi-workflow-session/spec.md:61-65`). T-003 must include the OpenCode caller migration and symmetric regression tests in the same task as the required wire change.
 
-### F-3 High: T-003's required Workflow Session wire change would break the existing OpenCode Action
+### F-3 High: A Pi-owned queue cannot enforce logical Session serialization across runtimes
 
-T-003 independently makes `runtime` and expected-current binding fields required (`tasks.json:55-76`). The current OpenCode Action sends neither runtime on open nor expected runtime/session on attach (`packages/runner/src/actions/opencode.ts:96-108,135-145`). T-003 does not require migrating that caller, and T-004's OpenCode-preservation criteria do not close the gap.
+D5 permits a logical Workflow AgentSession to switch between OpenCode and Pi in either direction (`design.md:88-95`), but D6 places the keyed queue in the Pi Action adapter/coordinator (`design.md:112-118`). An OpenCode Action never enters that queue. Concurrent OpenCode and Pi tasks using the same logical Session can therefore overlap: the expected-current bind guard can reject a stale bind, but it does not reserve the logical Session for the duration of the already-running physical Prompt.
 
-T-003 therefore cannot be delivered independently without breaking the only working Workflow Inline Agent path. The task must either migrate and regression-test `mohist/opencode` atomically with the Server contract, or keep the new wire fields additive until all callers switch. Since the binding command is runtime-neutral, coverage must also prove a guarded Pi-to-OpenCode rebind, not only another-runtime-to-Pi.
+This violates the runtime-neutral invariant that each logical AgentSession admits at most one work Prompt (`design/runtimes/opencode.md:171-173`) and the new Session requirement (`specs/pi-workflow-session/spec.md:89-108`). The serialization boundary must be shared by both Workflow Inline Agent callers, or cross-runtime rebinding must be removed from this issue. Tests must cover concurrent OpenCode/Pi turns against one logical Session, not only concurrent Pi turns.
 
-### F-4 Medium: Pi parent-context injection conflicts with the architecture-owned dispatch specification
+### F-4 High: Post-admission durable-append failure has no defined safe outcome
 
-`design.md:75-81` and T-004 (`tasks.json:94`) require plan-stage parent issue context to include `mohist/pi`. The authoritative dispatch design currently says the context is attached only when `uses = mohist/opencode`, and excludes every other Action (`design/workflow/task-dispatch.md:65-75`). `design/architecture.md:33-35` makes `design/` authoritative over OpenSpec for architecture rules.
+D8 says every projected fact is durably appended before the Action returns and that delivery failure preserves the Action result because the durable record remains (`design.md:145-151`). It does not define what happens when the append itself fails after Prompt admission due to storage exhaustion, permission loss, corruption, or an interrupted/partial write. At that point failing the task can invite an unsafe Workflow retry, while succeeding permanently violates the required audit record (`specs/pi-workflow-session/spec.md:110-129`).
 
-If Pi is intended to receive the same parent context, the canonical dispatch design must be revised before implementation and that revision must be explicit in a task. Otherwise the Pi parent-context change must be removed from this plan.
+The design must specify the crash-consistent record/ack format, the Action result and physical-Session admission state after an unpersisted post-admission fact, and recovery when a stream cannot be drained. Because repository tests may not instantiate physical filesystem adapters (`design/testing.md:45-55`), the production file-backed implementation also needs an injected storage/filesystem boundary so serialization, partial-write recovery, restart loading, and acknowledgement persistence can be tested in memory. The current plan mentions only an in-memory outbox fake (`design.md:145,163-167`), which bypasses the production durability logic.
 
-### F-5 Medium: The `session` input's accepted and invalid forms are undefined
+### F-5 High: The governing working-directory contract is contradictory
 
-`specs/pi-workflow-action/spec.md:17-43` precisely defines prompt/options/model/variant validation but does not define the type, whitespace, empty string, or null behavior of `session`. `design.md:65-79` only says it is validated, and T-004 has no acceptance matrix for it. This matters because the current helper stringifies non-string values (`packages/runner/src/core/json.ts:24-28`) and can turn an object or number into a durable Session name.
+The issue's explicit domain decision and the delta plan reject a different working directory (`proposal.md:10`; `specs/pi-workflow-session/spec.md:67-87`). The issue-designated product contract instead says a working-directory change creates a new physical Session and appends lineage (`docs/actions/pi.md:78-85`). The canonical runtime design says both that directory change creates a new physical Session (`design/runtimes/pi.md:120-123`) and that mismatch is rejected (`design/runtimes/pi.md:140-146`); the shared AgentSession design also permits replacement on work-directory change (`design/agent-execution.md:125-126`).
 
-The spec must state which `session` values mean omitted/default-to-Work-ID and which fail `invalid-input`; design and task tests must pin the same behavior before Session identities are persisted.
+An implementer cannot treat all of these as authoritative. The canonical product/runtime/domain documents must be reconciled to the issue's selected rule before build work begins. T-005 only updates implementation-gap footnotes (`tasks.json:113-126`), so no task currently owns that contract correction.
 
-### F-6 Medium: The promised Runner-configurable provider policy has no configuration path
+### F-6 High: `tasks.json` was not reconciled with the hardened runtime and Action specs
 
-`specs/pi-runtime/spec.md:115-135` requires a Runner-configured retry threshold, and `design.md:121-127` describes configurable provider patterns/threshold behavior. T-002 tests only defaults and threshold mechanics (`tasks.json:40-41`); no artifact identifies the configuration source, validation/defaulting, host wiring, or a test proving a non-default value reaches `PiRuntime`.
+Several newly normative behaviors have no matching task acceptance or test obligation. T-002 tests only an unconfirmed-stop diagnostic (`tasks.json:40`) and does not require quarantining the physical path, rejecting later admission, preserving other Sessions, or clearing quarantine on observed stop/restart (`specs/pi-runtime/spec.md:93-126`). It mentions provider policy mechanics (`tasks.json:31,41`) but does not own parsing and validating `MOHIST_PROVIDER_RETRY_THRESHOLD` and `MOHIST_PROVIDER_NON_RECOVERABLE_TERMS`, readiness failure on invalid input, literal matching, or one shared OpenCode/Pi policy object (`specs/pi-runtime/spec.md:150-168`; `design.md:130`).
 
-The plan must either define and task the Runner configuration surface or narrow the normative contract to fixed defaults plus an internal test seam. Leaving "Runner-configured" undefined gives implementers no testable completion condition.
+T-004's input criterion (`tasks.json:86`) does not require the exact `session` identity matrix, recursive structured expansion, `options` object/null/type validation, or no-side-effect rejection before Session creation (`specs/pi-workflow-action/spec.md:17-59`). Its readiness criterion gates polling (`tasks.json:84`) rather than requiring both runtimes ready before Server registration as the spec and D3 state (`specs/pi-runtime/spec.md:17-37`; `design.md:54-62`). These omissions are material because autonomous builders use task acceptance to decide completion.
 
-### F-7 Medium: The breaking Node floor migration omits contributor documentation
+### F-7 Medium: Required design/toolchain migrations are absent from the task graph
 
-The proposal marks Node 22.19 as a breaking requirement (`proposal.md:13`). T-001 updates manifests, CI, and Docker (`tasks.json:9-17`), but `CONTRIBUTING.md:5-10` still advertises Node >=22.0.0. T-001 must include the documented development prerequisite and verify all installation instructions remain accurate; otherwise contributors can follow the repository documentation with an unsupported runtime.
+D4 requires updating the architecture-owned parent-context rule in `design/workflow/task-dispatch.md` before changing dispatch code (`design.md:82,197`), but T-004 changes parent-context behavior without owning or depending on that spec update (`tasks.json:82,94`). T-001 also omits `CONTRIBUTING.md` even though the proposal and D9 explicitly include it in the breaking Node 22.19 migration (`proposal.md:13,28`; `design.md:153-159,193`); the contributor guide still advertises Node >=22.0.0 (`CONTRIBUTING.md:5-10`).
+
+Both migrations need explicit task ownership and ordering. Otherwise implementation can satisfy the task graph while leaving authoritative architecture and contributor prerequisites stale.
+
+### F-8 Medium: Cancellation parity is not specified with the same rigor as timeout
+
+The issue requires cancellation semantics to remain equivalent to OpenCode. The design says only that an external Action signal follows interruption cleanup and maps to `interrupted` (`design.md:128`), while the runtime spec's detailed scenarios cover deadline interruption but not cancellation result fixation, abort confirmation, unconfirmed-stop quarantine, or no replay after cancellation (`specs/pi-runtime/spec.md:93-126`). T-002 mentions external interruption in one broad test criterion (`tasks.json:40`) and T-004 checks only the final error mapping (`tasks.json:92`).
+
+Add a normative cancellation scenario and deterministic acceptance coverage for confirmed and unconfirmed abort outcomes. Without it, implementations can diverge on whether a cancelled task releases the Session while Pi may still be running.
 
 ## Structural Checks
 
 - `tasks.json` parses as valid JSON.
 - All five task IDs and dependencies resolve; the graph is acyclic and every dependency points to a lower priority.
-- All three proposal capabilities have matching spec files; every requirement has at least one correctly headed scenario.
-- All task spec paths/anchors resolve, and the task references collectively cover all 20 requirements.
-- Scope exclusions for AgentJob Pi routing, Session commands, ACP/RPC, and model-catalog UI are otherwise consistently stated.
+- All three proposal capabilities have matching spec files; the 21 requirements use correctly headed scenarios.
+- Scope exclusions for Pi AgentJob routing, Session commands, ACP/RPC, and runtime-aware model-catalog UI are otherwise consistently stated.
+- The worktree was clean before this review; only `self-review.md` is changed by it.
 
 ## Verdict
 
-The plan has three build-blocking contradictions around required audit delivery, turn serialization after unconfirmed interruption, and independent migration of the shared Workflow Session wire contract. The remaining findings leave authoritative dispatch behavior, durable Session input identity, provider-policy configuration, and the breaking toolchain migration incomplete. These must be corrected before autonomous build execution.
+The revised proposal, design, and specs close the earlier lossy-delivery, quarantine, input-validation, provider-configuration, and runtime-switch contract gaps, but the executable task graph still reflects the older plan. In addition, cross-runtime serialization, durable local append failure, and the contradictory canonical working-directory rule remain unresolved design blockers. The plan is not ready for autonomous build execution.
 
 <promise>FAIL</promise>
