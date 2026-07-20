@@ -91,3 +91,4 @@
 - Follow-up verification passes: `npm test` (including 2,870 server specs, 4,929 Web tests, and 1,162 runner tests), `npm run typecheck -w packages/runner`, `npm test -w packages/runner`, `npm run typecheck -w packages/web`, and `npm run test:run -w packages/web`.
 - Check report follow-up validates exactly one result for every declared check and validates scalar row fields before parsing. Empty, unknown, missing, duplicate, and malformed-field rows now become durable `unexpected-error` failures for all declared checks.
 - Parallel-check specs now report every declared check result, matching the structured check-batch contract enforced at the runner/server boundary.
+- Check-set follow-up verification passes: `npm test` (including 2,878 server specs, 4,929 Web tests, and 1,162 runner tests).
