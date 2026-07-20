@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { mockIssue } from './_issueDetailMsw'
+import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 import { makeCompositeParent, renderCompositeParentPage } from './_compositeParentDetailTestSupport'
+
+mountIssueDetail({ issue: makeCompositeParent() })
 
 afterEach(() => {
   cleanup()

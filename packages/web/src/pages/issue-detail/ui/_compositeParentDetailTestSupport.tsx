@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
-import { mountIssueDetail } from './_issueDetailMsw'
 
 function LocationProbe() {
   const location = useLocation()
@@ -90,5 +89,3 @@ export function renderCompositeParentPage(initialEntry: string = '/issues/14') {
     </QueryClientProvider>,
   )
 }
-
-mountIssueDetail({ issue: makeCompositeParent() })
