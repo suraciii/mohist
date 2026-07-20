@@ -39,6 +39,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     private readonly AttachmentService _attachmentService;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -53,6 +54,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         AttachmentService attachmentService,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
+        TimeProvider timeProvider,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -66,6 +68,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         _attachmentService = attachmentService;
         _configuration = configuration;
         _environment = environment;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -644,7 +647,28 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     {
         RejectIfReloadRequired();
         if (_issue is null) return;
-        if (!_issue.Complete(workflowRunId)) return;
+        if (!_issue.Complete(workflowRunId, _timeProvider.GetUtcNow().UtcDateTime)) return;
+        await SaveIssueAsync();
+    }
+
+    public async Task MarkDoneAsync()
+    {
+        EnsureIssue();
+        if (_issue!.Status == Domain.IssueStatus.Done) return;
+        if (await HasChildrenAsync(_issue.Number))
+            throw new InvalidOperationException($"Issue #{_issue.Number} has child issues and cannot be marked done manually");
+
+        var workflowRunId = _issue.WorkflowRunId
+            ?? throw new InvalidOperationException($"Issue #{_issue.Number} has no workflow run to complete");
+        var workflowStatus = (await _workflowQuerier.GetStatusAsync(workflowRunId))?.Status;
+        if (workflowStatus is not ("stopped" or "completed"))
+        {
+            var observed = workflowStatus ?? "unavailable";
+            throw new InvalidOperationException(
+                $"Cannot mark issue done while workflow is {observed}. Stop the workflow first.");
+        }
+
+        if (!_issue.MarkDone(_timeProvider.GetUtcNow().UtcDateTime)) return;
         await SaveIssueAsync();
     }
 

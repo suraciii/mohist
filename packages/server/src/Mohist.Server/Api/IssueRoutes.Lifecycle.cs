@@ -87,6 +87,29 @@ public static partial class IssueRoutes
             return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
         });
 
+        group.MapPost("/{number:int}/done", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            IGrainFactory grains,
+            IssueQuerier issuesQuery) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var issue = await issuesQuery.GetAsync(project.Id, number);
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
+            try
+            {
+                await grain.MarkDoneAsync();
+                return ApiResults.Ok();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
+        });
+
         group.MapPost("/{number:int}/close", async (
             HttpContext ctx,
             string projectRef,

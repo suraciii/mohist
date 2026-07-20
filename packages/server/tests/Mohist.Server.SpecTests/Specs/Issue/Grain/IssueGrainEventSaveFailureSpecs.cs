@@ -180,6 +180,7 @@ public class IssueGrainEventSaveFailureSpecs
             services.GetRequiredService<AttachmentService>(),
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
+            services.GetRequiredService<TimeProvider>(),
             services.GetRequiredService<ILogger<IssueGrain>>())
         {
             GrainKeyForTest = grainKey,

@@ -8,6 +8,7 @@ import {
   extractAttachmentIds,
   forceStopIssue,
   invalidateApprovalWait,
+  markIssueDone,
   removePrerequisite,
   reopenIssue,
   requestChangesIssue,
@@ -37,6 +38,7 @@ export interface IssueDetailMutations {
   addPrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
   removePrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
   closeMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
+  markDoneMutation: UseMutationResult<void, Error, void, unknown>
   forceStopMutation: UseMutationResult<{ ok: boolean; issueNumber: number }, Error, void, unknown>
   stopMutation: UseMutationResult<{ ok: boolean; issueNumber: number }, Error, void, unknown>
   reopenMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
@@ -56,6 +58,7 @@ export interface IssueDetailMutationDependencies {
   extractAttachmentIds: typeof extractAttachmentIds
   forceStopIssue: typeof forceStopIssue
   invalidateApprovalWait: typeof invalidateApprovalWait
+  markIssueDone: typeof markIssueDone
   removePrerequisite: typeof removePrerequisite
   reopenIssue: typeof reopenIssue
   requestChangesIssue: typeof requestChangesIssue
@@ -76,6 +79,7 @@ const defaultDependencies: IssueDetailMutationDependencies = {
   extractAttachmentIds,
   forceStopIssue,
   invalidateApprovalWait,
+  markIssueDone,
   removePrerequisite,
   reopenIssue,
   requestChangesIssue,
@@ -109,6 +113,7 @@ export function createIssueDetailMutationOptions(
     extractAttachmentIds,
     forceStopIssue,
     invalidateApprovalWait,
+    markIssueDone,
     removePrerequisite,
     reopenIssue,
     requestChangesIssue,
@@ -183,6 +188,14 @@ export function createIssueDetailMutationOptions(
     mutationFn: () => closeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
+    },
+  }
+
+  const markDoneMutation = {
+    mutationFn: () => markIssueDone(issueNumber, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
   }
 
@@ -262,6 +275,7 @@ export function createIssueDetailMutationOptions(
     addPrerequisiteMutation,
     removePrerequisiteMutation,
     closeMutation,
+    markDoneMutation,
     forceStopMutation,
     stopMutation,
     reopenMutation,
@@ -292,6 +306,7 @@ export function useIssueDetailMutations(
     addPrerequisiteMutation: useMutation(mutationOptions.addPrerequisiteMutation),
     removePrerequisiteMutation: useMutation(mutationOptions.removePrerequisiteMutation),
     closeMutation: useMutation(mutationOptions.closeMutation),
+    markDoneMutation: useMutation(mutationOptions.markDoneMutation),
     forceStopMutation: useMutation(mutationOptions.forceStopMutation),
     stopMutation: useMutation(mutationOptions.stopMutation),
     reopenMutation: useMutation(mutationOptions.reopenMutation),

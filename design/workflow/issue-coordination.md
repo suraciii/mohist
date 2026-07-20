@@ -93,6 +93,11 @@ Runner → Report → WorkflowRun
 [WorkflowRunCompleted] → Issue.Complete(expectedWorkflowRunId)
 [WorkflowRunFailed]    → Issue.AbortWork(expectedWorkflowRunId)
 
+User → Issue.MarkDone
+         ├─ require leaf Issue in InProgress
+         ├─ require bound WorkflowRun status Stopped or Completed
+         └─ transaction: Issue state + [IssueCompleted(completionKind=manual)]
+
 [IssueCompleted / IssueCancelled]
   ├→ Parent Issue.RecomputeComposite       (sub-issue only)
   └→ current Epic.Advance                  (when affiliated)
@@ -100,6 +105,17 @@ Runner → Report → WorkflowRun
 
 Issue 用 `expectedWorkflowRunId` 拒绝旧 run 的迟到结果。Epic 的下一次推进只由 Issue 已提交
 的终态事件触发，不从 WorkflowRun 直接修改 Epic。
+
+手工完成是 Issue 自己的显式生命周期命令，不伪造 `WorkflowRunCompleted`，也不修改
+WorkflowRun。IssueGrain 在提交前读取当前绑定 run 的状态；只有 `Stopped` / `Completed`
+这两个不可再调度的状态可以通过，`Failed` 仍可 retry，必须由用户先显式 stop。由于允许
+值都是 terminal，读取后不会与 resume/retry 竞态。Issue 聚合再次校验自身仍为
+`InProgress` 且仍绑定同一个 run，然后写入唯一的 `IssueCompleted` 事实；事件的
+`completionKind` 区分 `workflow` 与 `manual`，下游的父 Issue、Epic、Inbox 和指标继续
+消费同一种完成事件。
+
+重复命令命中 `Done` 时是 no-op，因此调用结果丢失后的重投不会产生第二条完成事件。
+有子 Issue 的父 Issue 不接受手工完成，它的终态只由子 Issue 新鲜快照汇总。
 
 ## 同步方向与异步闭环
 
@@ -119,6 +135,6 @@ Issue → Cancel → WorkflowRun
 Runner ──[RunnerDisconnected]──→ Session (fails affected sessions)
 
 WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun
-Issue: Archive, Unarchive, Reopen, Close
+Issue: MarkDone, Archive, Unarchive, Reopen, Close
 Runner: Register, Unregister, Heartbeat
 ```

@@ -75,6 +75,10 @@ export function closeIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/close`), { method: 'POST' })
 }
 
+export function markIssueDone(number: number, projectId?: string | null) {
+  return request<void>(projectApiPath(projectId, `/issues/${number}/done`), { method: 'POST' })
+}
+
 export function reopenIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reopen`), { method: 'POST' })
 }
