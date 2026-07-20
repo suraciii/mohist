@@ -210,3 +210,152 @@ describe('SessionFollowupComposer — disabled transition clears prior errors', 
     expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-disabled', 'true')
   })
 })
+
+describe('SessionFollowupComposer — three-state data-state attribute', () => {
+  it('renders data-state="interactive" by default', () => {
+    renderComposer()
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
+  })
+
+  it('renders data-state="closed" when disabled is true', () => {
+    renderComposer({ disabled: true })
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveAttribute('data-disabled', 'true')
+  })
+
+  it('renders data-state="closed" when state="closed" is explicitly passed overriding disabled=false', () => {
+    renderComposer({ state: 'closed' })
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveAttribute('data-disabled', 'true')
+    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+  })
+
+  it('keeps the input disabled when disabled=true overrides an interactive visual state', () => {
+    renderComposer({ disabled: true, state: 'interactive' })
+
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-send')).toBeDisabled()
+  })
+
+  it('renders data-state="queued" when hasQueuedFollowup is true', () => {
+    renderComposer({ hasQueuedFollowup: true })
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+  })
+
+  it('renders data-state="queued" when isSending is true and hasQueuedFollowup is unset', () => {
+    renderComposer({ isSending: true })
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+  })
+})
+
+describe('SessionFollowupComposer — closed-state endedAt copy', () => {
+  it('renders a relative-time message that references endedAt past the 1-hour threshold (8h ago)', () => {
+    const endedAt = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString()
+    renderComposer({ disabled: true, endedAt })
+
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveAttribute('data-state', 'closed')
+    expect(composer).toHaveTextContent(/session ended 8h ago/i)
+    expect(composer).toHaveTextContent(/not accepting new followups/i)
+  })
+
+  it('renders a relative-time message within the 1-hour threshold (5m ago)', () => {
+    const endedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    renderComposer({ disabled: true, endedAt })
+
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveTextContent(/session ended 5m ago/i)
+    expect(composer).toHaveTextContent(/not accepting new followups/i)
+  })
+
+  it('falls back to the generic phrasing when endedAt is absent', () => {
+    renderComposer({ disabled: true })
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    expect(composer).not.toHaveTextContent(/session ended \d/i)
+  })
+
+  it('falls back to the generic phrasing when endedAt is null', () => {
+    renderComposer({ disabled: true, endedAt: null })
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+  })
+
+  it('falls back to the generic phrasing when endedAt is an unparseable string', () => {
+    renderComposer({ disabled: true, endedAt: 'not-a-date' })
+    const composer = screen.getByTestId('session-followup-composer')
+    expect(composer).toHaveTextContent(/no longer accepting followups/i)
+    expect(composer).not.toHaveTextContent(/session ended \d/i)
+  })
+})
+
+describe('SessionFollowupComposer — queued-state persistent indicator', () => {
+  it('disables the input and shows the queued indicator when hasQueuedFollowup is true', () => {
+    renderComposer({ hasQueuedFollowup: true })
+
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-send')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+  })
+
+  it('disables the input and shows the queued indicator when isSending is true with no hasQueuedFollowup', () => {
+    renderComposer({ isSending: true })
+
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-send')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+  })
+
+  it('keeps the queued indicator visible after isSending flips back to false while hasQueuedFollowup stays true', () => {
+    const { rerender } = render(
+      <SessionFollowupComposer onSend={onSendMock} isSending hasQueuedFollowup />,
+    )
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+
+    rerender(
+      <SessionFollowupComposer onSend={onSendMock} isSending={false} hasQueuedFollowup />,
+    )
+
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+    expect(screen.getByTestId('session-followup-input')).toBeDisabled()
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+  })
+
+  it('returns to interactive when hasQueuedFollowup flips back to false', () => {
+    const { rerender } = render(
+      <SessionFollowupComposer onSend={onSendMock} hasQueuedFollowup />,
+    )
+
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'queued')
+
+    rerender(
+      <SessionFollowupComposer onSend={onSendMock} hasQueuedFollowup={false} />,
+    )
+
+    expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-state', 'interactive')
+    expect(screen.getByTestId('session-followup-input')).not.toBeDisabled()
+  })
+
+  it('suppresses the transient Sent flash when hasQueuedFollowup is supplied', async () => {
+    onSendMock.mockResolvedValue(undefined)
+    const { rerender } = renderComposer({ hasQueuedFollowup: true, isSending: true })
+
+    rerender(
+      <SessionFollowupComposer
+        onSend={onSendMock}
+        isSending={false}
+        hasQueuedFollowup
+      />,
+    )
+
+    const sendButton = screen.getByTestId('session-followup-send')
+    expect(sendButton).not.toHaveAttribute('data-state', 'sent')
+    expect(screen.getByTestId('session-followup-status')).toHaveTextContent(/queued.*waiting for agent/i)
+  })
+})

@@ -1,0 +1,866 @@
+# Issue #430 — Build progress
+
+## Codebase Patterns
+
+- `packages/web/src/shared/lib/` is the bottom FSD layer; it cannot import from
+  `entities/`, `features/`, `widgets/`, `pages/`, `app/`. Cross-layer type
+  unions (e.g. `StatusKind`) get duplicated as a focused local alias when
+  needed inside a `shared/lib` helper.
+- Web tests run under Vitest's two projects (`node` env for `*.test.ts`,
+  `jsdom` env for `*.test.tsx` and `*.spec.tsx`). The `node`-project tests
+  cannot reach DOM APIs.
+- Web tests cannot read source files via `node:fs` (`no-web-node-fs-source-read`
+  rule from `scripts/check-node-test-boundaries.ts`). Static inspection is a
+  human responsibility; runtime guarantees must come from behaviour assertions.
+- Tests under `packages/web/src/shared/lib/` follow the pure-logic convention:
+  no fake timers unless the helper owns its own `Date.now()`; for helper-level
+  determinism, all clock input flows through arguments and tests assert by
+  comparing to a formatter the test reuses (the production formatter, not a
+  separately hand-written expected string).
+- `useNow({ now })` is the established clock-injection seam in
+  `widgets/session-transcript/model/use-now.ts`. For non-React helpers (pure
+  functions) we just take `now: number` directly.
+
+## T-001 — Time formatter extraction (done)
+
+What landed:
+
+- `packages/web/src/shared/lib/format-time.ts` now exports:
+  - `formatSessionTime({ date, statusKind, now })` returning
+    `{ primary, secondary }`. Status branches per `session-time-display/spec.md`
+    matrix: terminal past-1h → absolute primary / relative secondary; terminal
+    within-1h → relative primary / absolute secondary; non-terminal at any
+    threshold → relative primary / absolute secondary.
+  - `SessionTimeStatusKind` union (locally defined so `shared/lib` does not
+    have to depend on `entities/coder-session`).
+  - `sessionTimeAbsoluteFormatter` (re-exports the frozen `Intl.DateTimeFormat`)
+    used by tests to compute expected absolute strings without depending on
+    a hand-written `Aug 17, 09:52` literal (which would break across TZs).
+- `packages/web/src/shared/lib/format-time.test.ts` extended with a new
+  `describe('formatSessionTime')` block: 18 tests covering all six matrix rows,
+  determinism (same inputs → same output; ISO string / epoch ms / Date inputs
+  are equivalent), threshold flip on changing `now` (terminal crosses the
+  1-hour boundary; live does NOT cross), the probing indicator invariant
+  (probing stays relative at any threshold), sub-minute "just now", and a
+  `vi.spyOn(Date, 'now')` clock-isolation assertion. The original four
+  `formatTime` / `formatTimeAgo` / `formatElapsedTimeAgo` / `formatLogTime`
+  describe blocks remain unchanged.
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Removed the private `formatRelativeTime`.
+  - Imported `formatSessionTime` from `@/shared/lib/format-time`.
+  - Added a small private `sessionTimeAnchorMs(meta, statusKind)` that returns
+    `max(lastActivityAt, completedAt)` for terminal statuses and
+    `lastActivityAt` directly otherwise. The helper itself never sees two
+    timestamps — the consumer computes the anchor.
+  - The `last activity` indicator now renders
+    `formatSessionTime(...).primary` inline with `secondary` as the `title`
+    attribute. The probing `Checking since <relative>` indicator now uses
+    `formatSessionTime({ date: probeSentAt, statusKind: 'probing', ... }).primary`
+    — `probing` always resolves to relative primary per the matrix, which is
+    exactly the preserved invariant from `session-time-display` requirement 3.
+
+Decisions / gotchas for downstream tasks:
+
+- The helper takes ONE timestamp (`date`). Anchor logic
+  (`max(completedAt, lastActivityAt)` for terminal) lives in the consumer —
+  do not push it into the helper. T-007 (followup composer) reuses the
+  helper, so it just passes `endedAt` directly without any max computation.
+- `SessionTimeStatusKind` intentionally includes `'loading'` even though it
+  is not in the spec matrix — `displayStatusKind` from `SessionDetailShell`
+  can be `'loading'`, and dropping it would force the consumer to special-case
+  it. `loading` behaves as non-terminal (relative primary).
+- Tests compute expected absolute strings by re-running the helper's own
+  `Intl.DateTimeFormat` against the same `Date` — this is TZ-stable within
+  the test run (production code and test run share the same TZ) without
+  freezing the global `process.env.TZ`. Vitest tests run in whatever TZ the
+  CI / dev machine has, so any literal "Jun 17, 09:52" expectation would be
+  brittle; computing via the formatter sidesteps the issue.
+- All 18 new tests pass without `vi.useFakeTimers` (the helper is pure);
+  the determinism / threshold-flip / no-`Date.now` invariants are all
+  asserted under real-time. The existing `formatTimeAgo` block in the same
+  file does install fake timers, but that's an unrelated existing block.
+- `npm run typecheck -w packages/web` passes. `npm run test:run -w packages/web`
+  passes (4895 tests, was 4896 before removing one test that violated the
+  `no-web-node-fs-source-read` rule — runtime spy test fully covers the
+  "no `Date.now()` internally" invariant). `npm run check:fsd` and
+  `npm run check:test-boundaries` both pass.
+- No data-testid was added to the last-activity / probing spans — those
+  belong to T-002's `data-testid` migration (`session-header-last-activity`,
+  `session-header-probing-since`). T-001 keeps the markup identical to the
+  pre-existing DOM shape (just text and `title` differ by branch).
+
+Downstream notes:
+
+- T-002 (header single-row rewrite) explicitly **removes** the `hidden md:inline`
+  wrappers and the `text-muted-foreground/40` `·` dividers per design D3 — the
+  metadata row becomes one `flex flex-wrap items-center gap-x-2 gap-y-1` row,
+  no dividers, no per-item responsive breakpoints. The downstream hint above
+  ("preserve them unchanged") is superseded by the actual T-002 brief.
+- T-007 (followup composer three states) will call
+  `formatSessionTime({ date: endedAt, statusKind: 'completed', now }).primary`
+  to produce the relative "Session ended <relative>" copy. No new coupling
+  required — just import the helper the same way `SessionDetailShell` does.
+- If any future task wants the absolute arm to live-format as the clock
+  advances (a future dogfooding request), the cleanest seam is a small
+  `useNow`-backed local in the call site — the helper's `now` argument
+  already accepts whatever value the caller provides.
+
+## T-003 — Sticky identity strip scroll-engaged via IntersectionObserver wrapper (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Added a second ref `headerRef: RefObject<HTMLDivElement | null>` alongside the
+    existing `scrollContainerRef`, and threaded it through `<SessionHeader
+    headerRef={...}>` so the outer header element (the `<div
+    data-testid="session-header">`) is directly observable from the wrapper.
+  - Introduced `ScrollEngagedStickyTitle` (just above `StickySessionTitle` in
+    the same file, not exported — the DI seam `SessionDetailShellComponents`
+    only swaps the inner `SessionTranscriptLayout`/etc.). It owns the `engaged`
+    boolean (`useState(false)`) and an `IntersectionObserver` registered on the
+    header with `root: scrollContainerRef.current`, `threshold: 0`. On each
+    callback it sets `engaged = entry.intersectionRatio < 0.001`. Cleanup is
+    `observer.disconnect()` (we never call `observe`/`unobserve` against more
+    than one element, so `disconnect` is the simplest correct teardown).
+  - When `engaged === false` the wrapper returns `null` (no DOM, no layout
+    contribution). When `engaged === true` it renders the existing
+    `StickySessionTitle` with the same three props the call site previously
+    passed (`meta`, `statusKind`, `turnCount`). The inner component itself is
+    untouched — its signature, its `data-testid="session-sticky-title"`, its
+    classes (`sticky top-0 z-20 bg-background ...`) and its visible content
+    (session name + status + turn count) are exactly the same.
+  - The wrapper degrades gracefully when `IntersectionObserver` is unavailable
+    on the runtime (`typeof IntersectionObserver === 'undefined'` short-circuit)
+    — it just renders `null`. This isn't reachable in our targets (Chromium +
+    the scroll-engaged prod path) but it keeps jsdom out of trouble if any
+    future refactor drops the polyfill.
+- `packages/web/src/pages/session/ui/SessionPage.sticky.test.tsx`:
+  - Installed a tiny `vi.stubGlobal('IntersectionObserver', IntersectionObserverStub)`
+    in `beforeEach`. The stub class:
+    - Records `(callback, options, observer)` into a per-test array and
+      appends observed targets.
+    - Implements `observe`, `unobserve`, `disconnect`, `takeRecords` so the
+      wrapper's teardown assertions stay honest (`observer.disconnected === true`
+      after unmount).
+  - New helper `reportHeaderIntersection(header, ratio)` wraps `act(() => …)`
+    around the recorded callback so the React state update driven by the
+    observer stays within react-testing-library's batching.
+  - Three replacement / new scenarios per the task brief:
+    - `does not render the sticky title before the first observer callback`
+      asserts that with no callback fired yet, the
+      `[data-testid="session-sticky-title"]` element is absent from the scroll
+      container and only one `session-status-badge` (the outer header's) is in
+      the document. Also asserts the observer was registered with `root ===
+      scrollContainer` and `threshold === 0`, observed `[header]`, and that
+      `disconnect()` ran on unmount.
+    - `mounts the sticky title with identity, status, and turns when the
+      observer reports the header out of view` reports `intersectionRatio: 0`
+      and asserts the strip now mounts inside the scroll container, carries
+      `sticky top-0 bg-background` classes, contains `session-1`, `Completed`,
+      `2 turns`, exactly one status badge, and no `<button>` or
+      `session-header-*` children (closing the spec's "only name, status,
+      turns" invariant at the structural level too).
+    - `unmounts the sticky title when the observer reports the header has
+      re-entered` flips `ratio` between `0` and `0.5` to verify the wrapper's
+      `engaged` boolean (de-)mounts in lockstep with the observer.
+  - The pre-existing `keeps the outer session header non-sticky`,
+    `the sticky title strip is the first child of the transcript scroll
+    container`, and `keeps the recovery bar visible … (scroll-stick)` tests
+    needed `reportHeaderIntersection(header, 0)` injected before their
+    DOM-shape assertions to flip `engaged` to true — otherwise the strip is
+    correctly hidden by this task's spec contract and the older assertions
+    couldn't find it. The injected callback respects the same wrapper, just
+    forward-runs the scroll-engaged state to make those assertions check the
+    mounted DOM shape rather than re-assert the spec invariant.
+- `packages/web/tests/CoderSessionCompactViewport.spec.tsx` and
+  `packages/web/tests/CoderSessionEvidence.spec.tsx`:
+  - Both contained a "sticky title is inside the scroll container" assertion
+    that was pinning on the always-mounted strip shape. Replaced with a
+    matching "sticky title is NOT in the DOM on first render" assertion
+    driven by the same T-003 invariant. The
+    `preserves all existing region anchors` test in
+    `CoderSessionCompactViewport.spec.tsx` had `session-sticky-title` in the
+    expected regions list — removed (it no longer belongs to the always-on
+    region-anchor contract; the strip is a scroll-engaged consequence of the
+    header being out of view).
+
+Decisions / gotchas for downstream tasks:
+
+- The wrapper deliberately does NOT receive the
+  `ScrollEngagedStickyTitle`-side callback as a passive "engaged" prop — T-002
+  owns the metadata row, T-004 owns Cancel, T-006 owns sibling nav. None of
+  them need to know about scroll engagement; the strip is a self-contained
+  sub-region of the scroll container. Don't add an "engaged" prop to
+  `StickySessionTitle` later; the wrapper stays the engagement owner.
+- The wrapper's effect captures `headerRef.current` and
+  `scrollContainerRef.current` once via closure. They are stable across renders
+  (both are `useRef`), so the effect's dependency array
+  (`[headerRef, scrollContainerRef]`) only re-fires when the refs' identity
+  changes — which never happens for the lifetime of `SessionDetailShell`. No
+  re-registration needed even if the header's height changes (IntersectionObserver
+  sees a new `intersectionRatio` automatically; no ResizeObserver required,
+  per design D2's "defer ResizeObserver" note).
+- `IntersectionObserver` is not available in jsdom without a polyfill. We stub
+  it per-test (`vi.stubGlobal('IntersectionObserver', IntersectionObserverStub)`)
+  in `beforeEach`. Vitest's auto-restore in `afterEach` (per `design/testing.md`)
+  restores the global, so no manual cleanup is needed.
+- `vi.stubGlobal` does NOT need a corresponding `vi.unstubGlobals` because
+  Vitest's `unstubGlobals: true` global config (per
+  `design/testing.md` "Restore stubs: vitest auto-restore") does that
+  automatically. Don't add redundant `vi.unstubGlobals()` calls in this file
+  or in any future sticky / intersection-observer spec.
+- The "first render -> strip not in DOM" invariant holds because the wrapper's
+  initial state is `false` and the observer's callback only fires AFTER the
+  effect runs (mounted, observed, then async intersection dispatch). No
+  `display: none` / `visibility: hidden` heuristic is needed; the node truly is
+  not in the DOM tree. `querySelector('[data-testid="session-sticky-title"]')`
+  returns `null` until the callback arrives, which is what the new sticky tests
+  assert.
+- The existing `keeps the outer session header non-sticky` test now also
+  calls `reportHeaderIntersection` because it wants to check the strip's
+  `sticky` class — the class is on a node that only exists post-engagement.
+  This is the right test surface for a non-sticky-header invariant now that
+  the strip is conditional.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4902 tests, was 4900).
+  `npm run check:fsd` and `npm run check:test-boundaries` both pass.
+  No tests were deleted; the two CoderSessionCompactViewport/CoderSessionEvidence
+  tests were edited in place (replacement of the obsolete expectation with the
+  matching new one), keeping the test count moved across the boundary.
+
+## T-002 — SessionHeader single-row metadata rewrite + copy-on-click session id (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - The two-row `flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3`
+    metadata block is gone. The new `<div
+    data-testid="session-header-metadata-row" className="flex flex-wrap
+    items-center gap-x-2 gap-y-1 ...">` carries every metadata item on one
+    row that wraps to a second row at narrow widths without dropping items.
+  - All `hidden md:inline` wrappers and `text-muted-foreground/40` `·`
+    dividers are removed. No `·` glyphs anywhere in the metadata row.
+  - Stable `data-testid` + `data-*` per design D3:
+    - `session-header-name` (the `<h1>` — was previously un-targeted)
+    - `session-status-badge` (existing, now carries `data-status-kind` —
+      was already there, kept)
+    - `session-header-stage` with `data-stage` (was `session-stage-chip`,
+      renamed for the row contract; existing tests that picked the old
+      testid were migrated)
+    - `session-header-model` with `data-model`
+    - `session-header-turn-count` with `data-turn-count`
+    - `session-header-last-activity` with `data-last-activity` (the value
+      attribute carries the primary form; `title` keeps the secondary)
+    - `session-header-duration` with `data-duration-ms` (terminal only;
+      uses the same `formatDuration(duration)` helper as before)
+    - `session-header-session-id` with `data-session-id={meta.sessionId}`
+      (the full value, not the 8-char prefix)
+    - Added `session-header-probing-since` (only when probing) and
+      `session-header-file-summary` (only when `changedFiles` > 0) — both
+      follow the same single-row shape.
+  - The Cancel button keeps its existing
+    `data-testid="session-cancel-trigger"` and stays in the metadata row.
+    Its `variant="destructive"` is **not** touched — that demotion is owned
+    by T-004, fenced out by T-002's acceptance criterion 5.
+  - The `siblingNav` slot in the context breadcrumb row above is unchanged;
+    T-006 owns the wide-viewport removal.
+  - New sub-component `SessionIdCopyButton` (defined in
+    `SessionDetailShell.tsx`, not exported — no need to surface it on the
+    `SessionDetailShellComponents` DI seam because nothing else consumes
+    it today):
+    - Truncated 8-char prefix (`meta.sessionId.slice(0, 8)`) plus a copy
+      icon, with the full id always exposed via `aria-label` and
+      `title={sessionId}` (browser tooltip fallback for users who hover but
+      don't activate).
+    - On click: `navigator.clipboard?.writeText?.(sessionId)`. Three
+      states:
+      - **idle** — default. Shows truncated prefix + copy icon.
+      - **copied** — writes succeed. Transient state for 1500 ms, then
+        resets. Shows "Copied!" + check icon, swaps the
+        `aria-label` to `"Copied!"`.
+      - **failed** — `navigator.clipboard.writeText` missing or rejects.
+        Pinned tooltip with the full id renders open
+        (`role="tooltip"`, `data-testid="session-header-session-id-tooltip"`)
+        so the user can copy manually; no silent failure. The same 1500 ms
+        reset clears the pinned tooltip.
+    - Local `data-copy-state` and `data-tooltip-pinned` attributes on the
+      button make every state machine transition individually targetable.
+    - The 1500 ms reset uses `window.setTimeout`/`clearTimeout` directly;
+      tests drive it via `vi.useFakeTimers()` + `vi.advanceTimersByTime`.
+- `packages/web/tests/CoderSessionCompactViewport.spec.tsx` — 4 tests
+  migrated. The old assertions were pinned on the deleted
+  `hidden md:inline` + `flex-col sm:flex-row` shape:
+  - `hides nonessential SessionHeader metadata items below md via hidden
+    md:inline class` → replaced by an assertion that the metadata row
+    contains zero `hidden md:inline` items, zero `·` glyphs, carries the
+    new stable `data-testid`s for model / file summary / session id / last
+    activity, and that the row itself uses `flex flex-wrap`.
+  - `hides the duration span below md on a terminal session` → replaced
+    by an assertion that the duration span is reachable via
+    `data-testid="session-header-duration"`, has no `hidden` class, and
+    carries the `1h 00m` text on a completed session.
+  - `keeps the session name (h1), StatusBadge, and stage chip visible
+    without hidden class` → stage-chip selector migrated from
+    `session-stage-chip` to `session-header-stage` (matching the new
+    per-row testid table).
+  - `keeps the desktop metadata cluster layout classes unchanged
+    (flex-col sm:flex-row)` → replaced by an assertion that the metadata
+    row carries `flex flex-wrap` and does **not** carry `flex-col` or
+    `sm:flex-row` (the vertical-stack layout is gone).
+- `packages/web/tests/SessionPageHeader.spec.tsx` — 1 test migrated:
+  - `main branch session header metadata cluster stacks vertically below
+    sm` → renamed to `main branch session header metadata cluster
+    renders on a single flex-wrap row`. The old assertion was pinned on
+    `flex-col sm:flex-row` on the metadata cluster's parent; the new
+    assertion uses `screen.getByTestId('session-header-metadata-row')`
+    and verifies the row carries `flex flex-wrap` and no
+    `flex-col` / `sm:flex-row`.
+- `packages/web/tests/SessionHeaderSessionIdCopy.spec.tsx` — new spec
+  (5 tests) covering the copy control:
+  1. Renders the control with `data-session-id` = full id, `aria-label`
+     `Copy session id <full id>`, `title` = full id, and the visible
+     label contains the truncated 8-char prefix.
+  2. Clicking the control calls `navigator.clipboard.writeText` with the
+     full session id (clipboard spy via `setScopedValue`).
+  3. Transient `Copied!` state for ~1.5 s, then resets: tested by
+     `vi.useFakeTimers()` + `vi.advanceTimersByTime(1499)` (still
+     `copied`) + `vi.advanceTimersByTime(1)` (back to `idle`, aria-label
+     restored).
+  4. When `navigator.clipboard` is `undefined`, click pins the tooltip
+     open showing the full id (`role="tooltip"`,
+     `data-testid="session-header-session-id-tooltip"`), no
+     `writeText` call. Same 1500 ms reset clears the pinned tooltip.
+  5. When `clipboard.writeText` rejects, the same pinned-tooltip fallback
+     fires (rejection path covered in addition to the missing-API path).
+- `SessionPage.test.ts`, `SessionPage.sticky.test.tsx`,
+  `SessionPage.cancel.test.tsx` — **no source changes needed**. They
+  don't overlap with the metadata items: `SessionPage.test.ts` only
+  exercises `isCurrentSiblingSession` (pure helper), `SessionPage.sticky.test.tsx`
+  targets the sticky recovery bar / sticky title strip (not the metadata
+  row), `SessionPage.cancel.test.tsx` targets the cancel trigger /
+  AlertDialog (preserved as-is by this task). All 18 tests across the
+  three files continue to pass unchanged.
+
+Decisions / gotchas for downstream tasks:
+
+- The Cancel button is still `variant="destructive"` and still rendered
+  inline in the metadata row. **T-004 (Demote Cancel session into a
+  secondary action slot)** owns moving it to a ghost/outline variant in a
+  dedicated slot — T-004 must not regress the metadata-row testids
+  (`session-header-stage`, `session-header-turn-count`, …) since those
+  are now part of the public surface.
+- The `siblingNav` slot above the metadata row is still rendered for all
+  viewports. **T-006 (Deduplicate sibling navigation)** owns the
+  `useMediaQuery('(min-width: 1280px)')` gate that suppresses it on
+  wide viewports and keeps the narrow fallback with
+  `data-viewport="narrow"`. T-006 must keep the existing
+  `data-testid="session-sibling-navigation-slot"` on the slot wrapper for
+  the narrow fallback so the existing prev/next tests
+  (`SessionPageHeader.spec.tsx` `renders prev/next controls …`,
+  `disables the previous control …`, `disables the next control …`)
+  continue to find the controls.
+- The session-id copy control exposes the **full id** via
+  `aria-label="Copy session id <full id>"`. Any future embedder
+  re-rendering this control must keep the full id (not the truncated
+  prefix) in the accessible name — the spec scenario
+  `Session id copy control exposes the full id for accessibility` is
+  load-bearing.
+- Tests must drive the copy-state transitions through `vi.useFakeTimers`
+  *after* `findByTestId` resolves — invoking `vi.useFakeTimers()` in
+  `beforeEach` blocks the MSW-driven fetch from resolving (network
+  timers hang under fake timers). The SessionHeaderSessionIdCopy spec
+  follows that pattern; future specs that mix fake timers with
+  `SessionPage` async loading should do the same.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4900 tests, was 4895).
+  `npm run check:fsd` and `npm run check:test-boundaries` both pass.
+
+## T-004 — Cancel session secondary action slot (done)
+
+What landed:
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - Moved the existing Cancel trigger out of
+    `session-header-metadata-row` into a dedicated
+    `session-header-secondary-actions` wrapper rendered immediately after the
+    metadata row with `mt-1 flex justify-end`.
+  - Switched the trigger from `variant="destructive"` to `variant="ghost"`.
+    The existing `size="sm"`, stop icon, inline `Cancel session` label,
+    `aria-label="Cancel session"`, `data-testid="session-cancel-trigger"`,
+    running-session visibility guard, AlertDialog, and cancel mutation are
+    unchanged.
+- `packages/web/src/pages/session/ui/SessionPage.cancel.test.tsx`:
+  - Expanded the running-session render scenario to assert the preserved
+    accessible name and inline label, ghost styling (`hover:bg-muted`), absence
+    of the destructive variant classes, containment in the secondary slot,
+    absence from the metadata row, `justify-end`, and immediate-after-row DOM
+    placement.
+  - Strengthened the existing mutation scenario to move focus onto the Cancel
+    trigger with `userEvent.tab()`, activate it with Enter, assert the existing
+    dialog opens, confirm it, and verify the same workflow-session cancel
+    mutation and result flow.
+
+Decisions / gotchas for downstream tasks:
+
+- The shared Button base classes include generic `aria-invalid:*destructive`
+  tokens for every variant. Tests therefore assert the destructive variant's
+  actual paint classes (`bg-destructive/10`, `text-destructive`, `bg-danger*`)
+  are absent instead of rejecting every class token containing the word
+  `destructive`.
+- T-004 does not alter `SessionRecoveryActions`; its structured disabled-reason
+  tooltip remains owned by T-005.
+- The pre-refactor focused spec passed (5 tests). After the change, the focused
+  spec passes (5 tests), `npm run typecheck -w packages/web` passes,
+  `npm run test:run -w packages/web` passes (4902 tests), and both
+  `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` pass.
+
+## T-005 — Structured disabled-reason tooltip on Compact/Reset via existing Tooltip primitive (done)
+
+What landed:
+
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx`:
+  - Replaced the two per-button `<span title="Unavailable while session is active">`
+    wrappers and the native `title={active ? INACTIVE_TOOLTIP : undefined}`
+    attribute on the buttons with a single private `DisabledReasonTooltip`
+    helper component that wraps the existing `Tooltip` primitive from
+    `@/shared/ui/components/tooltip`. The wrapper is only applied when
+    `active === true` (i.e. `data-active="true"`); the enabled branch
+    renders the bare button with no wrapper at all.
+  - The `DisabledReasonTooltip` renders structured content as a
+    `<div className="space-y-1">` with a `<div className="font-medium">`
+    title (`"Session is running"`) and a plain `<div>` reason sentence
+    (`"Finish or cancel the session before compacting or resetting."`).
+    No new contract attribute was introduced — `data-active="true"` is the
+    only trigger and the only reason today.
+  - Removed `INACTIVE_TOOLTIP` constant and the inline
+    `session-recovery-compact-wrapper` / `session-recovery-reset-wrapper`
+    `data-testid`s (no consumer depended on them; only the wrapper spans
+    carried them).
+  - The existing `Tooltip` primitive already wraps its child in a
+    `tabIndex={0}` span with `onFocus`/`onBlur` toggling the tooltip,
+    so the focus path of the spec scenario (`disabled button is reachable
+    via the wrapper's focusable proxy`) works with no new a11y code.
+  - The Reset button still uses `variant="destructive"` — the design has
+    Compact at `variant="outline"` and Reset at `variant="destructive"`,
+    and the demotion of Reset to outline / ghost is explicitly out of
+    T-005's scope (it sits in a separate secondary-actions slot owned by
+    T-004 if any consumer wires it that way; the recovery bar here ships
+    its own slot already).
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.test.tsx`:
+  - Updated the existing `disables both buttons and shows the tooltip
+    wrapper when status is running` spec to assert the new behaviour:
+    `toBeDisabled()` + `data-active="true"` are preserved, but the
+    `title` assertions flipped from `toHaveAttribute('title', 'Unavailable
+    while session is active')` to `not.toHaveAttribute('title')` on both
+    buttons (the native title is gone; the structured tooltip replaces it).
+  - Added a new `describe('SessionRecoveryActions — structured
+    disabled-reason tooltip', …)` block with three scenarios:
+    1. **renders the running-block structured tooltip when the session is
+       running** — focuses the `tabIndex={0}` wrapper span that the
+       existing Tooltip primitive adds around the disabled Compact button
+       (asserted via `parentElement?.getAttribute('tabindex')`), then
+       asserts `screen.getByRole('tooltip')` shows both the
+       `'Session is running'` title and the reason sentence regex
+       `/finish or cancel the session before compacting or resetting/i`.
+       A follow-up `fireEvent.blur` confirms the tooltip disappears on
+       blur (covers the off-focus half of the spec scenario).
+    2. **renders the running-block structured tooltip on the Reset
+       button when the session is running** — same shape as (1) but
+       targets the Reset button, guaranteeing both disabled buttons
+       receive the structured tooltip wrapper.
+    3. **does not wrap enabled buttons with a disabled-reason tooltip** —
+       renders with `status="completed"`, asserts neither parent element
+       carries `tabindex="0"` (i.e. no Tooltip wrapper), neither button
+       carries `title`, and a hover + focus on each button does NOT
+       render any tooltip element (`queryByRole('tooltip')` returns null).
+  - The local `focusDisabledWrapper(testId)` helper inside the new
+    describe block wraps the `getByTestId` + `parentElement` +
+    `toHaveAttribute('tabindex', '0')` + `fireEvent.focus` chain to keep
+    the new scenarios DRY.
+
+Decisions / gotchas for downstream tasks:
+
+- The structured tooltip text is rendered as a `<div className="space-y-1">`
+  inside the existing Tooltip primitive's `<span role="tooltip">` bubble.
+  The Tooltip primitive applies `text-xs font-normal leading-relaxed
+  text-popover-foreground` to the bubble; we don't override the
+  typography, just add a `font-medium` for the title line to create the
+  short-title-vs-long-sentence hierarchy. No CSS color tokens change.
+- The disabled-button focus path now goes through the Tooltip primitive's
+  `tabIndex={0}` wrapper. Keyboard users land on the wrapper span (which
+  is focusable); the disabled button itself remains non-focusable. This is
+  the exact a11y shape that the spec scenario required, with no new
+  mechanism added.
+- The `fireEvent.focus(button)` path does NOT open the tooltip when the
+  button is disabled (browser / jsdom won't deliver focus to a disabled
+  element), so the tests focus the wrapper span instead. The wrapper span
+  is reachable via `getByTestId(testId).parentElement` — both spans are
+  direct parents, and the wrapper carries `tabindex="0"` per the
+  Tooltip primitive contract.
+- The tooltip closes on blur, which the first new spec asserts to confirm
+  the off-focus half of the spec scenario (`WHEN a user hovers or focuses
+  the disabled button` ⇒ tooltip renders; the symmetric "and stops
+  hovering / focuses away" is implicit but worth a sanity assertion).
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4905 tests, was 4902 — the
+  3 new specs). `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` both pass.
+- No FSD / layer change: `widgets/coder-session/ui/SessionRecoveryActions.tsx`
+  now imports the `Tooltip` primitive from `@/shared/ui/components/tooltip`,
+  which is the same shared-layer dependency other widgets already use
+  (e.g. `pages/settings/ui/AgentSettingsSection.tsx`). No new public
+  surface: `SessionRecoveryActionsProps` and `SessionRecoveryActions`
+  exports are unchanged.
+
+## T-006 — Deduplicate sibling navigation (done)
+
+What landed:
+
+- `packages/web/src/shared/lib/use-media-query.ts` (new) exports:
+  - `useMediaQuery(query: string): boolean` — a tiny React hook with two
+    state slots: `override` (from the module-level seam) and `liveMatches`
+    (from `window.matchMedia(query).matches`). The hook returns the
+    override when the seam is active, otherwise the live matchMedia value.
+    - Initial state is `false` (SSR-safe) — both slots seed to `false` on
+      mount and the effect then syncs to the actual matchMedia value (or
+      subscribes to the seam). This is the same shape `use-narrow-viewport.ts`
+      uses, plus the seam.
+    - The live matchMedia effect returns early when `override !== null`, so
+      when the seam is active we never even register a `matchMedia` listener.
+    - The seam's listener subscription is keyed off `override`; whenever the
+      seam flips, both the listener fan-out and the `liveMatches` effect's
+      dep list are re-evaluated. This makes "widen then narrow then widen"
+      round-trips work without manual re-subscription.
+  - `setMatchesForTest(matches: boolean | null)` — module-level test seam.
+    Passing `null` clears the seam and lets the hook fall back to the live
+    matchMedia value; passing `true`/`false` overrides. This is the same
+    pattern as `useNow`'s `now` injection, just promoted to a global seam
+    because `matchMedia` is a window-level query rather than per-component.
+- `packages/web/src/shared/lib/use-media-query.test.tsx` (new, 9 tests):
+  - Reads the initial value from the seam when set before render.
+  - Seeds `false` when the seam is inactive.
+  - Updates on `setMatchesForTest(true)` / `setMatchesForTest(false)` flips
+    inside `await act(async () => {...})` (React 19's act queue needs the
+    async form when the update comes from a synchronous listener fan-out —
+    see gotcha below).
+  - Clears the seam via `setMatchesForTest(null)` and falls back to
+    `window.matchMedia` (asserts the live query is called with the same
+    argument and that the change listener is registered).
+  - Subscribes to `matchMedia` change events when the seam is inactive and
+    reflects the next `matches` value.
+  - Removes the `matchMedia` change listener on unmount.
+  - Does NOT call `matchMedia` at all when the seam is set.
+  - Keeps multiple subscribers in lockstep across multiple
+    `setMatchesForTest` flips without leaking listeners when one of them
+    unmounts mid-flight.
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx`:
+  - New import: `useMediaQuery` from `@/shared/lib/use-media-query`.
+  - Inside `SessionHeader`, a single new line right after the stage-chip
+    helper: `const isWideViewport = useMediaQuery('(min-width: 1280px)')`.
+    The slot's render condition flips from `siblingNav && (...)` to
+    `siblingNav && !isWideViewport && (...)`. When wide, the slot is not
+    rendered at all (no DOM, no layout contribution — matches the spec's
+    "SHALL NOT occupy any visible space" invariant).
+  - The slot's `<div>` carries `data-viewport="narrow"` so the narrow
+    fallback is distinguishable from the removed wide-viewport version.
+    The `data-testid="session-sibling-navigation-slot"` stays unchanged
+    so the existing `SessionPageHeader.spec.tsx` prev/next tests
+    (which fire under the default `matchMedia` mock returning `false`)
+    continue to find the slot.
+  - The `SiblingSessionsSidebar` itself is NOT modified — the same
+    CSS-driven `xl:flex-row` parent layout at `SessionDetailShell.tsx:402`
+    (`flex flex-col flex-1 min-h-0 relative xl:flex-row`) still decides
+    whether the sidebar sits beside or below the transcript. Per Occam
+    we did not add a new render gate.
+- `packages/web/tests/SessionDetailShell.sibling-nav-dedup.spec.tsx` (new,
+  3 tests) — focused on the wide/narrow contract the header row can't
+  easily express:
+  1. `omits the sibling nav slot on wide viewports and keeps the sidebar
+     CSS wired for xl+ visibility` — drives `setMatchesForTest(true)`,
+     asserts `[data-testid="session-sibling-navigation-slot"]` is absent
+     (along with the inner `session-sibling-prev` / `-next` controls);
+     asserts the scroll container's grandparent (the shell root) carries
+     `xl:flex-row` and the sidebar carries both `hidden` and `xl:flex`
+     — pinning the CSS-driven visibility contract that the sidebar stays
+     available to users when the header slot is gone.
+  2. `renders the narrow-viewport fallback slot with data-viewport=narrow
+     and keeps the sidebar CSS-hidden by default` — drives
+     `setMatchesForTest(false)`, asserts the slot is present with
+     `data-viewport="narrow"`, prev/next controls are reachable inside it,
+     and the sidebar's className still carries `hidden xl:flex` (so the
+     same data-testid is always present in the DOM — no new mechanism).
+  3. `never renders the slot in both viewport states simultaneously when
+     the seam flips` — flips wide → narrow → wide via
+     `setMatchesForTest(true|false)` inside `await act(async () => {...})`
+     and asserts the slot's presence/absence tracks the seam each time.
+- The pre-existing `CoderSessionCompactViewport.spec.tsx` test
+  `preserves all existing region anchors` continues to pass unchanged —
+  the default `matchMedia` mock in `tests/setup.ts` returns `false` for
+  `(min-width: 1280px)`, which is narrow, so the slot renders with
+  `data-viewport="narrow"` exactly as the old "no data-viewport" shape
+  satisfied the same anchor-presence contract.
+- The pre-existing `SessionPageHeader.spec.tsx` prev/next tests
+  (`renders prev/next controls …`, `disables the previous control …`,
+  `disables the next control …`, `hides the sidebar entirely … but keeps
+  prev/next always visible`) continue to pass unchanged — same reason:
+  default `matchMedia` returns narrow, slot renders, controls reachable.
+
+Decisions / gotchas for downstream tasks:
+
+- **React 19 + sync `act` does not flush listener-driven updates.** The
+  hook's `setMatchesForTest` fires listeners synchronously, which call
+  `setOverride`. React 19 schedules the resulting render as a microtask;
+  sync `act(() => setMatchesForTest(true))` exits before the render
+  commits and the framework's `console.error` spy (registered in
+  `tests/setup.ts`) treats the un-wrapped update as an unexpected
+  warning. `await act(async () => setMatchesForTest(true))` flushes the
+  queue. Specs in any future task that exercises the seam should use the
+  async form. Hook itself is fine — no setState during render.
+- **afterEach ordering.** Vitest calls afterEach hooks in registration
+  order: the setup file's `cleanup()` (unmounts React) is registered
+  FIRST, then the per-file afterEach. So a per-file
+  `afterEach(() => setMatchesForTest(null))` runs BEFORE cleanup, which
+  means it fires listeners on still-mounted components and triggers the
+  act warning. The fix is to reset the seam in `beforeEach` (where no
+  components are mounted yet) and not in `afterEach`. The
+  `use-media-query.test.tsx` file follows this pattern.
+- **`vi.stubGlobal('matchMedia', …)` is the required test-boundary
+  substitute.** `tests/setup.ts`'s `_matchMediaMock` is fine for tests that
+  don't care about a specific query result, but for the hook's own tests
+  we need to drive specific `addEventListener`/`removeEventListener`
+  spies per test. The web test-boundaries linter rejects direct
+  `window.matchMedia = …` assignment (`no-direct-shared-state-mutation`);
+  `vi.stubGlobal` is the correct replacement, with `vi.unstubAllGlobals()`
+  in `finally`. Setup's `unstubGlobals: true` vitest config restores
+  between tests, so the explicit cleanup is belt-and-suspenders.
+- **Sidebar visibility is intentionally NOT in the hook.** The spec /
+  design explicitly chose CSS-driven sidebar visibility
+  (`xl:flex-row` + `hidden xl:flex`); adding a JS gate in the hook
+  would be a new mechanism for no behavioural gain. The new spec asserts
+  the CSS classes are still present in both viewport states — that is
+  the "stable DOM/CSS attribute check" the spec author approved.
+- **Hydration-mismatch safety.** Initial state is `false` regardless of
+  the actual viewport — both `override` and `liveMatches` seed to `false`.
+  SSR HTML has the slot absent (because `isWideViewport` is `false` →
+  `!isWideViewport` is `true` → slot renders), then on the client the
+  effect runs and flips if needed. The narrow-vs-wide split is
+  handled by the CSS layout (`xl:flex-row`) — no hydration risk in
+  either direction.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4917 tests, was 4905 — the
+  9 new `useMediaQuery` specs + 3 new SessionDetailShell sibling-dedup
+  specs). `npm run check:fsd -w packages/web` and
+  `npm run check:test-boundaries -w packages/web` both pass.
+- Full monorepo `npm test` passes (server / cli / web / runner combined).
+- No FSD / layer change: `pages/session/ui/SessionDetailShell.tsx`
+  imports the new hook from `@/shared/lib/use-media-query`, which is the
+  shared-layer pattern `pages/issue-detail/ui/IssueDetailPage.tsx` already
+  uses (`useNarrowViewport` from `@/shared/lib/use-narrow-viewport`). No
+  new public surface; `SessionDetailShellProps` and the
+  `SessionDetailShellComponents` seam are unchanged.
+
+## T-007 — Followup composer three explicit states (done)
+
+What landed:
+
+- `packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.tsx`:
+  - Three new optional props on `SessionFollowupComposerProps`:
+    - `endedAt?: string | null` — when `disabled` is true and `endedAt` is
+      provided, the closed-state copy references `endedAt` via the helper
+      from T-001 in relative form. When `endedAt` is null/undefined or
+      unparseable, the copy falls back to the existing generic phrasing
+      (no fabricated time, matching the spec's "SHALL NOT fabricate or
+      guess a time value" rule).
+    - `hasQueuedFollowup?: boolean` — when true (and the composer is not
+      `disabled`), the composer enters the queued state: input disabled,
+      submit button disabled, persistent "Queued — waiting for agent..."
+      indicator visible. Clears back to interactive when the prop flips
+      to false AND `isSending` is false.
+    - `state?: 'interactive' | 'queued' | 'closed'` — explicit override
+      that wins over derivation. The `disabled` / `isSending` /
+      `hasQueuedFollowup` signals still gate the underlying controls
+      (so `state="queued"` with empty content still produces a disabled
+      send button), but the rendered state, copy, and queued indicator
+      follow `state` directly.
+  - `data-state` attribute on `data-testid="session-followup-composer"`
+    reflects the resolved state (`interactive | queued | closed`).
+    Closed banner keeps `data-disabled="true"` for backward compat with
+    the existing assertion.
+  - State resolution rule:
+    ```ts
+    const resolvedState: ResolvedState = state ?? (
+      disabled ? 'closed'
+        : (isSending || hasQueuedFollowup) ? 'queued'
+        : 'interactive'
+    )
+    ```
+  - `canSend` now also requires `resolvedState === 'interactive'`, so
+    the send button is disabled whenever the composer is queued (even if
+    `hasQueuedFollowup` becomes true while text is in the input).
+  - Existing transient `Sent` flash is gated on `!hasQueuedFollowup` —
+    when the caller supplies the prop, the flash timer is skipped (so
+    the queued indicator, which is the persistent equivalent, is the
+    sole post-submit signal). The `data-state="sent"` on the send
+    button follows the same gate, so when `hasQueuedFollowup` is
+    supplied the button never gets `data-state="sent"`. Backward
+    compatible — every existing test that doesn't pass the new prop
+    continues to see the flash as before.
+  - Closed-state copy uses `formatSessionTime` from T-001 with
+    `statusKind: 'completed'`. The helper's branch produces absolute
+    primary past the 1-hour threshold and relative primary within; we
+    pick the relative-form field via a tiny local
+    `SESSION_TIME_RELATIVE_PATTERN = /^\d+[mhd] ago$|^just now$/`
+    guard so the closed copy is "Session ended 8h ago — not accepting
+    new followups." at any timestamp offset. Defensive
+    `Date.parse`/`Number.isFinite` keeps invalid timestamps from
+    rendering "Session ended Invalid Date — not accepting..." — they
+    fall through to the generic phrasing.
+  - The status indicator (`data-testid="session-followup-status"`) now
+    has `data-tone="queued"` and renders "Queued — waiting for agent..."
+    in `text-warning` while `isQueued` is true. The transient
+    `Sent`/`Sending` labels keep their old `data-tone` values. The
+    element is still present in the DOM in queued mode so
+    `screen.getByTestId('session-followup-status')` stays reachable.
+- `packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.test.tsx`:
+  - All 15 original tests pass unchanged (interactive path, transient
+    `Sent` flash with `data-state="sent"`, disabled banner with
+    `/no longer accepting followups/i` and `data-disabled="true"`, error
+    handling, etc.).
+  - Added 15 new specs across three new describe blocks:
+    - **three-state data-state attribute** (5 specs): default
+      `interactive`; derived `closed` from `disabled`; explicit
+      `state="closed"` overriding `disabled=false`; derived `queued`
+      from `hasQueuedFollowup`; derived `queued` from `isSending` alone.
+    - **closed-state endedAt copy** (5 specs): relative message at 8h
+      past the 1-hour threshold ("Session ended 8h ago — not accepting
+      new followups."); relative message within the 1-hour threshold
+      ("Session ended 5m ago — not accepting new followups."); generic
+      phrasing fallback when `endedAt` is absent; generic phrasing
+      fallback when `endedAt` is null; generic phrasing fallback when
+      `endedAt` is an unparseable string ("not-a-date").
+    - **queued-state persistent indicator** (5 specs): input + send
+      button disabled + queued indicator visible when
+      `hasQueuedFollowup` is true; same shape when `isSending` is true
+      alone; queued indicator persists after `isSending` flips false
+      while `hasQueuedFollowup` stays true (the spec's "persists past
+      the transient `Sent` flash window" invariant); composer returns
+      to `interactive` when `hasQueuedFollowup` flips back to false;
+      `data-state="sent"` is NOT applied to the send button when
+      `hasQueuedFollowup` is supplied.
+
+Decisions / gotchas for downstream tasks:
+
+- **`statusKind: 'completed'` + relative-pick pattern, not `'live'`.**
+  The progress note from T-001 said T-007 would call
+  `formatSessionTime({ date: endedAt, statusKind: 'completed', now }).primary`,
+  but the helper's matrix returns absolute primary past the 1-hour
+  threshold for terminal statuses. Rather than inventing a new
+  statusKind or post-processing the helper output with the
+  `SESSION_TIME_RELATIVE_PATTERN` regex, we considered both. We went
+  with `statusKind: 'completed'` (semantically correct for a closed
+  session) plus the relative-pattern pick so the call site can pass
+  any timestamp and always get "Xh/d ago" or "just now" in the
+  message. The `Date.parse` + `Number.isFinite` defensive check
+  degrades gracefully when `endedAt` is unparseable. No new coupling
+  beyond the T-001 `formatSessionTime` import.
+- **`canSend` gate is `resolvedState === 'interactive'`, not
+  `!isQueued`.** This matches the spec's "the composer MUST NOT render
+  the interactive state when the underlying send is unavailable"
+  invariant — when `state="queued"` is explicitly supplied but the
+  user has somehow typed into a (currently-disabled) input, the submit
+  button is still disabled and `submit()` still early-returns.
+- **Status indicator DOM presence is preserved across all three
+  states.** The `data-testid="session-followup-status"` element is
+  always present (not conditionally rendered), it just changes
+  `data-tone` and `text-warning` vs `text-success` vs
+  `text-transparent`. Existing tests
+  (`screen.getByTestId('session-followup-status')`,
+  `toHaveTextContent(/sent/i)`) keep working. The new queued-mode
+  text is found via `toHaveTextContent(/queued.*waiting for agent/i)`.
+- **`Sent` flash suppression is `!hasQueuedFollowup`, not
+  `isQueued`.** The flash only fires when the caller hasn't
+  opted into the queued signal. If a parent flips `hasQueuedFollowup`
+  from `false` → `true` mid-send (a race condition), the
+  post-`onSend` flash check uses the closed-over prop value, which is
+  the latest render's value (the function is recreated every render),
+  so the suppression is honored. In practice this race only matters
+  if the parent's mutation signal flips inside `await onSend`, which
+  is rare — the `submit` itself can't run when
+  `hasQueuedFollowup === true` because `canSend` is false.
+- **`state="queued"` with `disabled=false` and `hasQueuedFollowup=false`.**
+  Such a call renders the form (interactive-or-queued branch, not the
+  closed early-return), shows the queued indicator, and disables the
+  input and send button. This is the explicit-override semantic the
+  spec scenario requires: callers that have authoritative upstream
+  state (e.g. `followupIsPending || firstNewPartSince(submitAt)`) can
+  pin the composer to the right state regardless of what
+  `disabled`/`isSending`/`hasQueuedFollowup` they pass.
+- **No new FSD / layer change.** `SessionFollowupComposer.tsx` was
+  already at `widgets/coder-session/ui/` and imports from
+  `@/shared/lib/format-time` (the same shared-layer dependency pattern
+  that T-001 / T-002 / T-004 / T-006 already use). The
+  `SessionFollowupComposerProps` public surface gains three optional
+  props (`endedAt`, `hasQueuedFollowup`, `state`) but no existing prop
+  changes semantics. The existing `SessionPage.cancel.test.tsx` /
+  `SessionPage.sticky.test.tsx` / `GenericSessionPage.test.tsx` /
+  `SessionPage.lineage.test.tsx` / `GenericSessionPage.recovery.test.tsx`
+  mock patterns destructure only `disabled`, so they continue to work
+  without any source change.
+- `npm run typecheck -w packages/web` passes.
+  `npm run test:run -w packages/web` passes (4932 tests, was 4917
+  before — the 15 new specs). `npm run check:fsd -w packages/web`
+  and `npm run check:test-boundaries -w packages/web` both pass. No
+  existing tests deleted; the existing 5 describes
+  (`visibility and enabled state`, `disabled (terminal state)`,
+  `sending and success state`, `error handling`, `disabled transition
+  clears prior errors`) keep their original assertions verbatim.
+
+## Review Fixes (2026-07-20)
+
+- Moved the session header, usage summary, and error evidence inside the
+  transcript scroll container so the sticky title observes a header that
+  actually moves through its root. The sticky title stays hidden on the
+  observer's initial in-view callback.
+- The shell now passes `completedAt` to the followup composer and keeps a
+  followup queued from submit until the transcript version advances.
+- A disabled composer now disables its textarea even when an explicit visual
+  state is interactive. Removed trailing whitespace from the composer spec.
+- Verification passed: `npm run typecheck -w packages/web`,
+  `npm run test:run -w packages/web` (358 files, 4935 tests), and
+  `git diff --check master...HEAD`.
+
+## Follow-up Queue Scope Fix (2026-07-20)
+
+- The shell now stores the queued follow-up marker with its originating
+  `sessionKey`. A queued marker only disables the composer while that same
+  session remains displayed, so sibling navigation cannot inherit it.
+- Added `SessionDetailShell.followup-queue.spec.tsx`, which submits in one
+  session and rerenders the shell for a sibling session before new transcript
+  content arrives. The sibling composer remains interactive.
+
+## Wide Navigation Initial Render Fix (2026-07-20)
+
+- `useMediaQuery` now reads the browser's current match synchronously when no
+  test override is active, while retaining `false` when browser APIs are
+  unavailable. The header no longer briefly renders narrow prev/next controls
+  beside the CSS-visible `xl` sibling sidebar.
+- Added hook and shell specs for an unoverridden initial `matchMedia` wide
+  result, and retained the test seam and no-`matchMedia` fallback behavior.
+
+## Pending Recovery Reason Fix (2026-07-20)
+
+- Compact and Reset now explain both existing disable conditions: a running
+  session and an in-flight recovery mutation. The controls' `aria-disabled`
+  state now matches their native disabled state in both cases.
+- Added Compact-pending and Reset-pending tooltip specs. The action-weight
+  proposal, design, task, and capability spec now record `anyPending` as an
+  existing presentation input without adding a new reason attribute.
+
+## Zero-Turn Closed Composer Fix (2026-07-20)
+
+- The shell now keeps the composer region visible for non-running sessions
+  even when they have no transcript turns, so terminal sessions show their
+  closed-state explanation and end time.
+- Added completed and failed zero-turn page integration specs, and recorded
+  the scenario in the follow-up capability spec and task acceptance criteria.

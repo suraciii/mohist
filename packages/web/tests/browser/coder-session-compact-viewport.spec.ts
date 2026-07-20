@@ -311,18 +311,19 @@ async function expectReachableAboveMobileNav(page: Page, locator: Locator, label
 async function expectTranscriptScrollsIndependently(page: Page) {
   const transcript = page.getByTestId('session-transcript-scroll-container')
   const header = page.getByTestId('session-header')
-  const usage = page.getByTestId('session-usage-summary')
+  const stickyTitle = page.getByTestId('session-sticky-title')
   const composer = page.getByTestId('session-followup-composer')
 
   await expect(transcript).toBeVisible()
   await expect(header).toBeVisible()
-  await expect(usage).toBeVisible()
   await expect(composer).toBeVisible()
+  await expect(stickyTitle).toHaveCount(0)
 
-  const [headerBefore, usageBefore, composerBefore] = await Promise.all([
+  const [transcriptBox, headerBefore, composerBefore, documentScrollBefore] = await Promise.all([
+    boxOf(page, transcript),
     boxOf(page, header),
-    boxOf(page, usage),
     boxOf(page, composer),
+    page.evaluate(() => window.scrollY),
   ])
   const metrics = await transcript.evaluate((node) => ({
     height: node.getBoundingClientRect().height,
@@ -338,15 +339,28 @@ async function expectTranscriptScrollsIndependently(page: Page) {
     node.dispatchEvent(new Event('scroll'))
   })
   await expect.poll(() => transcript.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
+  await expect(stickyTitle).toBeVisible()
 
-  const [headerAfter, usageAfter, composerAfter] = await Promise.all([
+  const [headerAfter, stickyBefore, composerAfter, documentScrollAfter] = await Promise.all([
     boxOf(page, header),
-    boxOf(page, usage),
+    boxOf(page, stickyTitle),
     boxOf(page, composer),
+    page.evaluate(() => window.scrollY),
   ])
-  expect(Math.abs(headerAfter.y - headerBefore.y), 'header remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
-  expect(Math.abs(usageAfter.y - usageBefore.y), 'usage remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+  expect(headerAfter.y, 'outer header scrolls with transcript content').toBeLessThan(headerBefore.y)
+  expect(headerAfter.y + headerAfter.height, 'outer header leaves the transcript viewport').toBeLessThanOrEqual(transcriptBox.y + 1)
+  expect(Math.abs(stickyBefore.y - transcriptBox.y), 'sticky identity takes over at the transcript top').toBeLessThanOrEqual(1)
   expect(Math.abs(composerAfter.y - composerBefore.y), 'composer remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+  expect(documentScrollAfter, 'document does not scroll with the transcript').toBe(documentScrollBefore)
+
+  await transcript.evaluate((node) => {
+    node.scrollTop = node.scrollHeight - node.clientHeight
+    node.dispatchEvent(new Event('scroll'))
+  })
+  await expect.poll(() => transcript.evaluate((node) => node.scrollTop)).toBeGreaterThan(metrics.clientHeight)
+
+  const stickyAfter = await boxOf(page, stickyTitle)
+  expect(Math.abs(stickyAfter.y - stickyBefore.y), 'sticky identity remains pinned during further transcript scrolling').toBeLessThanOrEqual(1)
 }
 
 async function expectNoDocumentHorizontalOverflow(page: Page) {
@@ -359,7 +373,7 @@ async function expectNoDocumentHorizontalOverflow(page: Page) {
 
 test.describe('Coder Session compact viewport pixel verification', () => {
   for (const viewport of compactViewports) {
-    test(`preserves a readable, independently scrollable transcript at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`preserves a readable transcript and pins identity after the header scrolls out at ${viewport.width}x${viewport.height}`, async ({ page }) => {
       await openIssueSession(page, viewport)
       await expectTranscriptScrollsIndependently(page)
     })

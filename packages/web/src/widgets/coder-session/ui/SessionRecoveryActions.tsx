@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/shared/ui/components/dialog'
+import { Tooltip } from '@/shared/ui/components/tooltip'
 import { cn } from '@/shared/lib/utils'
 import {
   compactGenericSession,
@@ -19,10 +20,38 @@ import {
 } from '../../../entities/coder-session'
 import { useProject } from '../../../entities/project'
 
-const INACTIVE_TOOLTIP = 'Unavailable while session is active'
+const DISABLED_REASON_TITLE = 'Session is running'
+const DISABLED_REASON_BODY =
+  'Finish or cancel the session before compacting or resetting.'
+const PENDING_REASON_TITLE = 'Recovery action in progress'
+const PENDING_REASON_BODY =
+  'Wait for the current recovery action to finish before starting another one.'
 const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
   'A new runtime session will start without prior context. Transcript and audit history remain available.'
+
+function DisabledReasonTooltip({
+  title,
+  body,
+  children,
+}: {
+  title: string
+  body: string
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip
+      content={
+        <div className="space-y-1">
+          <div className="font-medium">{title}</div>
+          <div>{body}</div>
+        </div>
+      }
+    >
+      {children}
+    </Tooltip>
+  )
+}
 
 function isSessionActive(status: string | null | undefined): boolean {
   if (!status) return false
@@ -150,6 +179,11 @@ export function SessionRecoveryActions({
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending
+  const disabledReason = active
+    ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
+    : anyPending
+      ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
+      : null
 
   function handleCompact() {
     if (active || anyPending) return
@@ -189,8 +223,7 @@ export function SessionRecoveryActions({
       size="sm"
       onClick={handleCompact}
       disabled={active || anyPending}
-      aria-disabled={active}
-      title={active ? INACTIVE_TOOLTIP : undefined}
+      aria-disabled={disabledReason !== null}
       data-testid="session-recovery-compact"
       data-active={active ? 'true' : 'false'}
     >
@@ -205,8 +238,7 @@ export function SessionRecoveryActions({
       size="sm"
       onClick={openResetDialog}
       disabled={active || anyPending}
-      aria-disabled={active}
-      title={active ? INACTIVE_TOOLTIP : undefined}
+      aria-disabled={disabledReason !== null}
       data-testid="session-recovery-reset"
       data-active={active ? 'true' : 'false'}
     >
@@ -217,25 +249,13 @@ export function SessionRecoveryActions({
   const content = (
     <>
       <div className="flex items-center gap-2">
-        {active ? (
-          <span
-            className="inline-block"
-            title={INACTIVE_TOOLTIP}
-            data-testid="session-recovery-compact-wrapper"
-          >
-            {compactButton}
-          </span>
+        {disabledReason ? (
+          <DisabledReasonTooltip {...disabledReason}>{compactButton}</DisabledReasonTooltip>
         ) : (
           compactButton
         )}
-        {active ? (
-          <span
-            className="inline-block"
-            title={INACTIVE_TOOLTIP}
-            data-testid="session-recovery-reset-wrapper"
-          >
-            {resetButton}
-          </span>
+        {disabledReason ? (
+          <DisabledReasonTooltip {...disabledReason}>{resetButton}</DisabledReasonTooltip>
         ) : (
           resetButton
         )}
