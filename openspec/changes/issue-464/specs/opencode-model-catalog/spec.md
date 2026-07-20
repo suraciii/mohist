@@ -92,7 +92,7 @@ If the command cannot start, exits unsuccessfully, is aborted, or produces no va
 - **THEN** discovery SHALL return an empty model list and empty variant map
 - **AND** it SHALL report the failure diagnostically without throwing to the caller
 
-#### Scenario: Output has no parseable model entries
+#### Scenario: Output has no valid model headers
 - **WHEN** the command succeeds but its stdout contains no line matching the `provider/modelID` header grammar
 - **THEN** discovery SHALL return an empty model list and empty variant map
 

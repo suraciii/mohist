@@ -4,9 +4,13 @@
 
 - [x] Aligned periodic rediscovery timing to one interval after the existing post-connection, post-convergence timer registration point across spec, design, and T-002.
 - [x] Defined the model-header grammar, flat-list support, ignored-line behavior, metadata boundaries, and balanced/unbalanced malformed-block recovery across spec, design, and T-001.
-- [ ] Require direct AgentProfileEditor variant-path regression coverage instead of claiming existing coverage.
-- [ ] Add a deterministic seam and test for the production synchronous stdout-capture adapter rather than testing only a preassembled parser payload.
+- [x] Required direct AgentProfileEditor variant-path regression coverage instead of claiming existing coverage.
+- [x] Added a deterministic synchronous-executor seam and command-boundary test contract beneath the production stdout-capture adapter, separate from large-payload parser coverage.
 
 ## Verification
 
-- Pending final JSON, spec-structure, self-review integrity, and diff validation.
+- `tasks.json` parses as valid JSON; both task IDs are complete, `passes` is false, T-002 depends only on lower-priority T-001, and all three capability specs are referenced.
+- Every spec requirement has at least one four-hash scenario with WHEN and THEN clauses.
+- Searches confirm the old startup-discovery clock origin, undefined identifiable-model wording, high-level command-runner seam, and claimed existing Agent editor coverage are absent from the repaired artifacts.
+- `self-review.md` was not edited or staged.
+- `git diff --check` passes. No product code or tests changed in this plan-repair task.
