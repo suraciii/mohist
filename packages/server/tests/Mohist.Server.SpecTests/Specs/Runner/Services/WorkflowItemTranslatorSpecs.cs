@@ -349,7 +349,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var projectId = "proj-result-5";
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Checks("build", "checks-build",
-            [new CheckItem("check-1", "Check 1", "spec/check")]);
+            [new CheckItem("check-1", "Check 1", "spec/check"), new CheckItem("check-2", "Check 2", "spec/check")]);
         var output = JsonSerializer.SerializeToElement(new[]
         {
             new { name = "check-1", status = "pass", message = (string?)null! },

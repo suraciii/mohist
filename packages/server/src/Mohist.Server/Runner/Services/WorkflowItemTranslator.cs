@@ -421,16 +421,20 @@ EpicNumber: ReadEpicNumber(run),
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
-        if (!HasValidCheckResultRows(result.Output))
+        if (!HasValidCheckResultRows(item.Items, result.Output))
             return MalformedCheckOutput(item);
 
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         return new InboundReport.Checks(new CheckReport(item.Stage, results));
     }
 
-    private static bool HasValidCheckResultRows(JsonElement? output)
+    private static bool HasValidCheckResultRows(IReadOnlyList<CheckItem>? checks, JsonElement? output)
     {
         if (output is not { ValueKind: JsonValueKind.Array }) return false;
+        var expectedNames = (checks ?? []).Select(check => check.Name).ToHashSet(StringComparer.Ordinal);
+        if (expectedNames.Count != (checks?.Count ?? 0)) return false;
+
+        var reportedNames = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var row in output.Value.EnumerateArray())
         {
@@ -440,12 +444,35 @@ EpicNumber: ReadEpicNumber(run),
                 || string.IsNullOrWhiteSpace(name.GetString()))
                 return false;
 
+            var nameValue = name.GetString()!;
+            if (!expectedNames.Contains(nameValue) || !reportedNames.Add(nameValue))
+                return false;
+
+            if (row.TryGetProperty("status", out var status)
+                && status.ValueKind != JsonValueKind.String)
+                return false;
+
+            if (row.TryGetProperty("message", out var message)
+                && message.ValueKind is not JsonValueKind.String and not JsonValueKind.Null)
+                return false;
+
             if (row.TryGetProperty("output", out var actionOutput)
                 && actionOutput.ValueKind is not JsonValueKind.Object and not JsonValueKind.Null)
                 return false;
+
+            if (row.TryGetProperty("error", out var error))
+            {
+                if (error.ValueKind == JsonValueKind.Null) continue;
+                if (error.ValueKind != JsonValueKind.Object
+                    || !error.TryGetProperty("code", out var code)
+                    || code.ValueKind != JsonValueKind.String
+                    || !error.TryGetProperty("message", out var errorMessage)
+                    || errorMessage.ValueKind != JsonValueKind.String)
+                    return false;
+            }
         }
 
-        return true;
+        return reportedNames.SetEquals(expectedNames);
     }
 
     private static InboundReport MalformedCheckOutput(WorkItem item)

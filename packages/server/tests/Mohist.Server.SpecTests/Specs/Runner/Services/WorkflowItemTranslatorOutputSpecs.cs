@@ -54,6 +54,10 @@ public partial class WorkflowItemTranslatorSpecs
     [InlineData("[42]")]
     [InlineData("[null]")]
     [InlineData("""[{"name":"check-1","status":"pass","output":"bad"}]""")]
+    [InlineData("""[{"name":"check-1","status":1,"output":null}]""")]
+    [InlineData("""[{"name":"check-1","status":"pass","message":false,"output":null}]""")]
+    [InlineData("""[{"name":"check-1","status":"pass","error":{"code":1,"message":"bad"},"output":null}]""")]
+    [InlineData("""[{"name":"check-1","status":"pass","error":{"code":"bad","message":false},"output":null}]""")]
     public async Task TranslateResult_MalformedCheckRow_FailsEveryDispatchedCheck(string output)
     {
         var runId = $"wr-{Guid.NewGuid():N}";
@@ -70,5 +74,30 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("check-1", check.Name);
         Assert.Equal(CheckResultStatus.Failed, check.Status);
         Assert.Equal("unexpected-error", check.Error?.Code);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("""[{"name":"unknown","status":"pass","output":null},{"name":"check-1","status":"pass","output":null}]""")]
+    [InlineData("""[{"name":"check-1","status":"pass","output":null}]""")]
+    [InlineData("""[{"name":"check-1","status":"pass","output":null},{"name":"check-1","status":"pass","output":null}]""")]
+    public async Task TranslateResult_CheckSetMismatch_FailsEveryDispatchedCheck(string output)
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-result-check-set-mismatch";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var item = WorkItem.Checks("build", "checks-build",
+            [new CheckItem("check-1", "Check 1", "spec/check"), new CheckItem("check-2", "Check 2", "spec/check")]);
+
+        var report = await _translator.TranslateResultAsync(
+            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId, run);
+
+        var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
+        Assert.Equal(["check-1", "check-2"], checks.Value.Results.Select(check => check.Name));
+        Assert.All(checks.Value.Results, check =>
+        {
+            Assert.Equal(CheckResultStatus.Failed, check.Status);
+            Assert.Equal("unexpected-error", check.Error?.Code);
+        });
     }
 }
