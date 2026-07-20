@@ -1,27 +1,25 @@
 ## Findings
 
-### 1. High: The proposed `Runner -> Issue` dependency is rejected by the architecture suite
+### 1. Medium: The migration sequence implements before updating the canonical design specs
 
-Design D1 requires `WorkflowItemTranslator` in `Mohist.Server.Runner.Services` to call `IssueQuerier` in `Mohist.Server.Issue.Services` (`design.md:29-31`), and T-001 plans that same direct path (`tasks.json:9-17`). The enforced domain allowlist permits `Runner -> Sessions` and `Runner -> Workflow`, but not `Runner -> Issue` (`packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs:383-416`); `DomainModules_ShouldNotDependOnEachOther` rejects every unlisted direction (`ArchitectureRules.cs:418-439`). Implementing the plan as written therefore cannot satisfy T-001's own `npm test` acceptance criterion.
+The repository requires both product and design specs to precede implementation: "先确定方案落到文档，再去实现" (`AGENTS.md:75-82`). T-001 correctly includes updates to `design/issue-breakdown.md` and `design/workflow/task-dispatch.md` (`tasks.json:9,19`), but the design's Migration Plan orders server implementation first, runner implementation second, and canonical design-document updates third (`design.md:86-91`). An autonomous implementer following that sequence would knowingly violate the repository's spec-first workflow.
 
-The plan must choose an architecture-compliant assembly boundary outside the Runner and Issue domain namespaces, or explicitly change the canonical architecture and its allowlist with a justified new domain relationship. Moving only the value type does not solve the dependency: placing it under Issue leaves `Runner -> Issue`, while placing it under Runner makes the Issue-side producer depend on Runner.
+Move the canonical documentation update to the first migration step, before either server or runner code. The implementation and deployment steps can otherwise retain their current order.
 
-### 2. Medium: Missing-parent failure is extra behavior and its dispatch outcome is incomplete
+## Verified Corrections
 
-The issue and capability spec define context for issues that currently have a parent and require lifecycle/stage behavior to remain unchanged (`specs/sub-issue-plan-context/spec.md:38-55`). They do not define corruption handling. Design D1 nevertheless requires a missing or malformed referenced parent to fail dispatch (`design.md:39`), and T-001 makes that observable failure and its tests mandatory (`tasks.json:12,17`). This invents behavior outside the normative contract instead of deriving it from a requirement.
+The three findings from the prior review are resolved:
 
-The proposed failure is also underspecified against the current dispatch pipeline. `DispatchService` permanently rejects a claimed task only for `WorkflowDispatchRejectedException` (`packages/server/src/Mohist.Server/Runner/Services/DispatchService.cs:183-187,219-223`). Query, missing-row, or deserialization exceptions fall into the generic catch and leave the task Running for poll redelivery (`DispatchService.cs:188-195,224-231`). As written, the design's "fails with an actionable consistency error" can become indefinite retries. The plan must either remove this unrequested policy or specify its normative behavior, exception conversion, ownership, and testable terminal/retry semantics.
+- Cross-domain enrichment now occurs in the API poll response mapper, which already converts `WorkDispatch` to `WorkDispatchResponse`; `WorkflowItemTranslator` and the Runner namespace no longer depend on Issue (`proposal.md:19-20`, `design.md:29-51`, `tasks.json:12-14`). This path is compatible with the enforced domain dependency matrix (`packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs:383-439`).
+- Missing/corrupt parent behavior is no longer invented as a permanent dispatch failure; absent resolved context preserves existing dispatch behavior and corruption policy is explicitly outside this change (`design.md:51`, `tasks.json:29`).
+- Orleans field-id semantics are now limited correctly: `WorkDispatch` remains unchanged, while only the plain HTTP `WorkDispatchResponse` gains the optional context (`design.md:40-42`, `tasks.json:12-13,20`).
 
-### 3. Low: The task applies Orleans field-id semantics to the HTTP DTO
+## Coverage And Feasibility
 
-T-001 says both `WorkDispatch` and `WorkDispatchResponse` carry `ParentIssueContext` "using a new Orleans field id" (`tasks.json:13`). Only `WorkDispatch` is an Orleans `[GenerateSerializer]` contract and needs the next appended id (`packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs:87-131`). `WorkDispatchResponse` is a plain HTTP record with no Orleans field ids (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:656-682`); it needs only an additive property and explicit mapping in the poll route. The task wording must distinguish these contracts so implementation does not add meaningless serialization annotations or mis-handle positional DTO mapping.
-
-## Verified Coverage
-
-Apart from the findings above, the proposal names exactly one capability and the matching spec exists. Parent title/body inclusion, child-scope authority, parent comment/artifact exclusion, sibling exclusion, ordinary Plan preservation, and non-Plan/lifecycle isolation trace consistently from the issue through the proposal, spec, design, and T-001. `tasks.json` parses, contains all required fields, and its single-task dependency graph is a valid DAG.
+All issue acceptance criteria and non-goals trace through the proposal, the single `sub-issue-plan-context` capability spec, design decisions, and T-001: parent title/body inclusion, child-scope authority, exclusion of parent comments/artifacts and siblings, unchanged ordinary Plan input, and no non-Plan or lifecycle changes. The current poll route has the required mapping seam (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:94-140`), the runner path has explicit wire/internal/action boundaries, and the planned fake-based server/runner tests are feasible. `tasks.json` parses and its single-task dependency graph is valid and acyclic.
 
 ## Conclusion
 
-The product scope and capability coverage are coherent, but the chosen implementation boundary fails an enforced architecture rule and the added corruption policy is neither normatively grounded nor operationally complete. The plan is not ready for autonomous build execution.
+The technical boundary and behavioral coverage are ready, but the migration order must be corrected to comply with the repository's mandatory spec-first process before autonomous build execution.
 
 <promise>FAIL</promise>
