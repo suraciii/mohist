@@ -85,9 +85,9 @@ No probabilistic assertion is made about generated Plan prose. The contract is v
 
 ## Migration Plan
 
-1. Add the Issue read operation, optional HTTP response field, poll-route enrichment, and server specs without changing `WorkDispatch` or persisted Issue/Workflow state.
-2. Add the matching runner wire/internal types, mapping, prompt composer, and runner tests.
-3. Update the canonical dispatch and issue-breakdown design documentation to record the resolved boundary before product implementation is considered complete.
+1. Update the canonical dispatch and issue-breakdown design documentation to record the resolved boundary before changing implementation.
+2. Add the Issue read operation, optional HTTP response field, poll-route enrichment, and server specs without changing `WorkDispatch` or persisted Issue/Workflow state.
+3. Add the matching runner wire/internal types, mapping, prompt composer, and runner tests.
 4. Deploy server and runner together. The additive optional field also permits either order during a rolling deployment: old runners ignore unknown JSON fields; new runners treat a missing field as no parent context.
 
 Rollback removes the prompt composition and stops populating the optional HTTP field. No data migration, Orleans compatibility step, or cleanup is required.
