@@ -652,7 +652,8 @@ public class IssueCliTableRendererTests
                   "reason": "TaskFailed",
                   "stage": "integrate",
                   "taskId": "integrate:prepare",
-                  "message": "{{failureMessage}}"
+                  "message": "{{failureMessage}}",
+                  "error": { "code": "{{expectedKind}}", "message": "{{failureMessage}}" }
                 },
                 "stages": [
                   { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
@@ -748,7 +749,8 @@ public class IssueCliTableRendererTests
                   "reason": "TaskFailed",
                   "stage": "integrate",
                   "taskId": "integrate:prepare",
-                  "message": "{{failureMessage}}"
+                  "message": "{{failureMessage}}",
+                  "error": { "code": "branch-invariant-violation", "message": "{{failureMessage}}" }
                 },
                 "stages": [
                   { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
@@ -806,7 +808,8 @@ public class IssueCliTableRendererTests
                   "reason": "TaskFailed",
                   "stage": "integrate",
                   "taskId": "integrate:publish",
-                  "message": "{{failureMessage}}"
+                  "message": "{{failureMessage}}",
+                  "error": { "code": "branch-invariant-violation", "message": "{{failureMessage}}" }
                 },
                 "stages": [
                   { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
@@ -903,6 +906,7 @@ public class IssueCliTableRendererTests
                   "stage": "build",
                   "taskId": "build:task-1",
                   "message": "{{failureMessage}}",
+                  "error": { "code": "{{kind}}", "message": "{{failureMessage}}" },
                   "output": "{\"kind\":\"{{kind}}\",\"workspacePath\":\"/home/runner/workspaces/proj_x/wr_abc\"}"
                 },
                 "stages": [

@@ -18,7 +18,8 @@ public sealed record CheckResult(
     string Name,
     CheckResultStatus Status,
     string? Message = null,
-    JsonElement? Output = null);
+    JsonElement? Output = null,
+    ExecutionError? Error = null);
 
 public sealed class StageCheck
 {
@@ -31,4 +32,5 @@ public sealed class StageCheck
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }
+    public ExecutionError? Error { get; set; }
 }

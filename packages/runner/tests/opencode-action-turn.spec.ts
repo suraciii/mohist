@@ -143,14 +143,14 @@ describe("parseOpencodeInput — input validation", () => {
     const result = parseOpencodeInput({ options: { model: 42 as never } })
     expect(result.kind).toBe("failure")
     if (result.kind !== "failure") return
-    expect(result.result.message).toMatch(/options\.model.*must be a string/)
+    expect(result.result.error?.message).toMatch(/options\.model.*must be a string/)
   })
 
   it("Rejects non-string variant", () => {
     const result = parseOpencodeInput({ options: { variant: true as never } })
     expect(result.kind).toBe("failure")
     if (result.kind !== "failure") return
-    expect(result.result.message).toMatch(/options\.variant.*must be a string/)
+    expect(result.result.error?.message).toMatch(/options\.variant.*must be a string/)
   })
 
   it("Rejects malformed model (no slash)", () => {
@@ -182,7 +182,7 @@ describe("opencodeAction — happy path + turn fact", () => {
     await ensureReady(runtime)
     const context = baseContext({ openCodeRuntime: runtime })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(result.turnFact).toEqual({ finalAssistantText: "hello from opencode" })
   })
 
@@ -223,8 +223,8 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { session: "plan", prompt: "second task" } as never,
     }))
 
-    expect(first.status).toBe("success")
-    expect(second.status).toBe("success")
+    expect(first.error).toBeUndefined()
+    expect(second.error).toBeUndefined()
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
     expect(attachWorkflowAgentSession).toHaveBeenCalledTimes(1)
@@ -248,8 +248,8 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { session: "plan", prompt: "do not submit" } as never,
     }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/persist.*binding.*attach rejected/i)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/persist.*binding.*attach rejected/i)
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
@@ -268,8 +268,8 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { session: "plan", prompt: "do not use old workspace" } as never,
     }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/different workspace/i)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/different workspace/i)
     expect(client.sessionCreate).not.toHaveBeenCalled()
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
@@ -287,8 +287,8 @@ describe("opencodeAction — happy path + turn fact", () => {
 
     const result = await opencodeAction(baseContext({ openCodeRuntime: runtime }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("UND_ERR_HEADERS_TIMEOUT")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("UND_ERR_HEADERS_TIMEOUT")
     expect(client.sessionAbort).toHaveBeenCalledTimes(1)
   })
 
@@ -300,7 +300,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { prompt: "do", options: { model: "openrouter/vendor/family/model", variant: "high" } } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const arg = client.sessionPrompt.mock.calls[0]?.[0] as { model?: unknown }
     expect(arg.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
   })
@@ -313,7 +313,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { prompt: "do", options: { model: "openai/gpt-5", type: "opencode", livenessQuietThresholdMs: 5000 } } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
   })
 })
@@ -322,8 +322,8 @@ describe("opencodeAction — readiness gates", () => {
   it("Fails when the OpenCode runtime handle is missing", async () => {
     const context = baseContext()
     const result = await opencodeAction(context)
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/requires the opencode runtime/i)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/requires the opencode runtime/i)
   })
 
   it("Fails when the OpenCode runtime is not ready", async () => {
@@ -332,8 +332,8 @@ describe("opencodeAction — readiness gates", () => {
     await runtime.shutdown({ clearDiagnostic: true })
     const context = baseContext({ openCodeRuntime: runtime })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/requires the opencode runtime to be ready/i)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/requires the opencode runtime to be ready/i)
   })
 })
 
@@ -346,8 +346,8 @@ describe("opencodeAction — input validation short-circuits before runtime", ()
       with: { prompt: "   " } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/requires 'prompt'/)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/requires 'prompt'/)
   })
 
   it("Rejects malformed options without calling sessionPrompt", async () => {
@@ -358,8 +358,8 @@ describe("opencodeAction — input validation short-circuits before runtime", ()
       with: { prompt: "do", options: { model: "no-slash" } } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/provider\/model/)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/provider\/model/)
     expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
 })
@@ -382,7 +382,7 @@ describe("opencodeAction — provider-error fail-fast propagates", () => {
       },
     })
     const result = await actionPromise
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(result.turnFact?.finalAssistantText).toBeNull()
     expect(client.sessionAbort).toHaveBeenCalledTimes(1)
   })
@@ -458,7 +458,7 @@ describe("opencodeAction — deadline declaration", () => {
       with: { prompt: "do", timeout: 5 * 60 * 1000 } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>
       system?: string
@@ -476,7 +476,7 @@ describe("opencodeAction — deadline declaration", () => {
     await ensureReady(runtime)
     const context = baseContext({ openCodeRuntime: runtime })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>
       system?: string
@@ -496,7 +496,7 @@ describe("opencodeAction — deadline declaration", () => {
       with: { prompt: "do", timeout: 30 * 60 * 1000 } as never,
     })
     const result = await opencodeAction(context)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>
     }

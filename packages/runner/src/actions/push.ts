@@ -3,6 +3,7 @@ import { booleanInput, stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
 import { resolveDeliveryRemote, resolvePushSource, resolvePushTarget } from "./delivery-context.js"
+import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -42,8 +43,8 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const target = resolvePushTarget(context)
   const source = target ? resolvePushSource(context, target) : null
   const remote = resolveDeliveryRemote(context)
-  if (!target) return { status: "failure", message: "Push requires the authoritative repository base branch or workflow branch" }
-  if (!source || !remote) return { status: "failure", message: "Push requires the authoritative workspace branch and repository origin" }
+  if (!target) return fail("invalid-input", "Push requires the authoritative repository base branch or workflow branch")
+  if (!source || !remote) return fail("invalid-input", "Push requires the authoritative workspace branch and repository origin")
   const force = booleanInput(context.with, "force") === true
   const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true
   const refspec = `${source}:${target}`
@@ -64,7 +65,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
       force,
       forceWithLease,
       sourceResolve.combinedOutput,
-      "retry-safe",
+      sourceResolve.status === "timeout" ? "timeout" : "push-failed",
       sourceResolve.exitCode,
     )
   }
@@ -84,7 +85,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, networkOpts)
     if (remoteTip.kind === "timeout") {
       steps.push({ name: "git-ls-remote", command: remoteTip.command, exitCode: remoteTip.result.exitCode, output: remoteTip.result.combinedOutput, ...timeoutStepMetadata(remoteTip.result) })
-      return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, remoteTip.result.combinedOutput, "retry-safe", remoteTip.result.exitCode, steps)
+      return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, remoteTip.result.combinedOutput, "timeout", remoteTip.result.exitCode, steps)
     }
     if (remoteTip.kind === "failed") {
       pushArgs.push("--force-with-lease")
@@ -97,14 +98,14 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const push = await git(workDir, pushArgs, context.signal, networkOpts)
   steps.push({ name: "git-push", command: pushArgs.join(" "), exitCode: push.exitCode, output: push.combinedOutput, ...timeoutStepMetadata(push) })
   if (!push.success) {
-    const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
-    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode, steps)
+    const failureCode = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : push.status === "timeout" ? "timeout" : "push-failed"
+    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureCode, push.exitCode, steps)
   }
 
   return pushOutput(source, target, remote, workDir, landedCommit, true, force, forceWithLease, push.combinedOutput, null, push.exitCode, steps)
 }
 
-type PushFailureKind = "base-moved" | "retry-safe" | null
+type PushFailureCode = "base-moved" | "push-failed" | "timeout" | null
 
 function pushOutput(
   source: string,
@@ -116,20 +117,21 @@ function pushOutput(
   force: boolean,
   forceWithLease: boolean,
   gitOutput: string,
-  failureKind: PushFailureKind,
+  failureCode: PushFailureCode,
   exitCode: number | null,
   steps: GitHubPrStep[] = [],
 ): ActionResult {
-  // Schema convention: `failureKind` is always present (null on success).
-  // Downstream renderers (CLI DeliveryFailureGuidance, web delivery-failure.ts)
-  // detect the kind from the JSON `failureKind` field first. Push reports
-  // `base-moved` (non-fast-forward; rebase and try again) and `retry-safe`
-  // (transient/network/auth). `force` and `forceWithLease` are recorded so
-  // the integrate stage's rebase-then-push recovery path can be audited in
-  // the task output.
+  if (!pushed) {
+    const message = failureCode === "base-moved"
+      ? "Push failed because the target branch moved (non-fast-forward). Rebase and try again."
+      : failureCode === "timeout"
+        ? "Push timed out."
+        : `Push failed: ${gitOutput || "unknown error"}`
+    return fail(failureCode ?? "push-failed", message, { exitCode: exitCode ?? 1 })
+  }
   const output = JSON.stringify({
     kind: "push",
-    status: pushed ? "completed" : "failed",
+    status: "completed",
     source,
     target,
     remote,
@@ -139,17 +141,10 @@ function pushOutput(
     pushed,
     force,
     forceWithLease,
-    failureKind,
     output: gitOutput,
     steps,
   })
-  if (pushed) {
-    return { status: "success", message: "Push completed", output, exitCode: exitCode ?? 0 }
-  }
-  const label = failureKind === "base-moved"
-    ? `Push failed: base branch moved (non-fast-forward). Rebase and try again.`
-    : `Push failed (retry-safe): ${gitOutput || "unknown error"}`
-  return { status: "failure", message: label, output, exitCode: exitCode ?? 1 }
+  return succeed(output, { exitCode: exitCode ?? 0 })
 }
 
 function looksLikeNonFastForward(text: string) {

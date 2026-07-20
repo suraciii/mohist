@@ -225,13 +225,13 @@ describe("worktree cleanup before delivery", () => {
       expect(prompt).toMatch(/do NOT push to any remote/i)
       expect(prompt).toContain("src/agent-output.ts")
       commitCleanup(worktree, ["src/agent-output.ts"], "cleanup-sha")
-      return { status: "success", message: "committed leftover", output: JSON.stringify({ commitSha: "cleanup-sha" }) }
+      return { output: JSON.stringify({ commitSha: "cleanup-sha" }) }
     })
 
     const registry = buildRegistry({
       "mohist/acp-agent": async () => {
         worktree.untracked = ["src/agent-output.ts"]
-        return { status: "success", message: "agent finished" }
+        return { output: null }
       },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
@@ -250,7 +250,7 @@ describe("worktree cleanup before delivery", () => {
     const rebaseResult = await rebaseAction(rebaseContext())
     const rebaseOutput = JSON.parse(rebaseResult.output ?? "{}")
 
-    expect(rebaseResult.status).toBe("success")
+    expect(rebaseResult.error).toBeUndefined()
     expect(rebaseCalls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -271,7 +271,6 @@ describe("worktree cleanup before delivery", () => {
       remote: "origin",
       squashed: true,
       squashedHeadSha: "squashed-sha",
-      errorCode: null,
     })
 
     const pushCalls: { workDir: string; command: string }[] = []
@@ -290,7 +289,7 @@ describe("worktree cleanup before delivery", () => {
 
     const pushResult = await pushAction(pushContext())
     const pushOutput = JSON.parse(pushResult.output ?? "{}")
-    expect(pushResult.status).toBe("success")
+    expect(pushResult.error).toBeUndefined()
     expect(pushOutput).toMatchObject({
       kind: "push",
       status: "completed",
@@ -298,7 +297,6 @@ describe("worktree cleanup before delivery", () => {
       target: "master",
       landedCommit: "squashed-sha",
       pushed: true,
-      failureKind: null,
       workDir: worktree.workDir,
     })
     expect(pushCalls).toEqual([
@@ -313,13 +311,13 @@ describe("worktree cleanup before delivery", () => {
       attempt += 1
       const prompt = String(ctx.with?.prompt ?? "")
       expect(prompt).toContain(`attempt ${attempt}`)
-      return { status: "success", message: "noop" }
+      return { output: null }
     })
 
     const registry = buildRegistry({
       "mohist/acp-agent": async () => {
         worktree.untracked = ["src/never-clean.ts"]
-        return { status: "success", message: "first run" }
+        return { output: null }
       },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
@@ -343,13 +341,5 @@ describe("worktree cleanup before delivery", () => {
     expect(attempt).toBe(3)
     expect(agentResult.message).toMatch(/worktree dirty after 3 cleanup attempt/i)
     expect(agentResult.message).toMatch(/untracked=\[src\/never-clean\.ts\]/)
-    const evidence = JSON.parse(agentResult.output ?? "{}")
-    expect(evidence).toMatchObject({
-      kind: "dirty-worktree",
-      staged: [],
-      unstaged: [],
-      untracked: ["src/never-clean.ts"],
-      cleanupAttempts: 3,
-    })
   })
 })

@@ -128,11 +128,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
     registry.register("mohist/rebase", async (ctx: ActionContext): Promise<ActionResult> => {
       dispatched.push(ctx.workId)
       residual.rebase = true
-      return {
-        status: "failure",
-        message: "rebase conflict",
-        output: JSON.stringify({ kind: "rebase", errorCode: "rebase-conflict" }),
-      }
+      return { error: { code: "conflict", message: "rebase conflict" } }
     })
     registry.register("mohist/workspace-prepare", async (ctx) => {
       dispatched.push(ctx.workId)
@@ -141,7 +137,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
     registry.register("core/business", async (ctx) => {
       dispatched.push(ctx.workId)
       expect(residual.rebase).toBe(false)
-      return { status: "success", message: `ran ${ctx.workId}` }
+      return { output: `ran ${ctx.workId}` }
     })
 
     const executor = buildExecutor(registry)
@@ -161,11 +157,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
   it("RecoveryScheduledTasks_AreReturnedWithoutFreshWorkspacePrepare", async () => {
     installExecutorGitProbe()
     const registry = new ActionRegistry()
-    registry.register("mohist/rebase", async () => ({
-      status: "failure",
-      message: "rebase conflict",
-      output: JSON.stringify({ kind: "rebase", errorCode: "rebase-conflict" }),
-    }))
+    registry.register("mohist/rebase", async () => ({ error: { code: "conflict", message: "rebase conflict" } }))
     const executor = buildExecutor(registry)
 
     const result = await executor.execute(
@@ -174,7 +166,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
           budget: 1,
           handlers: [
             {
-              when: "errorCode=rebase-conflict",
+              when: "error.code=conflict",
               retrySelf: true,
               tasks: [{ id: "resolve-rebase-conflicts", title: "Resolve rebase conflicts", uses: "mohist/acp-agent" }],
             },

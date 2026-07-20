@@ -141,7 +141,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+            [new RecoveryHandlerDefinition("output.promise=FAIL", [], RetrySelf: true)]);
         var definition = SingleStage(
             tasks:
             [

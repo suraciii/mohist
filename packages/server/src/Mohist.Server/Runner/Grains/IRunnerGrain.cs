@@ -186,7 +186,8 @@ public record WorkResult(
     string? Output = null,
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
-    [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null);
+    [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null,
+    [property: Id(6)] ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

@@ -107,7 +107,7 @@ Variables 解析语义，不改写 snapshot。
 
 ```yaml
 handlers:
-  - when: errorCode=conflict
+  - when: error.code=conflict
     retryself: true
 ```
 
@@ -148,7 +148,7 @@ stages[0].tasks[0].with.prompt: 未知命名空间 openspecChangeDir
 | 构造 | 实现语义所在 |
 |---|---|
 | `with` / `expect` 的展开时机与 dispatch 输入 | [`task-dispatch.md`](task-dispatch.md) |
-| `expect` / `artifacts` / `setVars` / `errorCode` 的执行分工 | [`actions.md`](actions.md) |
+| `expect` / `artifacts` / `setVars` / `error` 的执行分工 | [`actions.md`](actions.md) |
 | recovery 的匹配位置、预算流转（`recoveryRemaining`）、人工 retry 重建 | [`recovery.md`](recovery.md) |
 | `vars.*` 的合并算法与写入 API | [`variables.md`](variables.md) |
 | Profile 资源、definition snapshot 与 API | [`profile.md`](profile.md) |

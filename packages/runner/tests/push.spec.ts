@@ -81,8 +81,8 @@ describe("mohist/push", () => {
       repository: { name: "web", gitUrl: "https://example.com/web.git", baseBranch: null },
     }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/authoritative repository base branch/)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/authoritative repository base branch/)
     expect(calls).toHaveLength(0)
   })
 
@@ -107,7 +107,7 @@ describe("mohist/push", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse HEAD",
       "push --force origin HEAD:mo/issue-99",
@@ -137,7 +137,7 @@ describe("mohist/push", () => {
     const result = await pushAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
       "push origin mo/issue-99:master",
@@ -151,7 +151,6 @@ describe("mohist/push", () => {
       refspec: "mo/issue-99:master",
       landedCommit: "source-sha",
       pushed: true,
-      failureKind: null,
     })
   })
 
@@ -171,7 +170,7 @@ describe("mohist/push", () => {
     const result = await pushAction(context({}, { project: { path: PROJECT_PATH } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH])
     expect(calls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
     expect(output.workDir).toBe(WORKSPACE_PATH)
@@ -226,20 +225,8 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "push",
-      status: "failed",
-      source: "mo/issue-99",
-      target: "master",
-      remote: "origin",
-      landedCommit: "source-sha",
-      pushed: false,
-      failureKind: "base-moved",
-    })
-    expect(result.message).toContain("base branch moved")
+    expect(result.error).toMatchObject({ code: "base-moved" })
+    expect(result.error?.message).toContain("target branch moved")
   })
 
   it("RejectedWithFetchFirstHint_ClassifiesAsBaseMoved", async () => {
@@ -256,10 +243,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("base-moved")
+    expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
   it("TransientAuthError_ClassifiesAsRetrySafe", async () => {
@@ -276,15 +260,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "push",
-      landedCommit: "source-sha",
-      pushed: false,
-      failureKind: "retry-safe",
-    })
+    expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
   it("SourceResolveFails_ClassifiesAsRetrySafeWithNullCommit", async () => {
@@ -299,15 +275,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "push",
-      landedCommit: null,
-      pushed: false,
-      failureKind: "retry-safe",
-    })
+    expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
   it("ExplicitRemoteOption_PushesAgainstConfiguredRemote", async () => {
@@ -329,14 +297,13 @@ describe("mohist/push", () => {
     ))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("push upstream mo/issue-99:master")
     expect(workspaceCalls(calls)).not.toContain("push origin mo/issue-99:master")
     expect(output).toMatchObject({
       remote: "upstream",
       refspec: "mo/issue-99:master",
       pushed: true,
-      failureKind: null,
     })
   })
 
@@ -354,7 +321,7 @@ describe("mohist/push", () => {
       },
     ))
 
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(calls).toEqual([])
   })
 
@@ -377,7 +344,7 @@ describe("mohist/push", () => {
     ))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("rev-parse custom-source")
     expect(workspaceCalls(calls)).toContain("push origin custom-source:master")
     expect(output).toMatchObject({
@@ -428,7 +395,7 @@ describe("mohist/push", () => {
     // `pushed` directly from the JSON output.
     expect(output.landedCommit).toBe("abc123def456")
     expect(output.pushed).toBe(true)
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
   })
 
   it("ForceWithLease_UsesExplicitLeaseAgainstResolvedRemoteTip", async () => {
@@ -449,7 +416,7 @@ describe("mohist/push", () => {
     const result = await pushAction(context({ forceWithLease: true }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
       "ls-remote origin refs/heads/master",
@@ -461,7 +428,6 @@ describe("mohist/push", () => {
       forceWithLease: true,
       pushed: true,
       landedCommit: "rewritten-sha",
-      failureKind: null,
     })
   })
 
@@ -482,7 +448,7 @@ describe("mohist/push", () => {
 
     const result = await pushAction(context({ forceWithLease: true }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
       "ls-remote origin refs/heads/master",
@@ -508,7 +474,7 @@ describe("mohist/push", () => {
 
     const result = await pushAction(context({ forceWithLease: true }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
     expect(workspaceCalls(calls)).toContain("push --force-with-lease origin mo/issue-99:master")
   })
@@ -532,7 +498,7 @@ describe("mohist/push", () => {
 
     const stringTrue = await pushAction(context({ forceWithLease: "true" }))
     const stringTrueOutput = JSON.parse(stringTrue.output ?? "{}")
-    expect(stringTrue.status).toBe("success")
+    expect(stringTrue.error).toBeUndefined()
     expect(stringTrueOutput.forceWithLease).toBe(true)
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
     expect(workspaceCalls(calls)).toContain("push --force-with-lease=master:remote-tip origin mo/issue-99:master")
@@ -540,7 +506,7 @@ describe("mohist/push", () => {
     calls.length = 0
     const absent = await pushAction(context({ forceWithLease: "no" }))
     const absentOutput = JSON.parse(absent.output ?? "{}")
-    expect(absent.status).toBe("success")
+    expect(absent.error).toBeUndefined()
     expect(absentOutput.forceWithLease).toBe(false)
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
@@ -565,15 +531,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ forceWithLease: true }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      force: false,
-      forceWithLease: true,
-      pushed: false,
-      failureKind: "base-moved",
-    })
+    expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
   it("ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe", async () => {
@@ -592,7 +550,7 @@ describe("mohist/push", () => {
     const result = await pushAction(context({ force: true }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
       "push --force origin mo/issue-99:master",
@@ -604,7 +562,6 @@ describe("mohist/push", () => {
       forceWithLease: false,
       pushed: true,
       landedCommit: "rewritten-sha",
-      failureKind: null,
     })
   })
 
@@ -624,7 +581,7 @@ describe("mohist/push", () => {
     const result = await pushAction(context({ force: true, forceWithLease: true }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
       "push --force origin mo/issue-99:master",
@@ -634,7 +591,6 @@ describe("mohist/push", () => {
       force: true,
       forceWithLease: false,
       pushed: true,
-      failureKind: null,
     })
   })
 
@@ -656,14 +612,13 @@ describe("mohist/push", () => {
     const result = await pushAction(context({ force: false, forceWithLease: true }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
     expect(workspaceCalls(calls)).toContain("push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master")
     expect(output).toMatchObject({
       force: false,
       forceWithLease: true,
       pushed: true,
-      failureKind: null,
     })
   })
 
@@ -737,23 +692,10 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
     expect(result.exitCode).toBe(124)
-    expect(output.steps).toEqual([
-      {
-        name: "git-push",
-        command: "push origin mo/issue-99:master",
-        exitCode: 124,
-        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
-        status: "timeout",
-        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-      },
-    ])
-    expect(result.message).not.toContain("base branch moved")
+    expect(result.error?.message).not.toContain("base branch moved")
   })
 
   it("ForceWithLease_LsRemoteTimeoutFailsRetrySafeAndSurfacesDuration", async () => {
@@ -778,21 +720,8 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ forceWithLease: true }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
     expect(calls.some((call) => call.args[0] === "push")).toBe(false)
-    expect(output.steps).toEqual([
-      {
-        name: "git-ls-remote",
-        command: "ls-remote origin refs/heads/master",
-        exitCode: 124,
-        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
-        status: "timeout",
-        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-      },
-    ])
   })
 })

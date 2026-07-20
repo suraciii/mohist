@@ -42,7 +42,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
             1,
             [
                 new RecoveryHandlerDefinition(
-                    "errorCode=script-failed",
+                    "error.code=script-failed",
                     [
                         new TaskDefinition(
                             "recover:fix-ci",

@@ -1,6 +1,7 @@
 import type { GitHubPrErrorCode } from "./github-pr-types.js"
 
-export function classifyGhFailure(stdout: string, stderr: string): GitHubPrErrorCode {
+export function classifyGhFailure(stdout: string, stderr: string, status?: "timeout"): GitHubPrErrorCode {
+  if (status === "timeout") return "timeout"
   const text = `${stdout}\n${stderr}`.toLowerCase()
   if (!text.trim()) return "retry-safe"
   if (looksLikeAuthFailure(text)) return "config-error"
@@ -11,8 +12,8 @@ export function classifyGhFailure(stdout: string, stderr: string): GitHubPrError
   return "retry-safe"
 }
 
-export function classifyPushFailure(stdout: string, stderr: string): GitHubPrErrorCode {
-  return classifyGhFailure(stdout, stderr)
+export function classifyPushFailure(stdout: string, stderr: string, status?: "timeout"): GitHubPrErrorCode {
+  return classifyGhFailure(stdout, stderr, status)
 }
 
 export function looksLikeBaseMoved(text: string): boolean {

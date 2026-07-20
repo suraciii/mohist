@@ -5,6 +5,7 @@ import { buildPromptLoaderContext } from "./acp/agent-config.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
 import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
 import { sessionNameFromContext } from "./acp/session-events.js"
+import { actionErrorMessage, fail, succeed } from "./action-result.js"
 
 export const OPENCODE_USES = "mohist/opencode"
 
@@ -63,10 +64,10 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   try {
     prompt = await resolvePrompt(context.with?.prompt, buildPromptLoaderContext(context))
   } catch (error) {
-    return { status: "failure", message: error instanceof Error ? error.message : String(error) }
+    return fail("invalid-input", actionErrorMessage(error))
   }
   if (typeof prompt !== "string" || !prompt.trim()) {
-    return { status: "failure", message: "mohist/opencode requires 'prompt' that resolves to non-empty text" }
+    return fail("invalid-input", "mohist/opencode requires 'prompt' that resolves to non-empty text")
   }
 
   const optionsParse = parseOpencodeInput(context.with ?? null)
@@ -75,17 +76,11 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
 
   const runtime = context.openCodeRuntime
   if (!runtime) {
-    return {
-      status: "failure",
-      message: "mohist/opencode requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding",
-    }
+    return fail("runtime-unavailable", "mohist/opencode requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
   }
   if (!runtime.ready()) {
     const diagnostic = runtime.diagnostic()
-    return {
-      status: "failure",
-      message: `mohist/opencode requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`,
-    }
+    return fail("runtime-unavailable", `mohist/opencode requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
   }
 
   const sessionName = sessionNameFromContext(context)
@@ -108,20 +103,14 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
         context.signal,
       )
       if (opened.workDir && opened.workDir !== context.workDir) {
-        return {
-          status: "failure",
-          message: "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying",
-        }
+        return fail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
       }
       binding = {
         runtimeSessionId: opened.runtimeSessionId ?? null,
         workDir: context.workDir,
       }
     } catch (error) {
-      return {
-        status: "failure",
-        message: `Failed to resolve the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`,
-      }
+      return fail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`)
     }
   }
   if (!binding) {
@@ -134,22 +123,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
       model: runtimeModel(options),
     })
     if (!created.ok) {
-      return {
-        status: "failure",
-        message: created.error.message,
-        output: JSON.stringify({
-          kind: "opencode",
-          status: "failure",
-          runtimeSessionId: null,
-          model: options?.model ?? null,
-          variant: options?.variant ?? null,
-          text: null,
-          error: created.error.message,
-          diagnostics: created.error.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-        }),
-        exitCode: 1,
-        turnFact: { finalAssistantText: null },
-      }
+      return fail(runtimeErrorCode(created.error.kind), created.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
     }
     try {
       await context.serverConnection.attachWorkflowAgentSession(
@@ -166,23 +140,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
         context.signal,
       )
     } catch (error) {
-      const message = `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`
-      return {
-        status: "failure",
-        message,
-        output: JSON.stringify({
-          kind: "opencode",
-          status: "failure",
-          runtimeSessionId: null,
-          model: options?.model ?? null,
-          variant: options?.variant ?? null,
-          text: null,
-          error: message,
-          diagnostics: [],
-        }),
-        exitCode: 1,
-        turnFact: { finalAssistantText: null },
-      }
+      return fail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${actionErrorMessage(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
     }
     binding = {
       runtimeSessionId: created.value.runtimeSessionId,
@@ -193,40 +151,19 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   const turnRequest = buildTurnRequest(binding, prompt, options, resolveTurnDeadlineMs(context))
   const result = await runtime.runTurn(turnRequest, context.signal)
   if (!result.ok) {
-    const message = result.error.message
-    const isMissing = result.error.kind === "missing-session"
-    const output = JSON.stringify({
-      kind: "opencode",
-      status: "failure",
-      runtimeSessionId: null,
-      model: options?.model ?? null,
-      variant: options?.variant ?? null,
-      text: null,
-      error: message,
-      diagnostics: result.error.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-      ...(isMissing ? { hint: "reset" } : {}),
-    })
-    return { status: "failure", message, output, exitCode: 1, turnFact: { finalAssistantText: null } }
+    return fail(runtimeErrorCode(result.error.kind), result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
   const facts = result.value.facts
-  const ok = true
   const output = JSON.stringify({
     kind: "opencode",
-    status: ok ? "success" : "failure",
+    status: "success",
     runtimeSessionId: facts.runtimeSessionId,
     model: options?.model ?? null,
     variant: options?.variant ?? null,
     text: facts.finalAssistantText,
-    error: null,
     diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
   })
-  return {
-    status: ok ? "success" : "failure",
-    message: ok ? "OpenCode agent task completed" : "OpenCode agent task failed",
-    output,
-    exitCode: ok ? 0 : 1,
-    turnFact: { finalAssistantText: facts.finalAssistantText },
-  }
+  return succeed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
 }
 
 /**
@@ -254,7 +191,7 @@ export function parseOpencodeInput(withInput: JsonObject | null): OptionsParse {
   if (!isObject(rawOptions)) {
     return {
       kind: "failure",
-      result: { status: "failure", message: "mohist/opencode 'options' must be an object when present" },
+      result: fail("invalid-input", "mohist/opencode 'options' must be an object when present"),
     }
   }
   return parseOpencodeOptions(rawOptions as Record<string, unknown>)
@@ -273,12 +210,12 @@ function parseOpencodeOptions(raw: Record<string, unknown>): ParsedOptions {
     } else if (typeof value !== "string") {
       return {
         kind: "failure",
-        result: { status: "failure", message: "mohist/opencode 'options.model' must be a string when present" },
+        result: fail("invalid-input", "mohist/opencode 'options.model' must be a string when present"),
       }
     } else {
       const parsed = parseModelIdentifier(value)
       if (parsed.kind === "failure") {
-        return { kind: "failure", result: { status: "failure", message: `mohist/opencode ${parsed.message}` } }
+        return { kind: "failure", result: fail("invalid-input", `mohist/opencode ${parsed.message}`) }
       }
       options.model = value.trim()
     }
@@ -290,13 +227,19 @@ function parseOpencodeOptions(raw: Record<string, unknown>): ParsedOptions {
     } else if (typeof value !== "string") {
       return {
         kind: "failure",
-        result: { status: "failure", message: "mohist/opencode 'options.variant' must be a string when present" },
+        result: fail("invalid-input", "mohist/opencode 'options.variant' must be a string when present"),
       }
     } else {
       options.variant = value
     }
   }
   return { kind: "ok", options }
+}
+
+function runtimeErrorCode(kind: string): string {
+  if (kind === "deadline-exceeded") return "timeout"
+  if (kind === "missing-session") return "runtime-session-missing"
+  return kind
 }
 
 function resolveTurnDeadlineMs(context: ActionContext): number {

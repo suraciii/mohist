@@ -230,7 +230,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
 
     const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
     expect(events).toContain("getAgentSession")
     expect(events).toContain("openAgentSession")
@@ -249,7 +249,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
 
     const result = await runDefaultModelAction(fixture.context({ with: { prompt: "run minted session" } as never }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
     expect(events.indexOf("getAgentSession")).toBeGreaterThanOrEqual(0)
     expect(events.indexOf("openAgentSession")).toBeGreaterThan(events.indexOf("getAgentSession"))
@@ -267,8 +267,8 @@ describe("runAcpAgentSession — generic session dispatch", () => {
 
     const result = await acpAgentAction(fixture.context({ with: { prompt: "continue" } as never }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("Reset")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("Reset")
     expect(fixture.agent.calls).not.toContainEqual(expect.objectContaining({ event: "resumeSession" }))
   })
 
@@ -317,7 +317,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     try {
       const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
-      expect(result.status).toBe("failure")
+      expect(result.error).toBeDefined()
       expect(fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "session.closed")).toHaveLength(0)
     } finally {
       errorSpy.mockRestore()
@@ -329,7 +329,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
 
     const result = await runDefaultModelAction(fixture.context({ agentSessionId: undefined, with: { prompt: "raw" } as never }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
     expect(events).not.toContain("getWorkflowAgentSession")
     expect(events).not.toContain("openWorkflowAgentSession")
@@ -362,7 +362,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
       with: { prompt: "continue with a different model", agent: { model: "openai/gpt-5.5" } } as never,
     }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(fixture.agent.calls).toContainEqual({ event: "resumeSession", sessionId: "persisted-acp-session" })
     expect(fixture.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
     expect(fixture.agent.calls).toContainEqual({ event: "unstable_setSessionModel", sessionId: "persisted-acp-session", modelId: "openai/gpt-5.5" })

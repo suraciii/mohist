@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, JsonObject, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
+import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
@@ -46,7 +46,7 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | 
   }
 }
 
-function makeRegistry(handler: (ctx: ActionContext) => Promise<WorkItemResult>): ActionRegistry {
+function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
   const registry = new ActionRegistry()
   registry.register("test/action", async (ctx) => handler(ctx))
   return registry
@@ -87,11 +87,7 @@ describe("WorkExecutor artifact capture", () => {
   it("taskRecoveryPreservesNestedRecoveryOnAddedTasks", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({
-        status: "failure",
-        message: "base moved",
-        output: JSON.stringify({ errorCode: "base-moved" }),
-      })),
+      makeRegistry(async () => ({ error: { code: "base-moved", message: "base moved" } })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -106,7 +102,7 @@ describe("WorkExecutor artifact capture", () => {
         budget: 2,
         handlers: [
           {
-            when: "errorCode=base-moved",
+            when: "error.code=base-moved",
             tasks: [
               {
                 id: "recover:rebase",
@@ -117,7 +113,7 @@ describe("WorkExecutor artifact capture", () => {
                   budget: 1,
                   handlers: [
                     {
-                      when: "errorCode=conflict",
+                      when: "error.code=conflict",
                       tasks: [
                         {
                           id: "recover:resolve-rebase-conflicts",
@@ -146,7 +142,7 @@ describe("WorkExecutor artifact capture", () => {
         budget: 1,
         handlers: [
           {
-            when: "errorCode=conflict",
+            when: "error.code=conflict",
             retrySelf: true,
           },
         ],
@@ -166,7 +162,7 @@ describe("WorkExecutor artifact capture", () => {
     await writeFile(join(workDir, "design.md"), "the design", "utf8")
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -177,7 +173,7 @@ describe("WorkExecutor artifact capture", () => {
     const result = await executor.execute(buildWork({ files: [{ path: "review.md" }, { path: "design.md" }] }), new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(result.message).toBe("agent done")
+    expect(result.output).toBe("agent done")
     expect(result.artifactUploadIds).toEqual(["artup_1", "artup_2"])
     expect(connection.uploads).toHaveLength(2)
   })
@@ -185,7 +181,7 @@ describe("WorkExecutor artifact capture", () => {
   it("declaredArtifactMissingIsNonFatalWarning", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -206,7 +202,7 @@ describe("WorkExecutor artifact capture", () => {
     const connection = new FakeServerConnection()
     connection.uploadFailures.set("review.md", new Error("server 503"))
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -229,7 +225,7 @@ describe("WorkExecutor artifact capture", () => {
     }
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success" })),
+      makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -294,7 +290,7 @@ describe("WorkExecutor artifact capture", () => {
   it("actionFailureShortCircuitsArtifactCapture", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "failure", message: "agent crashed" })),
+      makeRegistry(async () => ({ error: { code: "action-failed", message: "agent crashed" } })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -313,7 +309,7 @@ describe("WorkExecutor artifact capture", () => {
   it("skipsArtifactCaptureWhenNoDeclaredOrDynamicArtifacts", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "ok" })),
+      makeRegistry(async () => ({ output: "ok" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -345,7 +341,7 @@ describe("WorkExecutor artifact capture", () => {
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -379,7 +375,7 @@ describe("WorkExecutor artifact capture", () => {
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success" })),
+      makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -407,7 +403,7 @@ describe("WorkExecutor artifact capture", () => {
     const executor = new WorkExecutor(
       makeRegistry(async (ctx) => {
         actionWorkDir = ctx.workDir
-        return { status: "success" }
+        return { output: null }
       }),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
@@ -430,7 +426,7 @@ describe("WorkExecutor artifact capture", () => {
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success" })),
+      makeRegistry(async () => ({ output: null })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -452,7 +448,7 @@ describe("WorkExecutor artifact capture", () => {
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "ok" })),
+      makeRegistry(async () => ({ output: "ok" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -473,7 +469,7 @@ describe("WorkExecutor artifact capture", () => {
     await writeFile(join(workDir, "review.md"), "looks good", "utf8")
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      makeRegistry(async () => ({ output: "agent done" })),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
@@ -489,7 +485,7 @@ describe("WorkExecutor artifact capture", () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(result.message).toBe("agent done")
+    expect(result.output).toBe("agent done")
     expect(result.artifactUploadIds).toEqual(["artup_1"])
     expect(connection.uploads).toHaveLength(1)
     expect(connection.uploads[0]).toMatchObject({

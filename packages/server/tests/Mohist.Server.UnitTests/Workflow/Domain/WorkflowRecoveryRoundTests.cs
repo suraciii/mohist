@@ -16,7 +16,7 @@ public sealed class WorkflowRecoveryRoundTests
     private static RecoveryDefinition Recovery => new(
         2,
         [new RecoveryHandlerDefinition(
-            "errorCode=conflict",
+            "error.code=conflict",
             [new TaskDefinition("fix", "Fix", "test/fix")],
             RetrySelf: true)]);
 
@@ -108,9 +108,9 @@ public sealed class WorkflowRecoveryRoundTests
             {
               "stages": [{
                 "tasks": [
-                  {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}},
-                  {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}},
-                  {"definitionId":"review","attempt":3,"recovery":{"budget":0,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}}
+                  {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error.code=conflict","tasks":[],"retrySelf":true}]}},
+                  {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error.code=conflict","tasks":[],"retrySelf":true}]}},
+                  {"definitionId":"review","attempt":3,"recovery":{"budget":0,"handlers":[{"when":"error.code=conflict","tasks":[],"retrySelf":true}]}}
                 ]
               }]
             }
@@ -231,8 +231,8 @@ public sealed class WorkflowRecoveryRoundTests
     {
         const string json = """
             {"stages":[{"tasks":[
-              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=one","tasks":[],"retrySelf":true}]}},
-              {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"errorCode=two","tasks":[],"retrySelf":true}]}}
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error.code=one","tasks":[],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error.code=two","tasks":[],"retrySelf":true}]}}
             ]}]}
             """;
 
@@ -251,9 +251,9 @@ public sealed class WorkflowRecoveryRoundTests
         // The group is skipped (attempts preserved as-is) rather than thrown.
         const string json = """
             {"stages":[{"tasks":[
-              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error.code=conflict","tasks":[],"retrySelf":true}]}},
               {"definitionId":"review","attempt":2},
-              {"definitionId":"review","attempt":3,"recovery":{"budget":0,"handlers":[{"when":"errorCode=conflict","tasks":[],"retrySelf":true}]}}
+              {"definitionId":"review","attempt":3,"recovery":{"budget":0,"handlers":[{"when":"error.code=conflict","tasks":[],"retrySelf":true}]}}
             ]}]}
             """;
 

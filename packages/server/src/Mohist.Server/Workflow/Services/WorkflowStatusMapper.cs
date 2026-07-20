@@ -27,7 +27,8 @@ public static class WorkflowStatusMapper
                     s.Failure.Stage,
                     s.Failure.TaskId,
                     s.Failure.CheckName,
-                    s.Failure.Message)
+                    s.Failure.Message,
+                    s.Failure.Error)
                 : null;
 
             return new StageStatusView(
@@ -52,7 +53,8 @@ public static class WorkflowStatusMapper
                 effectiveFailure.Stage,
                 effectiveFailure.TaskId,
                 effectiveFailure.CheckName,
-                effectiveFailure.Message)
+                effectiveFailure.Message,
+                effectiveFailure.Error)
             : null;
 
         var actions = BuildAvailableActions(run, effectiveFailure);
@@ -110,7 +112,8 @@ public static class WorkflowStatusMapper
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
                         : null,
-                    Output: t.Output.HasValue ? JSON.Serialize(t.Output.Value) : null))
+                    Output: t.Output.HasValue ? JSON.Serialize(t.Output.Value) : null,
+                    Error: t.Error))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
@@ -130,7 +133,7 @@ public static class WorkflowStatusMapper
     public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Checks.Count > 0)
-            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, FrontendStatus(c.Status.ToString()), c.Message)).ToList();
+            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, FrontendStatus(c.Status.ToString()), c.Message, c.Error)).ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];

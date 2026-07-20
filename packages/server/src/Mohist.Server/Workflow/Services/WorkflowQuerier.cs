@@ -86,7 +86,8 @@ public class WorkflowQuerier : IScopedService
                     StartedAt: task.StartedAt,
                     CompletedAt: task.CompletedAt,
                     DurationMs: task.DurationMs,
-                    Output: task.Output);
+                    Output: task.Output,
+                    Error: task.Error);
             }
         }
     }

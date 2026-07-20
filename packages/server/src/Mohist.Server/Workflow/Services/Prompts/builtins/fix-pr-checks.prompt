@@ -8,17 +8,17 @@ stage: integrate
 ## Context
 
 `mohist/merge-github-pr` rejected the merge because one or more GitHub PR checks
-failed for PR #`${{ failure.output.prNumber }}` (`${{ failure.output.prUrl }}`).
+failed for PR #`${{ vars.github.pr.number }}` (`${{ vars.github.pr.url }}`).
 The merge action is waiting on you to repair the checks before it can squash-merge.
 
-The previous failure surfaced a structured `failure.output.message` describing
-which checks failed; read that as the entry point.
+The failure message is `${{ failure.error.message }}`. Read it as the entry
+point, then inspect the current PR check state directly.
 
 ## Process
 
 1. Inspect the PR check status for the affected PR:
    ```bash
-   gh pr view ${{ failure.output.prNumber }} --json statusCheckRollup \
+   gh pr view ${{ vars.github.pr.number }} --json statusCheckRollup \
      --jq '.statusCheckRollup[] | {name, status, conclusion, detailsUrl}'
    ```
 2. For every check whose `conclusion` is `FAILURE` / `ERROR` / `CANCELLED` /
@@ -35,7 +35,7 @@ which checks failed; read that as the entry point.
 ## Rules
 
 - Do NOT reopen or recreate the PR. Reuse the same workflow branch and the
-  same open PR (`${{ failure.output.prNumber }}`).
+  same open PR (`${{ vars.github.pr.number }}`).
 - Do NOT mark the PR ready again — `merge-github-pr` only checks PR state,
   not PR readiness. Committing the fix is enough; `recover:push` handles sync.
 - Do NOT modify the merge action's behavior. Recovery is scoped to making

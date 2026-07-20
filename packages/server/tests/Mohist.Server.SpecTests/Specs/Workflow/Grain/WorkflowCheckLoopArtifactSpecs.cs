@@ -29,7 +29,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
             1,
             [
                 new RecoveryHandlerDefinition(
-                    "promise=FAIL",
+                    "output.promise=FAIL",
                     [
                         new TaskDefinition(
                             "recover:fix-review-findings",

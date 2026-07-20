@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { git } from "./git-probe.js"
 import type { TaskLogger } from "./task-log.js"
 
@@ -76,36 +76,8 @@ export function branchInvariantViolationFailure(
   return {
     status: "failed",
     message,
-    output: JSON.stringify(evidence),
+    error: { code: "branch-invariant-violation", message },
   }
-}
-
-export function attachBranchStabilityEvidence(
-  result: WorkItemResult,
-  evidence: BranchStabilityEvidence | BranchStabilityEvidence[],
-): WorkItemResult {
-  const stack = Array.isArray(evidence) ? evidence : [evidence]
-  if (stack.length === 0) return result
-  const existingOutput = result.output ? safeParseJson(result.output) : null
-  const evidenceList = Array.isArray((existingOutput ?? {})["branchStability"])
-    ? ((existingOutput as JsonObject)["branchStability"] as JsonValue[])
-    : []
-  const merged: JsonObject = {
-    ...(existingOutput ?? {}),
-    branchStability: [...evidenceList, ...stack.map(branchStabilityToJson)],
-  }
-  return { ...result, output: JSON.stringify(merged) }
-}
-
-export function branchStabilityToJson(evidence: BranchStabilityEvidence): JsonObject {
-  const value: JsonObject = {
-    kind: evidence.kind,
-    boundary: evidence.boundary,
-    expectedBranch: evidence.expectedBranch,
-    observedBranch: evidence.observedBranch,
-  }
-  if (evidence.observedRef !== undefined) value["observedRef"] = evidence.observedRef
-  return value
 }
 
 /**
@@ -196,13 +168,4 @@ export async function checkBranchStability(
     }
   }
   return { kind: "ok", evidence }
-}
-
-function safeParseJson(value: string): JsonObject | null {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as JsonObject) : null
-  } catch {
-    return null
-  }
 }

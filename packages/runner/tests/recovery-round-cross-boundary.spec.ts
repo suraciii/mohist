@@ -41,11 +41,7 @@ function executor(): WorkExecutor {
   const registry = new ActionRegistry()
   // Every attempt fails with output that matches the declared recovery handler,
   // so each attempt schedules a recovery round.
-  registry.register("test/matching", async () => ({
-    status: "failure",
-    message: "conflict",
-    output: JSON.stringify({ errorCode: "conflict" }),
-  }))
+  registry.register("test/matching", async () => ({ error: { code: "conflict", message: "conflict" } }))
   return new WorkExecutor(
     registry,
     verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
@@ -60,7 +56,7 @@ const recovery = {
   budget: 2,
   handlers: [
     {
-      when: "errorCode=conflict",
+      when: "error.code=conflict",
       tasks: [{ id: "recover:fix", title: "Fix", uses: "test/matching" }],
       retrySelf: true,
     },

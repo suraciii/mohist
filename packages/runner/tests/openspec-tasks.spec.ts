@@ -31,7 +31,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.loaded).toBe(1)
     expect(addTasks).toHaveBeenCalledWith("workflow-1", expect.any(Array))
     expect(loadedTasks[0].uses).toBe("mohist/opencode")
@@ -100,7 +100,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBe("${{ vars.agent }}")
     // Default prompt is still injected as the loader spec.
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
@@ -126,7 +126,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBeUndefined()
   })
 
@@ -164,7 +164,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     // None of these loader-internal fields should appear on the wire:
     expect(loadedWith.description).toBeUndefined()
     expect(loadedWith.notes).toBeUndefined()
@@ -212,7 +212,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt).toBe("literal caller prompt")
   })
 
@@ -238,7 +238,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt).toEqual({
       artifact: { task: "caller structured prompt" },
     })
@@ -267,7 +267,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt).toEqual({
       uses: "custom/caller-loader",
       with: { file: "other.json", index: 2 },
@@ -294,7 +294,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt).toBe("default-with caller prompt")
   })
 
@@ -317,7 +317,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
     expect(loadedWith.prompt.with.base).toBe("<build>build prompt</build>")
     expect(loadedWith.prompt.with.taskId).toBe("T-001")
@@ -340,7 +340,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
     expect(loadedWith.prompt.with.base).toBeUndefined()
     expect(loadedWith.prompt.with).toEqual({
@@ -370,7 +370,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
     expect(loadedWith.prompt.with.items).toBe("items.nested")
   })
@@ -391,7 +391,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(3)
     expect(loadedWithList[0].prompt.with.taskId).toBe("T-001")
     expect(loadedWithList[1].prompt.with.taskId).toBe("T-002")
@@ -511,7 +511,7 @@ describe("mohist/openspec-tasks", () => {
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(2)
     expect(loadedTasks[0].uses).toBe("mohist/opencode")
     expect(loadedTasks[1].uses).toBe("mohist/opencode")
@@ -642,7 +642,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBe("${{ vars.agent }}")
     expect(loadedWith.options).not.toEqual(resolvedAgent)
   })

@@ -3,7 +3,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
 import type { StageTaskState, WorkflowStage, WorkflowTimeline } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
-import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
+import { getDeliveryFailureGuidance } from '../../../shared/lib/delivery-failure'
 import { TaskLogPanel, type TaskLogDataHook } from './TaskLogPanel'
 
 function parseTaskOutput(raw: string | null | undefined): unknown {
@@ -54,20 +54,10 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId, taskLogHook }: 
   const canExpand = typeof task.taskId === 'string' && task.taskId.length > 0 && (task.status === 'failed' || task.status === 'completed' || task.status === 'running')
   const isInProgress = isRunning && task.status === 'running'
   const isDeliveryTask = isDeliveryFailureTask(task)
-  const taskReason = typeof task.reason === 'string' ? task.reason : null
-  const outputResolution = resolveDeliveryFailureFromOutput(task.output)
-  const messageResolution = resolveDeliveryFailureFromMessage(taskReason)
+  const taskReason = task.error?.message ?? (typeof task.reason === 'string' ? task.reason : null)
   const deliveryGuidance = isFailed && isDeliveryTask
-    ? (outputResolution.guidance ?? messageResolution.guidance)
+    ? getDeliveryFailureGuidance(task.error?.code)
     : null
-  const branchEvidence =
-    (outputResolution.failureKind === 'branch-invariant-violation'
-      ? outputResolution.evidence
-      : null) ??
-    (messageResolution.failureKind === 'branch-invariant-violation'
-      ? messageResolution.evidence
-      : null)
-  const workspaceEvidence = outputResolution.workspaceEvidence ?? messageResolution.workspaceEvidence
   const failureKind = deliveryGuidance?.failureKind
   const isWorkspaceSetupFailure = failureKind === 'workspace-setup'
 
@@ -101,8 +91,8 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId, taskLogHook }: 
       </Button>
       {expanded && canExpand && (
         <div className={`px-2.5 pb-2 border-t space-y-1.5 ${isFailed ? 'border-red-100 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
-          {isFailed && task.reason && (
-            <p className="text-xs text-amber-600">{task.reason}</p>
+          {isFailed && taskReason && (
+            <p className="text-xs text-amber-600">{taskReason}</p>
           )}
           {deliveryGuidance && (
             <div
@@ -129,45 +119,6 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId, taskLogHook }: 
                 </span>
                 <span>{deliveryGuidance.label}</span>
               </div>
-              {deliveryGuidance.failureKind === 'branch-invariant-violation' && (
-                <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
-                  <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
-                    Attribution: runner/action (not issue work)
-                  </div>
-                  {branchEvidence?.boundary && (
-                    <div>
-                      <span className="font-sans opacity-70">boundary:</span> {branchEvidence.boundary}
-                    </div>
-                  )}
-                  <div>
-                    <span className="font-sans opacity-70">expected:</span>{' '}
-                    <span className="text-green-700">{branchEvidence?.expectedBranch || '(unknown)'}</span>
-                  </div>
-                  <div>
-                    <span className="font-sans opacity-70">observed:</span>{' '}
-                    <span className="text-red-700">
-                      {branchEvidence?.observedBranch
-                        ? branchEvidence.observedBranch
-                        : branchEvidence?.observedRef
-                          ? `(detached at ${branchEvidence.observedRef})`
-                          : '(unknown)'}
-                    </span>
-                  </div>
-                </div>
-              )}
-              {isWorkspaceSetupFailure && workspaceEvidence && (
-                <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
-                  <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
-                    Attribution: workflow infrastructure (not issue work)
-                  </div>
-                  {workspaceEvidence.workspacePath && (
-                    <div>
-                      <span className="font-sans opacity-70">workspace:</span>{' '}
-                      {workspaceEvidence.workspacePath}
-                    </div>
-                  )}
-                </div>
-              )}
               <p className="leading-snug">{deliveryGuidance.nextAction}</p>
             </div>
           )}
@@ -259,6 +210,7 @@ export function TaskProgressPanel({
     duration: task.durationMs ?? 0,
     artifacts: [],
     output: parseTaskOutput(task.output),
+    error: task.error,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     updatedAt: task.completedAt ?? task.startedAt ?? new Date().toISOString(),

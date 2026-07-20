@@ -268,7 +268,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var selfReviewTask = plan.Tasks.Single(t => t.Id == "self-review");
         Assert.NotNull(selfReviewTask.Recovery);
-        Assert.Equal("promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
+        Assert.Equal("output.output.promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
 
         var health = plan.Checks.Single(c => c.Name == "health");
         Assert.Equal("core/script", health.Uses);
@@ -322,7 +322,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(recovery);
         var handler = Assert.Single(recovery!.Handlers);
         Assert.True(handler.RetrySelf);
-        Assert.Equal("promise=FAIL", handler.When);
+        Assert.Equal("output.output.promise=FAIL", handler.When);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
         Assert.Equal("mohist/opencode", fixReviewFindings.Uses);
@@ -399,7 +399,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var handlers = recovery.Handlers.ToList();
         Assert.Equal(3, handlers.Count);
 
-        var baseMoved = handlers.Single(h => h.When == "errorCode=base-moved");
+        var baseMoved = handlers.Single(h => h.When == "error.code=base-moved");
         Assert.True(baseMoved.RetrySelf);
         var baseMovedTasks = baseMoved.Tasks.ToList();
         Assert.Equal(new[] { "recover:rebase", "recover:push" }, baseMovedTasks.Select(t => t.Id).ToArray());
@@ -417,7 +417,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(2, rebaseRecovery!.Budget);
         var rebaseHandlers = rebaseRecovery.Handlers.ToList();
         Assert.Single(rebaseHandlers);
-        var conflictHandler = rebaseHandlers.Single(h => h.When == "errorCode=conflict");
+        var conflictHandler = rebaseHandlers.Single(h => h.When == "error.code=conflict");
         Assert.False(conflictHandler.RetrySelf);
         var conflictTasks = conflictHandler.Tasks.ToList();
         Assert.Single(conflictTasks);
@@ -433,7 +433,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.True(pushWith["force"]!.Value.GetBoolean());
         Assert.False(pushWith.ContainsKey("forceWithLease"));
 
-        var prChecksFailed = handlers.Single(h => h.When == "errorCode=pr-checks-failed");
+        var prChecksFailed = handlers.Single(h => h.When == "error.code=pr-checks-failed");
         Assert.True(prChecksFailed.RetrySelf);
         var prChecksTasks = prChecksFailed.Tasks.ToList();
         Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, prChecksTasks.Select(t => t.Id).ToArray());
@@ -447,7 +447,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("HEAD", recoverPushPrChecks.With!["source"]!.Value.GetString());
         Assert.True(recoverPushPrChecks.With!["force"]!.Value.GetBoolean());
 
-        var protectionConflict = handlers.Single(h => h.When == "errorCode=protection-conflict");
+        var protectionConflict = handlers.Single(h => h.When == "error.code=protection-conflict");
         Assert.True(protectionConflict.RetrySelf);
         Assert.Empty(protectionConflict.Tasks);
     }
@@ -594,7 +594,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("open-draft-pr", emitted);
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
-        Assert.Contains("when: errorCode=conflict", emitted);
+        Assert.Contains("when: error.code=conflict", emitted);
         Assert.Contains("id: recover:fix-ci", emitted);
         Assert.Contains("prompt: ${{ prompts.fix-ci }}", emitted);
         Assert.Contains("retrySelf: true", emitted);

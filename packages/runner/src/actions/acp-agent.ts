@@ -3,6 +3,7 @@ import { resolvePrompt } from "../core/prompt.js"
 import { resolveAgentConfig, buildPromptLoaderContext } from "./acp/agent-config.js"
 import { emitSessionEvent } from "./acp/session-events.js"
 import { runAcpGenericAgentSession } from "./acp/session-strategies.js"
+import { actionErrorMessage, fail, succeed } from "./action-result.js"
 
 export { AcpProcessHandle, setAcpProcessFactoryForTest } from "./acp/process.js"
 export type { AcpProcessFactory } from "./acp/process.js"
@@ -21,9 +22,9 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   try {
     prompt = await resolvePrompt(context.with?.prompt, buildPromptLoaderContext(context))
   } catch (error) {
-    return { status: "failure", message: error instanceof Error ? error.message : String(error) }
+    return fail("invalid-input", actionErrorMessage(error))
   }
-  if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
+  if (!prompt?.trim()) return fail("invalid-input", "ACP agent requires 'prompt'")
 
   const result = await runAcpGenericAgentSession(context, prompt)
   const ok = result.success
@@ -33,19 +34,13 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   if (context.ownerKind !== "agent-job" || !context.agentSessionId) {
     await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) }, result.acpSessionId ?? null)
   }
-  return {
-    status: ok ? "success" : "failure",
-    message: ok ? "ACP agent task completed" : failureReason,
-    output: JSON.stringify({
+  if (!ok) return fail(failureCategory || "agent-failed", failureReason ?? "ACP agent task failed", { exitCode: result.exitCode ?? 1, turnFact: { finalAssistantText: result.text ?? null } })
+  return succeed(JSON.stringify({
       kind: "acp-agent",
-      status: ok ? "success" : "failure",
+      status: "success",
       runtimeSessionId: result.acpSessionId,
       model: agentConfig?.model,
       text: result.text,
-      error: result.error,
       providerError: result.providerError,
-    }),
-    exitCode: result.exitCode ?? (ok ? 0 : 1),
-    turnFact: { finalAssistantText: result.text ?? null },
-  }
+    }), { exitCode: result.exitCode ?? 0, turnFact: { finalAssistantText: result.text ?? null } })
 }

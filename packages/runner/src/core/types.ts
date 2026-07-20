@@ -198,6 +198,7 @@ export interface AddTaskInput {
 export interface WorkItemResult {
   status: string
   message?: string | null
+  error?: ActionError | null
   output?: string | null
   exitCode?: number | null
   artifactUploadIds?: string[] | null
@@ -274,10 +275,15 @@ export interface ActionContext {
   writeVars(vars: JsonObject): Promise<void>
 }
 
-export interface ActionResult {
-  status: string
-  message?: string | null
-  output?: string | null
+export interface ActionError {
+  code: string
+  message: string
+}
+
+export type ActionResult = (
+  | { output: string | null; error?: never }
+  | { output?: never; error: ActionError }
+) & {
   exitCode?: number | null
   /**
    * Runner-private Action-result facts that must never be serialized

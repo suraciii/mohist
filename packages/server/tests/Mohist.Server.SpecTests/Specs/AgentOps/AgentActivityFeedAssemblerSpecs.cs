@@ -204,8 +204,8 @@ public class AgentActivityFeedAssemblerSpecs
               "attempt": 1,
               "initialized": true,
               "tasks": [
-                {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=one","tasks":[],"retrySelf":true}]}},
-                {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"errorCode=two","tasks":[],"retrySelf":true}]}}
+                {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error.code=one","tasks":[],"retrySelf":true}]}},
+                {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error.code=two","tasks":[],"retrySelf":true}]}}
               ]
             }
           ]

@@ -46,7 +46,7 @@ describe("WorkExecutor mid-execution variable writes", () => {
       events.push("action-start")
       await ctx.writeVars({ checkpoint: "before-failure" })
       events.push("action-after-write")
-      return { status: "failure", message: "boom" }
+      return { error: { code: "action-failed", message: "boom" } }
     })
 
     const executor = new WorkExecutor(

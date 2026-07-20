@@ -387,7 +387,8 @@ EpicNumber: ReadEpicNumber(run),
                     Status: TaskReportStatus.Failed,
                     Output: result.Output,
                     Artifacts: null,
-                    Detail: bindResult.Error ?? "artifact binding failed"));
+                    Detail: bindResult.Error ?? "artifact binding failed",
+                    Error: result.Error));
             }
 
             artifacts = bindResult.ArtifactRecordedEvents
@@ -401,7 +402,8 @@ EpicNumber: ReadEpicNumber(run),
             Output: result.Output,
             Artifacts: artifacts,
             Detail: detail,
-            AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null));
+            AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null,
+            Error: result.Error));
     }
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
@@ -419,6 +421,7 @@ EpicNumber: ReadEpicNumber(run),
     private static string? NormalizeDetail(WorkResult result, TaskReportStatus status)
     {
         if (status == TaskReportStatus.Succeeded) return null;
+        if (result.Error is not null) return result.Error.Message;
         if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
         return result.Status;
     }

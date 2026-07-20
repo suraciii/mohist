@@ -58,7 +58,7 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(moCalls).toEqual([
       "mo issue show 248 --project-id proj_1 --output json",
     ])
@@ -78,8 +78,6 @@ describe("mohist/merge-github-pr action", () => {
       prUrl: "https://github.com/example/repo/pull/42",
       mergeCommitSha: "merge-sha-1",
       method: "squash",
-      errorCode: null,
-      message: null,
     })
   })
 
@@ -98,17 +96,14 @@ describe("mohist/merge-github-pr action", () => {
 
     const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository()))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/acme/repo")
   })
 
   it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
     const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository("not a Git URL")))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("config-error")
-    expect(output.message).toContain("authoritative GitHub repository URL")
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("authoritative GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {
@@ -139,7 +134,7 @@ describe("mohist/merge-github-pr action", () => {
 
     const result = await mergeGitHubPrAction(withLog(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }), writes))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:merge-github-pr" && write.text.includes("gh pr merge 42"))).toBe(true)
   })
 
@@ -167,7 +162,7 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.prNumber).toBe(9)
     expect(output.mergeCommitSha).toBe("merge-sha-9")
   })
@@ -198,18 +193,8 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "merge-github-pr",
-      status: "failed",
-      prNumber: 42,
-      prUrl: "https://github.com/example/repo/pull/42",
-      errorCode: "base-moved",
-    })
-    expect(output.message).toContain("gh pr merge 42 --squash failed")
-    expect(output.message.length).toBeGreaterThan(0)
+    expect(result.error).toMatchObject({ code: "base-moved" })
+    expect(result.error?.message).toContain("gh pr merge 42 --squash failed")
   })
 
   it("reports base-moved before reading old failing checks when the PR is behind", async () => {
@@ -241,17 +226,8 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "merge-github-pr",
-      status: "failed",
-      prNumber: 42,
-      prUrl: "https://github.com/example/repo/pull/42",
-      errorCode: "base-moved",
-    })
-    expect(output.message).toContain("PR #42 is BEHIND; rebase required.")
+    expect(result.error).toMatchObject({ code: "base-moved" })
+    expect(result.error?.message).toContain("PR #42 is BEHIND; rebase required.")
     expect(ghCalls).not.toContain(PR_CHECKS_COMMAND)
     expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
   })
@@ -289,18 +265,8 @@ describe("mohist/merge-github-pr action", () => {
         method: "squash",
         subjectFrom: "issue.title",
       }))
-      const output = JSON.parse(result.output ?? "{}")
-
-      expect(result.status).toBe("failure")
-      expect(output).toMatchObject({
-        kind: "merge-github-pr",
-        status: "failed",
-        prNumber: 42,
-        prUrl: "https://github.com/example/repo/pull/42",
-        errorCode: "pr-checks-failed",
-      })
-      expect(output.message).toContain("PR #42 checks failed")
-      expect(output.message.length).toBeGreaterThan(0)
+      expect(result.error).toMatchObject({ code: "pr-checks-failed" })
+      expect(result.error?.message).toContain("PR #42 checks failed")
       expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
     }
   })
@@ -347,7 +313,7 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(checksCalls).toBeGreaterThanOrEqual(3)
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThanOrEqual(3)
     expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
@@ -356,7 +322,6 @@ describe("mohist/merge-github-pr action", () => {
       status: "completed",
       prNumber: 42,
       mergeCommitSha: "merge-sha-1",
-      errorCode: null,
     })
   })
 
@@ -394,7 +359,7 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThan(1)
     expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
     expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", mergeCommitSha: "merge-sha-1" })
@@ -439,10 +404,10 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBe(3)
     expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
-    expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", errorCode: null, mergeCommitSha: "merge-sha-1" })
+    expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", mergeCommitSha: "merge-sha-1" })
   })
 
   it("fails with pr-checks-unavailable after internal statusCheckRollup retries are exhausted", async () => {
@@ -471,14 +436,11 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toMatchObject({ code: "pr-checks-unavailable" })
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBe(3)
     expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
-    expect(output).toMatchObject({ kind: "merge-github-pr", status: "failed", errorCode: "pr-checks-unavailable" })
-    expect(output.message).toContain("PR #42 checks status unavailable")
-    expect(output.message).toContain("after 3 attempts")
+    expect(result.error?.message).toContain("PR #42 checks status unavailable")
+    expect(result.error?.message).toContain("after 3 attempts")
   })
 
   it("fails with pr-checks-unavailable when gh pr view statusCheckRollup returns invalid JSON", async () => {
@@ -507,12 +469,9 @@ describe("mohist/merge-github-pr action", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toMatchObject({ code: "pr-checks-unavailable" })
     expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBe(2)
-    expect(output).toMatchObject({ kind: "merge-github-pr", status: "failed", errorCode: "pr-checks-unavailable" })
-    expect(output.message).toContain("unparseable JSON")
+    expect(result.error?.message).toContain("unparseable JSON")
   })
 
   it("reports pr-state-conflict when the PR is closed", async () => {
@@ -534,15 +493,8 @@ describe("mohist/merge-github-pr action", () => {
       prNumber: 42,
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "merge-github-pr",
-      errorCode: "pr-state-conflict",
-      prNumber: 42,
-    })
-    expect(output.message).toContain("PR #42 is closed")
+    expect(result.error).toMatchObject({ code: "pr-state-conflict" })
+    expect(result.error?.message).toContain("PR #42 is closed")
   })
 
   it("binds every gh call to the workspace path even when project.path differs", async () => {
@@ -575,7 +527,7 @@ describe("mohist/merge-github-pr action", () => {
     }, { project: { id: "proj_1", path: PROJECT_PATH } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls.every((call) => call.cwd === WORKSPACE_PATH)).toBe(true)
     expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
     expect(output.mergeCommitSha).toBe("merge-sha-1")
@@ -592,14 +544,7 @@ describe("mohist/merge-github-pr action", () => {
       prNumber: 42,
       method: "merge",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "merge-github-pr",
-      errorCode: "config-error",
-      prNumber: null,
-    })
+    expect(result.error).toMatchObject({ code: "config-error" })
     expect(ghCalls).toEqual([])
   })
 
@@ -654,7 +599,7 @@ describe("mohist/merge-github-pr action", () => {
         const result = await resultPromise
         const output = JSON.parse(result.output ?? "{}")
 
-        expect(result.status).toBe("success")
+        expect(result.error).toBeUndefined()
         const checksCalls = ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup")
         expect(checksCalls.length).toBe(3)
         expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
@@ -664,8 +609,6 @@ describe("mohist/merge-github-pr action", () => {
           prNumber: 42,
           prUrl: "https://github.com/example/repo/pull/42",
           mergeCommitSha: "merge-sha-1",
-          errorCode: null,
-          message: null,
         })
         const stepNames = output.steps.map((step: { name: string }) => step.name)
         expect(stepNames.filter((name: string) => name === "gh-pr-checks").length).toBe(3)
@@ -715,7 +658,7 @@ describe("mohist/merge-github-pr action", () => {
         const result = await resultPromise
         const output = JSON.parse(result.output ?? "{}")
 
-        expect(result.status).toBe("success")
+        expect(result.error).toBeUndefined()
         expect(mergeStateCalls).toBe(3)
         expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
         expect(output).toMatchObject({
@@ -723,7 +666,6 @@ describe("mohist/merge-github-pr action", () => {
           status: "completed",
           prNumber: 42,
           mergeCommitSha: "merge-sha-1",
-          errorCode: null,
         })
       } finally {
         vi.useRealTimers()
@@ -768,16 +710,9 @@ describe("mohist/merge-github-pr action", () => {
         controller.abort(new Error("run canceled"))
         const outcome = await probe
         const result = await resultPromise
-        const output = JSON.parse(result.output ?? "{}")
-
         expect(outcome).toBe("resolved")
-        expect(result.status).toBe("failure")
-        expect(output).toMatchObject({
-          kind: "merge-github-pr",
-          errorCode: "retry-safe",
-          prNumber: 42,
-        })
-        expect(output.message).toContain("Cancelled while waiting for PR #42 checks")
+        expect(result.error).toMatchObject({ code: "retry-safe" })
+        expect(result.error?.message).toContain("Cancelled while waiting for PR #42 checks")
         expect(ghCalls).not.toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
       } finally {
         vi.useRealTimers()
@@ -824,14 +759,13 @@ describe("mohist/merge-github-pr action", () => {
         }))
         const output = JSON.parse(result.output ?? "{}")
 
-        expect(result.status).toBe("success")
+        expect(result.error).toBeUndefined()
         expect(ghCalls).toContain("gh pr view 42 --json statusCheckRollup")
         expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
         expect(output).toMatchObject({
           kind: "merge-github-pr",
           status: "completed",
           prNumber: 42,
-          errorCode: null,
         })
       }
     })

@@ -65,7 +65,7 @@ public class PromptReferenceScannerTests
                 recovery:
                   budget: 1
                   handlers:
-                    - when: promise=FAIL
+                    - when: output.promise=FAIL
                       tasks:
                         - id: recover:fix
                           title: Fix

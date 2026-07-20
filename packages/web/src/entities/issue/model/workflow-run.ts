@@ -59,6 +59,7 @@ export interface WorkflowTask {
   duration: number
   artifacts: string[]
   output: unknown
+  error?: import('./stage-state').WorkflowExecutionError | null
   reason: string | null
   causedBy: WorkflowTaskCause | null
   resetBy: WorkflowTaskResetCause | null
@@ -72,6 +73,7 @@ export interface WorkflowCheck {
   status: WorkflowCheckStatus
   message: string | null
   output: unknown
+  error?: import('./stage-state').WorkflowExecutionError | null
   runCount: number
   lastRunAt: string | null
   origin?: WorkItemOrigin | null

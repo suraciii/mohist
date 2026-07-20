@@ -97,6 +97,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = now;
             check.Message = result.Message;
             check.Output = result.Output;
+            check.Error = result.Error;
             return new CheckPassed(current.Id, check.Name, result.Message);
         }
 
@@ -107,6 +108,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = now;
             check.Message = result.Message;
             check.Output = result.Output;
+            check.Error = result.Error;
             return new CheckFailed(current.Id, check.Name, result.Message);
         }
 
@@ -118,6 +120,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = null;
             check.Message = result.Message;
             check.Output = result.Output;
+            check.Error = result.Error;
             return new CheckPending(current.Id, check.Name, result.Message);
         }
 

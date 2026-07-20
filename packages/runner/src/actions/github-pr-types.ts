@@ -1,4 +1,5 @@
 export type GitHubPrErrorCode =
+  | "timeout"
   | "base-moved"
   | "retry-safe"
   | "config-error"

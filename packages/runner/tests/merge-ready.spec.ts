@@ -88,7 +88,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     const result = await mergeReadyAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       kind: "merge-ready",
       strategy: "squash",
@@ -128,13 +128,9 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     })
 
     const result = await mergeReadyAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.canMerge).toBe(false)
-    expect(output.error).toContain("does not contain the latest 'origin/main' tip")
-    expect(output.error).toContain("rebase is required")
-    expect(output.conflictFiles).toEqual([])
+    expect(result.error).toMatchObject({ code: "merge-not-ready" })
+    expect(result.error?.message).toContain("does not contain the latest 'origin/main' tip")
+    expect(result.error?.message).toContain("rebase is required")
 
     const cmds = workspaceCalls(calls)
     expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
@@ -180,12 +176,8 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     })
 
     const result = await mergeReadyAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.canMerge).toBe(false)
-    expect(output.error).toContain("Could not resolve base branch 'origin/main'")
-    expect(output.conflictFiles).toEqual([])
+    expect(result.error).toMatchObject({ code: "merge-not-ready" })
+    expect(result.error?.message).toContain("Could not resolve base branch 'origin/main'")
 
     const cmds = workspaceCalls(calls)
     expect(cmds).toEqual(["rev-parse origin/main"])
@@ -205,14 +197,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     })
 
     const result = await mergeReadyAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.canMerge).toBe(false)
-    expect(output.error).toBe("Could not resolve source")
-    expect(output.baseSha).toBe("base-sha")
-    expect(output.candidateHeadSha).toBe("")
-    expect(output.conflictFiles).toEqual([])
+    expect(result.error).toMatchObject({ code: "merge-not-ready", message: "Could not resolve source" })
 
     const cmds = workspaceCalls(calls)
     expect(cmds).toContain("rev-parse origin/main")
@@ -242,7 +227,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     ))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)
     expect(output.candidateHeadSha).toBe("custom-head-sha")
     expect(output.mergeBaseSha).toBe("custom-merge-base")
@@ -277,7 +262,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     ))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)
     expect(output.baseSha).toBe("upstream-base-sha")
 
@@ -337,7 +322,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     )
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)
     expect(output.candidateHeadSha).toBe("head-sha")
 

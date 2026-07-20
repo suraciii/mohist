@@ -75,7 +75,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
       loggerPresent = ctx.log !== null && ctx.log !== undefined
       ctx.log?.write("action:rebase", "rebasing commit a1b2c3")
       ctx.log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
-      return { status: "success", message: "ok", output: JSON.stringify({ rebase: "ok" }) }
+      return { output: JSON.stringify({ rebase: "ok" }) }
     })
     const { collector } = await runWith(registry)
     expect(loggerPresent).toBe(true)
@@ -94,7 +94,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
   })
 
   it("PassesWorkspacePreparationOutputThroughWorkspacePrepSource", async () => {
-    const registry = makeRegistry(async () => ({ status: "success", message: "ok" }))
+    const registry = makeRegistry(async () => ({ output: "ok" }))
     const workspaceManager = verifyOnlyWorkspaceManager(
       { path: workDir, branch: null, changeDir: null },
       (log) => log?.write("workspace-prep", "clone output from workspace preparation"),
@@ -117,7 +117,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
         combinedOutput: "",
       }
     })
-    const registry = makeRegistry(async () => ({ status: "failure", message: "stop after start check" }))
+    const registry = makeRegistry(async () => ({ error: { code: "action-failed", message: "stop after start check" } }))
 
     const { collector } = await runWith(registry, buildWork({ variables: { workspace: { path: workDir, branch: "main", changeDir: null } } }))
 
@@ -137,7 +137,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
         combinedOutput: "",
       }
     })
-    const registry = makeRegistry(async () => ({ status: "success", message: "ok" }))
+    const registry = makeRegistry(async () => ({ output: "ok" }))
 
     const { collector } = await runWith(registry, buildWork({ variables: { workspace: { path: workDir, branch: "main", changeDir: null } } }))
 
@@ -151,9 +151,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
       ctx.log?.write("action:rebase", "Rebase conflict in src/lib/rebase.ts")
       ctx.log?.write("action:rebase", "fatal: Could not apply abc1234")
       return {
-        status: "failure",
-        message: "Rebase conflict",
-        output: JSON.stringify({ kind: "rebase", rebased: false, conflicts: ["src/lib/rebase.ts"] }),
+        error: { code: "conflict", message: "Rebase conflict" },
         exitCode: 1,
       }
     })
@@ -192,8 +190,6 @@ describe("WorkExecutor forwards action output to the task log", () => {
     const registry = makeRegistry(async (ctx) => {
       ctx.log?.write("action:health-check", "ok")
       return {
-        status: "success",
-        message: "done",
         output: JSON.stringify({
           kind: "health-check",
           gitOutput: "out-line-1\nout-line-2",
@@ -220,7 +216,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
       ctx.log?.write("action:rebase", "error: Failed to merge in the changes.")
       ctx.log?.write("action:rebase", "Patch failed at 0001 feat: introduce capture-and-upload plumbing")
       ctx.log?.write("action:rebase", "hint: Use 'git am --show-current-patch' to see the failed patch")
-      return { status: "failure", message: "Rebase failed: conflict", output: JSON.stringify({ rebase: false }) }
+      return { error: { code: "conflict", message: "Rebase failed: conflict" } }
     })
     const { result, collector } = await runWith(registry)
     expect(result.status).toBe("failed")
@@ -236,7 +232,7 @@ describe("WorkExecutor forwards action output to the task log", () => {
     try {
       const registry = makeRegistry(async (ctx) => {
         ctx.log?.write("action:script", `command failed with ${secret}`)
-        return { status: "failure", message: "failed" }
+        return { error: { code: "action-failed", message: "failed" } }
       })
 
       const { collector } = await runWith(registry)

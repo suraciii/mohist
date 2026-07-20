@@ -172,13 +172,13 @@ internal sealed partial class TableRenderer
     private void RenderDeliveryFailure(JsonNode? failureNode)
     {
         if (failureNode is not JsonObject failure) return;
-        var message = StringOf(failure, "message");
-        if (string.IsNullOrEmpty(message)) return;
+        var error = failure["error"] as JsonObject;
+        var message = StringOf(error, "message");
         var output = failure["output"] as JsonNode;
-
-        var (kind, guidance, evidence) = DeliveryFailureGuidance.ResolveWithEvidence(message, output);
-        if (kind is null || guidance is null) return;
-
+        var kind = StringOf(error, "code");
+        var guidance = DeliveryFailureGuidance.ResolveGuidance(kind);
+        if (string.IsNullOrEmpty(kind) || guidance is null) return;
+        var evidence = DeliveryFailureGuidance.ResolveBranchEvidence(message, output);
         var workspaceEvidence = DeliveryFailureGuidance.ResolveWorkspaceEvidence(message, output);
 
         _out.WriteLine("");
@@ -188,31 +188,16 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"  next action: {guidance.Value.NextAction}");
         if (string.Equals(kind, DeliveryFailureGuidance.BranchInvariantViolation, StringComparison.OrdinalIgnoreCase) && evidence is not null)
         {
-            _out.WriteLine($"  attribution: runner/action (not issue work)");
-            if (!string.IsNullOrEmpty(evidence.Boundary))
-            {
-                _out.WriteLine($"  boundary:   {evidence.Boundary}");
-            }
-            if (!string.IsNullOrEmpty(evidence.ExpectedBranch))
-            {
-                _out.WriteLine($"  expected:   {evidence.ExpectedBranch}");
-            }
-            if (!string.IsNullOrEmpty(evidence.ObservedBranch))
-            {
-                _out.WriteLine($"  observed:   {evidence.ObservedBranch}");
-            }
-            else if (!string.IsNullOrEmpty(evidence.ObservedRef))
-            {
-                _out.WriteLine($"  observed:   (detached at {evidence.ObservedRef})");
-            }
+            _out.WriteLine("  attribution: runner/action (not issue work)");
+            if (!string.IsNullOrEmpty(evidence.Boundary)) _out.WriteLine($"  boundary:   {evidence.Boundary}");
+            if (!string.IsNullOrEmpty(evidence.ExpectedBranch)) _out.WriteLine($"  expected:   {evidence.ExpectedBranch}");
+            if (!string.IsNullOrEmpty(evidence.ObservedBranch)) _out.WriteLine($"  observed:   {evidence.ObservedBranch}");
+            else if (!string.IsNullOrEmpty(evidence.ObservedRef)) _out.WriteLine($"  observed:   (detached at {evidence.ObservedRef})");
         }
         else if (DeliveryFailureGuidance.IsWorkspaceSetupKind(kind) && workspaceEvidence is not null)
         {
-            _out.WriteLine($"  attribution: workflow infrastructure (not issue work)");
-            if (!string.IsNullOrEmpty(workspaceEvidence.WorkspacePath))
-            {
-                _out.WriteLine($"  workspace:  {workspaceEvidence.WorkspacePath}");
-            }
+            _out.WriteLine("  attribution: workflow infrastructure (not issue work)");
+            if (!string.IsNullOrEmpty(workspaceEvidence.WorkspacePath)) _out.WriteLine($"  workspace:  {workspaceEvidence.WorkspacePath}");
         }
     }
 

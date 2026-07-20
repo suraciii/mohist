@@ -125,8 +125,19 @@ internal static class WorkflowDispatchHelpers
         var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() : null;
         var message = element.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
         JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp.Clone() : null;
+        ExecutionError? error = null;
+        if (element.TryGetProperty("error", out var errorProp)
+            && errorProp.ValueKind == JsonValueKind.Object
+            && errorProp.TryGetProperty("code", out var codeProp)
+            && errorProp.TryGetProperty("message", out var errorMessageProp))
+        {
+            var code = codeProp.GetString();
+            var errorMessage = errorMessageProp.GetString();
+            if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(errorMessage))
+                error = new ExecutionError(code, errorMessage);
+        }
 
-        return new CheckResult(name!, ParseCheckResultStatus(status), message, output);
+        return new CheckResult(name!, ParseCheckResultStatus(status), message, output, error);
     }
 
     private static CheckResultStatus ParseCheckResultStatus(string? status) =>

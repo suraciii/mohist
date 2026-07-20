@@ -173,7 +173,7 @@ describe("mohist/create-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(gitCalls).toEqual([])
     expect(ghCalls).toEqual([
       "gh --version",
@@ -191,8 +191,6 @@ describe("mohist/create-github-pr action", () => {
       prNumber: 42,
       prUrl: "https://github.com/example/repo/pull/42",
       operation: "created",
-      errorCode: null,
-      message: null,
       draft: true,
     })
   })
@@ -215,18 +213,16 @@ describe("mohist/create-github-pr action", () => {
 
     const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository()))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
     expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
   })
 
   it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
     const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository("not a Git URL")))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("config-error")
-    expect(output.message).toContain("authoritative GitHub repository URL")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("authoritative GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {
@@ -251,7 +247,7 @@ describe("mohist/create-github-pr action", () => {
 
     const result = await createGitHubPrAction(withLog(context({ target: "master" }), writes))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:create-github-pr" && write.text.includes("gh pr create"))).toBe(true)
   })
 
@@ -295,7 +291,7 @@ describe("mohist/create-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls).toContain("gh pr edit 7 --title Fresh issue title --body Fresh issue body")
     expect(ghCalls.some((call) => call.startsWith("gh pr create "))).toBe(false)
     expect(output).toMatchObject({
@@ -351,7 +347,7 @@ describe("mohist/create-github-pr action", () => {
     }, { project: { id: "proj_1", path: PROJECT_PATH } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls.map((call) => call.cwd)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
     expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
     expect(output.prNumber).toBe(42)
@@ -373,16 +369,9 @@ describe("mohist/create-github-pr action", () => {
     const result = await createGitHubPrAction(context({
       titleFrom: "issue.summary",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "create-github-pr",
-      errorCode: "config-error",
-      prNumber: null,
-      prUrl: null,
-    })
-    expect(output.message).toContain("Unsupported titleFrom source 'issue.summary'")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("Unsupported titleFrom source 'issue.summary'")
   })
 
   it("does not invoke Git when GitHub creates the PR", async () => {
@@ -404,7 +393,7 @@ describe("mohist/create-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(gitCalls).toEqual([])
     expect(output.operation).toBe("created")
   })
@@ -423,14 +412,9 @@ describe("mohist/create-github-pr action", () => {
       title: "Issue title",
       body: "Issue body",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "create-github-pr",
-      errorCode: "config-error",
-    })
-    expect(output.message).toContain("gh CLI is not installed")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("gh CLI is not installed")
   })
 
   it("does not pass --draft when draft is explicitly false", async () => {
@@ -473,7 +457,7 @@ describe("mohist/create-github-pr action", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(ghCalls.some((call) => call.startsWith("gh pr create ") && call.endsWith("--draft"))).toBe(false)
     expect(ghCalls.some((call) => call.startsWith("gh pr create "))).toBe(true)
     expect(output).toMatchObject({
@@ -578,20 +562,9 @@ describe("mohist/create-github-pr action", () => {
       titleFrom: "issue.title",
       bodyFrom: "issue.body",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
-    // Step name + duration must be visible to downstream renderers via the
-    // existing structured `steps` array — no new transport field was added.
-    const ghPrCreateStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-create")
-    expect(ghPrCreateStep).toBeDefined()
-    expect(ghPrCreateStep.command).toBe("pr create --head mohist/run-wr-gh-pr-1 --base master --title \"Use GitHub PR workflow\" --draft")
-    expect(ghPrCreateStep.output).toContain("timed out")
-    expect(ghPrCreateStep.exitCode).toBe(124)
-    expect(ghPrCreateStep.status).toBe("timeout")
-    expect(ghPrCreateStep.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
   })
 
 })

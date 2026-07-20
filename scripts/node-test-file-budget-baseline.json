@@ -1,5 +1,4 @@
 {
-  "packages/runner/tests/merge-github-pr.spec.ts": 1120,
   "packages/runner/tests/openspec-archive-change.spec.ts": 907,
   "packages/runner/tests/rebase.spec.ts": 906,
   "packages/web/src/entities/issue/model/attention.test.ts": 759,

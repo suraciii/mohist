@@ -375,7 +375,7 @@ public class WorkflowRunStoreSpecs
         Status = status,
         Recovery = new RecoveryDefinition(
             budget,
-            [new RecoveryHandlerDefinition("promise=FAIL", [new TaskDefinition("fix", "Fix", "spec/fix")], RetrySelf: true)]),
+            [new RecoveryHandlerDefinition("output.promise=FAIL", [new TaskDefinition("fix", "Fix", "spec/fix")], RetrySelf: true)]),
     };
 
     private static string ToLegacyRecoveryState(WorkflowRun run)

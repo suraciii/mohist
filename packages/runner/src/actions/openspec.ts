@@ -6,6 +6,7 @@ import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
+import { fail, succeed } from "./action-result.js"
 
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
 const OPENSPEC_ARCHIVE_NAME_VAR_KEY = "openspecArchiveName"
@@ -94,12 +95,12 @@ const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
 export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
-  if (!path) return { status: "failure", message: "OpenSpec task loader requires 'path'" }
-  if (!exists(path)) return { status: "failure", message: `tasks.json not found: ${path}` }
+  if (!path) return fail("invalid-input", "OpenSpec task loader requires 'path'")
+  if (!exists(path)) return fail("missing-source", `tasks.json not found: ${path}`)
 
   const root = JSON.parse(await readFile(path, "utf8")) as JsonObject
   const sourceTasks = Array.isArray(root.tasks) ? root.tasks.filter(isObject) : []
-  if (!Array.isArray(root.tasks)) return { status: "failure", message: "tasks.json must contain a tasks array" }
+  if (!Array.isArray(root.tasks)) return fail("invalid-input", "tasks.json must contain a tasks array")
 
   const taskDefaults = objectInput(context.rawWith ?? context.with, "task")
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
@@ -115,15 +116,15 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
     return [{ id, title, uses, with: mergedWith ?? null, expect }]
   })
 
-  if (!context.serverConnection) return { status: "failure", message: "Server connection not available" }
+  if (!context.serverConnection) return fail("server-unavailable", "Server connection not available")
   await context.serverConnection.addTasks(context.workflowRunId, tasks)
 
-  return { status: "success", message: `Loaded ${tasks.length} tasks`, output: JSON.stringify({ loaded: tasks.length }) }
+  return succeed(JSON.stringify({ loaded: tasks.length }))
 }
 
 export async function openspecArtifactsAction(context: ActionContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
-  if (!changeDir) return { status: "failure", message: "OpenSpec artifacts check requires 'changeDir'" }
+  if (!changeDir) return fail("invalid-input", "OpenSpec artifacts check requires 'changeDir'")
 
   const required: Array<{ path: string; kind: "file" | "directory" }> = [
     { path: join(changeDir, "proposal.md"), kind: "file" },
@@ -146,18 +147,10 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
   })
 
   if (present) {
-    return {
-      status: "success",
-      message: `OpenSpec artifacts present under ${changeDir}`,
-      output,
-    }
+    return succeed(output)
   }
 
-  return {
-    status: "failure",
-    message: `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`,
-    output,
-  }
+  return fail("artifacts-missing", `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`)
 }
 
 export async function archiveChangeAction(context: ActionContext): Promise<ActionResult> {
@@ -330,18 +323,13 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
   if (changedFiles.length === 0) {
-    return {
-      status: "success",
-      message: "Change already archived; no changes to commit",
-      output: JSON.stringify({
+    return succeed(JSON.stringify({
         kind: "archive-change",
         source: changeDir,
         destination,
         changed: false,
         noChange: true,
-        errorCode: null,
-      }),
-    }
+      }))
   }
 
   const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], context.signal, opts)
@@ -359,10 +347,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
 
-  return {
-    status: "success",
-    message: "Change archived and committed",
-    output: JSON.stringify({
+  return succeed(JSON.stringify({
       kind: "archive-change",
       source: changeDir,
       destination,
@@ -372,15 +357,14 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       commitSha,
       commitOutput: commitResult.combinedOutput,
       changedFiles,
-      errorCode: null,
-    }),
-  }
+    }))
 }
 
 type ArchiveErrorCode = "retry-safe" | "partial-archive" | "missing-source" | "config-error"
 
 function archiveFailure(errorCode: ArchiveErrorCode, message: string, output: Record<string, JsonValue>): ActionResult {
-  return { status: "failure", message, output: JSON.stringify({ ...output, errorCode }) }
+  void output
+  return fail(errorCode, message)
 }
 
 async function persistArchiveName(

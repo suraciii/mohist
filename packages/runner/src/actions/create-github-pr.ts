@@ -7,6 +7,7 @@ import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type CreateGitHubPrOutput, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata } from "./github-pr-types.js"
 import { resolveDeliveryBaseBranch, resolveDeliverySource, resolveGitHubRepository } from "./delivery-context.js"
+import { fail as actionFail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 
 /**
@@ -24,7 +25,7 @@ function networkGhOptions(context: ActionContext): CommandLineOptions | undefine
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
   const source = resolveDeliverySource(context)
   const target = resolveDeliveryBaseBranch(context)
-  if (!source || !target) return { status: "failure", message: "create-github-pr requires the authoritative repository branch and source" }
+  if (!source || !target) return actionFail("invalid-input", "create-github-pr requires the authoritative repository branch and source")
   const draft = context.with?.["draft"] !== false
   const workDir = context.workDir
 
@@ -120,7 +121,7 @@ export async function openOrReusePr(
   if (listResult.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr),
+      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr, listResult.status),
       message: `gh pr list failed: ${listOutput}`,
       output: listOutput,
     }
@@ -136,7 +137,7 @@ export async function openOrReusePr(
     if (editResult.exitCode !== 0) {
       return {
         kind: "failure",
-        errorCode: classifyGhFailure(editResult.stdout, editResult.stderr),
+        errorCode: classifyGhFailure(editResult.stdout, editResult.stderr, editResult.status),
         message: `gh pr edit ${pr.number} failed: ${editOutput}`,
         output: editOutput,
       }
@@ -152,7 +153,7 @@ export async function openOrReusePr(
   if (createResult.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(createResult.stdout, createResult.stderr),
+      errorCode: classifyGhFailure(createResult.stdout, createResult.stderr, createResult.status),
       message: `gh pr create failed: ${createOutput}`,
       output: createOutput,
     }
@@ -174,16 +175,11 @@ export async function openOrReusePr(
 }
 
 export function buildCreateGitHubPrOutput(output: CreateGitHubPrOutput): ActionResult {
-  const json = JSON.stringify(output)
   if (output.status === "completed") {
-    return { status: "success", message: "GitHub pull request created or reused", output: json }
+    const { errorCode: _errorCode, message: _message, ...success } = output
+    return succeed(JSON.stringify(success))
   }
-  return {
-    status: "failure",
-    message: `Create GitHub PR failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
-    output: json,
-    exitCode: 1,
-  }
+  return actionFail(output.errorCode ?? "create-pr-failed", output.message ?? output.output, { exitCode: 1 })
 }
 
 function withGitHubRepository(args: string[], githubRepository?: string): string[] {

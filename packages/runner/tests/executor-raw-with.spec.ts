@@ -35,7 +35,7 @@ describe("WorkExecutor rawWith", () => {
     const registry = new ActionRegistry()
     registry.register("test/capture-context", async (ctx) => {
       capturedContext = ctx
-      return { status: "success" }
+      return { output: null }
     })
 
     const executor = new WorkExecutor(

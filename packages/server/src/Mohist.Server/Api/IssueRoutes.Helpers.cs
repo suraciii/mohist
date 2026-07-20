@@ -154,7 +154,7 @@ public static partial class IssueRoutes
             Handlers:
             [
                 new RecoveryHandlerDefinition(
-                    When: "errorCode=conflict",
+                    When: "error.code=conflict",
                     Tasks:
                     [
                         new TaskDefinition(

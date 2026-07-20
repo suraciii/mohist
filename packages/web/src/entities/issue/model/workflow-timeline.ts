@@ -25,6 +25,7 @@ export interface WorkflowTimelineTask {
   classification?: 'UserFacing' | 'Orchestration'
   artifactSummaries?: WorkflowArtifactSummary[]
   output?: string | null
+  error?: import('./stage-state').WorkflowExecutionError | null
 }
 
 export interface WorkflowTimelineCheck {
@@ -36,6 +37,7 @@ export interface WorkflowTimelineCheck {
   startedAt: string | null
   completedAt: string | null
   durationMs: number | null
+  error?: import('./stage-state').WorkflowExecutionError | null
 }
 
 export interface WorkflowTimelineStage {

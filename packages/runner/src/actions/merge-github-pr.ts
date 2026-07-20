@@ -10,6 +10,7 @@ import { waitChecksAndMergePr } from "./github-pr-merge.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MergeGitHubPrOutput } from "./github-pr-types.js"
 import { resolveDeliveryBaseBranch, resolveDeliverySource, resolveGitHubRepository } from "./delivery-context.js"
+import { fail as actionFail, succeed } from "./action-result.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:merge-github-pr"
@@ -28,18 +29,10 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
     errorCode: GitHubPrErrorCode,
     message: string,
     payload: Partial<MergeGitHubPrOutput> = {},
-  ): ActionResult => buildMergeGitHubPrOutput({
-    kind: "merge-github-pr",
-    status: "failed",
-    prNumber: payload.prNumber ?? null,
-    prUrl: payload.prUrl ?? null,
-    mergeCommitSha: payload.mergeCommitSha ?? null,
-    method: "squash",
-    errorCode,
-    message,
-    output: payload.output ?? message,
-    steps,
-  })
+  ): ActionResult => {
+    void payload
+    return actionFail(errorCode, message, { exitCode: 1 })
+  }
   const githubRepository = resolveGitHubRepository(context)
   if (githubRepository === null) return fail("config-error", "merge-github-pr requires an authoritative GitHub repository URL")
 
@@ -137,7 +130,7 @@ async function resolvePrNumberForMerge(
   if (listResult.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr),
+      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr, listResult.status),
       message: `gh pr list failed: ${listOutput}`,
       output: listOutput,
     }
@@ -156,16 +149,11 @@ async function resolvePrNumberForMerge(
 }
 
 export function buildMergeGitHubPrOutput(output: MergeGitHubPrOutput): ActionResult {
-  const json = JSON.stringify(output)
   if (output.status === "completed") {
-    return { status: "success", message: "GitHub pull request merged", output: json }
+    const { errorCode: _errorCode, message: _message, ...success } = output
+    return succeed(JSON.stringify(success))
   }
-  return {
-    status: "failure",
-    message: `Merge GitHub PR failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
-    output: json,
-    exitCode: 1,
-  }
+  return actionFail(output.errorCode ?? "merge-failed", output.message ?? output.output, { exitCode: 1 })
 }
 
 function withGitHubRepository(args: string[], githubRepository?: string): string[] {

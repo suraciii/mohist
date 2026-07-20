@@ -55,7 +55,9 @@ WorkflowRun 将该 TaskRun 记为 Failed；只有普通渲染故障继续通过 
 | `vars.*` | Effective Stage Variables |
 | `tasks.<id>.outputs.*` | previous task output |
 | `prompts.<key>` | Project Prompt；Runner 在执行时按 key 解析 |
-| `failure.output` | 触发恢复的任务输出；runner 构造恢复任务时展开，仅恢复任务可用 |
+| `failure.output` | 触发恢复的任务 output；runner 构造恢复任务时展开，仅恢复任务可用 |
+| `failure.error.code` | 触发恢复的 error code；仅恢复任务可用 |
+| `failure.error.message` | 触发恢复的可操作错误文案；仅恢复任务可用 |
 
 Runtime context、Workflow Variables 与 Project Prompts 是三个独立命名空间。完整的
 dispatch/report 流程见 [`../runner.md`](../runner.md)。

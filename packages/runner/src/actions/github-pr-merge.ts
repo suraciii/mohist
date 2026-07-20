@@ -98,7 +98,7 @@ export async function waitChecksAndMergePr(
   if (viewResult.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(viewResult.stdout, viewResult.stderr),
+      errorCode: classifyGhFailure(viewResult.stdout, viewResult.stderr, viewResult.status),
       message: `gh pr view ${prNumber} failed: ${viewOutput}`,
       prUrl: null,
       output: viewOutput,
@@ -193,7 +193,7 @@ export async function waitChecksAndMergePr(
     if (mergeStatusResult.exitCode !== 0) {
       return {
         kind: "failure",
-        errorCode: classifyGhFailure(mergeStatusResult.stdout, mergeStatusResult.stderr),
+        errorCode: classifyGhFailure(mergeStatusResult.stdout, mergeStatusResult.stderr, mergeStatusResult.status),
         message: `gh pr view ${prNumber} mergeStateStatus failed: ${mergeStatusOutput}`,
         prUrl: view.url ?? null,
         output: mergeStatusOutput,
@@ -237,7 +237,7 @@ export async function waitChecksAndMergePr(
   if (mergeResult.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(mergeResult.stdout, mergeResult.stderr),
+      errorCode: classifyGhFailure(mergeResult.stdout, mergeResult.stderr, mergeResult.status),
       message: `gh pr merge ${prNumber} --squash failed: ${mergeOutput}`,
       prUrl: view.url ?? null,
       output: mergeOutput,
@@ -258,7 +258,7 @@ export async function waitChecksAndMergePr(
   if (recheck.exitCode !== 0) {
     return {
       kind: "failure",
-      errorCode: classifyGhFailure(recheck.stdout, recheck.stderr),
+      errorCode: classifyGhFailure(recheck.stdout, recheck.stderr, recheck.status),
       message: `gh pr view ${prNumber} (post-merge confirm) failed: ${recheckOutput}`,
       prUrl: view.url ?? null,
       output: recheckOutput,
