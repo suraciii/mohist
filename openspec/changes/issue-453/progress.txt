@@ -1,0 +1,79 @@
+# T-001 — Consolidate issue status and decision context
+
+## Codebase Patterns
+
+- `RuntimeDecision` (widgets/issue-workflow/model) is authoritative for workflow summary / actions; the
+  page now adds a separate, page-owned `IssueDecisionContext` for the composite-parent path.
+  The composite-parent case is intentionally issue-only: no fabricated workflow stage, current task,
+  or workflow action.
+- `StatusHeadline` is sticky; it remains the single runtime-summary statement. The previous
+  duplicate `runtime-status-pill` in the header identity row is removed. No replacement badge.
+- `IssueDetailsCard` no longer renders Issue Stage or Workflow Stage rows. Parent/child, project,
+  repository name, base branch, and Git URL are unchanged.
+- Two paused meanings: `approval-required` says "approval decision is pending"; interrupted/manual
+  stop says "Execution stopped manually. Resume or rerun to continue." They are mutually exclusive
+  in copy.
+
+## Decisions
+
+- Add `deriveIssueOnlyStatus` in `pages/issue-detail/model/issueDecisionContext.ts` (pure function).
+  Inputs: status, health, isDraft, isArchived, childSummary. Returns { label, headline, rationale,
+  nextAction } without any DOM/mutation concerns.
+- Add `IssueOnlyStatusHeadline` in `pages/issue-detail/ui/`. Reuses the same `data-testid="status-headline"`
+  anchor and `data-tier-weight="status-header"` sticky placement so existing tier tests still pass.
+  Uses `data-summary="issue-only"`.
+- `StatusHeadline` for workflow-capable issues: drop the separate `status-headline-current-task` pill.
+  The headline text from `deriveRuntimeDecision` already embeds the current task for running /
+  approval-required / blocked / failed (e.g. "Task running: X", "Approval pending on X"). Add
+  `data-has-current-task` attribute for tests; keep the sticky + summary + stage progress + headline.
+- `pills.tsx` no longer exports `RuntimeSummaryPill`. The component was the only consumer of the
+  header identity row's runtime pill; that row is gone.
+- Update `IssueDetailPage.tsx` to:
+  - Use `IssueOnlyStatusHeadline` when `isCompositeParent`, else the existing `StatusHeadline`.
+  - Drop the `RuntimeSummaryPill` render and the `status-badges-runtime` group.
+  - Stop passing `workflowStage: null` overrides to `IssueDetailsCard` (the type no longer
+    includes that field).
+
+## Gotchas
+
+- `RuntimeSummaryPill` removal: `IssueDetailPage.test.tsx`, `IssueDetailPage.status-header.test.tsx`,
+  `IssueDetailPage.archived.test.tsx` and the cross-tier tests all referenced
+  `status-badges-runtime` / `runtime-status-pill`. They are updated to assert the headline is the
+  sole summary carrier and the page-wide count of runtime-status-pill nodes is 0.
+- `IssueDetailsCardIssue` type lost `workflowStage`. `IssueDetailPage.tsx` no longer needs to strip
+  it; tests that passed `workflowStage: 'build'` into the card must no longer assert the row
+  shows (the row itself is gone, see `tests/IssueDetailPage.spec.tsx`).
+- `runtime-presentations.ts` approval-pause rationale: "The workflow is paused and waiting for your
+  review." -> "The workflow is paused while an approval decision is pending." The next-action copy
+  is now "An approval decision is needed to continue" instead of "Review and approve to continue".
+- `runtime-presentations.ts` blocked/interrupted rationale: "The workflow was interrupted. Resume or
+  rerun to continue." -> "Execution stopped manually. Resume or rerun to continue." The
+  interrupted health path test in `IssueDetailPage.control-workspace.active.spec.tsx` was updated to
+  assert stop/recovery language and absence of approval language.
+- Headline "Approval required on X" -> "Approval pending on X" (matching the rationale copy).
+- Backlog / queued path: the headline for `queued` is "Waiting to start (workflow)" when no stage.
+  The new `StatusHeadline` keeps the same sticky section, the same `data-testid="status-headline"`,
+  and does not fabricate a stage / progress / current task when none exist (existing cross-tier
+  test still asserts null for those three nodes when stage progress is null).
+
+## Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5027 / 5027 tests pass (added 14 new in
+  `IssueDetailPage.status-uniqueness.test.tsx`, 6 in
+  `widgets/issue-workflow/model/runtime-presentations.test.ts`, 3 in
+  `pages/issue-detail/ui/cards/IssueDetailsCard.test.tsx`, 9 in
+  `pages/issue-detail/model/issueDecisionContext.test.ts`).
+- `npm run check:fsd -w packages/web` — green (481 modules).
+- `npm run check:test-boundaries -w packages/web` — green.
+
+## Notes for T-002
+
+- `RuntimeDecision` continues to be authoritative for workflow actions; the page-owned
+  `deriveIssueOnlyStatus` is for the composite-parent case only. Do not extend
+  `deriveRuntimeDecision` with composite-parent logic.
+- The `data-testid="status-headline"` anchor is shared by both `StatusHeadline` and
+  `IssueOnlyStatusHeadline`. The data-summary differentiates them (`"running"` / `"issue-only"`,
+  etc.). T-002 can use the same anchor to add the mobile action surface.
+- The current task is no longer a separate pill but is still carried on `decision.currentTask`
+  (from `RuntimeDecision`). T-002 may consume that for mobile action description text if needed.

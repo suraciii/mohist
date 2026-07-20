@@ -132,7 +132,7 @@ describe('IssueDetailPage status-header — stickiness of StatusHeadline', () =>
 })
 
 describe('IssueDetailPage status-header — single glanceable region', () => {
-  it('aggregates situation, stage, progress, and current task together in one region', async () => {
+  it('aggregates situation, stage, and progress in one region with the current task embedded in the headline text', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -159,17 +159,18 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.contains(screen.getByTestId('status-headline-summary'))).toBe(true)
     expect(headline.contains(screen.getByTestId('status-headline-stage-progress'))).toBe(true)
-    expect(headline.contains(screen.getByTestId('status-headline-current-task'))).toBe(true)
+    expect(headline.dataset.hasCurrentTask).toBe('true')
+    expect(screen.queryByTestId('status-headline-current-task')).toBeNull()
 
     const stage = screen.getByTestId('status-headline-stage-progress')
     expect(stage.dataset.stage).toBe('build')
     expect(stage.textContent).toMatch(/2\s*\/\s*5/)
 
-    const task = screen.getByTestId('status-headline-current-task')
-    expect(task.textContent).toContain('Build decision surface')
+    const text = headline.textContent ?? ''
+    expect(text).toContain('Build decision surface')
   })
 
-  it('shows the situation alone without fabricating a stage or progress figure when no stage/progress exists (backlog)', async () => {
+  it('shows the situation alone without fabricating a stage, progress, or current task when none exist (backlog)', async () => {
     mockIssue(makeIssue({
       status: 'backlog',
       workflowStage: null,
@@ -185,6 +186,7 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
     expect(headline.contains(screen.getByTestId('status-headline-summary'))).toBe(true)
     expect(screen.queryByTestId('status-headline-stage-progress')).toBeNull()
     expect(screen.queryByTestId('status-headline-current-task')).toBeNull()
+    expect(headline.dataset.hasCurrentTask).toBe('false')
   })
 
   it('reflects the done situation with no active workflow controls for an archived done issue', async () => {
@@ -279,7 +281,7 @@ describe('IssueDetailPage status-header — adjudicated situation variants', () 
 })
 
 describe('IssueDetailPage status-header — single-badge invariant', () => {
-  it('renders exactly one runtime status pill in the identity row', async () => {
+  it('does not render a separate runtime status pill in the identity row (status is the headline)', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -296,10 +298,11 @@ describe('IssueDetailPage status-header — single-badge invariant', () => {
 
     renderPage()
 
-    const runtimeGroup = await waitFor(() => screen.getByTestId('status-badges-runtime'))
-    const pills = within(runtimeGroup).getAllByTestId('runtime-status-pill')
-    expect(pills).toHaveLength(1)
-    expect(pills[0]).toHaveAttribute('data-summary', 'running')
+    await waitFor(() => screen.getByTestId('status-headline'))
+    const page = screen.getByTestId('issue-detail-page-container')
+    const allPills = page.querySelectorAll('[data-testid="runtime-status-pill"]')
+    expect(allPills).toHaveLength(0)
+    expect(screen.queryByTestId('status-badges-runtime')).toBeNull()
   })
 
   it('does not render a duplicate runtime summary label or icon row inside the runtime decision surface', async () => {
@@ -322,10 +325,6 @@ describe('IssueDetailPage status-header — single-badge invariant', () => {
     expect(within(surface).queryByTestId('runtime-summary-label')).toBeNull()
     expect(within(surface).queryByTestId('runtime-summary-running')).toBeNull()
     expect(within(surface).queryByTestId('runtime-current-task')).toBeNull()
-
-    const page = screen.getByTestId('issue-detail-page-container')
-    const allPills = page.querySelectorAll('[data-testid="runtime-status-pill"]')
-    expect(allPills).toHaveLength(1)
   })
 })
 

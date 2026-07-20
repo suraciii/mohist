@@ -19,6 +19,7 @@ import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
+import { deriveIssueOnlyStatus } from '../model/issueDecisionContext'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
@@ -26,8 +27,9 @@ import {
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { buildExecutionSignal } from '../model/buildExecutionSignal'
 import { buildDriftRecoveryAction } from '../model/buildDriftRecoveryAction'
-import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
+import { ArchivedPill, DraftPill, PriorityChip } from './pills'
 import { StatusHeadline } from './StatusHeadline'
+import { IssueOnlyStatusHeadline } from './IssueOnlyStatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 import { IssueActionsCard } from './cards/IssueActionsCard'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
@@ -221,6 +223,15 @@ export function IssueDetailPage({
         blockedCount: issue.childIssuesSummary?.blockedCount ?? 0,
       }
     : null
+  const issueOnlyContext = isCompositeParent
+    ? deriveIssueOnlyStatus({
+      status: issue.status,
+      health: issue.health,
+      isDraft: !!issue.isDraft,
+      isArchived,
+      childSummary: compositeSummary,
+    })
+    : null
   const showMobileActionBar = isNarrowViewport && !isCompositeParent && !!decision?.primary
   const showWorkflowSections = !isCompositeParent
   const showRuntimeDecisionSurface = !isNarrowViewport && !isCompositeParent
@@ -238,11 +249,21 @@ export function IssueDetailPage({
           data-bar-reserved={showMobileActionBar ? 'true' : 'false'}
         >
           <div data-testid="status-header-tier" className="space-y-4">
-            {decision && (
-              <StatusHeadline
-                decision={decision}
-                stageProgress={issue.workflowStageProgress ?? null}
+            {isCompositeParent && issueOnlyContext ? (
+              <IssueOnlyStatusHeadline
+                status={issue.status}
+                health={issue.health}
+                isDraft={!!issue.isDraft}
+                isArchived={isArchived}
+                context={issueOnlyContext}
               />
+            ) : (
+              decision && (
+                <StatusHeadline
+                  decision={decision}
+                  stageProgress={issue.workflowStageProgress ?? null}
+                />
+              )
             )}
 
             <button
@@ -273,11 +294,6 @@ export function IssueDetailPage({
                     </span>
                   )}
                 </div>
-                {decision && !isCompositeParent && (
-                  <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
-                    <RuntimeSummaryPill summary={decision.summary} />
-                  </div>
-                )}
               </div>
               {isArchived && (
                 <div
@@ -537,7 +553,7 @@ export function IssueDetailPage({
                 summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
               >
                 <IssueDetailsCard
-                  issue={isCompositeParent ? { ...issue, workflowStage: null } : issue}
+                  issue={issue}
                   unframed
                 />
               </CollapsibleRailCard>

@@ -914,8 +914,8 @@ describe('IssueDetailPage workflow profile integration', () => {
     })
 
     const detailsCard = findDetailsCard()
-    expect(within(detailsCard).getByText('Issue Stage')).toBeInTheDocument()
-    expect(within(detailsCard).getByText('Workflow Stage')).toBeInTheDocument()
+    expect(within(detailsCard).queryByText('Issue Stage')).toBeNull()
+    expect(within(detailsCard).queryByText('Workflow Stage')).toBeNull()
     expect(within(detailsCard).getByText('Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Test Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Repository')).toBeInTheDocument()

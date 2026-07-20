@@ -269,7 +269,9 @@ describe('Control workspace: running path', () => {
     const headline = screen.getByTestId('status-headline')
     expect(within(headline).getByTestId('status-headline-summary')).toBeTruthy()
     expect(within(headline).getByTestId('status-headline-stage-progress')).toBeTruthy()
-    expect(within(headline).getByTestId('status-headline-current-task')).toBeTruthy()
+    expect(headline.dataset.hasCurrentTask).toBe('true')
+    expect(screen.queryByTestId('status-headline-current-task')).toBeNull()
+    expect(headline.textContent ?? '').toContain('Build decision surface')
 
     expect(within(surface).getByTestId('runtime-next-action')).toBeTruthy()
     expect(within(surface).getByTestId('runtime-rationale')).toBeTruthy()
@@ -511,7 +513,7 @@ describe('Control workspace: blocked path', () => {
 })
 
 describe('Control workspace: interrupted health path', () => {
-  it('reports interrupted as blocked in the header summary and exposes the recovery rationale', async () => {
+  it('reports interrupted as blocked in the header summary and exposes a stop/recovery rationale that is not framed as awaiting approval', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -533,7 +535,9 @@ describe('Control workspace: interrupted health path', () => {
     const headline = screen.getByTestId('status-headline')
     expect(headline.getAttribute('data-summary')).toBe('blocked')
 
-    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('interrupted')
+    const rationale = screen.getByTestId('runtime-rationale').textContent ?? ''
+    expect(rationale).toMatch(/stopped manually|resume or rerun/i)
+    expect(rationale).not.toMatch(/awaiting approval|pending review/i)
     expectNoNewActionKinds(container as HTMLElement)
 
     expect(screen.queryByTestId('workflow-interrupted-card')).toBeNull()

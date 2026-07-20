@@ -223,13 +223,13 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
   },
   'approval-required': {
     headline: (ctx) => {
-      if (ctx.currentTask) return `Approval required on ${ctx.currentTask.title}`
-      return `Approval required at ${formatStageLabelForCtx(ctx)}`
+      if (ctx.currentTask) return `Approval pending on ${ctx.currentTask.title}`
+      return `Approval pending at ${formatStageLabelForCtx(ctx)}`
     },
-    rationale: () => 'The workflow is paused and waiting for your review.',
+    rationale: () => 'The workflow is paused while an approval decision is pending.',
     nextAction: (ctx) => {
       const approve = buildApprovalActions(ctx).find((a) => a.kind === 'approve' && a.enabled)
-      if (approve) return `Review and approve to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
+      if (approve) return `An approval decision is needed to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
       return 'Approval actions are unavailable right now.'
     },
     actions: buildApprovalActions,
@@ -246,7 +246,7 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       const recovery = issue?.recovery
       if (recovery?.latestAttemptState === 'interrupted'
         || issue?.workflowStatus?.toLowerCase() === 'interrupted') {
-        return 'The workflow was interrupted. Resume or rerun to continue.'
+        return 'Execution stopped manually. Resume or rerun to continue.'
       }
       return 'The workflow is blocked and needs an action to continue.'
     },

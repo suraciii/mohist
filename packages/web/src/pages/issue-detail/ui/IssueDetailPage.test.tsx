@@ -832,7 +832,7 @@ describe('IssueDetailPage Ask Agent entry', () => {
 })
 
 describe('IssueDetailPage runtime status badges', () => {
-  it('groups identity metadata separately from one runtime summary badge', async () => {
+  it('keeps identity metadata visible and shows the runtime summary only inside the headline (no separate runtime badge row)', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -859,16 +859,18 @@ describe('IssueDetailPage runtime status badges', () => {
     renderPage()
 
     const identity = await waitFor(() => screen.getByTestId('status-badges-identity'))
-    const runtime = screen.getByTestId('status-badges-runtime')
     expect(within(identity).getByTestId('priority-chip')).toBeTruthy()
     expect(within(identity).getByTestId('draft-pill')).toBeTruthy()
-    expect(within(runtime).getAllByTestId('runtime-status-pill')).toHaveLength(1)
-    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'running')
+    expect(screen.queryByTestId('status-badges-runtime')).toBeNull()
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
     expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
     expect(screen.queryByTestId('health-pill')).not.toBeInTheDocument()
+
+    const headline = screen.getByTestId('status-headline')
+    expect(headline.dataset.summary).toBe('running')
   })
 
-  it('renders the queued runtime badge for backlog issues waiting on a prerequisite', async () => {
+  it('renders the queued summary inside the headline for backlog issues waiting on a prerequisite', async () => {
     mockIssue(makeIssue({
       status: 'backlog',
       workflowStage: null,
@@ -880,7 +882,9 @@ describe('IssueDetailPage runtime status badges', () => {
 
     renderPage()
 
-    const runtime = await waitFor(() => screen.getByTestId('status-badges-runtime'))
-    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'queued')
+    const headline = await waitFor(() => screen.getByTestId('status-headline'))
+    expect(headline.dataset.summary).toBe('queued')
+    expect(screen.queryByTestId('status-badges-runtime')).toBeNull()
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
   })
 })

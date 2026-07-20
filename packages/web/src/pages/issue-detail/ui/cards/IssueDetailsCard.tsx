@@ -2,11 +2,10 @@ import { Link } from 'react-router-dom'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { Issue } from '../../../../entities/issue'
 import { useProjectPath } from '../../../../entities/project'
-import { formatStageName } from '../../model/format'
 
 export type IssueDetailsCardIssue = Pick<
   Issue,
-  'status' | 'projectName' | 'repository' | 'workflowStage' | 'parentIssueRef' | 'childIssuesSummary' | 'repositoryName'
+  'status' | 'projectName' | 'repository' | 'parentIssueRef' | 'childIssuesSummary' | 'repositoryName'
 >
 
 export interface IssueDetailsCardProps {
@@ -23,25 +22,10 @@ function resolveRepositoryName(issue: IssueDetailsCardIssue): string | null {
 }
 
 export function IssueDetailsCard({ issue, unframed = false }: IssueDetailsCardProps) {
-  const workflowStage = issue.workflowStage ?? null
   const toProjectPath = useProjectPath()
   const repositoryName = resolveRepositoryName(issue)
   const content = (
     <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
-        <div className="flex min-w-0 justify-between gap-3">
-          <dt className="text-muted-foreground">Issue Stage</dt>
-          <dd className="min-w-0 text-foreground font-medium text-right">
-            {formatStageName(issue.status)}
-          </dd>
-        </div>
-        {workflowStage && (
-          <div className="flex min-w-0 justify-between gap-3">
-            <dt className="text-muted-foreground">Workflow Stage</dt>
-            <dd className="min-w-0 text-foreground font-medium text-right">
-              {formatStageName(workflowStage)}
-            </dd>
-          </div>
-        )}
         {issue.parentIssueRef && (
           <div className="flex min-w-0 justify-between gap-3" data-testid="parent-issue-metadata-row">
             <dt className="text-muted-foreground">Parent Issue</dt>

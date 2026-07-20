@@ -371,14 +371,15 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
 })
 
 describe('IssueDetailPage archived Done issue — workflow status reflects Done state', () => {
-  it('renders one Done runtime pill for an archived Done issue', async () => {
+  it('renders one Done summary inside the headline for an archived Done issue and no header runtime pill', async () => {
     mockIssue(archivedDoneIssue())
 
     renderPage()
 
-    const runtime = await waitFor(() => screen.getByTestId('runtime-status-pill'))
-    expect(runtime).toHaveAttribute('data-summary', 'done')
-    expect(runtime.textContent ?? '').toMatch(/Done/i)
+    const headline = await waitFor(() => screen.getByTestId('status-headline'))
+    expect(headline.dataset.summary).toBe('done')
+    expect(headline.textContent ?? '').toMatch(/Done/i)
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
     expect(screen.queryByTestId('health-pill')).toBeNull()
   })
 
