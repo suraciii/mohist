@@ -332,6 +332,7 @@ describe('useSessionTimeline event-wiring integration', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
