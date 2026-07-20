@@ -14,12 +14,18 @@ The runner SHALL perform one best-effort CLI model discovery during startup befo
 
 ### Requirement: The runner periodically rediscovers models
 
-After startup discovery, the runner SHALL run a single periodic model-rediscovery task. Its default interval SHALL be 30 minutes, a configured interval below 60 seconds SHALL be clamped to 60 seconds, and its first periodic invocation SHALL occur one full interval after startup discovery. The task SHALL continue independently of OpenCode runtime readiness and SHALL be stopped when the runner run loop terminates.
+After startup discovery, first registration, and startup convergence, the runner SHALL register a single periodic model-rediscovery task immediately before entering the worker loop. Its default interval SHALL be 30 minutes, a configured interval below 60 seconds SHALL be clamped to 60 seconds, and its first periodic invocation SHALL occur one full interval after that timer registration. The task SHALL continue independently of OpenCode runtime readiness and SHALL be stopped when the runner run loop terminates.
 
 #### Scenario: Default interval elapses
 - **WHEN** no rediscovery interval is configured
-- **THEN** the first periodic rediscovery SHALL run 30 minutes after startup discovery
+- **AND** the runner has registered the periodic task after startup discovery, first registration, and startup convergence
+- **THEN** the first periodic rediscovery SHALL run 30 minutes after timer registration
 - **AND** subsequent rediscoveries SHALL run every 30 minutes
+
+#### Scenario: Connection delays timer registration
+- **WHEN** startup discovery completes but runner connection or startup convergence has not completed
+- **THEN** the periodic rediscovery timer SHALL NOT yet be registered
+- **AND** its first interval SHALL be measured only after connection and startup convergence complete
 
 #### Scenario: Configured interval is below the minimum
 - **WHEN** the configured rediscovery interval is less than 60 seconds

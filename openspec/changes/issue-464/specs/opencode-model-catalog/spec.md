@@ -36,11 +36,28 @@ The runner SHALL select the executable for model discovery from the first config
 
 ### Requirement: Verbose output yields models and reasoning variants
 
-For each model entry in verbose output, the runner SHALL retain the model's full identifier. When the entry's JSON metadata contains a `variants` object, the runner SHALL expose every key of that object as that model's variant list, preserving each key's exact text. Missing, empty, or non-object `variants` data SHALL produce no variants for that model and MUST NOT remove the model from the catalog.
+A model entry SHALL begin with a trimmed header matching `provider/modelID`: the provider is one or more non-whitespace, non-`/` characters before the first `/`, and the model ID is the non-whitespace remainder after that slash, including any additional `/` characters. Lines that do not match this grammar outside a metadata block SHALL be ignored. The runner SHALL retain the full trimmed header for every valid entry.
+
+After a valid header, the parser SHALL skip blank lines and inspect the next non-blank line. A line beginning with `{` starts that model's JSON metadata block; the block ends at its balanced closing brace while respecting JSON strings and escapes. If the next non-blank line is another valid header or end-of-output, the prior model is a valid flat-list entry without metadata. This preserves support for flat `provider/modelID` lists even though discovery requests verbose output.
+
+When a complete metadata object contains a `variants` object, the runner SHALL expose every key of that object as that model's variant list, preserving each key's exact text. Missing, empty, or non-object `variants` data SHALL produce no variants for that model and MUST NOT remove the model from the catalog.
 
 #### Scenario: A model reports reasoning variants
-- **WHEN** a model entry has `variants` keys `low`, `medium`, `high`, and `max`
+- **WHEN** header `openai/gpt-5` is followed by complete JSON metadata with `variants` keys `low`, `medium`, `high`, and `max`
 - **THEN** the discovered model SHALL expose `low`, `medium`, `high`, and `max` as its variants
+
+#### Scenario: A model ID contains additional slashes
+- **WHEN** verbose output contains header `openrouter/vendor/family/model`
+- **THEN** the discovered catalog SHALL retain `openrouter/vendor/family/model` as the complete model identifier
+
+#### Scenario: Flat model list is accepted
+- **WHEN** output contains valid headers `openai/gpt-5` and `anthropic/claude-sonnet-4` without JSON metadata
+- **THEN** the discovered catalog SHALL contain both models without variants
+
+#### Scenario: Non-model lines are ignored
+- **WHEN** output contains only `warning: provider unavailable` and `{ broken output`
+- **THEN** neither line SHALL be treated as a model header
+- **AND** discovery SHALL return an empty model list and empty variant map
 
 #### Scenario: A model has no variants
 - **WHEN** a model entry omits `variants`, contains an empty `variants` object, or contains a non-object `variants` value
@@ -68,7 +85,7 @@ The command boundary MUST collect all stdout written by `opencode models --verbo
 
 ### Requirement: Catalog discovery failures return an empty result
 
-If the command cannot start, exits unsuccessfully, is aborted, or produces no parseable model entries, discovery SHALL log the failure and return an empty model list and empty variant map without throwing to its caller. A malformed metadata block for one identifiable model SHALL yield no variants for that model and MUST NOT prevent later valid model entries from being parsed.
+If the command cannot start, exits unsuccessfully, is aborted, or produces no valid `provider/modelID` headers, discovery SHALL log the failure and return an empty model list and empty variant map without throwing to its caller. A valid header remains a model when its metadata is malformed. After a balanced but invalid JSON block, scanning SHALL resume on the line after that block. After an unbalanced block, scanning SHALL resume at the next subsequent line that independently matches the model-header grammar; that header MUST NOT be consumed as part of the malformed entry.
 
 #### Scenario: Command execution fails
 - **WHEN** the selected command is missing or exits unsuccessfully
@@ -76,10 +93,17 @@ If the command cannot start, exits unsuccessfully, is aborted, or produces no pa
 - **AND** it SHALL report the failure diagnostically without throwing to the caller
 
 #### Scenario: Output has no parseable model entries
-- **WHEN** the command succeeds but its stdout contains no parseable model entries
+- **WHEN** the command succeeds but its stdout contains no line matching the `provider/modelID` header grammar
 - **THEN** discovery SHALL return an empty model list and empty variant map
 
-#### Scenario: One model has malformed metadata
-- **WHEN** one identifiable model entry has malformed JSON metadata and a later entry is valid
+#### Scenario: One model has balanced but invalid metadata
+- **WHEN** header `openai/gpt-5` is followed by a balanced block `{ invalid }`
+- **AND** a later entry `anthropic/claude-sonnet-4` has valid metadata
 - **THEN** discovery SHALL retain the malformed entry's model identifier without variants
 - **AND** it SHALL continue parsing the later valid entry and its variants
+
+#### Scenario: One model has an unbalanced metadata block
+- **WHEN** header `openai/gpt-5` is followed by an unbalanced JSON block
+- **AND** a later line `anthropic/claude-sonnet-4` independently matches the model-header grammar
+- **THEN** discovery SHALL retain `openai/gpt-5` without variants
+- **AND** it SHALL resume at and parse `anthropic/claude-sonnet-4` as a separate model entry

@@ -52,9 +52,9 @@ Alternatives considered: keep the SDK v2 catalog, rejected because it is the sou
 
 ### D2. Parse model blocks structurally and tolerate local metadata damage
 
-The parser treats verbose output as model identifier lines followed by JSON metadata blocks. It collects a complete balanced JSON object, accounting for strings and escapes, parses it with `JSON.parse`, and takes `Object.keys(metadata.variants)` only when `variants` is an object. Keys are returned unchanged; there is no enum, ordering rule, localization, or reasoning-name mapping.
+The parser recognizes a model header with the same lexical rule used for runtime model identifiers: after trimming, `^([^/\s]+)/(\S+)$`. The first capture is the provider and the entire second capture is the model ID, including additional slashes; the full trimmed header is retained in the catalog. Nonmatching lines outside metadata are ignored, so warnings and malformed output cannot become model IDs. A sequence of valid headers without metadata remains an accepted flat-list form.
 
-Missing, empty, non-object, or malformed metadata yields no variants for that identifiable model. A malformed block does not abort parsing of later valid entries. Command failure, abort, non-zero exit, or output with no parseable model entries is normalized to `{ models: [], variants: {} }` and logged. The discovery boundary returns this failure value rather than throwing into host startup.
+After a valid header, blank lines are skipped. A next nonblank line beginning with `{` starts metadata collection; the parser balances braces while accounting for strings and escapes, then uses `JSON.parse` and takes `Object.keys(metadata.variants)` only when `variants` is an object. Missing, empty, non-object, balanced-invalid, or unbalanced metadata yields no variants for the already-recognized model. Recovery after balanced-invalid JSON starts after the balanced block; recovery after an unbalanced block scans for the next line independently matching the header regex and does not consume it. Command failure, abort, non-zero exit, or output with no valid headers is normalized to `{ models: [], variants: {} }` and logged.
 
 Alternatives considered: regular expressions over JSON, rejected because nested objects, braces in strings, and multiline output make it fragile; require every metadata block to parse before returning any models, rejected because one provider's malformed metadata would hide unrelated valid providers; silently reuse an earlier result inside the module, rejected because freshness and failure-state policy belong to the host lifecycle.
 
@@ -66,11 +66,13 @@ Alternatives considered: regular expressions over JSON, rejected because nested 
 2. Initialize the shared `OpenCodeRuntime` server/client/event lifecycle.
 3. Run one best-effort CLI model discovery and assign its result, including an empty initial result.
 4. Connect and register using the host-owned snapshot.
-5. Start the worker loop and periodic timers.
+5. Run startup convergence.
+6. Register the periodic timers.
+7. Enter the worker loop.
 
 The initial discovery runs regardless of whether runtime startup succeeded, and discovery failure does not change runtime readiness. `registrationState()` reads the two host fields directly; it no longer projects a runtime catalog.
 
-Periodic rediscovery calls the same discovery module without checking `runtime.ready()`. Empty results preserve the current snapshot. Non-empty results are compared as sets, including variant-map keys and each model's variant set. A content change replaces both fields before attempting one immediate heartbeat; ordering-only differences do nothing. The existing timer registration, exception containment, 30-minute default, 60-second floor, and shutdown cleanup remain in `RunnerHost`.
+Periodic rediscovery calls the same discovery module without checking `runtime.ready()`. Empty results preserve the current snapshot. Non-empty results are compared as sets, including variant-map keys and each model's variant set. A content change replaces both fields before attempting one immediate heartbeat; ordering-only differences do nothing. The existing timer registration point remains after startup convergence and immediately before the worker loop; the first fire is one full interval after that registration, not after startup discovery. Exception containment, the 30-minute default, 60-second floor, and shutdown cleanup remain in `RunnerHost`.
 
 Alternatives considered: keep `catalog()` on `OpenCodeRuntime` but implement it with the CLI, rejected because execution lifecycle would still own an unrelated best-effort hint and callers could reintroduce readiness coupling; create a new long-lived catalog service, rejected because one host, one timer, and two in-memory fields do not justify another lifecycle abstraction; discover on every heartbeat, rejected because it couples process cost to transport cadence and discards the existing refresh contract.
 

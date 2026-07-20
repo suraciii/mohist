@@ -1,0 +1,12 @@
+# issue-464 plan repair progress
+
+## Review fixes
+
+- [x] Aligned periodic rediscovery timing to one interval after the existing post-connection, post-convergence timer registration point across spec, design, and T-002.
+- [x] Defined the model-header grammar, flat-list support, ignored-line behavior, metadata boundaries, and balanced/unbalanced malformed-block recovery across spec, design, and T-001.
+- [ ] Require direct AgentProfileEditor variant-path regression coverage instead of claiming existing coverage.
+- [ ] Add a deterministic seam and test for the production synchronous stdout-capture adapter rather than testing only a preassembled parser payload.
+
+## Verification
+
+- Pending final JSON, spec-structure, self-review integrity, and diff validation.
