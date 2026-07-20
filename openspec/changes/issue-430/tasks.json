@@ -89,12 +89,12 @@
       "id": "T-005",
       "title": "Surface a structured disabled reason for Compact/Reset via the existing Tooltip primitive",
       "spec": "specs/session-action-weight/spec.md",
-      "description": "Extend `SessionRecoveryActions` so a disabled Compact or Reset button (i.e. `data-active=\"true\"`, the only currently-known disabled trigger) is wrapped by the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) with a structured explanation (title + reason sentence). Remove the button's native `title` attribute to avoid double tooltips. NO new `data-disabled-reason` closed-set attribute is introduced — `data-active=\"true\"` is the trigger and the only reason today. The existing Tooltip primitive already wraps its child in a `tabIndex={0}` span with focus/blur toggling the tooltip, so the focus path of the spec scenario works with no new a11y code. Future reasons (genuine missing prerequisites, status pending) are deferred until a real trigger appears in the codebase.",
+      "description": "Extend `SessionRecoveryActions` so a disabled Compact or Reset button is wrapped by the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) with a structured explanation (title + reason sentence). Running sessions use the existing `data-active=\"true\"` signal; pending Compact/Reset mutations use the existing `anyPending` state. Remove the button's native `title` attribute to avoid double tooltips. NO new `data-disabled-reason` closed-set attribute is introduced. The existing Tooltip primitive already wraps its child in a `tabIndex={0}` span with focus/blur toggling the tooltip, so the focus path of the spec scenario works with no new a11y code.",
       "acceptanceCriteria": [
-        "When Compact or Reset is disabled because the session is running (`data-active=\"true\"`), the rendered button is wrapped by the existing `Tooltip` primitive that displays a short title (e.g. \"Session is running\") and a longer reason sentence (e.g. \"Finish or cancel the session before compacting or resetting.\"); the native `title` attribute is removed.",
-        "When Compact or Reset is enabled, no disabled-reason tooltip wraps the button; the existing `data-active='false'` (or absent) attribute carries no tooltip.",
+        "When Compact or Reset is disabled because the session is running (`data-active=\"true\"`) or another recovery action is pending (`anyPending`), the rendered button is wrapped by the existing `Tooltip` primitive with the matching short title and reason sentence; the native `title` attribute is removed and `aria-disabled` is true.",
+        "When Compact and Reset are enabled, no disabled-reason tooltip wraps either button.",
         "The wrapping reuses the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`) as-is — no new a11y mechanism, no new contract attribute, no Radix dependency.",
-        "`SessionRecoveryActions.test.tsx` is extended with two specs (running-session disabled renders the structured tooltip with the running-block explanation; enabled renders no tooltip); existing enabled-state and disabled-state assertions are preserved unchanged.",
+        "`SessionRecoveryActions.test.tsx` covers running-session, Compact-pending, and Reset-pending structured reasons plus the enabled state; existing enabled-state and disabled-state assertions are preserved unchanged.",
         "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
       ],
       "priority": 5,
@@ -103,7 +103,7 @@
       "output": "Updated `SessionRecoveryActions.tsx`; updated `SessionRecoveryActions.test.tsx`.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Occam: no `data-disabled-reason` closed-set (only one reason today); no new a11y mechanism (existing Tooltip primitive already handles focus via its `tabIndex` wrapper)."
+      "notes": "Occam: no `data-disabled-reason` closed-set; the existing running-session and mutation-pending inputs drive presentation. No new a11y mechanism is needed because the existing Tooltip primitive handles focus via its `tabIndex` wrapper."
     },
     {
       "id": "T-006",

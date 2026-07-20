@@ -21,7 +21,7 @@ Stakeholders: any reader who opens a Mohist session (primary); reviewers watchin
 - Render the session header metadata as a single row of stable, separately testable items, with session id as a one-click copy control that exposes the full id to assistive tech.
 - Make the sticky identity strip scroll-engaged: hidden while the outer header is visible, sticky-visible once the header scrolls out, only carrying session name + status + turn count.
 - Demote the Cancel session button out of the primary destructive variant and into a secondary slot (icon-only / outline / menu), keeping keyboard reachability and the existing confirm dialog.
-- Surface a structured disabled-reason tooltip on Compact/Reset driven by the existing `data-active="true"` attribute (the only currently-known disabled trigger), wrapped by the existing `Tooltip` primitive; no new closed-set attribute is introduced.
+- Surface a structured disabled-reason tooltip on Compact/Reset for the existing running-session and mutation-pending disable states, wrapped by the existing `Tooltip` primitive; no new closed-set attribute is introduced.
 - Remove the header prev/next sibling slot on wide viewports; keep it as a narrow-viewport fallback so navigation stays reachable when the sidebar is hidden.
 - Render absolute date-time as the default for terminal sessions (`completed` / `failed` / `stale`) older than the 1-hour threshold; keep relative for live sessions and for fresh terminal sessions; expose the alt form as a hover/focus tooltip.
 - Render three explicit followup states (interactive / queued / closed), with copy that matches real behavior — closed-state copy references the session's `completedAt` and falls back to a generic message when no timestamp is available.
@@ -120,17 +120,18 @@ The Cancel button moves from inside the metadata row to a small action slot rend
 - *Push Cancel into a kebab / overflow menu.* Hides the action behind a click; reviewers actively watching a running session may not look for it. Rejected for first release; revisit if dogfooding shows the inline button still over-weights.
 - *Replace the label with `aria-label` only.* Rejected — the design system does not yet have a documented icon-only destructive pattern; mixing it in risks accidental weight loss for genuinely destructive one-off actions elsewhere.
 
-### D6: Disabled-reason tooltips go through the existing `Tooltip` primitive; one reason (`active`), no new contract attribute
+### D6: Disabled-reason tooltips go through the existing `Tooltip` primitive; active and pending reasons, no new contract attribute
 
-`SessionRecoveryActions` already exposes `data-active="true"` on disabled Compact/Reset buttons (`packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx:195, 211`). That attribute is the only contract the disabled-reason story needs: `data-active="true"` ⇒ the session is running / not finished, and the structured tooltip must explain why this blocks the action. There is no second or third trigger today — only "session is active or otherwise not finished" — so no closed-set `data-disabled-reason` attribute and no enumeration of "prereq" / "unknown" branches; those would be speculative and would require inventing detection rules that don't exist in the codebase. The structured tooltip is rendered whenever `data-active="true"` on a Compact or Reset button, with content drawn from a single fixed pair:
+`SessionRecoveryActions` already exposes `data-active="true"` on Compact/Reset buttons for the running-session case and derives `anyPending` from its existing Compact/Reset mutations. Both cases already disable the controls, so both require a structured reason. `data-active="true"` remains the running-session contract; the pending reason is local presentation derived from the mutation state. No closed-set `data-disabled-reason` attribute and no speculative "prereq" / "unknown" branches are introduced. The structured tooltip uses one of two fixed pairs:
 
 | title | reason sentence |
 |---|---|
 | "Session is running" | "Finish or cancel the session before compacting or resetting." |
+| "Recovery action in progress" | "Wait for the current recovery action to finish before starting another one." |
 
 The wrapper is the existing `Tooltip` primitive (`packages/web/src/shared/ui/components/tooltip.tsx`). It already wraps the child in a `tabIndex={0}` span with `onFocus`/`onBlur` toggling the tooltip — no new a11y surface or new contract attribute is needed for the focus path; the existing wrapper IS the focus mechanism. The button's native `title="Unavailable while session is active"` attribute is removed to avoid double tooltips.
 
-**Rationale.** Occam: the existing `data-active` attribute already conveys "the action is blocked because the session is running". A separate `data-disabled-reason` closed-set would duplicate that information without adding any new signal. The wrapper already handles focus — reimplementing the a11y chain would add code for no behavioural gain. A single reason today means a single tooltip copy; future reasons (genuine missing prerequisites, status pending) can be added when their triggers actually exist in the codebase.
+**Rationale.** The existing running-session and mutation-pending inputs already determine whether controls are disabled, so the presentation must explain both. A separate `data-disabled-reason` closed-set would duplicate those inputs without adding a new signal. The wrapper already handles focus — reimplementing the a11y chain would add code for no behavioural gain. Future reasons (genuine missing prerequisites) can be added when their triggers actually exist in the codebase.
 
 **Alternatives considered:**
 
@@ -191,7 +192,7 @@ The `Sent` flash behavior is preserved on the transient `isSending` window only 
 3. **Session id copy** (`D4`): add the icon button + clipboard handler; wire it into `SessionHeader`; assert the full id is exposed via `aria-label` and `data-session-id`.
 4. **Sticky strip scroll-engaged** (`D2`): add a `ScrollEngagedStickyTitle` wrapper in `SessionDetailShell.tsx`; its initial state is `engaged=false` (renders `null`); the `IntersectionObserver` flips it to `true` only after the header scrolls fully out. Assert the strip is not in the DOM on first render and after a scroll-back-to-top, and that the inner `StickySessionTitle` itself has no new prop.
 5. **Cancel demotion** (`D5`): move the cancel button into the secondary slot; switch `variant` from `destructive` to `ghost`; assert `variant` and slot location; confirm dialog + mutation unchanged.
-6. **Disabled-reason tooltip** (`D6`): wrap disabled Compact/Reset buttons (those carrying `data-active="true"`) with the existing `Tooltip` primitive, render the running-block explanation, and remove the native `title` attribute. Assert the structured tooltip is shown when `data-active="true"` and absent when not. No new attribute is added.
+6. **Disabled-reason tooltip** (`D6`): wrap disabled Compact/Reset buttons with the existing `Tooltip` primitive, render the running-session or mutation-pending explanation, and remove the native `title` attribute. Assert both disabled reasons and the enabled state. No new attribute is added.
 7. **Sibling nav dedup** (`D7`): add `useMediaQuery`; remove the wide-viewport `siblingNav` slot; keep the narrow fallback with `data-viewport="narrow"`; assert wide renders no slot, narrow renders the slot, both never render together.
 8. **Followup composer three states** (`D8`): extend the composer with the three optional props + the `data-state` attribute; migrate `SessionFollowupComposer.test.tsx` to assert the new states (interactive / queued / closed) and that disabled input + persistent queued indicator match the spec.
 9. **Run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`** before commit. The change is presentation-only; no server / runner / CLI / protocol changes.

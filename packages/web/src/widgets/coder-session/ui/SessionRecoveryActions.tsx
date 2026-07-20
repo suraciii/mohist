@@ -23,17 +23,28 @@ import { useProject } from '../../../entities/project'
 const DISABLED_REASON_TITLE = 'Session is running'
 const DISABLED_REASON_BODY =
   'Finish or cancel the session before compacting or resetting.'
+const PENDING_REASON_TITLE = 'Recovery action in progress'
+const PENDING_REASON_BODY =
+  'Wait for the current recovery action to finish before starting another one.'
 const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
   'A new runtime session will start without prior context. Transcript and audit history remain available.'
 
-function DisabledReasonTooltip({ children }: { children: React.ReactNode }) {
+function DisabledReasonTooltip({
+  title,
+  body,
+  children,
+}: {
+  title: string
+  body: string
+  children: React.ReactNode
+}) {
   return (
     <Tooltip
       content={
         <div className="space-y-1">
-          <div className="font-medium">{DISABLED_REASON_TITLE}</div>
-          <div>{DISABLED_REASON_BODY}</div>
+          <div className="font-medium">{title}</div>
+          <div>{body}</div>
         </div>
       }
     >
@@ -168,6 +179,11 @@ export function SessionRecoveryActions({
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending
+  const disabledReason = active
+    ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
+    : anyPending
+      ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
+      : null
 
   function handleCompact() {
     if (active || anyPending) return
@@ -207,7 +223,7 @@ export function SessionRecoveryActions({
       size="sm"
       onClick={handleCompact}
       disabled={active || anyPending}
-      aria-disabled={active}
+      aria-disabled={disabledReason !== null}
       data-testid="session-recovery-compact"
       data-active={active ? 'true' : 'false'}
     >
@@ -222,7 +238,7 @@ export function SessionRecoveryActions({
       size="sm"
       onClick={openResetDialog}
       disabled={active || anyPending}
-      aria-disabled={active}
+      aria-disabled={disabledReason !== null}
       data-testid="session-recovery-reset"
       data-active={active ? 'true' : 'false'}
     >
@@ -233,13 +249,13 @@ export function SessionRecoveryActions({
   const content = (
     <>
       <div className="flex items-center gap-2">
-        {active ? (
-          <DisabledReasonTooltip>{compactButton}</DisabledReasonTooltip>
+        {disabledReason ? (
+          <DisabledReasonTooltip {...disabledReason}>{compactButton}</DisabledReasonTooltip>
         ) : (
           compactButton
         )}
-        {active ? (
-          <DisabledReasonTooltip>{resetButton}</DisabledReasonTooltip>
+        {disabledReason ? (
+          <DisabledReasonTooltip {...disabledReason}>{resetButton}</DisabledReasonTooltip>
         ) : (
           resetButton
         )}

@@ -18,9 +18,9 @@ The `Cancel session` action SHALL NOT be rendered as the highest visual weight e
 - **AND** SHALL expose an accessible name (for example `aria-label="Cancel session"`)
 - **AND** activating it SHALL open the existing cancel confirmation dialog and SHALL call the cancel mutation
 
-### Requirement: Disabled Compact / Reset actions render a structured tooltip explaining the running-session block
+### Requirement: Disabled Compact / Reset actions render a structured tooltip explaining the block
 
-When the `Compact` or `Reset` action in `SessionRecoveryActions` is disabled because the session is currently running (or otherwise not in a finished state), the disabled button SHALL be wrapped by the existing `Tooltip` primitive so a structured explanation is shown on hover or focus, and the rendered button SHALL NOT carry the native `title` attribute. The structured explanation SHALL convey both a short title and a longer reason sentence that names the running-session block as the cause and notes that finishing (or cancelling) the session would unblock the action. The `data-active="true"` attribute already exposed on the disabled button by `SessionRecoveryActions` is the trigger for the structured tooltip; no new contract attribute (no `data-disabled-reason` closed-set) is introduced, because the only currently-known disabled trigger is "session active / not finished".
+When the `Compact` or `Reset` action in `SessionRecoveryActions` is disabled, the disabled button SHALL be wrapped by the existing `Tooltip` primitive so a structured explanation is shown on hover or focus, and the rendered button SHALL NOT carry the native `title` attribute. The explanation SHALL name the actual block: a running session requires finishing or cancelling first, while an in-flight Compact or Reset requires waiting for the current recovery action to finish. The existing `data-active="true"` attribute continues to identify the running-session reason; the pending reason is derived from the existing mutation state. No new contract attribute (no `data-disabled-reason` closed-set) is introduced.
 
 #### Scenario: Disabled running-session Compact / Reset renders a structured tooltip
 - **WHEN** either the Compact or the Reset action is rendered in a disabled state because the session is running
@@ -32,6 +32,11 @@ When the `Compact` or `Reset` action in `SessionRecoveryActions` is disabled bec
 - **WHEN** a Compact or Reset button is rendered in a disabled state because the session is running
 - **THEN** the rendered button SHALL NOT carry a native `title` attribute
 - **AND** only the structured tooltip SHALL be the source of the disabled reason
+
+#### Scenario: Pending Compact / Reset renders a structured tooltip
+- **WHEN** Compact or Reset is disabled because the other recovery mutation is pending
+- **THEN** a structured tooltip SHALL explain that a recovery action is in progress and that the user must wait for it to finish
+- **AND** the disabled button SHALL expose `aria-disabled="true"`
 
 #### Scenario: Enabled Compact / Reset does not render the disabled tooltip
 - **WHEN** either the Compact or the Reset action is rendered in an enabled state

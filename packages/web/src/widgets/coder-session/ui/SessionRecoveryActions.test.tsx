@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ProjectProvider } from '../../../entities/project'
@@ -189,6 +189,59 @@ describe('SessionRecoveryActions — structured disabled-reason tooltip', () => 
     fireEvent.focus(reset)
 
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('explains why Reset is disabled while Compact is pending', async () => {
+    let resolveCompact: (value: SessionRecoveryResult) => void = () => {}
+    const clients = {
+      ...recoveryClients,
+      compact: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
+        resolveCompact = resolve
+      })),
+    }
+    renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-compact'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-recovery-reset')).toBeDisabled()
+    })
+    expect(screen.getByTestId('session-recovery-reset')).toHaveAttribute('aria-disabled', 'true')
+
+    focusDisabledWrapper('session-recovery-reset')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Recovery action in progress')
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/wait for the current recovery action to finish/i)
+
+    await act(async () => {
+      resolveCompact(makeCompactResult())
+    })
+  })
+
+  it('explains why Compact is disabled while Reset is pending', async () => {
+    let resolveReset: (value: SessionRecoveryResult) => void = () => {}
+    const clients = {
+      ...recoveryClients,
+      reset: vi.fn(() => new Promise<SessionRecoveryResult>((resolve) => {
+        resolveReset = resolve
+      })),
+    }
+    renderActions({ clients })
+
+    fireEvent.click(screen.getByTestId('session-recovery-reset'))
+    fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
+    })
+    expect(screen.getByTestId('session-recovery-compact')).toHaveAttribute('aria-disabled', 'true')
+
+    focusDisabledWrapper('session-recovery-compact')
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Recovery action in progress')
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(/wait for the current recovery action to finish/i)
+
+    await act(async () => {
+      resolveReset(makeCompactResult())
+    })
   })
 })
 
