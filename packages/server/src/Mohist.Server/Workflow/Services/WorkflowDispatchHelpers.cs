@@ -109,6 +109,7 @@ internal static class WorkflowDispatchHelpers
 
     internal static CheckResult? ParseSingleCheckResult(JsonElement element)
     {
+        if (element.ValueKind != JsonValueKind.Object) return null;
         var name = element.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
         if (string.IsNullOrWhiteSpace(name)) return null;
 

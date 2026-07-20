@@ -64,4 +64,9 @@ describe("Action result boundary", () => {
   it("rejects non-JSON object values", () => {
     expect(validateActionOutputShape({ completedAt: new Date("2026-01-01T00:00:00Z") })).toContain("successful Action output must be a JSON object or null")
   })
+
+  it("accepts repeated JSON object references", () => {
+    const shared = { value: 1 }
+    expect(validateActionOutputShape({ first: shared, second: shared })).toBeNull()
+  })
 })

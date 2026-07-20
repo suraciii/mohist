@@ -49,4 +49,26 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal(CheckResultStatus.Failed, check.Status);
         Assert.Equal("unexpected-error", check.Error?.Code);
     }
+
+    [Theory]
+    [InlineData("[42]")]
+    [InlineData("[null]")]
+    [InlineData("""[{"name":"check-1","status":"pass","output":"bad"}]""")]
+    public async Task TranslateResult_MalformedCheckRow_FailsEveryDispatchedCheck(string output)
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-result-malformed-check-row";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var item = WorkItem.Checks("build", "checks-build",
+            [new CheckItem("check-1", "Check 1", "spec/check")]);
+
+        var report = await _translator.TranslateResultAsync(
+            item, new WorkResult("fail", Output: JSON.DeserializeElement(output)), runId, run);
+
+        var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
+        var check = Assert.Single(checks.Value.Results);
+        Assert.Equal("check-1", check.Name);
+        Assert.Equal(CheckResultStatus.Failed, check.Status);
+        Assert.Equal("unexpected-error", check.Error?.Code);
+    }
 }

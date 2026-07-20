@@ -87,3 +87,4 @@
 - Structured-output UI assertions now live in focused `TaskProgressPanel.output.test.tsx` and `WorkflowView.output.test.tsx`; the original test files are below their size budgets and the focused Web suite passes.
 - The server translator output regressions are split into `WorkflowItemTranslatorOutputSpecs.cs` so the existing translator spec stays below the C# 24 KB test-file ratchet.
 - Final verification passes: `npm test` (including all server/CLI tests, 4,929 Web tests, and 1,161 runner tests), `npm run typecheck -w packages/runner`, `npm test -w packages/runner`, `npm run typecheck -w packages/web`, and `npm run test:run -w packages/web`.
+- Follow-up review fixes validate every check-result row before translation, failing all declared checks for malformed rows or scalar Action output, and treat only active traversal references as cycles so JSON-serializable shared objects remain valid.

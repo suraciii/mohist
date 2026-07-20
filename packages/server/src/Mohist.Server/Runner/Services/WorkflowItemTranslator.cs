@@ -421,18 +421,41 @@ EpicNumber: ReadEpicNumber(run),
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
-        if (result.Output is not { ValueKind: JsonValueKind.Array })
-        {
-            const string message = "Runner reported an invalid check output shape. Check output must be a JSON array.";
-            var error = new ExecutionError("unexpected-error", message);
-            var failed = (item.Items ?? [])
-                .Select(check => new CheckResult(check.Name, CheckResultStatus.Failed, message, Error: error))
-                .ToList();
-            return new InboundReport.Checks(new CheckReport(item.Stage, failed));
-        }
+        if (!HasValidCheckResultRows(result.Output))
+            return MalformedCheckOutput(item);
 
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         return new InboundReport.Checks(new CheckReport(item.Stage, results));
+    }
+
+    private static bool HasValidCheckResultRows(JsonElement? output)
+    {
+        if (output is not { ValueKind: JsonValueKind.Array }) return false;
+
+        foreach (var row in output.Value.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object
+                || !row.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(name.GetString()))
+                return false;
+
+            if (row.TryGetProperty("output", out var actionOutput)
+                && actionOutput.ValueKind is not JsonValueKind.Object and not JsonValueKind.Null)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static InboundReport MalformedCheckOutput(WorkItem item)
+    {
+        const string message = "Runner reported an invalid check output shape. Check output must be a JSON array of named rows with object-or-null Action output.";
+        var error = new ExecutionError("unexpected-error", message);
+        var failed = (item.Items ?? [])
+            .Select(check => new CheckResult(check.Name, CheckResultStatus.Failed, message, Error: error))
+            .ToList();
+        return new InboundReport.Checks(new CheckReport(item.Stage, failed));
     }
 
     /// <summary>

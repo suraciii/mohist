@@ -52,6 +52,7 @@ function validateJsonValue(value: unknown, path: string[], seen: WeakSet<object>
         if (!validateJsonValue(value[i], path, seen)) return false
         path.pop()
       }
+      seen.delete(value)
       return true
     }
     if (!isJsonObject(value)) return false
@@ -60,6 +61,7 @@ function validateJsonValue(value: unknown, path: string[], seen: WeakSet<object>
       if (!validateJsonValue(child, path, seen)) return false
       path.pop()
     }
+    seen.delete(value as object)
     return true
   }
   return false
