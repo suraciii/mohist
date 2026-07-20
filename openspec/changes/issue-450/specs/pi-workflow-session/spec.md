@@ -235,6 +235,12 @@ The guarded rebind's expected-current state SHALL include the authority-issued s
 - **THEN** Action reporting SHALL be globally not-ready and the Runner SHALL NOT register or claim new work
 - **AND** it SHALL expose a credential-redacted actionable storage diagnostic
 
+#### Scenario: Outbox readiness recovery clears its diagnostic
+
+- **WHEN** a later initialization attempt can list the outbox root and provide every required atomic operation
+- **THEN** Action reporting SHALL become ready and clear `workflow-session-outbox-unavailable`
+- **AND** Runner registration and new work claiming MAY resume when the other readiness gates pass
+
 #### Scenario: Ambiguous delivery does not duplicate usage or transcript
 
 - **WHEN** the Server applies an event but the acknowledgement is lost and the Runner sends the same stream sequence again
