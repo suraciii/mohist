@@ -27,15 +27,7 @@ import { registerFollowupHandler } from "./followup-handler.js"
 import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
-import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
-import {
-  registerSessionCommandHandler,
-  type SessionCommand,
-  type SessionCommandError,
-  type SessionCommandHandler,
-  type SessionCommandRequest,
-  type SessionCommandResult,
-} from "./session-command-handler.js"
+import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
 
 export {
   isUnderRunnerRoot,
@@ -51,11 +43,6 @@ export type {
   FollowupTargetResolver,
   ReceiveFollowupPayload,
   ReceiveWorkflowRunStatusPayload,
-  SessionCommand,
-  SessionCommandError,
-  SessionCommandHandler,
-  SessionCommandRequest,
-  SessionCommandResult,
   WorkspaceQuery,
 }
 
@@ -65,10 +52,15 @@ export interface RunnerSignalRClientOptions {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
   followupFailureOutbox?: FollowupFailureOutboxStore | null
-  sessionCommandHandler?: SessionCommandHandler | null
-  sessionCommandJournal?: SessionCommandJournalStore | null
-  reconcileStartedSessionCommand?: import("./session-command-handler.js").SessionCommandReconciler | null
   registry?: WorkspaceRegistry | null
+  /**
+   * Late-binding runtime accessor used by the Follow-up / Cancel
+   * handlers (issue-410 T-003 / design D3). The host wires this so
+   * the handler always consults the current runtime handle (which
+   * is rebuilt on Server exit). Tests pass a static fake instead of
+   * a getter.
+   */
+  openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   allowUnverifiedWorkspaceQueriesForTest?: boolean
 }
 
@@ -81,9 +73,7 @@ export class RunnerSignalRClient {
   private readonly serverConnection: ServerConnection | null
   private readonly followupTargetResolver: FollowupTargetResolver | null
   private readonly followupFailureOutbox: FollowupFailureOutboxStore | null
-  private readonly sessionCommandHandler: SessionCommandHandler | null
-  private readonly sessionCommandJournal: SessionCommandJournalStore | null
-  private readonly reconcileStartedSessionCommand: import("./session-command-handler.js").SessionCommandReconciler | null
+  private readonly openCodeRuntime: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
   constructor(
@@ -108,9 +98,7 @@ export class RunnerSignalRClient {
     this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
     this.followupFailureOutbox = options.followupFailureOutbox ?? null
-    this.sessionCommandHandler = options.sessionCommandHandler ?? null
-    this.sessionCommandJournal = options.sessionCommandJournal ?? null
-    this.reconcileStartedSessionCommand = options.reconcileStartedSessionCommand ?? null
+    this.openCodeRuntime = options.openCodeRuntime ?? null
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
     this.registerHandlers()
@@ -164,20 +152,22 @@ export class RunnerSignalRClient {
       serverConnection: this.serverConnection,
       followupTargetResolver: this.followupTargetResolver,
       followupFailureOutbox: this.followupFailureOutbox,
+      openCodeRuntime: this.resolveOpenCodeRuntime(),
     })
 
     registerCancelHandler(this.connection, {
       followupTargetResolver: this.followupTargetResolver,
-    })
-
-    registerSessionCommandHandler(this.connection, {
-      handler: this.sessionCommandHandler,
-      journal: this.sessionCommandJournal,
-      reconcileStarted: this.reconcileStartedSessionCommand,
+      openCodeRuntime: this.resolveOpenCodeRuntime(),
     })
 
     registerWorkflowRunStatusHandler(this.connection, {
       registry: this.registry,
     })
+  }
+
+  private resolveOpenCodeRuntime(): OpenCodeRuntime | null {
+    if (this.openCodeRuntime === null) return null
+    if (typeof this.openCodeRuntime === "function") return this.openCodeRuntime()
+    return this.openCodeRuntime
   }
 }

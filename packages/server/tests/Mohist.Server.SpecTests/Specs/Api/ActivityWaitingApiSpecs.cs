@@ -157,7 +157,7 @@ public class ActivityWaitingApiSpecs
                     Status = "AwaitingApproval",
                     Tasks = new[]
                     {
-                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/opencode" },
                     },
                     Checks = new[]
                     {

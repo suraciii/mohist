@@ -8,7 +8,6 @@ import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
-import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
@@ -24,6 +23,7 @@ import {
   promiseValue,
   type CompletionEvaluation,
 } from "../actions/expectations.js"
+import type { AgentJobExecutor } from "./agent-job-executor.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -45,13 +45,30 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  */
 const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
 
+/**
+ * Actions whose registration was retired by the runtime migration.
+ * A dispatch whose `uses` matches one of these is a pre-cutover
+ * WorkflowRun that the server never rewrote; the dispatch fails with a
+ * named, actionable error pointing the user to rerun the affected stage
+ * with a `mohist/opencode` profile instead of the generic "No action
+ * found" miss.
+ */
+const REMOVED_ACTIONS = new Set(["mohist/acp-agent"])
+
+function isRemovedAction(uses?: string | null): boolean {
+  return !!uses && REMOVED_ACTIONS.has(uses.trim().toLowerCase())
+}
+
+function removedActionMessage(uses: string): string {
+  return `Workflow task uses the removed Action '${uses}'. The Action no longer exists in this runner. ` +
+    "Rerun the affected stage with a profile that uses 'mohist/opencode' to recover this run."
+}
+
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
     private readonly workspaceManager: WorkspaceManager,
     private readonly connection: ServerConnection,
-    private readonly sessionManager: AcpSessionManager,
-    private acpConnection: SharedAcpConnection | null,
     private readonly fallbackWorkDir = process.cwd(),
     /**
      * Injected clock for {@link TaskLogCollector} timestamps. Defaults
@@ -63,20 +80,18 @@ export class WorkExecutor {
      */
     private readonly now: () => Date = () => new Date(),
     /**
-     * Shared OpenCode runtime handle for the Workflow Inline Agent
-     * path. Set by the runner host after `OpenCodeRuntime.start()`
-     * passes readiness; cleared when the runtime exits and rebuilds.
-     * The AgentJob path keeps the ACP connection above; only Workflow
-     * work receives this handle via `ActionContext.openCodeRuntime`.
-     * Hosts may swap it through {@link updateOpenCodeRuntime} when the
-     * runtime rebuilds after a server exit.
+     * Shared OpenCode runtime handle. Set by the runner host after
+     * `OpenCodeRuntime.start()` passes readiness; cleared when the
+     * runtime exits and rebuilds. Both Workflow and AgentJob work
+     * receive this handle through `ActionContext.openCodeRuntime`.
+     * The AgentJob path additionally dispatches through
+     * {@link agentJobExecutor} so it never reaches the Action
+     * registry. Hosts may swap it through {@link updateOpenCodeRuntime}
+     * when the runtime rebuilds after a server exit.
      */
     private openCodeRuntime: OpenCodeRuntime | null = null,
+    private readonly agentJobExecutor: AgentJobExecutor | null = null,
   ) {}
-
-  updateAcpConnection(acp: SharedAcpConnection | null) {
-    this.acpConnection = acp
-  }
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
     this.openCodeRuntime = runtime
@@ -123,8 +138,31 @@ export class WorkExecutor {
   }
 
   private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
+    // The AgentJob path is owned by the AgentJobExecutor: it drives the
+    // shared OpenCodeRuntime directly and never resolves an Action
+    // (no inline-agent contract and no removed or synthetic Action).
+    // Branch BEFORE Action resolution so the
+    // registry never sees the dispatch, and so a future refactor
+    // that strips the `Uses` field from AgentJob dispatches doesn't
+    // surface as "No action found".
+    if (work.ownerKind === "agent-job") {
+      if (!this.agentJobExecutor) {
+        return failure(work, "AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor")
+      }
+      try {
+        return await this.agentJobExecutor.execute(work, signal)
+      } catch (error) {
+        return failure(work, errorMessage(error))
+      }
+    }
+
     const action = this.actions.resolve(work.uses)
-    if (!action) return failure(work, `No action found for '${work.uses}'`)
+    if (!action) {
+      if (work.uses && isRemovedAction(work.uses)) {
+        return failure(work, removedActionMessage(work.uses))
+      }
+      return failure(work, `No action found for '${work.uses}'`)
+    }
 
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
@@ -142,7 +180,7 @@ export class WorkExecutor {
         return startCheck.result
       }
       const result = await action({
-        ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
+        ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
         with: renderedWith,
         rawWith: work.with,
         workDir,
@@ -175,7 +213,7 @@ export class WorkExecutor {
         variables,
         signal,
         resolveCleanupAgentAction(action),
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime) },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime) },
         log,
       )
       if (worktreeResult.status !== "completed") {
@@ -198,7 +236,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log, this.openCodeRuntime),
+      context: baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -358,24 +396,15 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
 }
 
-function baseContext(
+export function baseContext(
   work: RenderedWorkItem,
   variables: JsonObject,
   signal: AbortSignal,
-  sessionManager: AcpSessionManager,
-  acpConnection: SharedAcpConnection | null,
   connection: ServerConnection,
   log: TaskLogger | null = null,
   openCodeRuntime: OpenCodeRuntime | null = null,
 ): Omit<ActionContext, "with" | "workDir"> {
-  // The OpenCode runtime handle reaches the Workflow Inline Agent path
-  // only. The AgentJob path keeps the ACP connection above until #410
-  // migrates it. This is the same source-keyed dispatch the host uses
-  // for the readiness gate (T-003 AC: "runtime handle reaches
-  // ActionContext for Workflow work; the AgentJob path still receives
-  // the ACP connection").
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-  const runtimeHandle = ownerKind === "agent-job" ? null : openCodeRuntime
   return {
     workflowRunId: work.workflowRunId,
     workId: work.workId,
@@ -392,10 +421,8 @@ function baseContext(
     ownerKind,
     agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,
-    acpSessionManager: sessionManager,
-    acpConnection,
     serverConnection: connection,
-    openCodeRuntime: runtimeHandle,
+    openCodeRuntime,
     log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }

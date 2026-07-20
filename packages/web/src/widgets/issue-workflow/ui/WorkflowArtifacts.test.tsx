@@ -134,7 +134,7 @@ function makeTimelineWithTaskArtifacts(): WorkflowTimeline {
           {
             id: 'ai-review.1',
             title: 'AI review',
-            uses: 'mohist/acp-agent',
+            uses: 'mohist/opencode',
             status: 'completed',
             startedAt: '2026-01-01T00:00:00.000Z',
             completedAt: '2026-01-01T00:01:00.000Z',
@@ -160,7 +160,7 @@ function makeTimelineWithTaskArtifacts(): WorkflowTimeline {
           {
             id: 'ai-review.2',
             title: 'AI review',
-            uses: 'mohist/acp-agent',
+            uses: 'mohist/opencode',
             status: 'completed',
             startedAt: '2026-01-01T00:02:00.000Z',
             completedAt: '2026-01-01T00:03:00.000Z',

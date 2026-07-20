@@ -156,14 +156,6 @@ export function AgentDetailPage({
 
   const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
-  const agentType = useMemo(() => {
-    if (!agent?.agentConfig) return 'opencode'
-    const config = agent.agentConfig
-    if (config && typeof config === 'object' && 'type' in config) {
-      return String(config.type)
-    }
-    return 'opencode'
-  }, [agent])
 
   const runningSessions = useMemo(
     () => allSessions.filter((s) => s.status === 'running'),
@@ -242,8 +234,7 @@ export function AgentDetailPage({
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {agentType}
-                {model && ` · ${model}`}
+                {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
               </p>
             </div>

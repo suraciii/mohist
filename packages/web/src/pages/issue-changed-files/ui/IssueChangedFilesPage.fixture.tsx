@@ -43,7 +43,7 @@ export const SAMPLE_WORKFLOW_RUN_SESSION = {
   id: 'session-1',
   workflowRunId: 'wr-1',
   sessionName: 's-wr-1',
-  runtimeSessionId: 'acp-1',
+  runtimeSessionId: 'runtime-1',
   projectId: 'proj-1',
   issueNumber: 123,
   runnerId: 'runner-1',

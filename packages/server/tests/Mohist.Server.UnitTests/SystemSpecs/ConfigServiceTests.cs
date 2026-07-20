@@ -78,7 +78,10 @@ public class ConfigServiceTests
         var agent = doc.RootElement.GetProperty("agent");
 
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        // Per #410 T-002 design D5: GetVariables projects the global agent
+        // config down to the converged whitelist, so legacy keys like `type`
+        // never enter vars.agent from config.jsonc.
+        Assert.False(agent.TryGetProperty("type", out _));
     }
 
     [Fact]
@@ -103,7 +106,7 @@ public class ConfigServiceTests
     }
 
     [Fact]
-    public async Task GetAgentConfig_AgentConfigured_ReturnsConfiguredObjectVerbatim()
+    public async Task GetAgentConfig_AgentConfigured_ReturnsWhitelistedKeysOnly()
     {
         await _svc.SetAsync("agent", new Dictionary<string, object?>
         {
@@ -115,7 +118,12 @@ public class ConfigServiceTests
 
         Assert.NotNull(agent);
         Assert.Equal("gpt-4o", agent!["model"]!.ToString());
-        Assert.Equal("opencode", agent["type"]!.ToString());
+        // Per #410 T-002 design D5: GetAgentConfigAsync projects the global
+        // agent config down to the converged whitelist, so the returned
+        // dictionary contains only {model, variant}. Legacy keys are not
+        // round-tripped to callers (IssueVariableBuilder.Build, the issue
+        // variable projection, etc.).
+        Assert.False(agent.ContainsKey("type"));
     }
 
     [Fact]
@@ -154,17 +162,24 @@ public class ConfigServiceTests
     [Fact]
     public async Task SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel()
     {
+        // Per D5: `agent` in config.jsonc only carries {model, variant} —
+        // legacy keys are not written through SetAsync validation here, but
+        // the authoritative scenario exercised by this test is "clearing
+        // the model while other whitelisted siblings remain". The existing
+        // implementation already preserves sibling keys, so set the
+        // dictionary on the converged shape and assert it survives the
+        // model clear.
         await _svc.SetAsync("agent", new Dictionary<string, object?>
         {
             ["model"] = "anthropic/claude",
-            ["type"] = "opencode",
+            ["variant"] = "max",
         });
         await _svc.SetAgentModelAsync(null);
 
         var agent = await _svc.GetAgentConfigAsync();
         Assert.NotNull(agent);
         Assert.False(agent!.ContainsKey("model"));
-        Assert.Equal("opencode", agent["type"]!.ToString());
+        Assert.Equal("max", agent["variant"]!.ToString());
 
         var cfg = await _svc.GetConfigAsync();
         Assert.True(cfg.ContainsKey("agent"));

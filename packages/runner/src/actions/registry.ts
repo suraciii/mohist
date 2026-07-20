@@ -6,7 +6,6 @@ import { stringAt } from "../core/json-path.js"
 import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource } from "./delivery-context.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { timeoutSignal } from "../system/timeout-signal.js"
-import { acpAgentAction } from "./acp-agent.js"
 import { opencodeAction } from "./opencode.js"
 import { resolveActionPath } from "./expectations.js"
 import {
@@ -56,7 +55,6 @@ export function createDefaultRegistry() {
   registry.register("core/script", scriptAction)
   registry.register("core/artifact-exists", artifactExistsAction)
   registry.register("core/marker", markerAction)
-  registry.register("mohist/acp-agent", acpAgentAction)
   registry.register("mohist/opencode", opencodeAction)
   registry.register("mohist/openspec-tasks", openspecTasksAction)
   registry.register("mohist/openspec-artifacts", openspecArtifactsAction)

@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach, vi } from "vitest"
 import type { WorkExecutor } from "../src/runtime/executor.js"
 import type { ActionRegistry } from "../src/actions/registry.js"
 import type { ServerConnection } from "../src/server/connection.js"
-import type { AcpSessionManager, SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
@@ -16,8 +15,6 @@ describe("Check verdict validation", () => {
     const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" })
 
     const mockConnection = {} as unknown as ServerConnection
-    const mockSessionManager = {} as unknown as AcpSessionManager
-    const mockAcpConnection: SharedAcpConnection | null = null
 
     mockActionRegistry = {
       resolve: vi.fn(),
@@ -29,8 +26,6 @@ describe("Check verdict validation", () => {
       mockActionRegistry,
       mockWorkspaceManager as any,
       mockConnection,
-      mockSessionManager,
-      mockAcpConnection,
       mockFallbackWorkDir,
     )
   })
@@ -45,7 +40,7 @@ describe("Check verdict validation", () => {
     workType: "checks",
     stage: "check",
     title: "Run checks",
-    uses: "mohist/acp-agent",
+    uses: "mohist/opencode",
     with: { checks },
     variables: {},
     projectId: "project-1",

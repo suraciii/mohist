@@ -355,7 +355,9 @@ describe('AiSettingsSection inline variant chips', () => {
     const body = patchCaptures[0]
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
-    expect(agent?.agent).toEqual({ type: 'opencode', model: 'anthropic/claude-3', variant: 'high' })
+    // Per #410 T-002 design D5: project-layer writers no longer stamp
+    // `type: 'opencode'`; only {model, variant} flows to vars.agent.
+    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high' })
   })
 
   it('persists model and variant when a chip is clicked on an unset stage row', async () => {
@@ -381,6 +383,6 @@ describe('AiSettingsSection inline variant chips', () => {
     const body = patchCaptures[0]
     const buildStage = (body.stages as Record<string, unknown>)?.build as Record<string, unknown>
     const agent = buildStage?.vars as Record<string, unknown>
-    expect(agent?.agent).toEqual({ type: 'opencode', model: 'anthropic/claude-3', variant: 'high' })
+    expect(agent?.agent).toEqual({ model: 'anthropic/claude-3', variant: 'high' })
   })
 })

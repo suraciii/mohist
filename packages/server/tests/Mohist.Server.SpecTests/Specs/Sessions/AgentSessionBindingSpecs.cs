@@ -47,9 +47,9 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
     public async Task RunnerAttach_DifferentPhysicalSession_ReturnsConflictAndPreservesBinding()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "acp-1", workDir = "/work", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-1", workDir = "/work", processPid = 1234 });
 
-        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "acp-2", workDir = "/work", processPid = 1234 });
+        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "runtime-2", workDir = "/work", processPid = 1234 });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -58,7 +58,7 @@ public class AgentSessionBindingSpecs : AgentSessionTestSupport
             .GetGrain<IAgentSessionGrain>(session.Id)
             .GetAsync();
         Assert.NotNull(sessionAfterConflict);
-        Assert.Equal("acp-1", sessionAfterConflict.AgentSessionId);
+        Assert.Equal("runtime-1", sessionAfterConflict.AgentSessionId);
     }
 
     [Fact]

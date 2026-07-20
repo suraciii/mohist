@@ -147,7 +147,7 @@ function setupDefaultMocks() {
       id: 'session-1',
       sessionName: 'session-1',
       workflowRunId: 'wr-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       projectId: 'proj-1',
       issueNumber: 123,
       runnerId: 'runner-1',
@@ -167,7 +167,7 @@ function setupDefaultMocks() {
   _metadataData = {
     id: 'agent-session-1',
     sessionName: 'session-1',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     title: 'Test session',
     status: 'completed',
     statusKind: 'completed',

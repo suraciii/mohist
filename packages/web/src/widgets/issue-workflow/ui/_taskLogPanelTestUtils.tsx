@@ -56,7 +56,7 @@ export function sessionFixture(overrides: Partial<WorkflowRunSession>): Workflow
     id: 'session-id',
     workflowRunId: 'wr-1',
     sessionName: 'plan-issue-339',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     projectId: 'proj-1',
     issueNumber: 339,
     runnerId: null,

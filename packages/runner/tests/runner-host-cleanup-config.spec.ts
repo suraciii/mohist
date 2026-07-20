@@ -68,8 +68,6 @@ const mocks = vi.hoisted(() => {
     getConnectionId: vi.fn(() => "conn-1"),
     probeLiveness: vi.fn(async () => true),
     forceReconnect: vi.fn(async () => undefined),
-    createSharedAcpConnection: vi.fn(),
-    shutdownSharedAcpConnection: vi.fn(async () => undefined),
   }
 })
 
@@ -116,17 +114,6 @@ vi.mock("../src/runtime/cleanup-loop.js", () => {
   }
 })
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get() { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
-  },
-  createSharedAcpConnection: (...args: unknown[]) => mocks.createSharedAcpConnection(...args),
-}))
 
 function resetState() {
   mocks.state.cleanupCalls.length = 0
@@ -148,13 +135,6 @@ beforeEach(() => {
   resetState()
   installReadyRuntimeFactory()
   vi.clearAllMocks()
-  mocks.createSharedAcpConnection.mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers: vi.fn(),
-    clearSessionHandlers: vi.fn(),
-    shutdown: mocks.shutdownSharedAcpConnection,
-  })
 })
 
 async function importHost() {
@@ -231,14 +211,6 @@ function configureHost(): HostEvents {
   mocks.getConnectionId.mockReset().mockReturnValue("conn-1")
   mocks.probeLiveness.mockReset().mockResolvedValue(true)
   mocks.forceReconnect.mockReset().mockResolvedValue(undefined)
-  mocks.createSharedAcpConnection.mockReset().mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers: vi.fn(),
-    clearSessionHandlers: vi.fn(),
-    shutdown: mocks.shutdownSharedAcpConnection,
-  })
-  mocks.shutdownSharedAcpConnection.mockReset().mockResolvedValue(undefined)
   return events
 }
 

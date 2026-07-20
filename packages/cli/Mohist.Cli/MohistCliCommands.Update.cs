@@ -180,7 +180,9 @@ internal partial class SourceCodeUpdater
             commandExecutor,
             fs,
             getLocalHostname: getLocalHostname ?? (() => Environment.MachineName),
-            runnerIdentityTimeout: runnerIdentityTimeout);
+            runnerIdentityTimeout: runnerIdentityTimeout,
+            runnerIdentityPollInterval: runnerIdentityPollInterval,
+            timeProvider: timeProvider);
         var outcomeReporter = new UpdateOutcomeReporter(httpClient, output);
         return new SourceCodeUpdater(
             output,

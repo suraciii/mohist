@@ -106,12 +106,13 @@ describe('writeAgentModelAndVariant', () => {
     })
   })
 
-  it('preserves other keys while updating model and variant', () => {
+  it('writes only model and variant, dropping legacy keys', () => {
+    // Per #410 T-002 design D5: the agent profile editor must save a
+    // converged agentConfig that contains only {model, variant}. Legacy
+    // ACP/liveness keys supplied via spread are not preserved.
     expect(
       writeAgentModelAndVariant({ type: 'opencode', temperature: 0.5 }, 'anthropic/claude', 'low'),
     ).toEqual({
-      type: 'opencode',
-      temperature: 0.5,
       model: 'anthropic/claude',
       variant: 'low',
     })
@@ -123,10 +124,10 @@ describe('writeAgentModelAndVariant', () => {
     })
   })
 
-  it('drops both model and variant when model is null (atomic clear)', () => {
-    expect(writeAgentModelAndVariant({ model: 'm', variant: 'high', type: 'opencode' }, null, null)).toEqual({
-      type: 'opencode',
-    })
+  it('returns null when model is null regardless of legacy keys', () => {
+    // Dropping the model clears the agentConfig entirely; legacy keys
+    // are not preserved on the converged path.
+    expect(writeAgentModelAndVariant({ model: 'm', variant: 'high', type: 'opencode' }, null, null)).toBeNull()
   })
 
   it('returns null when writing an empty config', () => {

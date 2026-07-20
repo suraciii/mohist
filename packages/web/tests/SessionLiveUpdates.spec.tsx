@@ -27,7 +27,7 @@ describe('Live tool updates merge in place', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -36,7 +36,7 @@ describe('Live tool updates merge in place', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-merge-test',
         toolName: 'read',
@@ -62,7 +62,7 @@ describe('Live tool updates merge in place', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-merge-test',
         toolName: 'read',
@@ -88,7 +88,7 @@ describe('Live tool updates merge in place', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -97,7 +97,7 @@ describe('Live tool updates merge in place', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-terminal',
         toolName: 'bash',
@@ -118,7 +118,7 @@ describe('Live tool updates merge in place', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-terminal',
         toolName: 'bash',
@@ -146,7 +146,7 @@ describe('Terminal session events trigger refetch', () => {
     const { result } = renderHook(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }), {
@@ -160,7 +160,7 @@ describe('Terminal session events trigger refetch', () => {
     act(() => {
       dispatchAgentEvent('session.closed', {
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         status: 'completed',
       })
     })
@@ -176,7 +176,7 @@ describe('Terminal session events trigger refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -184,7 +184,7 @@ describe('Terminal session events trigger refetch', () => {
     act(() => {
       dispatchAgentEvent('session.closed', {
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         status: 'failed',
         failureReason: 'Out of memory',
       })
@@ -206,7 +206,7 @@ describe('Terminal session events trigger refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -214,7 +214,7 @@ describe('Terminal session events trigger refetch', () => {
     act(() => {
       dispatchAgentEvent('session.closed', {
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         status: 'cancelled',
         failureReason: 'User cancelled',
       })
@@ -236,7 +236,7 @@ describe('Terminal session events trigger refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -246,7 +246,7 @@ describe('Terminal session events trigger refetch', () => {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         status: 'recovered',
         attempt: 1,
       })
@@ -263,7 +263,7 @@ describe('Terminal session events trigger refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -271,7 +271,7 @@ describe('Terminal session events trigger refetch', () => {
     act(() => {
       dispatchAgentEvent('session.liveness', {
         sessionId: 'session-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         status: 'failed',
         lastDataAt: '2024-01-01T00:00:02.000Z',
         lastActivityType: 'agent_thought_chunk',
@@ -299,7 +299,7 @@ describe('Running session shows only real active tools', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -308,7 +308,7 @@ describe('Running session shows only real active tools', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-known',
         toolName: 'read',
@@ -329,7 +329,7 @@ describe('Running session shows only real active tools', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-known',
         toolName: 'read',
@@ -361,7 +361,7 @@ describe('Running session shows only real active tools', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -370,7 +370,7 @@ describe('Running session shows only real active tools', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-running',
         toolName: 'bash',
@@ -394,7 +394,7 @@ describe('Running session shows only real active tools', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -403,7 +403,7 @@ describe('Running session shows only real active tools', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-failed',
         toolName: 'edit',
@@ -430,7 +430,7 @@ describe('Live convergence with refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -441,7 +441,7 @@ describe('Live convergence with refetch', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-final',
         toolName: 'bash',
@@ -457,7 +457,7 @@ describe('Live convergence with refetch', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-final',
         toolName: 'bash',
@@ -477,7 +477,7 @@ describe('Live convergence with refetch', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -486,7 +486,7 @@ describe('Live convergence with refetch', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Starting task...',
         sessionId: 'session-123',
       })
@@ -503,7 +503,7 @@ describe('Live convergence with refetch', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-1',
         toolName: 'read',
@@ -516,7 +516,7 @@ describe('Live convergence with refetch', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Reading file...',
         sessionId: 'session-123',
       })
@@ -538,7 +538,7 @@ describe('Correlation-based tool merging', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -547,7 +547,7 @@ describe('Correlation-based tool merging', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-pending',
         toolName: 'read',
@@ -568,7 +568,7 @@ describe('Correlation-based tool merging', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-update',
         toolName: 'read',
@@ -594,7 +594,7 @@ describe('Thinking state for live sessions', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -610,7 +610,7 @@ describe('Thinking state for live sessions', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -623,7 +623,7 @@ describe('Thinking state for live sessions', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Hello world',
         sessionId: 'session-123',
       })
@@ -640,7 +640,7 @@ describe('Thinking state for live sessions', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -653,7 +653,7 @@ describe('Thinking state for live sessions', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-thinking',
         toolName: 'read',
@@ -672,7 +672,7 @@ describe('Thinking state for live sessions', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: false,
     }))
@@ -691,7 +691,7 @@ describe('Scroll follow behavior', () => {
     renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -707,7 +707,7 @@ describe('Scroll follow behavior', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -719,7 +719,7 @@ describe('Scroll follow behavior', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'New content',
         sessionId: 'session-123',
       })
@@ -736,7 +736,7 @@ describe('Scroll follow behavior', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -748,7 +748,7 @@ describe('Scroll follow behavior', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'New content',
         sessionId: 'session-123',
       })
@@ -773,7 +773,7 @@ describe('Live update convergence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -782,7 +782,7 @@ describe('Live update convergence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-converge',
         toolName: 'read',
@@ -807,7 +807,7 @@ describe('Live update convergence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-converge',
         toolName: 'read',
@@ -833,7 +833,7 @@ describe('Live update convergence', () => {
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       initialTurns,
       isRunning: true,
     }))
@@ -842,7 +842,7 @@ describe('Live update convergence', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'First text',
         sessionId: 'session-123',
       })
@@ -852,7 +852,7 @@ describe('Live update convergence', () => {
       dispatchAgentEvent('coder_tool_call', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         sessionId: 'session-123',
         toolCallId: 'tc-order-1',
         toolName: 'read',
@@ -865,7 +865,7 @@ describe('Live update convergence', () => {
       dispatchAgentEvent('coder_text_chunk', {
         issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
-        runtimeSessionId: 'acp-123',
+        runtimeSessionId: 'runtime-123',
         text: 'Second text',
         sessionId: 'session-123',
       })

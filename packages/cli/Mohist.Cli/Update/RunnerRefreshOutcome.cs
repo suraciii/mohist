@@ -79,7 +79,7 @@ internal sealed record RunnerIdentityView(
 /// </summary>
 internal sealed class RunnerRefreshVerifier
 {
-    private static readonly TimeSpan RunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan DefaultRunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
     private static readonly string RunnerDistBuildInfoRelativePath = Path.Combine("packages", "runner", "dist", "build-info.json");
 
     private readonly HttpClient _http;
@@ -87,19 +87,25 @@ internal sealed class RunnerRefreshVerifier
     private readonly IFileSystem _fileSystem;
     private readonly Func<string?> _getLocalHostname;
     private readonly TimeSpan _runnerIdentityTimeout;
+    private readonly TimeSpan _runnerIdentityPollInterval;
+    private readonly TimeProvider _timeProvider;
 
     public RunnerRefreshVerifier(
         HttpClient http,
         ICommandExecutor commandExecutor,
         IFileSystem fileSystem,
         Func<string?>? getLocalHostname = null,
-        TimeSpan? runnerIdentityTimeout = null)
+        TimeSpan? runnerIdentityTimeout = null,
+        TimeSpan? runnerIdentityPollInterval = null,
+        TimeProvider? timeProvider = null)
     {
         _http = http;
         _commandExecutor = commandExecutor;
         _fileSystem = fileSystem;
         _getLocalHostname = getLocalHostname ?? (() => Environment.MachineName);
         _runnerIdentityTimeout = runnerIdentityTimeout ?? TimeSpan.FromSeconds(30);
+        _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public void WriteSkippedSummary(string reason, TextWriter output, TextWriter error)
@@ -116,18 +122,26 @@ internal sealed class RunnerRefreshVerifier
             return new RunnerRefreshOutcome.UnknownIdentity("local hostname is unavailable; cannot identify local runner");
         }
 
-        using var cts = new CancellationTokenSource(_runnerIdentityTimeout);
+        using var cts = new CancellationTokenSource();
+        using var timeoutTimer = StartTimeoutTimer(cts, _runnerIdentityTimeout);
         RunnerIdentityView? identity = null;
         while (!cts.IsCancellationRequested)
         {
-            identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
+            try
+            {
+                identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                break;
+            }
             if (identity is not null)
                 break;
             try
             {
-                await Task.Delay(RunnerIdentityPollInterval, cts.Token);
+                await Task.Delay(_runnerIdentityPollInterval, _timeProvider, cts.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
                 break;
             }
@@ -245,6 +259,26 @@ internal sealed class RunnerRefreshVerifier
         {
             return null;
         }
+    }
+
+    private ITimer? StartTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            cts.Cancel();
+            return null;
+        }
+
+        return _timeProvider.CreateTimer(static state =>
+        {
+            try
+            {
+                ((CancellationTokenSource)state!).Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }, cts, timeout, Timeout.InfiniteTimeSpan);
     }
 
     private static RunnerIdentityView ReadRunnerIdentityView(JsonElement data)

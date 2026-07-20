@@ -87,7 +87,7 @@ function makeTurn(
 function makeSessionDetail(turns: SessionTurn[]): CoderSessionDetail {
   return {
     id: 'session-1',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     executionId: 'exec-1',
     taskDescription: 'Test task',
     status: 'completed',
@@ -99,7 +99,7 @@ function makeSessionDetail(turns: SessionTurn[]): CoderSessionDetail {
     title: 'Test Session',
     metadata: {
       sessionId: 'session-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       executionId: 'exec-1',
       title: 'Test Session',
       status: 'completed',

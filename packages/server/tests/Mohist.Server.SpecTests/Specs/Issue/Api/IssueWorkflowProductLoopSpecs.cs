@@ -130,7 +130,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         var patched = await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
-            new { vars = new { agent = new { type = "opencode", model = "kimi/k2", timeout = 1200 } } });
+            new { vars = new { agent = new { model = "kimi/k2" } } });
         Assert.NotNull(patched.Vars);
 
         var firstWork = await PollWorkAnyAsync();
@@ -138,9 +138,8 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         Assert.NotNull(firstWork.Variables);
         using var doc = JsonDocument.Parse(firstWork.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("kimi/k2", agent.GetProperty("model").GetString());
-        Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
     }
 
     [Fact]
@@ -156,8 +155,8 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
             new
             {
-                vars = new { agent = new { type = "opencode", model = "issue/default-model", timeout = 1200 } },
-                stages = new { plan = new { vars = new { agent = new { type = "opencode", model = "issue/plan-model" } } } }
+                vars = new { agent = new { model = "issue/default-model" } },
+                stages = new { plan = new { vars = new { agent = new { model = "issue/plan-model" } } } }
             });
 
         var detail = await _client.GetDataAsync<ProductLoopIssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
@@ -189,7 +188,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
-            new { vars = new { agent = new { type = "opencode", model = "project/model-new", timeout = 1500 } } });
+            new { vars = new { agent = new { model = "project/model-new" } } });
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
             new { stages = new { build = new { vars = new { agent = new { model = "project/build-model" } } } } });
@@ -216,9 +215,8 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         using var doc = JsonDocument.Parse(build.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("project/build-model", agent.GetProperty("model").GetString());
-        Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
     [Fact]
@@ -236,7 +234,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         // Project is configured with model A BEFORE the issue is started.
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
-            new { vars = new { agent = new { type = "opencode", model = "old-coding/legacy" } } });
+            new { vars = new { agent = new { model = "old-coding/legacy" } } });
 
         var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Live project config propagation", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
@@ -253,7 +251,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         // Project model changed to B AFTER the issue is already running.
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
-            new { vars = new { agent = new { type = "opencode", model = "deepseek/deepseek-v4-pro" } } });
+            new { vars = new { agent = new { model = "deepseek/deepseek-v4-pro" } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
@@ -300,7 +298,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
-            new { vars = new { agent = new { type = "opencode", model = "project/default-model", timeout = 1500 } } });
+            new { vars = new { agent = new { model = "project/default-model" } } });
         await _client.PatchDataAsync<ProductLoopProjectVariablesDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
             new { stages = new { build = new { vars = new { agent = new { model = "minimax-coding-plan/MiniMax-M3" } } } } });
@@ -325,9 +323,8 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
         using var doc = JsonDocument.Parse(build.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("type", out _));
         Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
-        Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
     [Fact]

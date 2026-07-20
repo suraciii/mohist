@@ -61,7 +61,7 @@ public class WorkflowProjectionTests
                             Attempt = 1,
                             Title = "Generate proposal",
                             Status = TaskRunStatus.Completed,
-                            Uses = "mohist/acp-agent",
+                            Uses = "mohist/opencode",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"session": "plan"}
                                 """),
@@ -149,7 +149,7 @@ public class WorkflowProjectionTests
                     Attempt = 1,
                     Title = "Generate proposal",
                     Status = TaskRunStatus.Completed,
-                    Uses = "mohist/acp-agent",
+                    Uses = "mohist/opencode",
                     RequiredFiles =
                     [
                         new WorkflowTaskRequiredFile("proposal.md", "task-expect", true, null)
@@ -230,8 +230,8 @@ public class WorkflowProjectionTests
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("t1", "Failed task", "mohist/acp-agent", "failed", null, TaskClassification.UserFacing),
-                        new TaskStatusView("t2", "Pending task", "mohist/acp-agent", "pending", null, TaskClassification.UserFacing)
+                        new TaskStatusView("t1", "Failed task", "mohist/opencode", "failed", null, TaskClassification.UserFacing),
+                        new TaskStatusView("t2", "Pending task", "mohist/opencode", "pending", null, TaskClassification.UserFacing)
                     ],
                     Checks: [],
                     ApprovalStatus: null,
@@ -311,7 +311,7 @@ public class WorkflowProjectionTests
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("review.1", "Prepare review", "mohist/acp-agent", "completed", null, TaskClassification.UserFacing)
+                        new TaskStatusView("review.1", "Prepare review", "mohist/opencode", "completed", null, TaskClassification.UserFacing)
                     ],
                     Checks:
                     [
@@ -378,7 +378,7 @@ public class WorkflowProjectionTests
                             Attempt = 1,
                             Title = "Generate proposal",
                             Status = TaskRunStatus.Completed,
-                            Uses = "mohist/acp-agent",
+                            Uses = "mohist/opencode",
                             WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
                                 {"session": "plan"}
                                 """),
@@ -398,7 +398,7 @@ public class WorkflowProjectionTests
                             Attempt = 1,
                             Title = "Sync spec",
                             Status = TaskRunStatus.Running,
-                            Uses = "mohist/acp-agent",
+                            Uses = "mohist/opencode",
                             RequiredFiles = null,
                             Classification = TaskClassification.UserFacing
                         }
@@ -422,7 +422,7 @@ public class WorkflowProjectionTests
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("user.1", "User task", "mohist/acp-agent", "running", null, TaskClassification.UserFacing),
+                        new TaskStatusView("user.1", "User task", "mohist/opencode", "running", null, TaskClassification.UserFacing),
                         new TaskStatusView("orch.1", "Internal orch", "core/script", "running", null, TaskClassification.Orchestration)
                     ],
                     Checks: [],
@@ -489,7 +489,7 @@ public class WorkflowProjectionTests
         };
 
         var task = new TaskStatusView(
-            "ai-review.1", "AI review", "mohist/acp-agent", "completed",
+            "ai-review.1", "AI review", "mohist/opencode", "completed",
             null, TaskClassification.UserFacing, SessionName: null, ArtifactSummaries: summaries);
 
         Assert.NotNull(task.ArtifactSummaries);

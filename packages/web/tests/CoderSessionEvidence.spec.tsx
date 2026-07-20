@@ -125,7 +125,7 @@ function baseCompletedMetadata(overrides: Record<string, unknown> = {}) {
   return {
     id: 'agent-session-1',
     sessionName: 'build',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     runtime: 'opencode',
     title: 'Build session',
     status: 'completed',
@@ -193,7 +193,7 @@ function setupDefaultMocks() {
       id: 'agent-session-1',
       sessionName: 'build',
       workflowRunId: 'wr-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       runtime: 'opencode',
       projectId: 'test-project',
       issueNumber: 123,

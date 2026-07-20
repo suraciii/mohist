@@ -268,7 +268,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var selfReviewTask = plan.Tasks.Single(t => t.Id == "self-review");
         Assert.NotNull(selfReviewTask.Recovery);
-        Assert.Equal("output.output.promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
+        Assert.Equal("output.promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
 
         var health = plan.Checks.Single(c => c.Name == "health");
         Assert.Equal("core/script", health.Uses);
@@ -322,7 +322,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(recovery);
         var handler = Assert.Single(recovery!.Handlers);
         Assert.True(handler.RetrySelf);
-        Assert.Equal("output.output.promise=FAIL", handler.When);
+        Assert.Equal("output.promise=FAIL", handler.When);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
         Assert.Equal("mohist/opencode", fixReviewFindings.Uses);

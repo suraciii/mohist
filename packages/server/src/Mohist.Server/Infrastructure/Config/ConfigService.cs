@@ -115,8 +115,11 @@ public class ConfigService : ISingletonService
 
     /// <summary>
     /// Returns the global default agent configuration read from the <c>agent</c>
-    /// object in <c>config.jsonc</c>, or <c>null</c> if no <c>agent</c> object
-    /// is configured.
+    /// object in <c>config.jsonc</c>, projected down to the converged
+    /// <c>{model, variant}</c> whitelist so legacy runtime/liveness keys never
+    /// enter <c>vars.agent</c> from this write path. Returns <c>null</c>
+    /// when no <c>agent</c> object is configured or when no allowed key
+    /// survives the projection.
     /// </summary>
     public Task<Dictionary<string, object?>?> GetAgentConfigAsync()
     {
@@ -129,7 +132,7 @@ public class ConfigService : ISingletonService
         try
         {
             var agentConfig = JSON.Deserialize<Dictionary<string, object?>>(agentJson);
-            return Task.FromResult<Dictionary<string, object?>?>(agentConfig);
+            return Task.FromResult<Dictionary<string, object?>?>(AgentConfigSchema.Filter(agentConfig));
         }
         catch
         {

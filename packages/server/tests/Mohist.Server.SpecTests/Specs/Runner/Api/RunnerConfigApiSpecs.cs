@@ -221,7 +221,10 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");
         Assert.Equal(string.Empty, body.GetProperty("workflowRunId").GetString());
         Assert.Equal(workId, body.GetProperty("workId").GetString());
-        Assert.Equal("mohist/acp-agent", body.GetProperty("uses").GetString());
+        // AgentJob dispatches no longer carry a `Uses` selector — the
+        // runner routes on `ownerKind === "agent-job"`, never on the
+        // Workflow Action contract (#410 T-001 D1/D2).
+        Assert.False(body.TryGetProperty("uses", out _));
         Assert.Equal("agent-job", body.GetProperty("workType").GetString());
         Assert.Equal("agent", body.GetProperty("stage").GetString());
         Assert.Equal("Agent Job", body.GetProperty("title").GetString());

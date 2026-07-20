@@ -409,7 +409,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 {
                     var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
                     await workflow.AddTasksAsync(new AddTasksBatchRequest([
-                        new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+                        new AddTasksBatchItem("build-1", "Build task", "mohist/opencode")
                     ]));
                 }
                 await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");

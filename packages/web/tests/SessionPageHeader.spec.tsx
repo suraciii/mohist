@@ -113,7 +113,7 @@ describe('SessionPage header and states', () => {
   function makeMockSession() {
     return {
       id: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
       status: 'completed',
@@ -129,7 +129,7 @@ describe('SessionPage header and states', () => {
   function makeMockMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
     return {
       sessionId: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       executionId: 'exec-123',
       title: 'Test Session',
       status: 'completed',
@@ -149,7 +149,7 @@ describe('SessionPage header and states', () => {
   function makeMockDetail(overrides: Partial<{ id: string; metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
     return {
       id: 'session-123',
-      runtimeSessionId: 'acp-123',
+      runtimeSessionId: 'runtime-123',
       executionId: 'exec-123',
       taskDescription: 'Test task',
       status: 'completed',

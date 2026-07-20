@@ -84,7 +84,6 @@ describe('LiveTaskProvider transcript routing', () => {
       runtime: 'opencode',
       text: 'working',
     })
-    expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')
     expect(unwrapped?.detail).not.toHaveProperty('coderSessionId')
   })
 })

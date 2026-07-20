@@ -65,7 +65,7 @@ function makeSession(overrides: SessionOverrides = {}): CoderSessionItem {
   const { inputTokens, outputTokens, costAmount, costCurrency, ...rest } = overrides
   return {
     id: 'session-1',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     executionId: null,
     taskDescription: null,
     status: 'running',
@@ -212,7 +212,7 @@ describe('CoderSessionItem type contract', () => {
   it('CoderSessionItem includes all summary fields', () => {
     const session = makeSession({
       id: 'test-id',
-      runtimeSessionId: 'acp-test',
+      runtimeSessionId: 'runtime-test',
       executionId: 'exec-1',
       taskDescription: 'Test task',
       status: 'completed',
@@ -229,7 +229,7 @@ describe('CoderSessionItem type contract', () => {
     })
 
     expect(session.id).toBe('test-id')
-    expect(session.runtimeSessionId).toBe('acp-test')
+    expect(session.runtimeSessionId).toBe('runtime-test')
     expect(session.executionId).toBe('exec-1')
     expect(session.taskDescription).toBe('Test task')
     expect(session.status).toBe('completed')

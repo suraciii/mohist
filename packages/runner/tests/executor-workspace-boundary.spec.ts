@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ActionRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
-import { WorkExecutor } from "../src/runtime/executor.js"
+import { WorkExecutor, baseContext } from "../src/runtime/executor.js"
+import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
+import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/types.js"
 import { createTestTempDir } from "./support/temp-dir.js"
 
 const nonGitRunner: GitRunner = async () => ({
@@ -31,12 +34,13 @@ describe("workspace preparation across stages", () => {
     } as unknown as WorkspaceManager
 
     const executor = new WorkExecutor(
-      buildRegistry(async () => ({ output: "agent ran" })),
+      buildRegistry(async () => ({ output: "should-not-reach" })),
       recordingManager,
       connection() as never,
-      {} as never,
-      null,
       "/runner",
+      undefined,
+      fakeRuntime() as never,
+      new AgentJobExecutor(connection() as never, fakeRuntime() as never),
     )
 
     const result = await executor.execute(
@@ -45,7 +49,6 @@ describe("workspace preparation across stages", () => {
     )
 
     expect(result.status).toBe("completed")
-    expect(result.output).toBe("agent ran")
     expect(recorded).toEqual({ prepare: 0 })
   })
 
@@ -70,8 +73,6 @@ describe("workspace preparation across stages", () => {
       buildRegistry(async () => ({ output: "should not run" })),
       failingManager,
       connection() as never,
-      {} as never,
-      null,
       "/runner",
     )
 
@@ -81,6 +82,27 @@ describe("workspace preparation across stages", () => {
     )
     expect(result.status).toBe("failed")
     expect(result.message).toContain("workspace preparation timed out")
+  })
+})
+
+describe("execution context runtime wiring", () => {
+  it("passes the OpenCode runtime to AgentJob contexts", () => {
+    const runtime = fakeRuntime()
+    const context = baseContext(
+      {
+        workflowRunId: "",
+        workId: "agent-work",
+        workType: "task",
+        ownerKind: "agent-job",
+      },
+      {},
+      new AbortController().signal,
+      {} as never,
+      null,
+      runtime,
+    )
+
+    expect(context.openCodeRuntime).toBe(runtime)
   })
 })
 
@@ -121,8 +143,10 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
     workType: "task",
     stage: "agent-job",
     title: "agent-job dispatch",
-    uses: "core/script",
-    with: { run: "echo ok" },
+    // After #410 T-001, AgentJob dispatches carry a flat
+    // `{ prompt, instructions?, model?, variant? }` payload — no
+    // `Uses` selector and no `core/script` Action shape.
+    with: { prompt: "echo ok" },
     variables: {
       mohist: { runId: workflowRunId },
       workspace: { path: suppliedPath, branch: null, changeDir: null },
@@ -139,4 +163,26 @@ function buildRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): 
   registry.register("core/script", async (ctx) => handler(ctx))
   registry.register("mohist/rebase", async (ctx) => handler(ctx))
   return registry
+}
+
+function fakeRuntime(): OpenCodeRuntime {
+  const runtime: Partial<OpenCodeRuntime> = {
+    ready: () => true,
+    diagnostic: () => null,
+    async runTurn(_request, _signal): Promise<RuntimeResult<RuntimeTurnResult>> {
+      return {
+        ok: true,
+        value: {
+          facts: {
+            finalAssistantText: "agent ran",
+            runtimeSessionId: "ses_fake",
+            workDir: "/runner",
+          },
+          diagnostics: [],
+        },
+        diagnostics: [],
+      }
+    },
+  }
+  return runtime as OpenCodeRuntime
 }

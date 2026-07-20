@@ -5,24 +5,34 @@
 // followup handler can be wired up independently of the other push
 // handlers.
 //
+// Issue-410 T-003 / design D3: the followup handler no longer calls a
+// live `ClientSideConnection.prompt`. It resolves the target through
+// the persisted binding (the same source the Workflow path already
+// uses) and dispatches the prompt through `OpenCodeRuntime.followup`.
+// The handler's `FollowupTarget` shape is a Mohist-owned value object
+// `{ runtimeSessionId, workDir, projectId }` — no live RPC surface is
+// held by the runner host.
+//
 // Behaviour is byte-identical to the inline implementation:
 //   - drops silently on null / missing payload, missing/empty text, no
-//     resolver, no server connection, resolver returning null, resolver
-//     throwing (logged)
+//     resolver, no server connection, no runtime, resolver returning
+//     null, resolver throwing (logged), runtime returning
+//     `unavailable-runtime` (the existing unavailable taxonomy)
 //   - branches on `target.kind` to pick the runtime-events endpoint:
 //     workflow → `workflowAgentSessionRuntimeEvents`;
 //     generic  → `agentSessionRuntimeEvents`
 //   - emits a `session.input` runtime event tagged with
 //     `kind: "followup" / role: "user" / source: "followup"` on the
-//     resolved `runtimeSessionId` — non-awaited, rejection logged but does
-//     NOT block the prompt
-//   - issues `connection.prompt(...)` exactly once, fire-and-forget:
-//     `target.connection.prompt(...)` is awaited only by `.catch(...)`,
+//     resolved `runtimeSessionId` — non-awaited, rejection logged but
+//     does NOT block the prompt
+//   - calls `runtime.followup(...)` exactly once, fire-and-forget:
 //     the handler returns before the prompt resolves, and a prompt
 //     rejection is logged rather than thrown
+//   - records the terminal outcome (`completed` / `failed`) via the
+//     followup failure outbox when an `operationId` is supplied
 //   - legacy top-level `workflowRunId` / `sessionName` fallback via
-//     `resolveSessionTarget` (T-004) — an empty `projectId` still routes
-//     to the workflow followup path
+//     `resolveSessionTarget` (T-004) — an empty `projectId` still
+//     routes to the workflow followup path
 
 import * as signalR from "@microsoft/signalr"
 import type { ServerConnection } from "./connection.js"
@@ -33,14 +43,16 @@ import {
   type FollowupTargetResolver,
   type ReceiveFollowupPayload,
   isFollowupTargetUnavailable,
+  type SessionTarget,
 } from "./session-target.js"
-import type { SessionTarget } from "../runtime/acp-connection.js"
 import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
+import type { OpenCodeRuntime, RuntimeFollowupRequest } from "../runtime/opencode/index.js"
 
 export interface FollowupHandlerDeps {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
   followupFailureOutbox?: FollowupFailureOutboxStore | null
+  openCodeRuntime?: OpenCodeRuntime | null
 }
 
 export interface FollowupDeliveryResult {
@@ -63,7 +75,12 @@ async function handleFollowup(
   if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return unavailable()
   const serverConnection = deps.serverConnection ?? null
   const resolver = deps.followupTargetResolver ?? null
-  if (!resolver || !serverConnection) return unavailable()
+  const runtime = deps.openCodeRuntime ?? null
+  if (!resolver || !serverConnection || !runtime) return unavailable()
+
+  if (!runtime.ready()) {
+    return unavailable()
+  }
 
   // Issue-129 T-004: branch on the discriminated `target.kind` so a
   // single handler can deliver followups to either a workflow-shaped
@@ -95,24 +112,45 @@ async function handleFollowup(
       kind: "followup",
       sentAt: new Date().toISOString(),
       ...(payload.operationId ? { operationId: payload.operationId } : {}),
-      runtimeSessionId: target.sessionId,
+      runtimeSessionId: target.runtimeSessionId,
       source: "followup",
     },
   })
 
+  const followupRequest: RuntimeFollowupRequest = {
+    target: {
+      runtime: "opencode",
+      runtimeSessionId: target.runtimeSessionId,
+      workDir: target.workDir,
+    },
+    prompt: payload.text,
+  }
   try {
-    void target.connection.prompt({
-      sessionId: target.sessionId,
-      prompt: [{ type: "text", text: payload.text }],
-    }).then(
-      () => recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "completed", null),
+    void runtime.followup(followupRequest).then(
+      (result) => {
+        if (!result.ok && result.error.kind === "unavailable-runtime") {
+          console.error("followup runtime unavailable:", result.error.message)
+          recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", result.error.message)
+          return
+        }
+        if (!result.ok && result.error.kind === "missing-session") {
+          recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", result.error.message)
+          return
+        }
+        if (!result.ok) {
+          console.error("followup runtime rejected:", result.error.message)
+          recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", result.error.message)
+          return
+        }
+        recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "completed", null)
+      },
       (error) => {
-        console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+        console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
         recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
       },
     )
   } catch (error) {
-    console.error("followup connection.prompt threw:", error instanceof Error ? error.message : String(error))
+    console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
     recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
     return unavailable()
   }
@@ -135,7 +173,7 @@ function recordFollowupTerminal(
     void outbox.record({
       operationId,
       target: sessionTarget,
-      runtimeSessionId: target.sessionId,
+      runtimeSessionId: target.runtimeSessionId,
       status,
       error: message,
       completedAt,
@@ -152,7 +190,7 @@ function recordFollowupTerminal(
       ...(message ? { failureReason: message } : {}),
       source: "followup",
       operationId,
-      runtimeSessionId: target.sessionId,
+      runtimeSessionId: target.runtimeSessionId,
       completedAt,
     },
   })
@@ -177,14 +215,14 @@ function emitFollowupEvent(
       target.projectId,
       sessionTarget.workflowRunId!,
       sessionTarget.sessionName!,
-      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.runtimeSessionId, runtimeEvents },
       signal,
     ).catch(onError)
   } else {
     void serverConnection.agentSessionRuntimeEvents(
       target.projectId,
       sessionTarget.sessionId,
-      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.runtimeSessionId, runtimeEvents },
       signal,
     ).catch(onError)
   }

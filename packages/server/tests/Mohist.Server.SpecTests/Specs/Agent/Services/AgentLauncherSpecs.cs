@@ -405,7 +405,7 @@ public class AgentLauncherSpecs
                 name,
                 description = $"description for {name}",
                 instructions = $"instructions for {name}",
-                agentConfig = new { type = "opencode" },
+                agentConfig = new { model = "openai/gpt-5.6" },
                 skills = new[] { "coding" },
                 maxConcurrentRuns = 1,
             });

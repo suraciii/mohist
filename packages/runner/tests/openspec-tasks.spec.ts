@@ -497,7 +497,7 @@ describe("mohist/openspec-tasks", () => {
     // T-004 acceptance: when the profile (and the task itself) does
     // not declare a `uses`, the loader MUST default to `mohist/opencode`
     // (the canonical Action for the new contract). The previous
-    // default was `mohist/acp-agent`.
+    // default was `mohist/opencode`.
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({

@@ -1,19 +1,15 @@
-import type { JsonObject, RunnerOptions, RunnerRegistration } from "../core/types.js"
+import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
-import {
-  RunnerSignalRClient,
-  type SessionCommandRequest,
-} from "../server/runner-signalr.js"
+import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
-import { SessionCommandJournal } from "./session-command-journal.js"
-import { executeAcpSessionCommand } from "./acp-session-command.js"
 import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
+import { AgentJobExecutor } from "./agent-job-executor.js"
 import { TaskLogCollector } from "./task-log.js"
 import {
   getOpenCodeRuntimeFactory,
@@ -21,16 +17,15 @@ import {
   type RuntimeModelCatalog,
   type RuntimeModelDescriptor,
 } from "./opencode/index.js"
-import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
-import { ToolCallIdGenerator, genericSessionEventType, normalizeSessionUpdate } from "../actions/acp/session-events.js"
 import {
   FOLLOWUP_TARGET_UNAVAILABLE,
+  type FollowupTarget,
   type FollowupTargetResolution,
+  type SessionTarget,
 } from "../server/session-target.js"
-import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk"
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -62,9 +57,6 @@ interface AwaitingAckEntry {
   retryAt: number | null
 }
 
-type RestoredSessionTarget = { sessionId: string; workDir: string }
-type RestoreResult = RestoredSessionTarget | null | "unavailable"
-
 /**
  * Builds the work key used to dedupe in-flight / awaiting-ack tracking.
  * `ownerKind:ownerId:workId`. The ownerId is the agentJobId for agent-job
@@ -91,7 +83,6 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
-  private readonly sessionCommandJournal: SessionCommandJournal
   private readonly followupFailureOutbox: FollowupFailureOutbox
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
@@ -116,15 +107,10 @@ export class RunnerHost {
   // immediate heartbeat it triggers.
   private activeSignal: AbortSignal | null = null
 
-  // Step 10 of design/eventbus.md: AcpSessionManager and
-  // SharedAcpConnection are created once per host (not per work item).
-  // The previous design recreated them for every executeAndReport call,
-  // so AcpSessionManager's cross-task cache was always cold and
-  // SharedAcpConnection's session-resume path was never reachable.
-  private sessionManager: AcpSessionManager = new AcpSessionManager()
-  private sharedAcpConnection: SharedAcpConnection | null = null
+  // Step 10 of design/eventbus.md: WorkExecutor is created once per host
+  // (not per work item). The previous design recreated it for every
+  // executeAndReport call, so shared lifecycle state was always cold.
   private workExecutor: WorkExecutor | null = null
-  private readonly sessionRestorations = new Map<string, Promise<RestoreResult>>()
 
   // Process-lifetime reported set (see workKey/InFlightEntry doc above).
   // These Maps outlive poll exceptions and reconnects: a work enters
@@ -150,7 +136,6 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
-    this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupFailureOutbox = new FollowupFailureOutbox(options.runnerRoot)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
@@ -172,149 +157,27 @@ export class RunnerHost {
         serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         followupFailureOutbox: this.followupFailureOutbox,
-        sessionCommandHandler: (request) => this.handleSessionCommand(request),
-        sessionCommandJournal: this.sessionCommandJournal,
-        reconcileStartedSessionCommand: (request) => this.reconcileStartedSessionCommand(request),
         registry: this.workspaceRegistry,
+        openCodeRuntime: () => this.openCodeRuntime,
       },
     )
   }
 
-  private handleSessionCommand(request: SessionCommandRequest) {
-    return executeAcpSessionCommand(request, this.sharedAcpConnection?.connection ?? null)
-  }
-
-  private reconcileStartedSessionCommand(_request: SessionCommandRequest) {
-    return { state: "indeterminate" } as const
-  }
-
-  // Issue-129 T-004: branches on `target.kind` so the same resolver
-  // services both the issue-scoped followup route (workflow-shaped) and
-  // the new generic AgentSession followup route. Workflow keys use the
-  // `workflow:` prefix; generic keys use the `generic:` prefix (T-002).
-  // On a cache miss, a current persisted binding lets the runner restore
-  // the ACP session before delivering a followup or cancellation.
-  private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution | Promise<FollowupTargetResolution> {
-    const sharedConnection = this.sharedAcpConnection
-    if (!sharedConnection) return FOLLOWUP_TARGET_UNAVAILABLE
-    const key = target.kind === "workflow"
-      ? this.sessionManager.workflowKey(target.workflowRunId, target.sessionName)
-      : this.sessionManager.genericKey(target.sessionId)
+  private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution {
     if (this.options.projectId && this.options.projectId !== target.projectId) return null
-    if (target.binding?.runnerId !== undefined && target.binding.runnerId !== this.options.runnerId) return null
-
-    const cached = this.sessionManager.get(key)
-    if (cached && (!target.binding || cached.sessionId === target.binding.runtimeSessionId)) {
-      return { connection: sharedConnection.connection, sessionId: cached.sessionId, projectId: target.projectId }
+    const binding = target.binding ?? null
+    if (!binding) return null
+    if (binding.runtime.toLowerCase() !== "opencode") return null
+    if (binding.runnerId !== this.options.runnerId) return null
+    if (!binding.runtimeSessionId) return null
+    if (!binding.workDir) return null
+    if (!this.isOpenCodeReadyForClaim()) return FOLLOWUP_TARGET_UNAVAILABLE
+    const resolved: FollowupTarget = {
+      runtimeSessionId: binding.runtimeSessionId,
+      workDir: binding.workDir,
+      projectId: target.projectId,
     }
-    if (!target.binding) return null
-
-    return this.restoreSessionTarget(key, target, target.binding, sharedConnection)
-      .then((entry) => entry === "unavailable"
-        ? FOLLOWUP_TARGET_UNAVAILABLE
-        : entry
-          ? { connection: sharedConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
-          : null)
-  }
-
-  private async restoreSessionTarget(
-    key: string,
-    target: SessionTarget,
-    binding: NonNullable<SessionTarget["binding"]>,
-    sharedConnection: SharedAcpConnection,
-  ): Promise<RestoreResult> {
-    if (binding.runtime.toLowerCase() !== "opencode" || binding.runnerId !== this.options.runnerId) return null
-
-    const existing = this.sessionRestorations.get(key)
-    if (existing) {
-      const entry = await existing
-      return entry === "unavailable" || entry?.sessionId === binding.runtimeSessionId ? entry : null
-    }
-
-    const restoration = this.resumeSessionTarget(key, target, binding, sharedConnection)
-    this.sessionRestorations.set(key, restoration)
-    try {
-      return await restoration
-    } finally {
-      this.sessionRestorations.delete(key)
-    }
-  }
-
-  private async resumeSessionTarget(
-    key: string,
-    target: SessionTarget,
-    binding: NonNullable<SessionTarget["binding"]>,
-    sharedConnection: SharedAcpConnection,
-  ): Promise<RestoreResult> {
-    if (binding.workDir === null) return null
-    const previous = this.sessionManager.get(key)
-    if (previous && previous.sessionId !== binding.runtimeSessionId) {
-      this.sessionManager.delete(key)
-      sharedConnection.clearSessionHandlers(previous.sessionId)
-    }
-
-    try {
-      const outcome = await resumeWithin(
-        sharedConnection.connection.resumeSession({
-        sessionId: binding.runtimeSessionId,
-        cwd: binding.workDir,
-        mcpServers: [],
-        }),
-        RESTORED_SESSION_RESUME_TIMEOUT_MS,
-      )
-      if (outcome === "timeout") return "unavailable"
-      if (outcome === "failed") return null
-
-      const entry = { sessionId: binding.runtimeSessionId, workDir: binding.workDir }
-      this.installRestoredSessionHandlers(target, binding, sharedConnection)
-      this.sessionManager.set(key, entry)
-      return entry
-    } catch {
-      sharedConnection.clearSessionHandlers(binding.runtimeSessionId)
-      this.sessionManager.delete(key)
-      return null
-    }
-  }
-
-  private installRestoredSessionHandlers(
-    target: SessionTarget,
-    binding: NonNullable<SessionTarget["binding"]>,
-    sharedConnection: SharedAcpConnection,
-  ): void {
-    const toolIds = new ToolCallIdGenerator()
-    sharedConnection.setSessionHandlers(
-      binding.runtimeSessionId,
-      async (notification: SessionNotification) => {
-        const update = normalizeSessionUpdate(
-          notification.update as unknown as JsonObject,
-          binding.runtimeSessionId,
-          toolIds,
-        )
-        const body = {
-          workId: null,
-          workType: null,
-          stage: null,
-          runtimeSessionId: binding.runtimeSessionId,
-          runtimeEvents: [{ type: genericSessionEventType(notification.update.sessionUpdate, update), payload: update }],
-        }
-        const signal = new AbortController().signal
-        if (target.kind === "workflow") {
-          await this.connection.workflowAgentSessionRuntimeEvents(
-            target.projectId,
-            target.workflowRunId,
-            target.sessionName,
-            body,
-            signal,
-          )
-          return
-        }
-        await this.connection.agentSessionRuntimeEvents(target.projectId, target.sessionId, body, signal)
-      },
-      async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
-        const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
-        return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
-      },
-    )
+    return resolved
   }
 
   async run(signal: AbortSignal) {
@@ -330,7 +193,6 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
-      await this.sessionCommandJournal.load()
       // The OpenCode runtime must be initialized BEFORE we connect to
       // the server so the first `RunnerRegistration` already carries
       // the runtime-loaded catalog (`coderModels` /
@@ -441,14 +303,10 @@ export class RunnerHost {
   }
 
   private async initializeSharedConnection(signal: AbortSignal) {
-    if (this.sharedAcpConnection !== null) return;
-    // Construct the shared OpenCode runtime BEFORE the shared ACP
-    // connection so the runner's readiness gate and registration
-    // catalog are populated even when the ACP connection fails
-    // initially (the per-work-item fallback path uses the same
-    // runtime handle). The factory seam returns a real
-    // `OpenCodeRuntime` (production) or a fake the test injected via
-    // `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
+    if (this.workExecutor !== null) return
+    // Construct the shared OpenCode runtime. The factory seam returns a
+    // real `OpenCodeRuntime` (production) or a fake the test injected
+    // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
     // check + catalog load and only flips `ready()` true after both
     // pass; until then the host's `pollOnce` gate keeps the runner
     // from claiming work.
@@ -460,33 +318,19 @@ export class RunnerHost {
     if (!startResult.ok) {
       console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
     }
-    try {
-      this.sharedAcpConnection = await createSharedAcpConnection(process.cwd())
-      this.workExecutor = new WorkExecutor(
-        createDefaultRegistry(),
-        this.workspace,
-        this.connection,
-        this.sessionManager,
-        this.sharedAcpConnection,
-        undefined,
-        undefined,
-        this.openCodeRuntime,
-      )
-      console.log("runner ACP connection established (per-host, shared across work items)")
-    } catch (error) {
-      console.error("failed to start shared ACP connection:", error)
-    }
+    this.workExecutor = new WorkExecutor(
+      createDefaultRegistry(),
+      this.workspace,
+      this.connection,
+      undefined,
+      undefined,
+      this.openCodeRuntime,
+      new AgentJobExecutor(this.connection, this.openCodeRuntime),
+    )
   }
 
   private async shutdownSharedConnection() {
-    if (this.sharedAcpConnection === null) return;
-    try {
-      await this.sharedAcpConnection.shutdown()
-    } catch { /* best effort */ }
-    this.sharedAcpConnection = null
     this.workExecutor = null
-    // Reset the session manager so the next initialize starts clean.
-    this.sessionManager = new AcpSessionManager()
     if (this.openCodeRuntime !== null) {
       try {
         await this.openCodeRuntime.shutdown()
@@ -510,8 +354,7 @@ export class RunnerHost {
       // readiness diagnostic — but it still drains `awaitingAck`
       // reports (the line above) and respects the existing poll
       // cadence so a recovered runtime resumes claiming on the next
-      // tick. One gate also pauses AgentJob work still on ACP until
-      // #410 (design D3, transitional scope).
+      // tick.
       if (!this.isOpenCodeReadyForClaim()) {
         const diagnostic = this.openCodeReadinessDiagnostic()
         const now = Date.now()
@@ -832,37 +675,7 @@ export class RunnerHost {
     }
 
     if (this.workExecutor === null) {
-      // ACP connection failed to initialize at startup; fall back to the
-      // per-work-item ephemeral path so the work still attempts to run.
-      const sessionManager = new AcpSessionManager()
-      const executor = new WorkExecutor(
-        createDefaultRegistry(),
-        this.workspace,
-        this.connection,
-        sessionManager,
-        null,
-        undefined,
-        undefined,
-        this.openCodeRuntime,
-      )
-      const fallback = await createSharedAcpConnection(process.cwd())
-      try {
-        executor.updateAcpConnection(fallback)
-        const collector = new TaskLogCollector()
-        const flushTrigger = startIncrementalFlushForCollector(collector)
-        try {
-          const execution = await executor.executeWithLog(work, signal, collector)
-          execution.collector.setAppendListener(null)
-          await flushTrigger.stop()
-          await flushTaskLog(execution.collector)
-          return execution.result
-        } finally {
-          collector.setAppendListener(null)
-          await flushTrigger.stop()
-        }
-      } finally {
-        await fallback.shutdown()
-      }
+      throw new Error("WorkExecutor not initialized; runner host is shutting down")
     }
 
     // Start the incremental flush trigger alongside executeWithLog and
@@ -989,8 +802,6 @@ const REPORT_TIMEOUT_MS = 10_000
  */
 const READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS = 30_000
 
-const RESTORED_SESSION_RESUME_TIMEOUT_MS = 30_000
-
 /** Maximum time a single poll request may wait before the loop retries. */
 const POLL_TIMEOUT_MS = 10_000
 
@@ -1025,21 +836,6 @@ const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
  * interval to see its tail in the web view (design D1).
  */
 const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
-
-function resumeWithin(promise: Promise<unknown>, timeoutMs: number): Promise<"resumed" | "failed" | "timeout"> {
-  return new Promise((resolve) => {
-    let settled = false
-    const complete = (outcome: "resumed" | "failed" | "timeout") => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(outcome)
-    }
-    const timer = setTimeout(() => complete("timeout"), timeoutMs)
-    timer.unref?.()
-    promise.then(() => complete("resumed"), () => complete("failed"))
-  })
-}
 
 /**
  * Create an incremental flush trigger. The returned handle exposes

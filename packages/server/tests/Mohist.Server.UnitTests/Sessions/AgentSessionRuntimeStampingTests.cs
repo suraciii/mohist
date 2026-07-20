@@ -119,7 +119,7 @@ public class AgentSessionRuntimeStampingTests
         var absentRuntime = CreateSession(runtime: null);
         absentRuntime.Status = absentRuntime.Status with { AgentRuntimeSessionId = "legacy-session" };
         var unavailableRuntime = CreateSession("acp");
-        unavailableRuntime.Status = unavailableRuntime.Status with { AgentRuntimeSessionId = "acp-session" };
+        unavailableRuntime.Status = unavailableRuntime.Status with { AgentRuntimeSessionId = "runtime-session" };
         var availableRuntime = CreateSession("opencode");
         availableRuntime.Status = availableRuntime.Status with { AgentRuntimeSessionId = "opencode-session" };
 

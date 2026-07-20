@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
-import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import type { SessionTarget } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
@@ -25,11 +25,6 @@ const mocks = vi.hoisted(() => ({
   probeLiveness: vi.fn(async () => true),
   blockingAction: vi.fn(),
   forceReconnect: vi.fn(async () => undefined),
-  createSharedAcpConnection: vi.fn(),
-  shutdownSharedAcpConnection: vi.fn(),
-  setSessionHandlers: vi.fn(),
-  clearSessionHandlers: vi.fn(),
-  acpShutdown: vi.fn(),
 }))
 
 const {
@@ -46,15 +41,10 @@ const {
   probeLiveness,
   blockingAction,
   forceReconnect,
-  createSharedAcpConnection,
-  shutdownSharedAcpConnection,
-  setSessionHandlers,
-  clearSessionHandlers,
-  acpShutdown,
 } = mocks
 
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
-let capturedFollowupTargetResolver: ((target: SessionTarget) => { connection: unknown; sessionId: string; projectId: string } | null) | null = null
+let capturedFollowupTargetResolver: ((target: SessionTarget) => { runtimeSessionId: string; workDir: string; projectId: string } | null) | null = null
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -88,34 +78,11 @@ vi.mock("../src/actions/registry.js", () => ({
   }),
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    private sessions = new Map<string, { sessionId: string; workDir: string }>()
-    key(target: SessionTarget) { return target.kind === "workflow" ? this.workflowKey(target.workflowRunId, target.sessionName) : this.genericKey(target.sessionId) }
-    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
-    genericKey(sessionId: string) { return `generic:${sessionId}` }
-    get(key: string) { return this.sessions.get(key) }
-    set(key: string, entry: { sessionId: string; workDir: string }) { this.sessions.set(key, entry) }
-    has(key: string) { return this.sessions.has(key) }
-    delete(key: string) { this.sessions.delete(key) }
-  },
-  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
-}))
-
 beforeEach(() => {
   vi.useFakeTimers()
   installReadyRuntimeFactory()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
-  createSharedAcpConnection.mockResolvedValue({
-    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
-    processPid: 99999,
-    setSessionHandlers,
-    clearSessionHandlers,
-    shutdown: shutdownSharedAcpConnection,
-  })
-  acpShutdown.mockResolvedValue(undefined)
-  shutdownSharedAcpConnection.mockResolvedValue(undefined)
   uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
     const aborted = deferred<{ status: string; message: string }>()

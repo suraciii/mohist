@@ -394,7 +394,7 @@ public class RuntimeEntrySpecs
             null,
             metadata: metadata,
             now: now);
-        session.AttachPhysicalSession($"acp-{Guid.NewGuid():N}", null, null, null, null, now);
+        session.AttachPhysicalSession($"runtime-{Guid.NewGuid():N}", null, null, null, null, now);
         return AgentSessionJson.ToRow(session, now);
     }
 }

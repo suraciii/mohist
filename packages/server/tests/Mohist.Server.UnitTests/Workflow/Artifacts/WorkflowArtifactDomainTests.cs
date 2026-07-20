@@ -65,7 +65,7 @@ public class WorkflowArtifactDomainTests
                         new TaskDefinition(
                             Id: "design",
                             Title: "Design",
-                            Uses: "mohist/acp-agent",
+                            Uses: "mohist/opencode",
                             With: null,
                             Artifacts: new TaskArtifactCapture([
                                 new TaskArtifactDeclaration("design.md")
