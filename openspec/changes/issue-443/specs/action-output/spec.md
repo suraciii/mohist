@@ -72,20 +72,13 @@ Every built-in Action other than `core/process` SHALL return its established pub
 
 ### Requirement: Output consumers read the same structured object
 
-Task-output references, declared output capture, and recovery `when: output.*` matching SHALL read the same structured object produced by the Action and retained as the task output. These consumers MUST NOT maintain independent string-parsing or string-wrapping behavior, and whole-value task-output references SHALL preserve the referenced JSON type.
+Task-output references and recovery `when: output.*` matching SHALL read the same structured object produced by the Action and retained as the task output. These consumers MUST NOT maintain independent string-parsing or string-wrapping behavior, and whole-value task-output references SHALL preserve the referenced JSON type.
 
 #### Scenario: Later task reads core/process fields
 
 - **WHEN** task `build` completes through `core/process` with output `{ "stdout": "artifact.zip", "exitCode": 0 }`
 - **AND** a later task uses `${{ tasks.build.outputs.stdout }}` and `${{ tasks.build.outputs.exitCode }}` as whole-value references
 - **THEN** the references SHALL resolve to `"artifact.zip"` and the number `0`, respectively
-
-#### Scenario: Declared output capture reads the Action object
-
-- **WHEN** a task declares an output capture sourced from `output.prNumber`
-- **AND** its Action succeeds with output `{ "prNumber": 42 }`
-- **THEN** the captured output SHALL equal the number `42`
-- **AND** capture MUST NOT depend on parsing serialized Action output
 
 #### Scenario: Recovery matches an output field
 

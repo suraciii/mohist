@@ -1,6 +1,6 @@
 ## Context
 
-The [proposal](proposal.md) establishes the motivation, and the [action-output specification](specs/action-output/spec.md) is the normative behavior contract. Workflow Action output currently crosses the runner as `string | null`. Built-in Actions serialize objects themselves, `core/process` returns bare stdout, and `setVars`, recovery, output capture, dynamic artifact capture, the server lifecycle, and the Web UI each parse that string independently. The server eventually stores a `JsonElement?` in `TaskRun.Output`, but invalid JSON is wrapped as a JSON string and non-object values are silently omitted from `tasks.<id>.outputs`.
+The [proposal](proposal.md) establishes the motivation, and the [action-output specification](specs/action-output/spec.md) is the normative behavior contract. Workflow Action output currently crosses the runner as `string | null`. Built-in Actions serialize objects themselves, `core/process` returns bare stdout, and `setVars`, recovery, dynamic artifact capture, the server lifecycle, and the Web UI each parse that string independently. The server eventually stores a `JsonElement?` in `TaskRun.Output`, but invalid JSON is wrapped as a JSON string and non-object values are silently omitted from `tasks.<id>.outputs`.
 
 The shared result envelope also carries non-Action results: check dispatches put a serialized array in `WorkItemResult.output`, and AgentJobs put their own serialized terminal result there without crossing the Workflow Action boundary. The implementation must therefore distinguish the Action contract from the shared transport type instead of narrowing every result to an object.
 
@@ -52,11 +52,11 @@ Alternative considered: introduce separate report endpoints or a discriminated r
 
 ### 3. Remove output parsing from runner consumers
 
-`set-vars`, recovery, declared output capture, and dynamic artifact discovery receive the Action output object directly:
+`set-vars`, recovery, and dynamic artifact discovery receive the Action output object directly:
 
 - `extractSetVars` traverses the object and builds the complete Run Variables patch before issuing one PATCH request. A missing source path or `null` output returns an error before any write, preserving atomic projection.
 - Recovery constructs `{ output, error }` using the object directly; `when: output.*` and `${{ failure.output.* }}` retain their existing path and type semantics.
-- `captureOutputs` and `actionProducedArtifacts` read fields directly and contain no `JSON.parse` fallback.
+- `actionProducedArtifacts` reads fields directly and contains no `JSON.parse` fallback.
 
 The existing `RenderedWorkItem.outputs` / `capturedOutputs` path remains non-authoritative and is not wired into the server as part of this issue. `tasks.<id>.outputs` continues to mean the entire persisted task output object.
 
