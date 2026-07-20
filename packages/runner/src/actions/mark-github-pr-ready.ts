@@ -139,7 +139,7 @@ function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
 
 export function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {
   if (output.status === "completed") {
-    const { errorCode: _errorCode, message: _message, output: _output, steps, ...rest } = output
+    const { errorCode: _errorCode, message: _message, steps, ...rest } = output
     const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
     return succeed(success)
   }

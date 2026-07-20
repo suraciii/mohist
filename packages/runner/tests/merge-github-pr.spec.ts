@@ -78,6 +78,7 @@ describe("mohist/merge-github-pr action", () => {
       prUrl: "https://github.com/example/repo/pull/42",
       mergeCommitSha: "merge-sha-1",
       method: "squash",
+      output: "Merged PR #42 via squash with subject \"Use GitHub PR workflow\"",
     })
   })
 

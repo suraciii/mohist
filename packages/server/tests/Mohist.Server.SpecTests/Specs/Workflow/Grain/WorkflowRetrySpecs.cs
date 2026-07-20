@@ -204,9 +204,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // A permanently invalid recovery follow-up must not escape as a thrown
-        // exception (the runner would resend it forever). It acks and fails the
-        // run terminally with an actionable detail.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
             Output: JSON.DeserializeElement("{}"),
@@ -230,9 +227,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // An out-of-range recoveryRemaining is a permanent validation failure:
-        // validation runs before any task insertion, so the active task is the
-        // sole task and the report acks + fails the run terminally.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
             Output: JSON.DeserializeElement("{}"),
@@ -256,9 +250,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // Validation runs before any task insertion, so an invalid continuation
-        // in a batch must not insert the earlier valid task. The report acks and
-        // fails the active task terminally.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
             Output: JSON.DeserializeElement("{}"),
@@ -293,7 +284,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var ack = await workflow.ReceiveTaskReportAsync(sameRunner, first.WorkId, new TaskReport(
             first.WorkId,
             TaskReportStatus.Failed,
-            Output: JSON.DeserializeElement("stale"),
+            Output: null,
             Artifacts: null,
             Detail: "stale report"));
 

@@ -192,6 +192,7 @@ describe("mohist/create-github-pr action", () => {
       prUrl: "https://github.com/example/repo/pull/42",
       operation: "created",
       draft: true,
+      output: "https://github.com/example/repo/pull/42",
     })
   })
 

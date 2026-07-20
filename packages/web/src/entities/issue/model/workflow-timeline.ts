@@ -24,7 +24,7 @@ export interface WorkflowTimelineTask {
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
   artifactSummaries?: WorkflowArtifactSummary[]
-  output?: string | null
+  output?: Record<string, unknown> | null
   error?: import('./stage-state').WorkflowExecutionError | null
 }
 

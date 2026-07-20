@@ -172,7 +172,7 @@ describe("WorkExecutor artifact capture", () => {
     const result = await executor.execute(buildWork({ files: [{ path: "review.md" }, { path: "design.md" }] }), new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(result.output).toBe("agent done")
+    expect(result.output).toEqual({ done: true })
     expect(result.artifactUploadIds).toEqual(["artup_1", "artup_2"])
     expect(connection.uploads).toHaveLength(2)
   })

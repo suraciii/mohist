@@ -56,17 +56,20 @@
 
 ## Verification status
 
-- `packages/runner`: `npx tsc -p tsconfig.json --noEmit` passes for all changed files. `tsconfig.tests.json` typechecks pass.
-- `packages/server`: `dotnet build Mohist.sln -p:SkipWebBuild=true` now compiles (server source clean). `Mohist.Server.UnitTests` ApprovalFeedbackTests pass (36/36).
-- `packages/runner` `npm test`: only failing files are the pre-existing opencode-ai SDK ones (37 failures pre-existing on master). The one new test failure I introduced was fixed.
-- `packages/web`: typecheck not yet attempted in this task slice; the Web side changes (removing `parseTimelineTaskOutput`/`parseTaskOutput`, updating `WorkflowTimelineTask.output` to `Record<string, unknown> | null`) are pending.
+- Initial `verify.1` failed with two runner regressions, eight server specs, and the C# test-size ratchet.
+- Root causes were a stale structured-output assertion, four GitHub PR Action builders dropping their established `output` field, check-report fixtures still sending serialized arrays, invalid scalar JSON fixtures, an AgentJob HTTP fixture still sending encoded JSON text, and verbose test migrations exceeding existing size allowances.
+- Restored the four Action-owned `output` fields and added direct object assertions for create/status/ready/merge outputs.
+- Migrated Web timeline/task output to `Record<string, unknown> | null`, removed task-output and PR-delivery JSON parsing fallbacks, and added structured process/PR/null display coverage in WorkflowView and TaskProgressPanel.
+- Removed the obsolete string-output implementation gap from `design/workflow/actions.md`.
+- Focused runner verification passes: 81/81 tests across executor artifacts and all four GitHub PR Actions.
+- Focused server verification passes: the C# size ratchet and all eight originally failing specs.
+- Focused Web verification passes: typecheck and 70/70 tests across WorkflowView, TaskProgressPanel, PrDeliveryIndicator, and PR metadata extraction.
+- `git diff --check` passes after focused verification.
 
 ## Pending work before this slice can be marked complete
 
-- Web side: `WorkflowTimelineTask.output`, `TaskProgressPanel` rendering, `StageBar` rendering, `pr-delivery.ts` callers, tests.
-- design/workflow/actions.md: remove "output is still a string" gap.
-- Spec tests `Mohist.Server.SpecTests` full run.
-- Re-run all test suites (runner unit, server unit, server spec, web unit) for final acceptance.
+- Re-run the repository's full verification command; this was not started because the session received an interruption deadline.
+- Confirm the final worktree state after full verification.
 
 ## Decisions / gotchas
 

@@ -116,6 +116,7 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.isDraft).toBe(false)
     expect(parsed.expectations).toEqual(["open", "ready"])
     expect(parsed.missing).toEqual([])
+    expect(parsed.output).toBe(PR_VIEW_OPEN)
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 

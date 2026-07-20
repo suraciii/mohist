@@ -231,13 +231,13 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         await ReportAsync(
             feedbackRunner,
             feedbackTask.WorkId,
-            new WorkResult("completed", Output: JSON.DeserializeElement("agent finished without writing a summary")));
+            new WorkResult("completed", Output: JSON.DeserializeElement("""{"note":"agent finished without writing a summary"}""")));
 
         var run = await LoadRunAsync();
         var feedback = run.Feedback.Single(f => f.Id == feedbackId);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, feedback.Status);
         Assert.Equal(feedbackTask.WorkId, feedback.ResolutionTaskId);
-        Assert.Equal("agent finished without writing a summary", feedback.ResolutionSummary);
+        Assert.Null(feedback.ResolutionSummary);
     }
 
     [Fact]

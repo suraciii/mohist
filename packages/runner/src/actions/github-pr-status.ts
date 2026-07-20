@@ -94,7 +94,7 @@ function combinedGhOutput(result: { stdout: string; stderr: string }): string {
 
 function buildOutput(payload: GitHubPrStatusOutput, failureCode = "pr-status-failed"): ActionResult {
   if (payload.status === "verified") {
-    const { message: _message, output: _output, steps, ...rest } = payload
+    const { message: _message, steps, ...rest } = payload
     const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
     return succeed(success)
   }

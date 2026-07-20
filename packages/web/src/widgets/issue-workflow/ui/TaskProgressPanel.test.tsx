@@ -98,7 +98,7 @@ function makeTimeline(): WorkflowTimeline {
             durationMs: 60000,
             attempts: 1,
             message: 'Rebase failed: CONFLICT (content): Merge conflict in src/foo.ts',
-            output: JSON.stringify({ rebaseConflict: { conflictingFile: 'src/foo.ts' } }),
+            output: { rebaseConflict: { conflictingFile: 'src/foo.ts' } },
           },
           {
             id: 'build-task-2',
@@ -260,6 +260,53 @@ describe('TaskProgressPanel — task execution log panel', () => {
     expect(screen.getByText(/rebaseConflict/)).toBeInTheDocument()
 
     expect(screen.getByTestId('task-log-panel')).toBeInTheDocument()
+  })
+
+  it('renders structured process and PR output while leaving null output empty', async () => {
+    const timeline = makeTimeline()
+    const task = timeline.stages[0].tasks[0]
+    timeline.stages[0].status = 'completed'
+    timeline.stages[0].tasks = [
+      {
+        ...task,
+        id: 'process.1',
+        title: 'Run release command',
+        uses: 'core/process',
+        status: 'completed',
+        message: null,
+        output: { stdout: 'release-ready', exitCode: 0 },
+      },
+      {
+        ...task,
+        id: 'open-pr.1',
+        title: 'Open release PR',
+        uses: 'mohist/create-pull-request',
+        status: 'completed',
+        message: null,
+        output: { kind: 'create-pull-request', prNumber: 42, prUrl: 'https://example.test/pr/42', mergeCommitSha: null, targetBranch: 'main' },
+      },
+      {
+        ...task,
+        id: 'no-output.1',
+        title: 'Complete without output',
+        status: 'completed',
+        message: null,
+        output: null,
+      },
+    ]
+    setWorkflowTimeline({ data: timeline })
+    setLogPage({ lines: [], nextCursor: null, truncated: false })
+
+    const { container } = renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    await expandFailedTask('Run release command')
+    await expandFailedTask('Open release PR')
+    await expandFailedTask('Complete without output')
+
+    expect(screen.getByText(/"stdout": "release-ready"/)).toBeInTheDocument()
+    expect(screen.getByText(/"exitCode": 0/)).toBeInTheDocument()
+    expect(screen.getByText(/"prNumber": 42/)).toBeInTheDocument()
+    expect(screen.getByText(/"mergeCommitSha": null/)).toBeInTheDocument()
+    expect(container.querySelectorAll('pre')).toHaveLength(2)
   })
 
   it('renders each line with source label, timestamp, and text', async () => {

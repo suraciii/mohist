@@ -22,27 +22,14 @@ export function extractPrDeliveryMetadata(taskOutput: unknown): PrDeliveryMetada
 }
 
 function readPublishViaPrRecord(value: unknown): Record<string, unknown> | null {
-  const parsed = parseJson(value)
-  if (parsed == null) return null
-  if (typeof parsed !== 'object' || Array.isArray(parsed)) return null
-  const record = parsed as Record<string, unknown>
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
   if (
     record['kind'] !== 'publish-via-pr' &&
     record['kind'] !== 'create-pull-request' &&
     record['kind'] !== 'merge-pull-request'
   ) return null
   return record
-}
-
-function parseJson(value: unknown): unknown {
-  if (typeof value !== 'string') return value ?? null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return null
-  }
 }
 
 function readNumber(value: unknown): number | null {

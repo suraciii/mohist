@@ -286,6 +286,53 @@ describe('WorkflowView', () => {
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })
 
+  it('renders structured process and PR output while leaving null output empty', () => {
+    const timeline = makeTimeline()
+    const task = timeline.stages[0].tasks[0]
+    timeline.pendingWork = null
+    timeline.stages[0].status = 'completed'
+    timeline.stages[0].tasks = [
+      {
+        ...task,
+        id: 'process.1',
+        title: 'Run release command',
+        uses: 'core/process',
+        status: 'completed',
+        completedAt: '2026-01-01T00:01:00.000Z',
+        output: { stdout: 'release-ready', exitCode: 0 },
+      },
+      {
+        ...task,
+        id: 'open-pr.1',
+        title: 'Open release PR',
+        uses: 'mohist/create-pull-request',
+        status: 'completed',
+        completedAt: '2026-01-01T00:02:00.000Z',
+        output: { kind: 'create-pull-request', prNumber: 42, prUrl: 'https://example.test/pr/42', mergeCommitSha: null, targetBranch: 'main' },
+      },
+      {
+        ...task,
+        id: 'no-output.1',
+        title: 'Complete without output',
+        status: 'completed',
+        completedAt: '2026-01-01T00:03:00.000Z',
+        output: null,
+      },
+    ]
+    setWorkflowTimeline({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
+
+    const { container } = render(<WorkflowView issue={makeIssue()} />)
+    fireEvent.click(screen.getByText('Run release command').closest('button')!)
+    fireEvent.click(screen.getByText('Open release PR').closest('button')!)
+    fireEvent.click(screen.getByText('Complete without output').closest('button')!)
+
+    expect(screen.getByText(/"stdout": "release-ready"/)).toBeInTheDocument()
+    expect(screen.getByText(/"exitCode": 0/)).toBeInTheDocument()
+    expect(screen.getByText(/"prNumber": 42/)).toBeInTheDocument()
+    expect(screen.getByText(/"mergeCommitSha": null/)).toBeInTheDocument()
+    expect(container.querySelectorAll('pre')).toHaveLength(2)
+  })
+
   it('renders a scrollable stage stepper on mobile without clipping stage labels', async () => {
     setScopedValue(window, 'innerWidth', 390)
     setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
