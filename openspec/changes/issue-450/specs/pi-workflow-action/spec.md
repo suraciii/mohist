@@ -98,7 +98,7 @@ The Action SHALL expose these stable failure codes for Workflow recovery matchin
 
 - **WHEN** the current Pi binding cannot be restored because its physical Session is missing or unreadable
 - **THEN** the Action SHALL fail with `runtime-session-missing`
-- **AND** the message SHALL tell the user that Reset is required
+- **AND** the message SHALL name Reset as the canonical same-Session remedy and a new logical `session` name as the recovery available before Pi Session-command routing ships
 
 #### Scenario: Provider exhaustion has a stable code
 
