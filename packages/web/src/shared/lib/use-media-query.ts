@@ -33,6 +33,10 @@ export function useMediaQuery(query: string): boolean {
   useEffect(() => {
     if (override !== null) return
 
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+
     const mql = window.matchMedia(query)
     const update = () => setLiveMatches(mql.matches)
     update()
