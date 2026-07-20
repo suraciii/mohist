@@ -160,7 +160,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
     return fail(runtimeErrorCode(result.error.kind), result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
   const facts = result.value.facts
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "opencode",
     status: "success",
     runtimeSessionId: facts.runtimeSessionId,
@@ -168,7 +168,7 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
     variant: options?.variant ?? null,
     text: facts.finalAssistantText,
     diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-  })
+  }
   return succeed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
 }
 

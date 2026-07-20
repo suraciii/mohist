@@ -1,6 +1,6 @@
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveMergeSubject } from "./github-pr-issue-fields.js"
@@ -150,8 +150,9 @@ async function resolvePrNumberForMerge(
 
 export function buildMergeGitHubPrOutput(output: MergeGitHubPrOutput): ActionResult {
   if (output.status === "completed") {
-    const { errorCode: _errorCode, message: _message, ...success } = output
-    return succeed(JSON.stringify(success))
+    const { errorCode: _errorCode, message: _message, steps, ...rest } = output
+    const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
+    return succeed(success)
   }
   return actionFail(output.errorCode ?? "merge-failed", output.message ?? output.output, { exitCode: 1 })
 }

@@ -619,7 +619,7 @@ public record RunnerReportRequest(
     string? WorkflowRunId = null,
     string? ProjectId = null,
     string? Message = null,
-    string? Output = null,
+    System.Text.Json.JsonElement? Output = null,
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     string? OwnerKind = null,

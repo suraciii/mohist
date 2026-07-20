@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -71,7 +72,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var report = await runner.ReportAgentJobResultAsync(
             jobKey,
             workId,
-            new WorkResult("completed", "ok", Output: "{}", ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
+            new WorkResult("completed", "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
         Assert.True(report.Tracked);
 
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
@@ -107,7 +108,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var report = await runner.ReportAgentJobResultAsync(
             jobKey,
             workId,
-            new WorkResult("failed", "boom", Output: "{\"error\":\"x\"}", ExitCode: 1));
+            new WorkResult("failed", "boom", Output: JSON.DeserializeElement("{\"error\":\"x\"}"), ExitCode: 1));
         Assert.True(report.Tracked);
 
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
@@ -399,7 +400,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await job.ReportResultAsync("runner-a", "work-a", new WorkResult(
             "failed",
             "prompt timed out",
-            Output: """{"failureCategory":"prompt_timeout"}""",
+            Output: JSON.DeserializeElement("""{"failureCategory":"prompt_timeout"}"""),
             ExitCode: 1));
         await session.FlushForTestAsync();
 

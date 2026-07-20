@@ -210,7 +210,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.TerminalResult = new AgentJobTerminalResult(
             State.Status,
             result.Message,
-            result.Output,
+            result.Output?.ValueKind == System.Text.Json.JsonValueKind.Object || result.Output?.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? result.Output.Value.GetRawText()
+                : null,
             result.ArtifactUploadIds,
             State.FailureReason,
             result.ExitCode);
@@ -639,24 +641,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private static string? FailureCategoryFrom(string? output)
+    private static string? FailureCategoryFrom(System.Text.Json.JsonElement? output)
     {
-        if (string.IsNullOrWhiteSpace(output))
-            return null;
-
-        try
-        {
-            using var document = JsonDocument.Parse(output);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("failureCategory", out var category)
-                && category.ValueKind == JsonValueKind.String
-                ? category.GetString()
-                : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        if (!output.HasValue) return null;
+        var element = output.Value;
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        return element.TryGetProperty("failureCategory", out var category) && category.ValueKind == JsonValueKind.String
+            ? category.GetString()
+            : null;
     }
 
     private bool DispatchRetryBoundExceeded()

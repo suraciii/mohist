@@ -107,7 +107,7 @@ describe("mohist/github-pr-status action", () => {
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
     expect(result.error).toBeUndefined()
-    const parsed = JSON.parse(result.output!)
+    const parsed = result.output as Record<string, unknown>
     expect(parsed.kind).toBe("github-pr-status")
     expect(parsed.status).toBe("verified")
     expect(parsed.prNumber).toBe(42)
@@ -116,6 +116,7 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.isDraft).toBe(false)
     expect(parsed.expectations).toEqual(["open", "ready"])
     expect(parsed.missing).toEqual([])
+    expect(parsed.output).toBe(PR_VIEW_OPEN)
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 
@@ -203,7 +204,7 @@ describe("mohist/github-pr-status action", () => {
     const result = await githubPrStatusAction(context({ prNumber: 42, expect: "merged" }))
 
     expect(result.error).toBeUndefined()
-    const parsed = JSON.parse(result.output!)
+    const parsed = result.output as Record<string, unknown>
     expect(parsed.status).toBe("verified")
     expect(parsed.missing).toEqual([])
   })
@@ -233,7 +234,7 @@ describe("mohist/github-pr-status action", () => {
     }))
 
     expect(result.error).toBeUndefined()
-    const parsed = JSON.parse(result.output!)
+    const parsed = result.output as Record<string, unknown>
     expect(parsed.prNumber).toBe(7)
   })
 

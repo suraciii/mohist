@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
 
@@ -41,7 +40,7 @@ internal sealed class WorkflowWorkLifecycle
         {
             if (currentTask is not null)
             {
-                currentTask.Output = ParseOutputToJsonElement(report.Output);
+                currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
             var hasFollowUpTasks = taskAttempts.Count > 0;
@@ -71,10 +70,11 @@ internal sealed class WorkflowWorkLifecycle
         {
             if (currentTask is not null)
             {
-                currentTask.Output = ParseOutputToJsonElement(report.Output);
+                currentTask.Output = report.Output;
                 currentTask.Error = report.Error;
             }
-            var taskResult = new TaskResult("failed", report.Detail ?? report.Output, report.Error);
+            var detail = report.Detail ?? (report.Output.HasValue ? report.Output.Value.GetRawText() : null);
+            var taskResult = new TaskResult("failed", detail, report.Error);
             events.AddRange(run.FailTask(taskResult, now));
         }
 
@@ -220,21 +220,6 @@ internal sealed class WorkflowWorkLifecycle
         }
 
         return null;
-    }
-
-    private static JsonElement? ParseOutputToJsonElement(string? output)
-    {
-        if (string.IsNullOrWhiteSpace(output)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(output);
-            return doc.RootElement.Clone();
-        }
-        catch
-        {
-            var wrapped = JsonSerializer.SerializeToElement(output);
-            return wrapped;
-        }
     }
 
     public void RequeueRunningChecks(WorkflowRun run)

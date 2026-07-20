@@ -183,7 +183,7 @@ public sealed record AgentJobPollState(
 public record WorkResult(
     string Status,
     string? Message = null,
-    string? Output = null,
+    System.Text.Json.JsonElement? Output = null,
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null,

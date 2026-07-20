@@ -245,8 +245,8 @@ function buildAgentJobOutput(
   error: string | null,
   diagnostics: readonly { code: string; message: string }[],
   hint?: "reset",
-): string {
-  return JSON.stringify({
+): JsonObject {
+  return {
     kind: "opencode",
     status: ok ? "success" : "failure",
     runtimeSessionId,
@@ -254,9 +254,9 @@ function buildAgentJobOutput(
     variant,
     text,
     error,
-    diagnostics,
+    diagnostics: diagnostics.map((d) => ({ code: d.code, message: d.message })),
     ...(hint ? { hint } : {}),
-  })
+  }
 }
 
 /**

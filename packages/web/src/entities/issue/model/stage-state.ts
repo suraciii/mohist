@@ -52,7 +52,7 @@ export interface StageTaskState {
   duration: number
   artifacts: string[]
   artifactSummaries?: WorkflowArtifactSummary[]
-  output: unknown
+  output: Record<string, unknown> | null
   error?: WorkflowExecutionError | null
   startedAt: string | null
   completedAt: string | null

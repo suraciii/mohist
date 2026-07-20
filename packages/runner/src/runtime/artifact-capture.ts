@@ -3,7 +3,8 @@ import { stat, readFile, readdir, realpath, lstat } from "node:fs/promises"
 import { realpathSync } from "node:fs"
 import { isAbsolute, normalize, relative, resolve, sep } from "node:path"
 import type { ArtifactUploadRequest, ArtifactUploadResponse } from "../server/connection.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../core/types.js"
+import type { ActionResult, JsonObject, JsonValue, RenderedWorkItem } from "../core/types.js"
+import { isObject } from "../core/json.js"
 
 export interface ArtifactUploader {
   uploadArtifact(
@@ -99,14 +100,11 @@ export function declaredPathsFromArtifacts(artifacts: JsonObject | null | undefi
 }
 
 export function actionProducedArtifacts(result: ActionResult | undefined): DeclaredArtifactDeclaration[] {
-  if (!result?.output) return []
-  let parsed: JsonObject
-  try {
-    parsed = JSON.parse(result.output) as JsonObject
-  } catch {
-    return []
-  }
-  const produced = parsed.producedArtifacts
+  if (!result) return []
+  const output = result.output
+  if (output === null || output === undefined) return []
+  if (!isObject(output)) return []
+  const produced = output["producedArtifacts"]
   if (!Array.isArray(produced)) return []
   const out: DeclaredArtifactDeclaration[] = []
   for (const entry of produced) {

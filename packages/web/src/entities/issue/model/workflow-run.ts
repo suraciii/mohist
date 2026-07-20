@@ -58,7 +58,7 @@ export interface WorkflowTask {
   attempts: number
   duration: number
   artifacts: string[]
-  output: unknown
+  output: Record<string, unknown> | null
   error?: import('./stage-state').WorkflowExecutionError | null
   reason: string | null
   causedBy: WorkflowTaskCause | null

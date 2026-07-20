@@ -86,7 +86,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     })
 
     const result = await mergeReadyAction(context())
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
@@ -100,7 +100,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       conflictFiles: [],
     })
     expect(typeof output.checkedAt).toBe("string")
-    expect(new Date(output.checkedAt).toString()).not.toBe("Invalid Date")
+    expect(new Date(output.checkedAt as string).toString()).not.toBe("Invalid Date")
     expect(output.error ?? null).toBeNull()
 
     const cmds = workspaceCalls(calls)
@@ -225,7 +225,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       { source: "custom-source" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
     ))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)
@@ -260,7 +260,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       { remote: "upstream" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
     ))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)
@@ -320,7 +320,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
         workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null },
       }),
     )
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.canMerge).toBe(true)

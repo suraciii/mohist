@@ -50,7 +50,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.kind).toBe("archive-change")
@@ -102,7 +102,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -143,7 +143,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -186,7 +186,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.commitSha).toBe("9999999")
@@ -216,7 +216,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
       "_actions.archiveChange.destination": { [sourceRel]: archiveName },
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(changeDir)
@@ -235,7 +235,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toMatch(/not found/)
@@ -280,7 +280,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.commitSha).toBe("fed4321")
@@ -319,11 +319,11 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.changedFiles).toEqual([`${destinationRel}/proposal.md`])
-    expect(output.changedFiles.find((file: string) => file.includes("unrelated"))).toBeUndefined()
+    expect((output.changedFiles as string[]).find((file: string) => file.includes("unrelated"))).toBeUndefined()
   })
 
   it("ArchiveChangeWhenCommitFails_FailsWithStageCommitAndPreservesChangedFiles", async () => {
@@ -388,7 +388,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
@@ -460,7 +460,7 @@ describe("mohist/archive-change", () => {
     })
 
     const retryResult = await archiveChangeAction(archiveContext(workDir, changeDir, persistedVars, { patchRunVars: retryPatchRunVars }))
-    const retryOutput = JSON.parse(retryResult.output ?? "{}")
+    const retryOutput = retryResult.output as Record<string, unknown>
 
     expect(retryResult.error).toBeUndefined()
     expect(retryOutput.destination).toBe(versionedDestination)
@@ -497,7 +497,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
       openspecArchiveName: oldPrefix,
     }, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -529,7 +529,7 @@ describe("mohist/archive-change", () => {
       : { "_actions.archiveChange.destination": { "openspec/changes/issue-127": unsafePrefix } }
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, variables, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
     expect(calls).toEqual([])
@@ -565,7 +565,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
       "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
     }, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
@@ -589,7 +589,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
   })
@@ -628,7 +628,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -673,7 +673,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
       openspecArchiveName: oldPrefix,
     }, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -699,7 +699,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
     expect(patchRunVars).toHaveBeenCalledTimes(1)
@@ -743,7 +743,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
       "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
     }, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
@@ -789,7 +789,7 @@ describe("mohist/archive-change", () => {
       events.push("patchRunVars")
       return patchRunVars(...args)
     } }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
@@ -839,7 +839,7 @@ describe("mohist/archive-change", () => {
       openspecArchiveName: newPrefix,
       "_actions.archiveChange.destination": { [sourceRel]: legacyPrefix },
     }, { patchRunVars }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output.destination).toBe(newArchivedDir)

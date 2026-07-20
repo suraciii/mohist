@@ -88,7 +88,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck");
+        await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck", "test");
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);

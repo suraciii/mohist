@@ -98,7 +98,7 @@ function makeTimeline(): WorkflowTimeline {
             durationMs: 60000,
             attempts: 1,
             message: 'Rebase failed: CONFLICT (content): Merge conflict in src/foo.ts',
-            output: JSON.stringify({ rebaseConflict: { conflictingFile: 'src/foo.ts' } }),
+            output: { rebaseConflict: { conflictingFile: 'src/foo.ts' } },
           },
           {
             id: 'build-task-2',

@@ -4,12 +4,12 @@ import { dirtyWorktreeFailure, worktreeProbeFailure, WorktreeProbeError } from "
 describe("worktree failure protocol", () => {
   it("reports a dirty worktree as an error instead of augmenting output", () => {
     const result = dirtyWorktreeFailure(
-      { status: "completed", output: JSON.stringify({ promise: "PASS" }) },
+      { status: "completed", output: { promise: "PASS" } },
       { staged: [], unstaged: ["src/leftover.ts"], untracked: [], isClean: false },
       0,
     )
     expect(result).toMatchObject({ status: "failed", error: { code: "worktree-dirty" } })
-    expect(result.output).toBe(JSON.stringify({ promise: "PASS" }))
+    expect(result.output).toEqual({ promise: "PASS" })
   })
 
   it("reports a worktree probe failure as a structured error", () => {

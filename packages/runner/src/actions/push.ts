@@ -129,7 +129,7 @@ function pushOutput(
         : `Push failed: ${gitOutput || "unknown error"}`
     return fail(failureCode ?? "push-failed", message, { exitCode: exitCode ?? 1 })
   }
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "push",
     status: "completed",
     source,
@@ -142,8 +142,8 @@ function pushOutput(
     force,
     forceWithLease,
     output: gitOutput,
-    steps,
-  })
+    steps: steps as unknown as JsonObject,
+  }
   return succeed(output, { exitCode: exitCode ?? 0 })
 }
 

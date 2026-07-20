@@ -206,7 +206,14 @@ export interface WorkItemResult {
   status: string
   message?: string | null
   error?: ActionError | null
-  output?: string | null
+  /**
+   * Successful public output of the dispatched work. Workflow task work
+   * carries the Action contract (`JsonObject | null`). Check work carries a
+   * structured array of result rows. AgentJob work carries its own
+   * non-Action terminal-object shape. The transport is generic JSON so a
+   * single envelope covers all three without a discriminator.
+   */
+  output?: JsonValue | null
   exitCode?: number | null
   artifactUploadIds?: string[] | null
   capturedOutputs?: JsonObject | null
@@ -286,7 +293,7 @@ export interface ActionError {
 }
 
 export type ActionResult = (
-  | { output: string | null; error?: never }
+  | { output: JsonObject | null; error?: never }
   | { output?: never; error: ActionError }
 ) & {
   exitCode?: number | null

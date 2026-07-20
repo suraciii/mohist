@@ -135,7 +135,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
     registry.register("core/business", async (ctx) => {
       dispatched.push(ctx.workId)
       expect(residual.rebase).toBe(false)
-      return { output: `ran ${ctx.workId}` }
+      return { output: { ran: ctx.workId } }
     })
 
     const executor = buildExecutor(registry)

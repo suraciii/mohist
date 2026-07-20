@@ -289,23 +289,19 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 
 正文是目标 spec;当前实现差距如下,待拆 issue 推进。
 
-1. **output 仍是字符串**:`ActionResult.output: string | null`
-   (`packages/runner/src/core/types.ts`),Action 手工 `JSON.stringify`,`setVars`、
-   captured outputs、server 落库三处各自 re-parse;`core/process` 返回裸 stdout,
-   对它投影会静默失效。
-2. **无 manifest 与 defineAction**:registry 是硬编码 name→handler Map,输入靠各
+1. **无 manifest 与 defineAction**:registry 是硬编码 name→handler Map,输入靠各
    Action 手写 `stringInput` 解析,无未知键/类型/required 校验,无 catalog 上报,
    profile 保存时无法校验 `uses` 与输入。
-3. **隐式输入通道仍在**:`packages/runner/src/actions/delivery-context.ts` 在
+2. **隐式输入通道仍在**:`packages/runner/src/actions/delivery-context.ts` 在
    `with` 与 `context.variables` 之间混合解析并内嵌 issue-backed 守护规则;多个
    Action 直接读 `workspace.path` 等。迁移后该模块删除,内置 profile 改为显式传参。
    随之取消的 authoritative 交叉守护是防呆而非安全边界(边界是 credential),如需
    保留应作为 server 侧 dispatch 策略另行设计。
-4. **engine 内按名特判**:executor 的 `PROMISE_PROJECTED_ACTIONS` 与
+3. **engine 内按名特判**:executor 的 `PROMISE_PROJECTED_ACTIONS` 与
    `REMOVED_ACTIONS` 名单,目标分别由 `agent-turn` 能力声明与 catalog tombstone
    取代。
-5. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
+4. **Action 越权访问**:`openspec-tasks` 直连 `serverConnection.addTasks`,
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
-6. **文档缺口**:`docs/actions/` 只有 opencode 一篇,其余 Action 的产品契约只存在
+5. **文档缺口**:`docs/actions/` 只有 opencode 一篇,其余 Action 的产品契约只存在
    于代码;manifest 落地后按 manifest 补齐并保持一致。

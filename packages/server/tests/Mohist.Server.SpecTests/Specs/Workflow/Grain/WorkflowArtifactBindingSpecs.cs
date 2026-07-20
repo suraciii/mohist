@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -163,7 +164,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         // bind artifacts, so the upload remains pending (recoverable by retry).
         await ReportAsync(runnerId, work.WorkId, new WorkResult(
             "completed",
-            Output: "{}",
+            Output: JSON.DeserializeElement("{}"),
             ArtifactUploadIds: [uploadId],
             AddTasks: [new RuntimeTaskInput("task-1", "Task 1", "spec/task", Recovery: recovery)]));
 

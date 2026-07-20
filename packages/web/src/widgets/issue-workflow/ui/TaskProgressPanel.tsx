@@ -6,17 +6,6 @@ import { useWorkflowTimeline } from '../../../entities/issue'
 import { getDeliveryFailureGuidance } from '../../../shared/lib/delivery-failure'
 import { TaskLogPanel, type TaskLogDataHook } from './TaskLogPanel'
 
-function parseTaskOutput(raw: string | null | undefined): unknown {
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  if (!trimmed) return null
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return raw
-  }
-}
-
 export type TaskProgressTimelineHook = (
   issueNumber: number,
   enabled: boolean,
@@ -122,10 +111,13 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId, taskLogHook }: 
               <p className="leading-snug">{deliveryGuidance.nextAction}</p>
             </div>
           )}
-          {isFailed && (
-            <p className="text-xs text-red-600 whitespace-pre-wrap">
-              {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
-            </p>
+          {task.output != null && (
+            <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">
+              {JSON.stringify(task.output, null, 2)}
+            </pre>
+          )}
+          {isFailed && task.output == null && (
+            <p className="text-xs text-red-600">Task failed</p>
           )}
           {typeof task.taskId === 'string' && task.taskId.length > 0 && (
             <TaskLogPanel
@@ -209,7 +201,7 @@ export function TaskProgressPanel({
     attempts: task.attempts,
     duration: task.durationMs ?? 0,
     artifacts: [],
-    output: parseTaskOutput(task.output),
+    output: task.output ?? null,
     error: task.error,
     startedAt: task.startedAt,
     completedAt: task.completedAt,

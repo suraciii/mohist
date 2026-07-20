@@ -112,7 +112,7 @@ public static class WorkflowStatusMapper
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
                         : null,
-                    Output: t.Output.HasValue ? JSON.Serialize(t.Output.Value) : null,
+                    Output: MapTaskOutput(t.Output),
                     Error: t.Error))
                 .ToList();
 
@@ -128,6 +128,22 @@ public static class WorkflowStatusMapper
                 TaskRunExtensions.DeriveClassification(t.Uses, null),
                 TaskRunExtensions.ExtractSessionName(t.With)))
             .ToList();
+    }
+
+    /// <summary>
+    /// Project the stored task output into a view value. Historical
+    /// non-object values (e.g. serialized JSON strings, scalars written by
+    /// older runners) are normalized to <c>null</c> so the public API
+    /// only ever exposes object-or-null for completed tasks. A successful
+    /// task whose persisted output is a JSON object is returned as the
+    /// object element so ASP.NET serializes it as a nested object.
+    /// </summary>
+    internal static System.Text.Json.JsonElement? MapTaskOutput(System.Text.Json.JsonElement? output)
+    {
+        if (!output.HasValue) return null;
+        var element = output.Value;
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Object) return element.Clone();
+        return null;
     }
 
     public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)

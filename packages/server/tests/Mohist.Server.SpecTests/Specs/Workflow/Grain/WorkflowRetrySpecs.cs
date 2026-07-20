@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -165,7 +166,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportAsync(r2, retriedAttempt.WorkId, new WorkResult(
             "completed",
             "Merge PR failed (error.code=base-moved); recovery scheduled",
-            Output: """{"errorCode":"base-moved"}""",
+            Output: JSON.DeserializeElement("""{"errorCode":"base-moved"}"""),
             AddTasks:
             [
                 new RuntimeTaskInput(
@@ -203,12 +204,9 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // A permanently invalid recovery follow-up must not escape as a thrown
-        // exception (the runner would resend it forever). It acks and fails the
-        // run terminally with an actionable detail.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
-            Output: "{}",
+            Output: JSON.DeserializeElement("{}"),
             AddTasks: [new RuntimeTaskInput("recover", "Recover", "spec/task", Recovery: recovery)]));
 
         var failed = await LoadRunAsync(_workflowId!);
@@ -229,12 +227,9 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // An out-of-range recoveryRemaining is a permanent validation failure:
-        // validation runs before any task insertion, so the active task is the
-        // sole task and the report acks + fails the run terminally.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
-            Output: "{}",
+            Output: JSON.DeserializeElement("{}"),
             AddTasks: [new RuntimeTaskInput("merge-pr", "Merge PR", "spec/task", Recovery: recovery, RecoveryRemaining: recoveryRemaining)]));
 
         var failed = await LoadRunAsync(_workflowId!);
@@ -255,12 +250,9 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
 
-        // Validation runs before any task insertion, so an invalid continuation
-        // in a batch must not insert the earlier valid task. The report acks and
-        // fails the active task terminally.
         await ReportAsync(runnerId, task.WorkId, new WorkResult(
             "completed",
-            Output: "{}",
+            Output: JSON.DeserializeElement("{}"),
             AddTasks:
             [
                 new RuntimeTaskInput("fix", "Fix", "spec/fix"),
@@ -292,7 +284,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var ack = await workflow.ReceiveTaskReportAsync(sameRunner, first.WorkId, new TaskReport(
             first.WorkId,
             TaskReportStatus.Failed,
-            Output: "stale",
+            Output: null,
             Artifacts: null,
             Detail: "stale report"));
 
@@ -319,7 +311,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(first.RecoveryRemaining);
         await ReportAsync(runnerId, first, new WorkResult(
             "completed",
-            Output: "{\"errorCode\":\"fail\"}",
+            Output: JSON.DeserializeElement("{\"errorCode\":\"fail\"}"),
             AddTasks: RecoveryFollowUps(recovery, 1)));
 
         var (fix1, sameRunner) = await PollWorkAnyAsync();
@@ -329,7 +321,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(1, second.RecoveryRemaining);
         await ReportAsync(runnerAfterFix1, second, new WorkResult(
             "completed",
-            Output: "{\"errorCode\":\"fail\"}",
+            Output: JSON.DeserializeElement("{\"errorCode\":\"fail\"}"),
             AddTasks: RecoveryFollowUps(recovery, 0)));
 
         var (fix2, runnerAfterSecond) = await PollWorkAnyAsync();
@@ -340,7 +332,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportAsync(runnerAfterFix2, exhausted, new WorkResult(
             "failed",
             "review failed",
-            Output: "{\"errorCode\":\"fail\"}"));
+            Output: JSON.DeserializeElement("{\"errorCode\":\"fail\"}")));
 
         await workflow.RetryAsync();
 
@@ -349,7 +341,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(fresh.RecoveryRemaining);
         await ReportAsync(retryRunner, fresh, new WorkResult(
             "completed",
-            Output: "{\"errorCode\":\"fail\"}",
+            Output: JSON.DeserializeElement("{\"errorCode\":\"fail\"}"),
             AddTasks: RecoveryFollowUps(recovery, 1)));
 
         var persisted = await LoadRunAsync(_workflowId!);

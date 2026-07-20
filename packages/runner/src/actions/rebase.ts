@@ -274,7 +274,7 @@ function rebaseOutput(
   if (!rebased) {
     return fail(failureCode ?? "rebase-failed", rebaseFailureMessage(failureCode, baseRef, conflicts, gitOutput), { exitCode: exitCode ?? 1 })
   }
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "rebase",
     status: "completed",
     baseBranch,
@@ -289,8 +289,8 @@ function rebaseOutput(
     conflicts,
     rebaseLeftInProgress: false,
     output: gitOutput,
-    steps,
-  })
+    steps: steps as unknown as JsonObject,
+  }
   return succeed(output, { exitCode: exitCode ?? 0 })
 }
 
@@ -361,7 +361,7 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
   const base = await git(context.workDir, ["rev-parse", baseRef], context.signal, opts)
   const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseRef, "HEAD"], context.signal, opts) : null
   const verified = !rebaseInProgress && conflicts.length === 0 && head.success && base.success && mergeBase?.success === true && mergeBase.stdout.trim() === base.stdout.trim()
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "rebase-status",
     status: verified ? "verified" : "failed",
     baseBranch,
@@ -373,7 +373,7 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
     headSha: head.success ? head.stdout.trim() : null,
     mergeBaseSha: mergeBase?.success ? mergeBase.stdout.trim() : null,
     output: [base.combinedOutput, mergeBase?.combinedOutput].filter(Boolean).join("\n"),
-  })
+  }
   return verified ? succeed(output) : fail("rebase-incomplete", "Rebase is not complete or not clean")
 }
 

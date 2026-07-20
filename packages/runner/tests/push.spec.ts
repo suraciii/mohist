@@ -105,7 +105,7 @@ describe("mohist/push", () => {
       remote: "origin",
       force: true,
     }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -135,7 +135,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -168,7 +168,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({}, { project: { path: PROJECT_PATH } }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH])
@@ -295,7 +295,7 @@ describe("mohist/push", () => {
       { remote: "upstream" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
     ))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("push upstream mo/issue-99:master")
@@ -342,7 +342,7 @@ describe("mohist/push", () => {
       { source: "custom-source" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
     ))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("rev-parse custom-source")
@@ -388,7 +388,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context())
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     // Single push owner: the landed commit and the push-occurred flag both
     // come from this action. Downstream renderers read `landedCommit` and
@@ -414,7 +414,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ forceWithLease: true }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -497,7 +497,7 @@ describe("mohist/push", () => {
     })
 
     const stringTrue = await pushAction(context({ forceWithLease: "true" }))
-    const stringTrueOutput = JSON.parse(stringTrue.output ?? "{}")
+    const stringTrueOutput = stringTrue.output as Record<string, unknown>
     expect(stringTrue.error).toBeUndefined()
     expect(stringTrueOutput.forceWithLease).toBe(true)
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
@@ -505,7 +505,7 @@ describe("mohist/push", () => {
 
     calls.length = 0
     const absent = await pushAction(context({ forceWithLease: "no" }))
-    const absentOutput = JSON.parse(absent.output ?? "{}")
+    const absentOutput = absent.output as Record<string, unknown>
     expect(absent.error).toBeUndefined()
     expect(absentOutput.forceWithLease).toBe(false)
     expect(workspaceCalls(calls)).toEqual([
@@ -548,7 +548,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ force: true }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -579,7 +579,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ force: true, forceWithLease: true }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -610,7 +610,7 @@ describe("mohist/push", () => {
     })
 
     const result = await pushAction(context({ force: false, forceWithLease: true }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")

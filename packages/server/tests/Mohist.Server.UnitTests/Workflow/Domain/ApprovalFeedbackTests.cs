@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -7,7 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Domain;
 
-public class ApprovalFeedbackTests
+public partial class ApprovalFeedbackTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -351,11 +352,11 @@ public class ApprovalFeedbackTests
 
         run.StartTask(apply.Id, "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        Assert.Null(run.ResolveFeedback(feedbackId, apply.Id, "applied", DateTimeOffset.UnixEpoch));
+        Assert.Null(run.ResolveFeedback(feedbackId, apply.Id, JSON.DeserializeElement("\"applied\""), DateTimeOffset.UnixEpoch));
 
         run.StartTask(publish.Id, "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        var resolved = run.ResolveFeedback(feedbackId, publish.Id, "published", DateTimeOffset.UnixEpoch);
+        var resolved = run.ResolveFeedback(feedbackId, publish.Id, JSON.DeserializeElement("\"published\""), DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(resolved);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
@@ -482,7 +483,7 @@ public class ApprovalFeedbackTests
         run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
 
-        var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, "applied retry semantics", DateTimeOffset.UnixEpoch);
+        var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, JSON.DeserializeElement("\"applied retry semantics\""), DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(resolved);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
@@ -498,7 +499,7 @@ public class ApprovalFeedbackTests
         var run = BuildAwaitingApprovalRun();
         run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
-        var resolved = run.ResolveFeedback("fb_missing", "apply-feedback.1", "summary", DateTimeOffset.UnixEpoch);
+        var resolved = run.ResolveFeedback("fb_missing", "apply-feedback.1", JSON.DeserializeElement("\"summary\""), DateTimeOffset.UnixEpoch);
 
         Assert.Null(resolved);
     }
@@ -512,9 +513,9 @@ public class ApprovalFeedbackTests
         var feedbackTask = run.CurrentStage().Tasks.Last(t => t.DefinitionId == "apply-feedback");
         run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.ResolveFeedback(feedbackId, feedbackTask.Id, "first summary", DateTimeOffset.UnixEpoch);
+        run.ResolveFeedback(feedbackId, feedbackTask.Id, JSON.DeserializeElement("\"first summary\""), DateTimeOffset.UnixEpoch);
 
-        var second = run.ResolveFeedback(feedbackId, feedbackTask.Id, "second summary", DateTimeOffset.UnixEpoch);
+        var second = run.ResolveFeedback(feedbackId, feedbackTask.Id, JSON.DeserializeElement("\"second summary\""), DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(second);
         Assert.Equal("first summary", second!.ResolutionSummary);

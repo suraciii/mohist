@@ -2,7 +2,7 @@ import { Button } from '@/shared/ui/components/button'
 import { WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
 import type { Issue, StageStateRead, StageCheckState } from '../../../entities/issue'
 import { useIsMobile } from '@/shared/hooks/use-mobile'
-import { formatDuration, parseTimelineTaskOutput } from './format'
+import { formatDuration } from './format'
 import { StageStatusIcon } from './StageStatusIcons'
 
 export const WORKFLOW_STAGES: readonly WorkflowStage[] = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate]
@@ -64,7 +64,7 @@ export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useW
         duration: task.durationMs ?? 0,
         artifacts: [],
         artifactSummaries: task.artifactSummaries,
-        output: parseTimelineTaskOutput(task.output),
+        output: task.output ?? null,
         startedAt: task.startedAt,
         completedAt: task.completedAt,
         updatedAt: task.completedAt ?? task.startedAt ?? '',

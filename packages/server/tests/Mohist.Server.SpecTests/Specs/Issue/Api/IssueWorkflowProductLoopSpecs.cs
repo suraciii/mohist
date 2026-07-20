@@ -518,7 +518,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
                 break;
             case "checks":
                 var checkNames = ParseCheckNames(work.With);
-                await ReportAsync(work.WorkflowRunId, work.WorkId, "pass", output: JsonSerializer.Serialize(checkNames.Select(name => new { name, status = "pass" })));
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "pass", output: checkNames.Select(name => new { name, status = "pass" }).ToArray());
                 break;
             default:
                 await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
@@ -556,7 +556,7 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
         return work.ProjectId == _projectId && work.IssueNumber == _issueNumber;
     }
 
-    private Task ReportAsync(string workflowRunId, string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
+    private Task ReportAsync(string workflowRunId, string workId, string status, string? message = null, object? output = null, int? exitCode = null) =>
         _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workflowRunId, workId, status, message, output, exitCode });
 
     private async Task DispatchWorkflowRunCompletedAsync(string workflowRunId)

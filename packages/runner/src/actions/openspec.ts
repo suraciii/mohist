@@ -119,7 +119,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   if (!context.serverConnection) return fail("server-unavailable", "Server connection not available")
   await context.serverConnection.addTasks(context.workflowRunId, tasks)
 
-  return succeed(JSON.stringify({ loaded: tasks.length }))
+  return succeed({ loaded: tasks.length })
 }
 
 export async function openspecArtifactsAction(context: ActionContext): Promise<ActionResult> {
@@ -139,12 +139,12 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
   }
 
   const present = missing.length === 0
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "openspec-artifacts",
     changeDir,
     present,
     missing,
-  })
+  }
 
   if (present) {
     return succeed(output)
@@ -323,13 +323,13 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
   if (changedFiles.length === 0) {
-    return succeed(JSON.stringify({
+    return succeed({
         kind: "archive-change",
         source: changeDir,
         destination,
         changed: false,
         noChange: true,
-      }))
+      })
   }
 
   const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], context.signal, opts)
@@ -347,7 +347,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
 
-  return succeed(JSON.stringify({
+  return succeed({
       kind: "archive-change",
       source: changeDir,
       destination,
@@ -357,7 +357,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       commitSha,
       commitOutput: commitResult.combinedOutput,
       changedFiles,
-    }))
+    })
 }
 
 type ArchiveErrorCode = "retry-safe" | "partial-archive" | "missing-source" | "config-error"

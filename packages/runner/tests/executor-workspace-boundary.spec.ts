@@ -34,7 +34,7 @@ describe("workspace preparation across stages", () => {
     } as unknown as WorkspaceManager
 
     const executor = new WorkExecutor(
-      buildRegistry(async () => ({ output: "should-not-reach" })),
+      buildRegistry(async () => ({ output: { reached: false } })),
       recordingManager,
       connection() as never,
       "/runner",
@@ -70,7 +70,7 @@ describe("workspace preparation across stages", () => {
       },
     } as unknown as WorkspaceManager
     const executor = new WorkExecutor(
-      buildRegistry(async () => ({ output: "should not run" })),
+      buildRegistry(async () => ({ output: { reached: false } })),
       failingManager,
       connection() as never,
       "/runner",

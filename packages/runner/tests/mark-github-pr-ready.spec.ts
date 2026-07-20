@@ -106,7 +106,7 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
@@ -161,7 +161,7 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
     expect(output).toMatchObject({

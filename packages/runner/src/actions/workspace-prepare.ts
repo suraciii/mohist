@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringAt } from "../core/json-path.js"
 import { exists } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
@@ -324,16 +324,16 @@ function gitFailure(step: string, command: string, result: GitResult): ProbeFail
 }
 
 function successOutput(workDir: string, expectedBranch: string, snapshot: WorkspaceSnapshot): ActionResult {
-  const output = JSON.stringify({
+  const output: JsonObject = {
     kind: "workspace-prepare",
     status: "success",
     expectedBranch,
-    head: snapshot.head,
-    residual: snapshot.residual,
+    head: snapshot.head as unknown as JsonObject,
+    residual: snapshot.residual as unknown as JsonObject,
     porcelain: snapshot.porcelain,
     step: null,
     workDir,
-  })
+  }
   return succeed(output, { exitCode: 0 })
 }
 

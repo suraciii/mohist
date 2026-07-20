@@ -1,6 +1,6 @@
 import { numberInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import type { ActionContext, ActionResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { combinedGhOutput, parsePrViewWithDraft } from "./github-pr-parse.js"
@@ -139,8 +139,9 @@ function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
 
 export function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {
   if (output.status === "completed") {
-    const { errorCode: _errorCode, message: _message, ...success } = output
-    return succeed(JSON.stringify(success))
+    const { errorCode: _errorCode, message: _message, steps, ...rest } = output
+    const success: JsonObject = { ...rest, steps: steps as unknown as JsonObject }
+    return succeed(success)
   }
   return fail(output.errorCode ?? "mark-ready-failed", output.message ?? output.output, { exitCode: 1 })
 }

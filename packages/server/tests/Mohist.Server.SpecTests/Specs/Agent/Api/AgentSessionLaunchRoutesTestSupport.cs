@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -126,7 +127,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             new WorkResult(
                 Status: "completed",
                 Message: "drained",
-                Output: "{}",
+                Output: JSON.DeserializeElement("{}"),
                 ArtifactUploadIds: null,
                 ExitCode: 0));
         Assert.True(report.Accepted, "AgentJob rejected drain report");

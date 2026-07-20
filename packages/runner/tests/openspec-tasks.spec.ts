@@ -27,7 +27,7 @@ describe("mohist/openspec-tasks", () => {
 
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const output = JSON.parse(result.output ?? "{}")
+    const output = result.output as Record<string, unknown>
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 

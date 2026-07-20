@@ -323,7 +323,7 @@ export function TaskItem({
             ))}
             {hasOutput && (
               <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">
-                {typeof taskOutput === 'string' ? taskOutput : JSON.stringify(taskOutput, null, 2)}
+                {JSON.stringify(taskOutput, null, 2)}
               </pre>
             )}
           </div>

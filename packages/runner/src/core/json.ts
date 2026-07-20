@@ -5,16 +5,6 @@ export function parseObject(value?: string | null) {
   return JSON.parse(value) as JsonObject
 }
 
-export function safeParseObject(value?: string | null): JsonObject | null {
-  if (!value) return null
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return isObject(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
 export function parseArray(value?: string | null): JsonValue[] | null {
   if (!value?.trim()) return null
   const parsed = JSON.parse(value) as JsonValue

@@ -362,6 +362,20 @@ EpicNumber: ReadEpicNumber(run),
             $"Task work item for workflow '{workflowRunId}' is missing work id");
         var status = ResolveTaskReportStatus(result);
         var detail = NormalizeDetail(result, status);
+
+        // Validate before binding artifacts so malformed Action output cannot
+        // produce durable artifact side effects.
+        if (!TryCanonicalizeTaskOutput(result.Output, out var validatedOutput, out var shapeError))
+        {
+            return new InboundReport.Task(new TaskReport(
+                WorkId: workId,
+                Status: TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: shapeError,
+                Error: new ExecutionError("unexpected-error", shapeError)));
+        }
+
         IReadOnlyList<ArtifactRef>? artifacts = null;
 
         if (result.ArtifactUploadIds is { Length: > 0 })
@@ -384,7 +398,7 @@ EpicNumber: ReadEpicNumber(run),
                 return new InboundReport.Task(new TaskReport(
                     WorkId: workId,
                     Status: TaskReportStatus.Failed,
-                    Output: result.Output,
+                    Output: null,
                     Artifacts: null,
                     Detail: bindResult.Error ?? "artifact binding failed",
                     Error: result.Error));
@@ -398,7 +412,7 @@ EpicNumber: ReadEpicNumber(run),
         return new InboundReport.Task(new TaskReport(
             WorkId: workId,
             Status: status,
-            Output: result.Output,
+            Output: validatedOutput,
             Artifacts: artifacts,
             Detail: detail,
             AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null,
@@ -407,8 +421,86 @@ EpicNumber: ReadEpicNumber(run),
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
+        if (!HasValidCheckResultRows(item.Items, result.Output))
+            return MalformedCheckOutput(item);
+
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         return new InboundReport.Checks(new CheckReport(item.Stage, results));
+    }
+
+    private static bool HasValidCheckResultRows(IReadOnlyList<CheckItem>? checks, JsonElement? output)
+    {
+        if (output is not { ValueKind: JsonValueKind.Array }) return false;
+        var expectedNames = (checks ?? []).Select(check => check.Name).ToHashSet(StringComparer.Ordinal);
+        if (expectedNames.Count != (checks?.Count ?? 0)) return false;
+
+        var reportedNames = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var row in output.Value.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object
+                || !row.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(name.GetString()))
+                return false;
+
+            var nameValue = name.GetString()!;
+            if (!expectedNames.Contains(nameValue) || !reportedNames.Add(nameValue))
+                return false;
+
+            if (row.TryGetProperty("status", out var status)
+                && status.ValueKind != JsonValueKind.String)
+                return false;
+
+            if (row.TryGetProperty("message", out var message)
+                && message.ValueKind is not JsonValueKind.String and not JsonValueKind.Null)
+                return false;
+
+            if (row.TryGetProperty("output", out var actionOutput)
+                && actionOutput.ValueKind is not JsonValueKind.Object and not JsonValueKind.Null)
+                return false;
+
+            if (row.TryGetProperty("error", out var error))
+            {
+                if (error.ValueKind == JsonValueKind.Null) continue;
+                if (error.ValueKind != JsonValueKind.Object
+                    || !error.TryGetProperty("code", out var code)
+                    || code.ValueKind != JsonValueKind.String
+                    || !error.TryGetProperty("message", out var errorMessage)
+                    || errorMessage.ValueKind != JsonValueKind.String)
+                    return false;
+            }
+        }
+
+        return reportedNames.SetEquals(expectedNames);
+    }
+
+    private static InboundReport MalformedCheckOutput(WorkItem item)
+    {
+        const string message = "Runner reported an invalid check output shape. Check output must be a JSON array of named rows with object-or-null Action output.";
+        var error = new ExecutionError("unexpected-error", message);
+        var failed = (item.Items ?? [])
+            .Select(check => new CheckResult(check.Name, CheckResultStatus.Failed, message, Error: error))
+            .ToList();
+        return new InboundReport.Checks(new CheckReport(item.Stage, failed));
+    }
+
+    /// <summary>
+    /// Canonicalize a Workflow task output element to the storage contract:
+    /// object-or-null. An explicit JSON null becomes nullable null; a
+    /// missing value becomes nullable null. Any other shape (array,
+    /// scalar, string) fails the call so the caller can convert it into a
+    /// durable failed task report.
+    /// </summary>
+    internal static bool TryCanonicalizeTaskOutput(JsonElement? output, out JsonElement? canonical, out string error)
+    {
+        if (!output.HasValue) { canonical = null; error = ""; return true; }
+        var element = output.Value;
+        if (element.ValueKind == JsonValueKind.Null) { canonical = null; error = ""; return true; }
+        if (element.ValueKind == JsonValueKind.Object) { canonical = element.Clone(); error = ""; return true; }
+        canonical = null;
+        error = "Runner reported an invalid Action output shape. Successful Action output must be a JSON object or null.";
+        return false;
     }
 
     private static TaskReportStatus ResolveTaskReportStatus(WorkResult result) =>

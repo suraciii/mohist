@@ -55,13 +55,13 @@ describe('PrDeliverySummary', () => {
         title: 'Publish via PR',
         uses: 'mohist/publish-via-pr',
         status: 'completed',
-        output: JSON.stringify({
+        output: {
           kind: 'publish-via-pr',
           prNumber: 7,
           prUrl: 'https://github.com/acme/widgets/pull/7',
           mergeCommitSha: 'cafef00d',
           targetBranch: 'main',
-        }),
+        },
       },
     ])
     render(<PrDeliverySummary timeline={timeline} />)
@@ -77,10 +77,10 @@ describe('PrDeliverySummary', () => {
         title: 'Open or update GitHub PR',
         uses: 'mohist/create-pull-request',
         status: 'completed',
-        output: JSON.stringify({
+        output: {
           kind: 'create-pull-request',
           targetBranch: 'main',
-        }),
+        },
       },
     ])
     const { container } = render(<PrDeliverySummary timeline={timeline} />)
@@ -94,12 +94,12 @@ describe('PrDeliverySummary', () => {
         title: 'Open or update GitHub PR',
         uses: 'mohist/create-pull-request',
         status: 'completed',
-        output: JSON.stringify({
+        output: {
           kind: 'create-pull-request',
           prNumber: 8,
           prUrl: 'https://github.com/acme/widgets/pull/8',
           targetBranch: 'main',
-        }),
+        },
       },
     ])
     render(<PrDeliverySummary timeline={timeline} />)
@@ -116,7 +116,7 @@ describe('PrDeliverySummary', () => {
         title: 'Publish',
         uses: 'mohist/publish',
         status: 'completed',
-        output: JSON.stringify({ kind: 'publish', commit: 'deadbeef' }),
+        output: { kind: 'publish', commit: 'deadbeef' },
       },
     ])
     const { container } = render(<PrDeliverySummary timeline={timeline} />)
@@ -130,7 +130,7 @@ describe('PrDeliverySummary', () => {
         title: 'Publish via PR',
         uses: 'mohist/publish-via-pr',
         status: 'running',
-        output: JSON.stringify({ kind: 'publish-via-pr', prNumber: 7, prUrl: 'https://x' }),
+        output: { kind: 'publish-via-pr', prNumber: 7, prUrl: 'https://x' },
       },
     ])
     const { container } = render(<PrDeliverySummary timeline={timeline} />)
@@ -158,7 +158,7 @@ describe('PrDeliverySummary', () => {
         title: 'Publish via PR',
         uses: 'mohist/publish-via-pr',
         status: 'completed',
-        output: JSON.stringify({ kind: 'publish-via-pr', prNumber: 7 }),
+        output: { kind: 'publish-via-pr', prNumber: 7 },
       },
     ])
     const { container } = render(<PrDeliverySummary timeline={timeline} />)
@@ -201,7 +201,7 @@ describe('PrDeliverySummary', () => {
               durationMs: null,
               attempts: 1,
               message: null,
-              output: JSON.stringify({ kind: 'publish-via-pr', prNumber: 9, prUrl: 'https://x/9' }),
+              output: { kind: 'publish-via-pr', prNumber: 9, prUrl: 'https://x/9' },
             },
           ],
           checks: [],
@@ -222,7 +222,7 @@ describe('PrDeliverySummary', () => {
         title: 'Merge GitHub PR',
         uses: 'mohist/merge-pull-request',
         status: 'completed',
-        output: JSON.stringify({ kind: 'merge-pull-request', prNumber: 11, prUrl: 'https://x/11' }),
+        output: { kind: 'merge-pull-request', prNumber: 11, prUrl: 'https://x/11' },
       },
     ])
     const metadata = findPullRequestDeliveryMetadata(timeline)
@@ -240,12 +240,12 @@ describe('PrDeliverySummary', () => {
             title: 'Open or update GitHub PR',
             uses: 'mohist/create-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'create-pull-request',
               prNumber: 17,
               prUrl: 'https://github.com/acme/widgets/pull/17',
               targetBranch: 'main',
-            }),
+            },
           },
         ],
       },
@@ -269,24 +269,24 @@ describe('PrDeliverySummary', () => {
             title: 'Open or update GitHub PR',
             uses: 'mohist/create-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'create-pull-request',
               prNumber: 21,
               prUrl: 'https://github.com/acme/widgets/pull/21',
               targetBranch: 'main',
-            }),
+            },
           },
           {
             id: 'build:update-pr',
             title: 'Update GitHub PR with build results',
             uses: 'mohist/create-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'create-pull-request',
               prNumber: 21,
               prUrl: 'https://github.com/acme/widgets/pull/21',
               targetBranch: 'main',
-            }),
+            },
           },
         ],
       },
@@ -299,13 +299,13 @@ describe('PrDeliverySummary', () => {
             title: 'Merge GitHub PR',
             uses: 'mohist/merge-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'merge-pull-request',
               prNumber: 21,
               prUrl: 'https://github.com/acme/widgets/pull/21',
               mergeCommitSha: 'final-sha',
               targetBranch: 'main',
-            }),
+            },
           },
         ],
       },
@@ -329,24 +329,24 @@ describe('PrDeliverySummary', () => {
             title: 'Open or update GitHub PR',
             uses: 'mohist/create-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'create-pull-request',
               prNumber: 33,
               prUrl: 'https://github.com/acme/widgets/pull/33',
               targetBranch: 'main',
-            }),
+            },
           },
           {
             id: 'build:update-pr',
             title: 'Update GitHub PR with build results',
             uses: 'mohist/create-pull-request',
             status: 'completed',
-            output: JSON.stringify({
+            output: {
               kind: 'create-pull-request',
               prNumber: 33,
               prUrl: 'https://github.com/acme/widgets/pull/33',
               targetBranch: 'main',
-            }),
+            },
           },
         ],
       },
@@ -485,7 +485,7 @@ interface TaskFixture {
   title: string
   uses: string
   status: 'completed' | 'running' | 'failed' | 'pending' | 'skipped'
-  output: string | null
+  output: Record<string, unknown> | null
 }
 
 function makeTimeline(tasks: TaskFixture[]): WorkflowTimeline {

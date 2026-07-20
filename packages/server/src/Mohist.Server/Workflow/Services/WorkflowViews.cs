@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Services;
@@ -103,7 +104,7 @@ public sealed record TaskStatusView(
     DateTimeOffset? StartedAt = null,
     DateTimeOffset? CompletedAt = null,
     long? DurationMs = null,
-    string? Output = null,
+    JsonElement? Output = null,
     ExecutionError? Error = null);
 
 [GenerateSerializer]

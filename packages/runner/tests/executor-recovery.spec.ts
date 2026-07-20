@@ -44,14 +44,14 @@ describe("recovery action error protocol", () => {
     const recovery = { budget: 1, handlers: [{ tasks: [{ id: "fix", title: "Fix" }], retrySelf: false }] }
     expect(tryRecovery(work(recovery), { status: "failed", error: { code: "timeout", message: "Timed out" } }))
       .toMatchObject({ status: "completed", addTasks: [{ id: "fix" }] })
-    expect(tryRecovery(work(recovery), { status: "completed", output: JSON.stringify({ promise: "PASS" }) })).toBeNull()
+    expect(tryRecovery(work(recovery), { status: "completed", output: { promise: "PASS" } })).toBeNull()
   })
 
   it("matches successful completion output with output.promise", () => {
     const result = tryRecovery(work({
       budget: 1,
       handlers: [{ when: "output.promise=FAIL", tasks: [{ id: "fix", title: "Fix" }], retrySelf: false }],
-    }), { status: "completed", output: JSON.stringify({ promise: "FAIL" }) })
+    }), { status: "completed", output: { promise: "FAIL" } })
     expect(result).toMatchObject({ status: "completed", addTasks: [{ id: "fix" }] })
   })
 
