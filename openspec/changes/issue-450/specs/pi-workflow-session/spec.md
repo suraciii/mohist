@@ -88,7 +88,7 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 ### Requirement: One Workflow work turn executes per logical AgentSession
 
-Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine that physical Session and later work MUST NOT start on it until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
+Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. Every Workflow Inline Agent Action SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL remain inside it through Prompt completion and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine that physical Session and later work MUST NOT start on it until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -101,6 +101,12 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 - **WHEN** concurrent Pi tasks target different logical AgentSessions
 - **THEN** serialization of one Session SHALL NOT serialize the other Session
 
+#### Scenario: Concurrent runtime choices share one serialization boundary
+
+- **WHEN** concurrent OpenCode and Pi Workflow tasks target the same logical AgentSession
+- **THEN** both Actions SHALL enter the same logical-Session serialization boundary
+- **AND** a runtime rebind or Prompt MUST NOT overlap the other Action's active turn
+
 #### Scenario: Unconfirmed stop prevents overlap
 
 - **WHEN** a turn ends with interruption unconfirmed and another Workflow task targets the same logical AgentSession
@@ -109,7 +115,11 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
-For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt and normalized Pi events to the current logical AgentSession. The projection SHALL include assistant text, reasoning when present, tool-call lifecycle and result facts, resolved model observations, and token usage including input, output, cache, and thought tokens when Pi provides them. Before prompt admission, `session.input` SHALL be durably accepted by the Session authority. After admission, each normalized fact SHALL be written to a Runner-local durable outbox before the Action returns; delivery SHALL retry across transport loss and Runner restart without replaying the Prompt. Each binding SHALL use one stable event stream identity and monotonically increasing sequence. The Session authority SHALL atomically ignore an already-applied sequence before updating transcript, usage, or model state, reject a gap, and reject facts for a stale physical binding. A runtime change MUST NOT replace the binding until the previous binding's durable outbox is drained. Pi message IDs and tool-call IDs SHALL also suppress duplicate SDK projections before enqueue. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
+For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt and normalized Pi events to the current logical AgentSession. The projection SHALL include assistant text, reasoning when present, tool-call lifecycle and result facts, resolved model observations, and token usage including input, output, cache, and thought tokens when Pi provides them. Before Prompt admission, the Runner SHALL durably create the binding's event-stream manifest with persisted projector fingerprints and an active-turn checkpoint, then `session.input` SHALL be durably accepted by the Session authority. The Runner SHALL durably mark that checkpoint admitted before calling Pi. After admission, each normalized fact and its updated fingerprints SHALL be one atomic Runner-local outbox state transition; the checkpoint SHALL close only after all final facts are durable. Delivery SHALL retry across transport loss and Runner restart without replaying the Prompt. Each binding SHALL use one stable event stream identity and monotonically increasing sequence. The Session authority SHALL atomically ignore an already-applied sequence before updating transcript, usage, or model state, reject a gap, and reject facts for a stale or sealed physical binding.
+
+Before a runtime change, the shared logical-Session serialization boundary SHALL fence new work while the current owning Runner drains all locally issued events. The guarded bind SHALL carry that stream's final issued sequence; in the same Session transition, the authority SHALL require its applied cursor to equal that sequence, seal the old stream, and replace the binding, or SHALL reject without either mutation. A Runner MUST NOT attest another Runner's local stream. Pi message IDs and tool-call IDs SHALL suppress duplicate SDK projections before enqueue and SHALL be persisted with the stream manifest so restart reconciliation can append only missing required facts. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
+
+If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, the pre-created manifest SHALL drive reconciliation from the persisted Pi Session messages through the saved projector fingerprints; required missing final facts SHALL be appended and drained before quarantine clears. An unavailable or corrupt committed outbox state SHALL remain preserved, SHALL leave reporting unavailable with an actionable diagnostic, and MUST NOT be silently discarded. Repair MUST NOT replay the Prompt.
 
 #### Scenario: Session view shows a completed Pi turn
 
@@ -128,6 +138,24 @@ For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt
 - **THEN** the Runner SHALL retain the ordered event in its durable outbox and preserve the Action result
 - **AND** it SHALL retry delivery without replaying the Prompt, including after Runner restart
 
+#### Scenario: Post-admission local append failure quarantines reporting
+
+- **WHEN** a required Pi fact cannot be atomically appended after the Prompt has been admitted
+- **THEN** the Action SHALL fail with `session-reporting-failed` and the physical Session SHALL reject later Prompt and rebind admission
+- **AND** the Runner SHALL interrupt an active turn and MUST NOT replay its Prompt
+
+#### Scenario: Restart repairs an incomplete manifested turn
+
+- **WHEN** the Runner restarts with a pre-created stream manifest whose turn did not durably append every required final fact
+- **THEN** it SHALL reconcile the persisted Pi Session messages through the manifest's projector fingerprints
+- **AND** it SHALL append and drain missing required facts before admitting later work on that Session
+
+#### Scenario: Corrupt committed outbox state is not discarded
+
+- **WHEN** startup cannot decode a committed stream snapshot
+- **THEN** Session reporting SHALL remain unavailable with an actionable diagnostic and the committed bytes SHALL be preserved
+- **AND** no Prompt or runtime rebind for that Session SHALL be admitted
+
 #### Scenario: Ambiguous delivery does not duplicate usage or transcript
 
 - **WHEN** the Server applies an event but the acknowledgement is lost and the Runner sends the same stream sequence again
@@ -139,6 +167,12 @@ For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt
 - **WHEN** the Session authority receives a current-binding event whose sequence skips an unapplied predecessor
 - **THEN** it SHALL reject that event without changing Session state
 - **AND** the Runner SHALL retain and resend the missing ordered outbox entries
+
+#### Scenario: Runtime rebind atomically seals the drained stream
+
+- **WHEN** the owning Runner requests a guarded runtime rebind with the old stream's final issued sequence
+- **THEN** the Session authority SHALL replace the binding only when that sequence equals the current applied cursor
+- **AND** it SHALL seal the old stream in the same transition so later old-binding events are rejected
 
 #### Scenario: Stale binding events are rejected
 

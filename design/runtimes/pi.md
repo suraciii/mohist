@@ -231,6 +231,20 @@ compaction 事实：
 Runner 进程终止即事件通道与执行中回合一并终止（见「进程拓扑与就绪」），重启后不
 重建「回合仍在执行」的假象。
 
+Workflow Inline Agent 路径不能把这些事实当作 best-effort UI 事件。Runner 在 Prompt 前
+为当前逻辑/物理绑定建立持久事件流 manifest；每条规范化事实与 projector 去重状态先原子
+写入本地 outbox，再按单调 sequence 报告给 AgentSession。AgentSession 对当前绑定持久化
+最后应用的 sequence，重复 sequence 只确认不重复应用，gap、旧绑定与已封口流在修改状态
+前拒绝。传输失败只延迟 outbox drain，不触发 Prompt replay。
+
+本地 outbox 的格式、sequence 与恢复由 outbox 模块拥有，物理文件 adapter 只实现字节级
+原子替换。Prompt 后本地持久化失败时，Action 返回 `session-reporting-failed` 并隔离该物理
+Session；后续 Prompt 与 Runtime rebind 都被拒绝。manifest 先于 Prompt 存在，因此 Runner
+重启后可以用已保存的 projector 状态核对 `session.messages`，补齐最终 assistant、tool、
+model 与 usage 事实后再解除隔离；修复过程不重放 Prompt。Runtime rebind 由共享的逻辑
+Session 串行边界围住，只有当前 Runner 的 outbox 已 drain，且 Server 在同一绑定事务中
+核对 final sequence、封口旧流并替换绑定时才能成功。
+
 ## Provider 错误失败策略
 
 判定规则与 [`opencode.md`](opencode.md) 的「Provider 错误失败策略」相同：可恢复
