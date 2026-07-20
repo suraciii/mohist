@@ -185,8 +185,12 @@ Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执�
 `session.prompt()` resolve 即整个 agent run（含工具循环与自动重试）结束，它就是
 唯一完成判据，不存在第二次 wait；`agent_end` 事件只用于投影，不作为完成权威。
 `PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。调用者必须声明工作
-回合期限。issue #450 的 Workflow task executor 固定声明 60 分钟，`mohist/pi` Action
-Input 不提供覆盖；AgentJob executor 的期限由其所属 issue 单独定义。
+回合的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
+固定提供 60 分钟，`mohist/pi` Action Input 不可见也不能覆盖。Action 完成 open/bind、输入
+确认与 model/thinking 应用后，把 duration 交给 `runTurn`；Runtime 在调用
+`session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与 outbox preflight
+不占 Prompt 预算；cleanup Prompt 是独立回合并取得新的 60 分钟。AgentJob executor 的期限
+由其所属 issue 单独定义。
 
 in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明的期限是单一
 回合期限权威。期限到达时 Runtime 将回合结果固定为 `deadline-exceeded`，随后调用

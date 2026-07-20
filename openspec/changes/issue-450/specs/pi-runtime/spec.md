@@ -98,7 +98,7 @@ An explicit model SHALL use `provider/model` form, split only at the first `/`, 
 
 ### Requirement: Workflow deadlines interrupt Pi deterministically
 
-A Pi Workflow turn SHALL use a 60-minute deadline declared by the Workflow executor. `mohist/pi` Action input MUST NOT expose or honor `timeout`, `deadline`, or another user-authored override in this issue. The runtime SHALL inject one task-independent wrap-up warning five minutes before the deadline. At the deadline it SHALL first fix the result as deadline exceeded, then request Pi interruption and verify whether execution stopped. A late prompt resolution MUST NOT replace the deadline result. If stopping cannot be confirmed, the runtime SHALL report interruption as unconfirmed, mark that physical Session quarantined, and MUST NOT represent the turn as safely stopped. The runtime MUST reject later work on that physical Session with `unavailable-runtime` until stop is observed or the Runner process restarts; different physical Sessions SHALL remain available. Runner restart clears the quarantine because process termination ends every in-process Pi turn. The runtime MUST NOT automatically replay the prompt after any timeout, interruption, or uncertain submission result.
+A Pi Workflow turn SHALL use a 60-minute duration declared by the Workflow executor through Runner-private Action context. `mohist/pi` Action input MUST NOT expose or honor `timeout`, `deadline`, or another user-authored override in this issue. After Session binding, input acknowledgement, model/thinking application, and event subscription are ready, the runtime SHALL read its injected clock immediately before calling the SDK Prompt and derive the absolute deadline from that instant. Queue wait, binding, and reporting preflight MUST NOT consume the Prompt budget. Each cleanup Prompt SHALL be a separate turn with a fresh duration. The runtime SHALL inject one task-independent wrap-up warning five minutes before the deadline. At the deadline it SHALL first fix the result as deadline exceeded, then request Pi interruption and verify whether execution stopped. A late prompt resolution MUST NOT replace the deadline result. If stopping cannot be confirmed, the runtime SHALL report interruption as unconfirmed, mark that physical Session quarantined, and MUST NOT represent the turn as safely stopped. The runtime MUST reject later work on that physical Session with `unavailable-runtime` until stop is observed or the Runner process restarts; different physical Sessions SHALL remain available. Runner restart clears the quarantine because process termination ends every in-process Pi turn. The runtime MUST NOT automatically replay the prompt after any timeout, interruption, or uncertain submission result.
 
 #### Scenario: Deadline fixes timeout before interruption cleanup
 
@@ -109,8 +109,15 @@ A Pi Workflow turn SHALL use a 60-minute deadline declared by the Workflow execu
 #### Scenario: Workflow executor declares the fixed deadline
 
 - **WHEN** the Workflow executor constructs a `mohist/pi` turn
-- **THEN** it SHALL declare a deadline exactly 60 minutes after turn start
+- **THEN** it SHALL provide an immutable 60-minute duration through private Action context
+- **AND** PiRuntime SHALL derive the deadline exactly 60 minutes after the injected clock instant read immediately before SDK Prompt submission
 - **AND** the runtime SHALL inject exactly one task-independent wrap-up warning at 55 minutes and interrupt at 60 minutes
+
+#### Scenario: Preparation does not consume the Prompt budget
+
+- **WHEN** queueing, Session binding, input acknowledgement, or cleanup preparation takes time before a Pi Prompt
+- **THEN** that elapsed preparation time SHALL NOT reduce the Prompt's 60-minute duration
+- **AND** an original and cleanup Prompt SHALL each receive a fresh duration
 
 #### Scenario: Action input cannot override the deadline
 
