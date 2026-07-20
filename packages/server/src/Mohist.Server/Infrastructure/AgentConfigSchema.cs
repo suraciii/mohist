@@ -7,7 +7,7 @@ namespace Mohist.Server.Infrastructure;
 /// Converged AgentConfig schema shared by the issue-level and
 /// agent-definition write surfaces. Per #410 T-002 design D5, the
 /// issue-level and agent-definition <c>agentConfig</c> surfaces accept
-/// only <c>model</c> + <c>variant</c>; legacy ACP/liveness keys
+/// only <c>model</c> + <c>variant</c>; legacy runtime/liveness keys
 /// (<c>type</c>, <c>livenessQuietThresholdMs</c>, <c>probeTimeoutMs</c>,
 /// <c>sessionStartTimeoutMs</c>, <c>compaction</c>) are rejected at the
 /// API boundary with an actionable validation error and never enter the

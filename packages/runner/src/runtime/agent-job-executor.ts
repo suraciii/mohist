@@ -19,7 +19,7 @@ import type { ServerConnection } from "../server/connection.js"
  *
  * Branches on the owner kind BEFORE Action resolution and drives the
  * shared `OpenCodeRuntime.runTurn` directly. No `mohist/opencode` Action
- * contract, no `mohist/acp-agent` Action, no ACP bridge. The AgentJob
+ * contract or removed Action. The AgentJob
  * payload lives in `work.with` as a flat
  * `{ prompt, instructions?, model?, variant? }` shape — composed at
  * launch time from the resolved Agent snapshot and stable for the
@@ -33,8 +33,7 @@ import type { ServerConnection } from "../server/connection.js"
  *
  * The physical Session binding is reported back through the existing
  * `/api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/attach`
- * endpoint (`ServerConnection.attachAgentSession`) — same channel the
- * ACP path used, no new wire introduced.
+ * endpoint (`ServerConnection.attachAgentSession`); no new wire is introduced.
  */
 export class AgentJobExecutor {
   constructor(

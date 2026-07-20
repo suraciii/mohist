@@ -167,7 +167,7 @@ public static class IssueModelMetadata
     /// <summary>
     /// Validate the open-shape <c>agentConfig</c> body supplied at issue
     /// create/update. The converged surface accepts only
-    /// <c>{model, variant}</c>; any other key (or any legacy ACP/liveness
+    /// <c>{model, variant}</c>; any other key (or any legacy runtime/liveness
     /// key explicitly named in <see cref="AgentConfigSchema.ForbiddenKeys"/>)
     /// is rejected at the API boundary so it never reaches persistence.
     /// Returns <c>null</c> when no offending key is found, otherwise the

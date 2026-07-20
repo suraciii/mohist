@@ -99,7 +99,7 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
 
         // Per #410 T-002 design D5: project the incoming per-stage agent
         // config down to the converged {model, variant} whitelist before
-        // writing into the stage vars. Legacy ACP/liveness keys supplied
+        // writing into the stage vars. Legacy runtime/liveness keys supplied
         // by callers MUST NOT enter stages.<stage>.vars.agent.
         var filteredAgent = AgentConfigSchema.Filter(agentConfig);
         if (filteredAgent is null)

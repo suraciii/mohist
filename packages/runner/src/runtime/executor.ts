@@ -45,6 +45,14 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  */
 const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
 
+/**
+ * Actions whose registration was retired by the runtime migration.
+ * A dispatch whose `uses` matches one of these is a pre-cutover
+ * WorkflowRun that the server never rewrote; the dispatch fails with a
+ * named, actionable error pointing the user to rerun the affected stage
+ * with a `mohist/opencode` profile instead of the generic "No action
+ * found" miss.
+ */
 const REMOVED_ACTIONS = new Set(["mohist/acp-agent"])
 
 function isRemovedAction(uses?: string | null): boolean {

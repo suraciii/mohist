@@ -116,7 +116,7 @@ public class ConfigService : ISingletonService
     /// <summary>
     /// Returns the global default agent configuration read from the <c>agent</c>
     /// object in <c>config.jsonc</c>, projected down to the converged
-    /// <c>{model, variant}</c> whitelist so legacy ACP/liveness keys never
+    /// <c>{model, variant}</c> whitelist so legacy runtime/liveness keys never
     /// enter <c>vars.agent</c> from this write path. Returns <c>null</c>
     /// when no <c>agent</c> object is configured or when no allowed key
     /// survives the projection.

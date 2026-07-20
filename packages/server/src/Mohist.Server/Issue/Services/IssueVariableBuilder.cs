@@ -283,7 +283,7 @@ public static class IssueVariableBuilder
     /// every <c>vars.agent</c> / <c>stages.&lt;stage&gt;.vars.agent</c>
     /// block down to the converged <c>{model, variant}</c> whitelist.
     /// Per #410 T-002 design D5, the <c>vars.agent</c> surface only carries
-    /// <c>{model, variant}</c>; legacy ACP/liveness keys carried via any
+    /// <c>{model, variant}</c>; legacy runtime/liveness keys carried via any
     /// read-in path (ConfigService.GetAgentConfigAsync,
     /// ProjectWorkflowProfileManager.SetVariablesAsync project write path,
     /// already-persisted bundle) MUST be projected away before

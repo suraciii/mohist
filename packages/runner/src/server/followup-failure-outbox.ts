@@ -6,13 +6,11 @@ import type { ServerConnection } from "./connection.js"
 // Issue-410 T-003 / design D3: the followup failure outbox is now a
 // pure Mohist-owned delivery primitive. It branches on `target.kind`
 // only (workflow → `workflowAgentSessionRuntimeEvents`; generic →
-// `agentSessionRuntimeEvents`) and never references a live
-// `ClientSideConnection` or any other ACP surface — the runtime
-// session id is the record's own `runtimeSessionId` field, resolved
+// `agentSessionRuntimeEvents`) and never references a live connection.
+// The runtime session id is the record's own `runtimeSessionId` field, resolved
 // out-of-band by the runner host when the original followup was
-// attempted. Persisted entries remain queryable across restarts;
-// legacy ACP-bound entries still flow through the same kind branch
-// (the legacy binding is no longer consulted at delivery time).
+// attempted. Persisted entries remain queryable across restarts; entries with
+// historical bindings still flow through the same kind branch.
 
 const DEFAULT_FOLLOWUP_FAILURE_OUTBOX_FILE = ".mohist/runner-state/followup-failures.json"
 const RETRY_DELAY_MS = 2_000

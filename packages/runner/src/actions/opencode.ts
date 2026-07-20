@@ -44,7 +44,7 @@ type OptionsParse =
  * `client.session.create()` / `prompt()` / `abort()` calls, the
  * provider-error failure policy, the executor-owned deadline
  * backstop, and the physical-Session reuse invariants. The Action
- * itself never touches ACP, never shells out to OpenCode CLI, and
+ * itself never shells out to OpenCode CLI, and
  * never cleans up a `.opencode` lockfile.
  *
  * Output projection: the Workflow task executor's `projectTaskOutput`

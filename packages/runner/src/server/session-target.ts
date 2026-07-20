@@ -15,14 +15,12 @@
 // value object `{ runtimeSessionId, workDir, projectId }` resolved from
 // the persisted binding (the same source the Workflow path already uses).
 // The handlers pass the value object to `OpenCodeRuntime.followup` /
-// `OpenCodeRuntime.cancel`. The session-target module therefore stops
-// importing any symbol from `@agentclientprotocol/sdk`; the live ACP
-// connection lifecycle and the per-session reconnect path were already
-// removed by the design D3's "no live per-session connection" rule.
+// `OpenCodeRuntime.cancel`. The module has no live connection lifecycle or
+// per-session reconnect path.
 //
 // Issue-410 T-004: the `RuntimeSessionBinding` and `SessionTarget` types
-// that used to live in `runtime/acp-connection.ts` are now defined here.
-// The wire shape is unchanged; only the connection lifecycle went away.
+// are now defined here. The wire shape is unchanged; only the connection
+// lifecycle went away.
 
 /**
  * Persisted runtime-session binding carried on the wire target by

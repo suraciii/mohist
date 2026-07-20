@@ -6,7 +6,7 @@ using Mohist.Server.Workflow.Domain;
 namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
-/// Filters legacy ACP/liveness keys from project-level <c>vars.agent</c>
+/// Filters legacy runtime/liveness keys from project-level <c>vars.agent</c>
 /// and per-stage agent blocks at the project-variables write boundary.
 /// The project-layer PATCH/PUT endpoints accept a free-shape
 /// <see cref="VariableBundle"/>; without this filter, callers could
