@@ -42,7 +42,7 @@ If a manifest marks an input as required, rendered `with` MUST provide that fiel
 
 ### Requirement: Input types use exact JSON kinds
 
-A supplied input value SHALL satisfy its manifest type only when its rendered JSON kind is the declared kind: string, finite number, boolean, non-null object that is not an array, or array. The Runner MUST NOT stringify objects, parse numeric strings, parse boolean-like strings, or otherwise coerce a supplied value to make it match. A mismatch SHALL fail with structured platform error code `invalid-input`, and the error message MUST identify the field, its expected type, and its actual type. Manifest validation applies to the declared top-level field and container type; constraints within an accepted object or array remain part of the Action's own semantics.
+A supplied input value SHALL satisfy its manifest declaration only when its rendered JSON kind belongs to the declared finite set: string, finite number, boolean, non-null object that is not an array, or array. The Runner MUST NOT stringify objects, parse numeric strings, parse boolean-like strings, or otherwise coerce a supplied value to make it match. A mismatch SHALL fail with structured platform error code `invalid-input`, and the error message MUST identify the field, every accepted kind in canonical order, and its actual kind. Manifest validation applies to the declared top-level field and container kind; constraints within an accepted object or array remain part of the Action's own semantics.
 
 #### Scenario: Reject a numeric string for a number input
 - **WHEN** an Action declares number input `timeout` and rendered `with.timeout` is the string `"30"`
@@ -59,6 +59,18 @@ A supplied input value SHALL satisfy its manifest type only when its rendered JS
 - **WHEN** an Action declares object input `options` and rendered `with.options` is a non-null JSON object
 - **THEN** the top-level manifest type check SHALL accept `options`
 - **AND** the Action SHALL remain responsible for any constraints on fields inside that object
+
+#### Scenario: Accept either OpenCode prompt kind
+- **WHEN** `mohist/opencode.prompt` accepts `string` and `object`
+- **AND** rendered `with.prompt` is a string or a non-null object
+- **THEN** manifest validation SHALL accept the value without changing it
+- **AND** the existing prompt resolver SHALL remain responsible for non-empty text, structured prompt, and prompt-loader semantics
+
+#### Scenario: Reject a kind outside a finite union
+- **WHEN** an input accepts `string` and `object` but the supplied value is an array, number, boolean, or `null`
+- **THEN** the task or individual check SHALL fail with error code `invalid-input`
+- **AND** the error message SHALL identify both accepted kinds and the actual kind
+- **AND** the Action execution function MUST NOT run
 
 ### Requirement: Defaults are applied centrally
 

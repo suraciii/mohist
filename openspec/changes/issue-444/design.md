@@ -35,7 +35,14 @@ This change crosses the Workflow/Runner published-language boundary but keeps ex
 Add an Action definition module under `packages/runner/src/actions/` with these conceptual types:
 
 ```ts
-type ActionInputType = "string" | "number" | "boolean" | "object" | "array"
+type ActionInputKind = "string" | "number" | "boolean" | "object" | "array"
+
+type ActionInputDeclaration = Readonly<{
+  types: readonly [ActionInputKind, ...ActionInputKind[]]
+  required?: true
+  default?: JsonValue
+  description?: string
+}>
 
 type ActionDefinition<M extends ActionManifest> = Readonly<{
   manifest: M
@@ -45,9 +52,9 @@ type ActionDefinition<M extends ActionManifest> = Readonly<{
 type ActionTombstone = Readonly<{ name: string; guidance: string }>
 ```
 
-`defineAction` validates and freezes the manifest, verifies static defaults, and returns the manifest paired with its function. `ValidatedActionContext` keeps the current `ActionContext` fields and `rawWith`, but narrows `with` to the inferred, validated input shape. This gives authors typed input without narrowing server/runtime/Variable capabilities in this issue.
+`defineAction` validates and freezes the manifest, verifies static defaults, and returns the manifest paired with its function. Every input uses a non-empty `types` tuple in canonical `string`, `number`, `boolean`, `object`, `array` order. This supports finite unions without Action-specific exceptions; `mohist/opencode.prompt` declares `types: ["string", "object"]`. `ValidatedActionContext` keeps the current `ActionContext` fields and `rawWith`, but narrows `with` to the union inferred from `types`. This gives authors typed input without narrowing server/runtime/Variable capabilities in this issue.
 
-Canonical names match `^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$`. `working-directory` is rejected as a manifest input. Input/output entries carry type and optional description; errors are a kebab-case code-to-description map. Descriptions are catalog metadata, not runtime behavior.
+Canonical names match `^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$`. `working-directory` is rejected as a manifest input. Empty/duplicate kind sets, null defaults, and defaults outside the accepted set are rejected. Output entries carry one type and an optional description; errors are a kebab-case code-to-description map. Descriptions are catalog metadata, not runtime behavior.
 
 Alternative considered: `defineAction(manifest, run)`. It separates serializable data from code more visibly, but weakens the single-object authoring experience and TypeScript contextual inference between `inputs` and `run`.
 
@@ -73,10 +80,10 @@ Validation order is deterministic:
 
 1. Exclude `working-directory` from Action-owned input and reject other unknown top-level keys.
 2. Reject omitted required fields.
-3. Reject supplied values whose exact JSON kind differs from the declaration. `null` is supplied and mismatches every supported type; omission means the property is absent.
+3. Reject supplied values whose exact JSON kind is absent from the declaration's `types` set. `null` is supplied and mismatches every supported kind; omission means the property is absent.
 4. Copy valid supplied values and clone static defaults for absent defaulted fields.
 
-Diagnostics sort candidate field names before selecting the first error and use stable forms such as `Action 'core/process' received unknown input 'commmand'` and `Action 'core/script' input 'timeout' must be number, received string`.
+Diagnostics sort candidate field names before selecting the first error and use stable forms such as `Action 'core/process' received unknown input 'commmand'` and `Action 'mohist/opencode' input 'prompt' must be string or object, received array`.
 
 Object and array declarations validate only the container. Conditional rules such as `expect` or legacy `contains`, `message` or `messageFrom` when squashing, nested OpenCode options, and context-dependent fallbacks remain in the Action implementation. Inputs currently obtainable from implicit Variables must remain optional in manifests until the later single-input-channel change; otherwise this issue would remove those fallbacks before the Action runs.
 
@@ -101,9 +108,9 @@ Alternative considered: change the aggregate check error to `invalid-input` when
 
 ### 5. The Action boundary enforces error ownership
 
-Maintain a constant reserved set containing `invalid-input`, `unexpected-error`, and `timeout`; manifests cannot declare those codes. After an execution function returns, the boundary accepts either a reserved platform code or a business code declared by that manifest. An undeclared business code is a contract violation and is normalized to `unexpected-error` before recovery.
+Maintain a constant reserved set containing `invalid-input`, `unexpected-error`, and `timeout`; manifests cannot declare those codes. After an execution function returns, the boundary accepts either a reserved platform code or a business code declared by that manifest. An undeclared business code is a contract violation and is normalized to `unexpected-error` before recovery. Built-in `fail` call sites use a manifest-derived code union where TypeScript can prove the branch; an exhaustive runtime test covers classifiers and other dynamic branches.
 
-Native exceptions from the execution function and malformed Action results are also normalized to `unexpected-error` at this boundary and enter the same task recovery path. Broader executor failures outside the Action boundary retain their existing executor-specific codes and behavior.
+Native exceptions from the execution function and malformed task Action results are also normalized to `unexpected-error` at this boundary and enter the same task recovery path. For checks, undeclared errors and exceptions become row-level `unexpected-error` while the aggregate remains `check-failed`; the existing successful-output shape guard continues to produce aggregate `unexpected-error`. Broader executor failures outside the Action boundary retain their existing executor-specific codes and behavior.
 
 Existing built-ins may still return a reserved code for a platform-defined condition, such as semantic invalid input or command timeout. Ownership means these codes are absent from the Action business catalog; it does not require capability/context refactoring in this issue.
 
@@ -113,9 +120,37 @@ Alternative considered: permit arbitrary returned codes and use manifests only a
 
 Project a pure-data `ActionCatalog` from the registry with executable entries and tombstones. Execution functions, inferred TypeScript types, and private handler output are excluded. Output declarations describe the public Action output after executor projection; for `mohist/opencode`, this is `promise`, not the handler's private debug payload.
 
+The published shape is arrays throughout so cross-language ordering is explicit:
+
+```json
+{
+  "actions": [
+    {
+      "name": "mohist/opencode",
+      "description": "Run an OpenCode agent turn",
+      "inputs": [
+        { "name": "options", "types": ["object"], "required": false },
+        { "name": "prompt", "types": ["string", "object"], "required": true }
+      ],
+      "outputs": [
+        { "name": "promise", "type": "string" }
+      ],
+      "errors": [
+        { "code": "runtime-unavailable", "description": "The OpenCode runtime is unavailable" }
+      ]
+    }
+  ],
+  "tombstones": [
+    { "name": "mohist/acp-agent", "guidance": "Use mohist/opencode and rerun the affected stage." }
+  ]
+}
+```
+
+Catalog projection sorts Actions, inputs, outputs, errors, and tombstones lexicographically; each input's `types` follows the fixed kind order. `required` is always present. `default` is omitted when absent, so a nullable generic leaf is unnecessary because null defaults are invalid.
+
 Add `actionCatalog` to TypeScript `RunnerRegistration`, initial registration, heartbeat state, and host test fakes. `RunnerHost` must retain the same registry instance passed to `WorkExecutor` and call `registry.catalog()` when building registration state.
 
-Add matching C# catalog records and an optional `ActionCatalog` field to `RunnerRegisterRequest`, `RunnerHeartbeatRequest`, and `RunnerInfo`. Register and heartbeat mapping pass the field through. Existing `RunnerGrain` persistence and registry mirroring then retain it automatically in `LastKnownInfo`; no Workflow service consumes it yet.
+Add matching C# records for `ActionCatalog`, `ActionCatalogEntry`, `ActionCatalogInput`, `ActionCatalogOutput`, `ActionCatalogError`, and `ActionCatalogTombstone`, plus an optional `ActionCatalog` field on `RunnerRegisterRequest`, `RunnerHeartbeatRequest`, and `RunnerInfo`. The catalog records use Orleans serializer metadata; input defaults use a typed optional JSON value only at that leaf. Register and heartbeat mapping pass the field through. Existing `RunnerGrain` persistence and registry mirroring then retain it automatically in `LastKnownInfo`; no Workflow service consumes it yet.
 
 Alternative considered: send an opaque JSON blob. That reduces C# types now but moves schema validation and parsing into every future consumer and weakens Orleans persistence contracts.
 
@@ -127,7 +162,33 @@ Define each built-in beside its implementation and replace local coercive reads 
 
 The migration includes all Actions returned by `createDefaultRegistry`; partial migration is not permitted. A profile traversal test must inspect executable task/check/recovery/approval-feedback `uses` while excluding nested prompt-loader `uses`. Existing built-in profile flow specs remain the regression boundary.
 
-Focused Runner unit tests own definition validation, exact-kind input validation, default cloning, error-code enforcement, and catalog projection. Runner specs own task recovery, check rows, tombstones, and built-in profile traversal. Host tests assert registration/heartbeat catalog payloads. Server API/grain specs assert wire binding and retention across heartbeat repair and activation using in-memory test infrastructure.
+#### Built-in migration inventory
+
+This inventory is the pre-migration baseline for known inputs and observable results. `required` means manifest-required; `default` means a serializable static default; other fallback text remains Action-owned because implicit context is a non-goal. Output lists describe public task output. Error lists exclude the three reserved platform codes.
+
+- **`core/process`** - Inputs: `command:string` required, `args:array` default `[]`. Array element string conversion remains Action-owned. Outputs: `stdout`, `exitCode`. Errors: `process-failed`.
+- **`core/script`** - Inputs: `run:string` required, `shell:string` optional, `timeout:number` optional. Shell keeps the OS-dependent `bash`/`pwsh` fallback. Outputs: `kind`, `run`, `shell`, `exitCode`, `stdout`, `stderr`. Errors: `script-failed`.
+- **`core/artifact-exists`** - Inputs: `path:string` required. Outputs: `kind`, `path`, `exists`. Errors: `artifact-missing`.
+- **`core/marker`** - Inputs: `path:string` required, `expect:string` optional, legacy alias `contains:string` optional; `expect` wins and one of the pair remains semantically required. Outputs: `kind`, `path`, `marker`, `found`. Errors: `artifact-missing`, `marker-missing`.
+- **`mohist/opencode`** - Inputs: `prompt:string|object` required, `session:string` optional, `options:object` optional, `timeout:number` default `3600000`. Session keeps the work-id fallback; nested `options.model`/`variant` and unknown-key diagnostics remain Action-owned. Public output: nullable `promise`. Errors: `runtime-unavailable`, `session-workspace-mismatch`, `session-binding-failed`, `runtime-session-missing`, `unavailable-runtime`, `incompatible-runtime`, `permission-required`, `interrupted`, `turn-failed`.
+- **`mohist/openspec-tasks`** - Inputs: `path:string` required, `task:object` optional, `items:string` default `tasks`. Nested task merge, `id`/`taskId`, default `uses`, `rawWith`, prompt, and `addTasks` behavior remain Action-owned. Output: `loaded`. Errors: `missing-source`, `server-unavailable`.
+- **`mohist/openspec-artifacts`** - Inputs: `changeDir:string` required. Outputs: `kind`, `changeDir`, `present`, `missing`. Errors: `artifacts-missing`.
+- **`mohist/archive-change`** - Inputs: `changeDir:string` required. Archive-name Variable fallback and immediate Variable write remain Action-owned. Outputs: `kind`, `source`, `destination`, `changed`, `noChange`, and when changed `commitMessage`, `commitSha`, `commitOutput`, `changedFiles`. Errors: `retry-safe`, `partial-archive`, `missing-source`, `config-error`.
+- **`mohist/rebase`** - Inputs: `baseBranch:string`, `remote:string`, `squash:boolean` default `false`, `message:string`, `messageFrom:string`, all optional at the manifest layer. Base branch keeps context fallback; `message` wins over `messageFrom`, and one is semantically required only for squash. Outputs: `kind`, `status`, `baseBranch`, `remote`, `baseRef`, `rebasedOntoSha`, `beforeHeadSha`, `afterHeadSha`, `squashed`, `squashedHeadSha`, `rebased`, `conflicts`, `rebaseLeftInProgress`, `output`, `steps`. Errors: `abort-failed`, `fetch-failed`, `base-resolve-failed`, `prepare-failed`, `rebase-failed`, `conflict`, `squash-failed`.
+- **`mohist/rebase-status`** - Inputs: optional `baseBranch:string`, `remote:string`; base branch keeps context fallback. Outputs: `kind`, `status`, `baseBranch`, `remote`, `baseRef`, `rebaseInProgress`, `conflicts`, `baseSha`, `headSha`, `mergeBaseSha`, `output`. Errors: `rebase-incomplete`.
+- **`mohist/merge-ready`** - Inputs: optional `baseBranch:string`, `remote:string`, `source:string`; repository/workspace fallbacks and issue-backed authority checks remain Action-owned. Outputs: `kind`, `targetBranch`, `strategy`, `baseSha`, `candidateHeadSha`, `mergeBaseSha`, `canMerge`, `conflictFiles`, `checkedAt`. Errors: `merge-not-ready`.
+- **`mohist/push`** - Inputs: optional `source:string`, `target:string`, alias `baseBranch:string`, `remote:string`, `force:boolean` default `false`, `forceWithLease:boolean` default `false`; `target` wins over `baseBranch`, and `force` suppresses lease mode. Repository/workspace fallbacks remain. Outputs: `kind`, `status`, `source`, `target`, `remote`, `refspec`, `workDir`, `landedCommit`, `pushed`, `force`, `forceWithLease`, `output`, `steps`. Errors: `base-moved`, `push-failed`.
+- **`mohist/create-github-pr`** - Inputs: optional `source:string`, `target:string`, alias `baseBranch:string`, `draft:boolean` default `true`, `title:string`, alias `message:string`, `titleFrom:string` default `issue.title`, `body:string`, `bodyFrom:string` default `issue.body`. Literal title/body win over source fields; repository/workspace/issue fallbacks remain. The currently ignored shipped `remote` key is removed from the profile rather than falsely declared. Outputs: `kind`, `status`, `source`, `targetBranch`, `branch`, `prNumber`, `prUrl`, `operation`, `draft`, `output`, `steps`. Errors: `config-error`, `protection-conflict`, `base-moved`, `pr-state-conflict`, `retry-safe`, `create-pr-failed`.
+- **`mohist/mark-github-pr-ready`** - Inputs: `prNumber:number` required. Outputs: `kind`, `status`, `prNumber`, `prUrl`, `state`, `previousState`, `transitioned`, `output`, `steps`. Errors: `config-error`, `protection-conflict`, `base-moved`, `pr-state-conflict`, `retry-safe`, `mark-ready-failed`.
+- **`mohist/merge-github-pr`** - Inputs: `method:string` default `squash`; optional `prNumber:number`, `source:string`, `target:string`, alias `baseBranch:string`, `subject:string`, `subjectFrom:string` default `issue.title`. Explicit PR number and literal subject take precedence; context lookup remains. Outputs: `kind`, `status`, `prNumber`, `prUrl`, `mergeCommitSha`, `method`, `output`, `steps`. Errors: `base-moved`, `retry-safe`, `config-error`, `protection-conflict`, `pr-state-conflict`, `pr-checks-unavailable`, `pr-checks-failed`, `merge-failed`.
+- **`mohist/github-pr-status`** - Inputs: optional `prNumber:number`, `expect:string` default `open,ready`; PR number keeps its Variable fallback and expectation token parsing remains Action-owned. Outputs: `kind`, `status`, `prNumber`, `prUrl`, `prState`, `isDraft`, `expectations`, `missing`, `output`, `steps`. Errors: `pr-status-failed`.
+- **`mohist/workspace-prepare`** - No Action inputs; workspace branch/path remain context requirements. Outputs: `kind`, `status`, `expectedBranch`, `head`, `residual`, `porcelain`, `step`, `workDir`. Errors: `workspace-setup`.
+
+Strict validation intentionally removes pre-migration coercion of non-strings to strings, numeric strings to numbers, boolean-like strings to booleans, non-arrays to empty arrays, explicit null to omission, and arbitrary unknown keys. Those are the only generic input compatibility breaks. Focused tests lock every inventory row, including aliases, context-backed omission, output projection, static/dynamic/fallback error codes, and removal of the ignored `create-github-pr.remote` profile field.
+
+Implementation sequencing keeps the registry migration type-honest. The first Runner slice constructs definitions, switches name/tombstone resolution, and invokes each definition through the existing broad `ActionContext`; it does not call that value validated. The dependent validation slice adds `validateActionInput`, atomically changes the execution signature to `ValidatedActionContext`, and migrates direct input reads. This avoids an intermediate cast or duplicate validator while leaving the manifest registry usable before strict validation lands.
+
+Focused Runner unit tests own definition validation, exact-kind input validation, default cloning, error-code enforcement, inventory completeness, and catalog projection. Runner specs own task recovery, check rows, tombstones, and built-in profile traversal. Host tests assert registration/heartbeat catalog payloads. Server API/grain specs assert wire binding and retention across heartbeat repair and activation using in-memory test infrastructure. Runner tasks run `npm run test:ci -w packages/runner`, which includes test-source typechecking and boundary/file-budget guards.
 
 ## Risks / Trade-offs
 
@@ -144,16 +205,14 @@ Focused Runner unit tests own definition validation, exact-kind input validation
 
 ## Migration Plan
 
-1. Add Runner manifest/catalog types, `defineAction`, registry construction checks, pure input validation, and focused unit tests without changing default registration.
-2. Convert test-only registries to explicit definitions so later removal of `register(name, handler)` has no hidden callers.
-3. Define and audit all 17 built-in manifests, add the `mohist/acp-agent` tombstone, switch `createDefaultRegistry()` atomically, and remove hard-coded handler/tombstone lists.
-4. Integrate resolution, validation/defaulting, result-code enforcement, and exception normalization into task and check execution. Add task recovery and check-row specs.
-5. Add the catalog to Runner registration state and typed Server DTOs/state; verify register, heartbeat repair, persistence reactivation, and host payloads.
-6. Run built-in profile traversal/full-flow regressions, Runner typecheck/tests, and Server tests. No database migration or Web/CLI change is required.
-7. Deploy Server and Runner together and restart the Runner so registration immediately populates the catalog. Existing `RunnerInfo` without a catalog remains readable until that registration.
+1. Add manifest/catalog types, `defineAction`, immutable registry construction, all 17 audited manifests, the `mohist/acp-agent` tombstone, inventory tests, and explicit test definitions. Atomically switch production name resolution while retaining broad `ActionContext` invocation.
+2. Add pure input validation/defaulting, narrow the execution signature to `ValidatedActionContext`, enforce result codes, normalize Action-boundary failures, and route task failures through recovery. Add task/check/recovery specs.
+3. In parallel after step 1, add the catalog to Runner registration state and typed Server DTOs/state; verify register, heartbeat repair, persistence reactivation, and host payloads.
+4. Run built-in profile traversal/full-flow regressions, `npm run test:ci -w packages/runner`, Runner production typecheck, and Server tests. No database migration or Web/CLI change is required.
+5. Deploy Server and Runner together and restart the Runner so registration immediately populates the catalog. Existing `RunnerInfo` without a catalog remains readable until that registration.
 
 Rollback reverts both binaries. The Server may retain catalog data in last-known Runner state, but older code does not consume it; the next old-Runner registration replaces the state. Workflow definitions and TaskRun persistence require no rollback migration. Rolling back also restores permissive input handling, so tasks rejected only by the new validator can be retried after rollback.
 
 ## Open Questions
 
-1. **How does `mohist/opencode.prompt` satisfy the single-type manifest rule?** Current contracts and shipped profiles accept both a string and a prompt-loader/structured object, while the input spec requires exactly one type. The recommended resolution is to amend the manifest input model/spec to allow an explicit finite union (`string | object`) because moving prompt-loader execution into the generic validator would add Action-specific engine behavior. Implementation must not silently exempt this field.
+None. The finite `types` set resolves the OpenCode prompt representation without Action-specific validation.

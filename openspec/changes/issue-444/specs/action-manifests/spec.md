@@ -1,6 +1,6 @@
 ### Requirement: Every executable Action has one declarative definition
 
-The Runner SHALL define every executable Action as one manifest paired with one execution function. The manifest MUST declare a canonical lowercase `<namespace>/<action>` name, its top-level inputs, successful output fields, and business error codes. Each input MUST declare exactly one JSON type from `string`, `number`, `boolean`, `object`, or `array`. An input SHALL be optional, required, or defaulted, MUST NOT be both required and defaulted, and any declared default MUST match the input's declared type. The engine-reserved `working-directory` input MUST NOT be declared by an Action manifest.
+The Runner SHALL define every executable Action as one manifest paired with one execution function. The manifest MUST declare a canonical lowercase `<namespace>/<action>` name, its top-level inputs, successful output fields, and business error codes. Each input MUST declare a non-empty finite set of accepted JSON kinds chosen from `string`, `number`, `boolean`, `object`, and `array`; the set MUST NOT contain duplicates. An input SHALL be optional, required, or defaulted, MUST NOT be both required and defaulted, and any declared static default MUST have one of the input's accepted kinds. `null` is not an accepted kind and MUST NOT be a default. The engine-reserved `working-directory` input MUST NOT be declared by an Action manifest.
 
 #### Scenario: Define a complete Action
 - **WHEN** an Action author provides a valid manifest and its execution function
@@ -8,8 +8,13 @@ The Runner SHALL define every executable Action as one manifest paired with one 
 - **AND** no separate name-to-handler registration SHALL be required
 
 #### Scenario: Reject an invalid Action definition
-- **WHEN** an Action definition has a non-canonical name, an unsupported input type, a default of the wrong type, a required input with a default, or an input named `working-directory`
+- **WHEN** an Action definition has a non-canonical name, an empty or duplicate kind set, an unsupported input kind, a default whose kind is not accepted, a required input with a default, a null default, or an input named `working-directory`
 - **THEN** registry construction MUST reject the definition before the Runner accepts work
+
+#### Scenario: Declare both supported OpenCode prompt forms
+- **WHEN** `mohist/opencode` declares required input `prompt` with accepted kinds `string` and `object`
+- **THEN** the manifest SHALL represent both kinds as one input contract
+- **AND** its execution function SHALL infer `prompt` as a string-or-object value
 
 ### Requirement: The manifest collection is the Action registry authority
 
@@ -44,7 +49,7 @@ The Action collection SHALL support tombstones containing a canonical Action nam
 
 ### Requirement: Runner registration publishes the serializable Action catalog
 
-The Runner's registration state SHALL include a serializable Action catalog derived from its manifest collection. The catalog MUST include each executable Action's name, input declarations, output declarations, and business error declarations, plus every tombstone's name and guidance; it MUST exclude execution functions and other implementation-only values. The Server SHALL accept and retain the catalog carried by the Runner's latest registration state without using it to reject Profile saves in this change.
+The Runner's registration state SHALL include a serializable Action catalog derived from its manifest collection. The catalog root MUST contain `actions` and `tombstones` arrays. Each Action entry MUST contain `name`, an `inputs` array of `{ name, types, required, default?, description? }`, an `outputs` array of `{ name, type, description? }`, and an `errors` array of `{ code, description }`. An Action description SHALL be included only when the manifest declares one. Every input's `types` MUST use the canonical order `string`, `number`, `boolean`, `object`, `array`, including a one-element array for a single-kind input. Each tombstone MUST contain `name` and `guidance`. Actions, inputs, outputs, errors, and tombstones MUST be ordered lexicographically by name or code. The catalog MUST exclude execution functions and other implementation-only values. The Server SHALL accept and retain the catalog carried by the Runner's latest registration state without using it to reject Profile saves in this change.
 
 #### Scenario: Register a Runner with its Action catalog
 - **WHEN** a Runner registers or repairs its registration state
@@ -56,9 +61,14 @@ The Runner's registration state SHALL include a serializable Action catalog deri
 - **THEN** the payload SHALL contain only manifest contract data and tombstones
 - **AND** it MUST NOT contain an Action execution function
 
+#### Scenario: Catalog serializes a finite input union canonically
+- **WHEN** the Runner serializes `mohist/opencode.prompt`, which accepts string and object values
+- **THEN** its catalog input SHALL contain `"types": ["string", "object"]`
+- **AND** a later consumer SHALL need no Action-specific rule to recognize either accepted kind
+
 ### Requirement: Built-in Actions are fully manifest-backed
 
-Every built-in Action shipped by the Runner SHALL be present in the manifest collection, and no built-in Action SHALL use a separate registration path. Migrating built-ins to manifests MUST preserve their behavior for inputs valid under their declared contracts, including the existing built-in workflow profiles and Action-specific execution behavior.
+Every built-in Action shipped by the Runner SHALL be present in the manifest collection, and no built-in Action SHALL use a separate registration path. Except for the explicit new rejection of unknown top-level fields, exact-kind enforcement, and rejection of explicit `null`, each built-in manifest and implementation MUST preserve the pre-migration contract for every known input key: aliases, conditional requirements, static defaults, dynamic/context fallbacks, nested semantics, public outputs, and business error codes. Ignored keys removed from shipped profiles are not Action inputs. The migration baseline MUST be recorded as one auditable inventory and verified independently of the shipped profile subset.
 
 #### Scenario: Built-in profiles resolve only manifest-backed Actions
 - **WHEN** each shipped built-in workflow profile is traversed across stage tasks, checks, approval feedback tasks, and recovery tasks
@@ -67,6 +77,21 @@ Every built-in Action shipped by the Runner SHALL be present in the manifest col
 #### Scenario: Built-in workflow regression remains valid
 - **WHEN** the shipped built-in profiles run with valid inputs after manifest migration
 - **THEN** their existing end-to-end workflow behavior SHALL remain unchanged except for the newly specified input rejection behavior
+
+#### Scenario: Preserve a known alias outside shipped profiles
+- **WHEN** a custom profile invokes `core/marker` with legacy alias `contains`
+- **THEN** the manifest SHALL recognize `contains` as a string input
+- **AND** the Action SHALL preserve its existing precedence and marker behavior
+
+#### Scenario: Preserve an implicit context fallback
+- **WHEN** a built-in Action's recorded migration baseline allows an input to be omitted because Variables or execution context supplies it
+- **THEN** that manifest input SHALL remain optional
+- **AND** the Action SHALL preserve the recorded fallback behavior
+
+#### Scenario: Declare every emitted business error
+- **WHEN** a built-in Action can return a business error through a static, classified, or fallback branch
+- **THEN** that error code MUST appear in the Action's manifest inventory
+- **AND** automated coverage SHALL prove that emitted business codes are a subset of the declared codes
 
 ### Requirement: Platform and Action error codes have separate ownership
 
@@ -85,3 +110,27 @@ The platform SHALL own the reserved error codes `invalid-input`, `unexpected-err
 #### Scenario: Reject a reserved business error declaration
 - **WHEN** an Action manifest declares `invalid-input`, `unexpected-error`, or `timeout` as an Action-owned business error
 - **THEN** registry construction MUST reject the manifest
+
+#### Scenario: Normalize an undeclared business error
+- **WHEN** an Action execution function returns an error code that is neither reserved by the platform nor declared by its manifest
+- **THEN** the Runner SHALL replace it with `unexpected-error`
+- **AND** a task SHALL expose that structured error to normal recovery matching
+
+#### Scenario: Normalize an Action exception
+- **WHEN** an Action execution function throws before returning a result
+- **THEN** the Runner SHALL produce `unexpected-error` with an actionable message
+- **AND** a task SHALL expose that structured error to normal recovery matching
+
+#### Scenario: Reject a malformed task Action result
+- **WHEN** a task Action returns a non-object result, both or neither of `output` and `error`, a non-string error code or message, or a success output that is not a JSON object or null
+- **THEN** the Runner SHALL produce `unexpected-error`
+- **AND** the task SHALL expose that structured error to normal recovery matching
+
+#### Scenario: Preserve check failure aggregation for contract errors
+- **WHEN** an individual check Action returns an undeclared error or throws
+- **THEN** that check row SHALL contain `unexpected-error`
+- **AND** the aggregate check verdict SHALL remain `check-failed`
+
+#### Scenario: Preserve invalid-output check handling
+- **WHEN** an individual check Action returns a success output that is not a JSON object or null
+- **THEN** the check dispatch SHALL retain the existing aggregate `unexpected-error` invalid-output failure
