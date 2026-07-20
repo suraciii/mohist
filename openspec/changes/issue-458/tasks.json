@@ -1,0 +1,54 @@
+{
+  "project": "mohist-local",
+  "description": "Persist Workflow OpenCode turn input and normalized runtime events in the associated AgentSession, then close each recorded turn as completed or failed without allowing best-effort Session reporting to control Workflow completion.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Record Workflow OpenCode turn transcripts",
+      "spec": "specs/workflow-agent-session-transcript/spec.md#Workflow OpenCode turns produce an AgentSession transcript",
+      "description": "Add a Workflow-local, turn-scoped event reporter to `mohist/opencode` after physical AgentSession binding resolution. Enqueue the exact composed prompt as `session.input`, forward the shared runtime's normalized observer events through the existing Workflow runtime-events endpoint in production order, and isolate every bounded upload failure from the OpenCode and Action results without changing the AgentJob path.",
+      "acceptanceCriteria": [
+        "For a Workflow Action with a resolved `(projectId, workflowRunId, sessionName)` target and current physical binding, the first attempted runtime-event report is `session.input` containing the exact composed prompt, `kind: task`, `source: workflow`, `role: user`, and the current `runtimeSessionId`; the request envelope retains `workId`, `workType`, `stage`, and `runtimeSessionId`.",
+        "`opencodeAction` passes a synchronous `RuntimeTurnObserver.onEvent` to `OpenCodeRuntime.runTurn` and forwards normalized `message.delta`, `reasoning.delta`, `tool_call.started`, `tool_call.updated`, `tool_call.completed`, `usage.updated`, and `model.resolved` events without reprojecting SDK payloads in the Action.",
+        "One turn-scoped promise chain serializes input and projected event uploads in observation order, catches each rejection before advancing, and waits for queued attempts to settle before returning; request cancellation is independent of an already-aborted runtime signal and bounded so stalled reporting cannot retain the Action indefinitely.",
+        "Upload timeout or rejection logs the WorkflowRun, work ID, session name, event type, and error without logging prompt or event payload content; it does not prevent prompt submission, change a successful Action to failed, replace an OpenCode failure, retry the request, or write a local fallback.",
+        "Focused runner specs using a fake OpenCode runtime/SDK client and recording ServerConnection verify exact input and event ordering, assistant and reasoning deltas, complete tool lifecycle with input/output/error, usage and model observations, final-response reconciliation without duplicate content, and continuation after an upload rejection without real network, process, filesystem, or wall-clock time.",
+        "Existing `agent-job-executor.spec.ts` transcript, ordering, and upload-failure cases pass unchanged and prove AgentJob still uses its generic AgentSession route with existing content semantics.",
+        "No server endpoint, request DTO, AgentSession persistence logic, Web component, retry loop, outbox, or external dependency is added or changed.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow turn transcript reporting in `packages/runner/src/actions/opencode.ts` (with a small local reporter/helper as needed), focused runner session-reporting specs, and unchanged AgentJob regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the reporter local to the Workflow OpenCode adapter; do not extract or migrate AgentJob reporting and do not move source-specific input policy into `OpenCodeRuntime`. This task is independently usable: Workflow session pages receive input and runtime activity even before terminal convergence is added."
+    },
+    {
+      "id": "T-002",
+      "title": "Converge Workflow AgentSession state after each turn",
+      "spec": "specs/workflow-agent-session-terminal-state/spec.md#Every executed Workflow OpenCode turn reports a terminal outcome",
+      "description": "Extend the Workflow turn reporter from T-001 so `opencodeAction` enqueues exactly one `session.closed` after all observed and reconciled runtime events, then settles the queue before returning the unchanged Action result. Map runtime success to completed and runtime failure, interruption, or timeout to failed, and preserve correct behavior when the same logical Workflow AgentSession is reused by later turns.",
+      "acceptanceCriteria": [
+        "A successful `runTurn` result enqueues exactly one final `session.closed` report with `status: completed`, `exitCode: 0`, and the current `runtimeSessionId` after every prior input and projected-event attempt for that turn.",
+        "A failed, interrupted, or timed-out `runTurn` result enqueues exactly one final `session.closed` report with `status: failed`, `exitCode: 1`, `failureReason` equal to the original runtime error message, and the current `runtimeSessionId`.",
+        "The close uses the existing Workflow runtime-events target and serialized queue; a close timeout or rejection is logged once, is not retried or locally persisted, and cannot change a runtime success or replace/obscure the original runtime failure.",
+        "Two sequential Workflow OpenCode turns that reuse one logical and physical AgentSession each record a new input and one close; event order is `input/activity/close` per turn and the later accepted close is the latest terminal observation.",
+        "Focused runner specs cover completed close, failed close, close-after-reconciled-events ordering, close upload rejection on both runtime success and failure, bounded reporting after an aborted runtime signal, and two-turn session reuse using fakes and deterministic timers/signals.",
+        "Existing AgentJob executor specs remain unchanged and green; no runner-generated `session.closed` is added to the AgentJob path because AgentJob completion remains its terminal authority.",
+        "No server, persistence, API, Web, migration, retry, outbox, or historical transcript backfill change is introduced.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass with no Git-visible generated changes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Terminal `session.closed` reporting and multi-turn convergence in the Workflow OpenCode adapter, with focused success/failure/failure-isolation/reuse runner specs.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Consumes T-001's serialized reporter; do not close from `OpenCodeRuntime` or server TaskRun reporting. The Session close is a runtime fact only and must not advance or adjudicate Workflow work. The dependency graph is T-001 -> T-002 and is acyclic."
+    }
+  ]
+}
