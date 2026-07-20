@@ -7,6 +7,7 @@ import type {
   RuntimeResult,
   RuntimeTurnFacts,
   RuntimeTurnEvent,
+  RuntimeTurnObserver,
   RuntimeTurnRequest,
   RuntimeTurnResult,
 } from "../src/runtime/opencode/index.js"
@@ -36,12 +37,30 @@ function makeFakeRuntime(): FakeRuntimeHandles {
   const runtime: Partial<OpenCodeRuntime> = {
     ready: () => true,
     diagnostic: () => null,
-    async runTurn(request: RuntimeTurnRequest, _signal: AbortSignal): Promise<RuntimeResult<RuntimeTurnResult>> {
+    async runTurn(
+      request: RuntimeTurnRequest,
+      _signal: AbortSignal,
+      observer?: RuntimeTurnObserver,
+    ): Promise<RuntimeResult<RuntimeTurnResult>> {
       runTurnCalls.push(request)
-      if (nextResult.ok) {
-        await request.onSessionReady?.(nextResult.value.facts.runtimeSessionId, nextResult.value.facts.workDir)
-        for (const event of nextEvents) request.onEvent?.(event)
+      const session = nextResult.ok
+        ? nextResult.value.facts
+        : { runtimeSessionId: "ses_default", workDir: "/tmp/ws" }
+      try {
+        await observer?.onSessionReady?.(session)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return {
+          ok: false,
+          error: {
+            kind: "turn-failed",
+            message: "OpenCode turn failed",
+            diagnostics: [{ severity: "error", code: "turn-failed", message }],
+          },
+          diagnostics: [{ severity: "error", code: "turn-failed", message }],
+        }
       }
+      if (nextResult.ok) for (const event of nextEvents) observer?.onEvent?.(event)
       return nextResult
     },
   }
@@ -66,12 +85,14 @@ interface FakeConnectionHandles {
   }>
   eventCalls: Array<{ projectId: string; sessionId: string; body: Record<string, unknown> }>
   setAgentSession: (session: { runtimeSessionId: string | null } | null) => void
+  setEventWriter: (writer: (body: Record<string, unknown>) => Promise<void>) => void
 }
 
 function makeFakeConnection(): FakeConnectionHandles {
   const attachCalls: FakeConnectionHandles["attachCalls"] = []
   const eventCalls: FakeConnectionHandles["eventCalls"] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
+  let eventWriter = async (_body: Record<string, unknown>) => undefined
   const connection = {
     async attachAgentSession(
       projectId: string,
@@ -90,6 +111,7 @@ function makeFakeConnection(): FakeConnectionHandles {
     },
     async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: Record<string, unknown>) {
       eventCalls.push({ projectId, sessionId, body })
+      await eventWriter(body)
     },
   } as unknown as ServerConnection
   return {
@@ -98,6 +120,9 @@ function makeFakeConnection(): FakeConnectionHandles {
     eventCalls,
     setAgentSession(session) {
       agentSession = session
+    },
+    setEventWriter(writer) {
+      eventWriter = writer
     },
   }
 }
@@ -302,7 +327,10 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     await executor.execute(buildAgentJobWork(), new AbortController().signal)
 
     expect(connection.attachCalls).toHaveLength(1)
-    expect(connection.eventCalls).toEqual([{
+    expect(connection.eventCalls).toHaveLength(2)
+    expect(connection.eventCalls.map((call) => (call.body.runtimeEvents as Array<{ type: string }>)[0]?.type))
+      .toEqual(["session.input", "message.delta"])
+    expect(connection.eventCalls[1]).toEqual({
       projectId: "proj-1",
       sessionId: "session-1",
       body: {
@@ -312,7 +340,60 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
         runtimeSessionId: "ses_default",
         runtimeEvents: [{ type: "message.delta", payload: { text: "working" } }],
       },
-    }])
+    })
+  })
+
+  it("does not let transcript event write failures adjudicate the AgentJob", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    runtime.setTurnEvents([
+      { type: "message.delta", runtimeSessionId: "ses_default", workDir: "/tmp/ws", payload: { text: "working" } },
+    ])
+    connection.setEventWriter(async (body) => {
+      const type = (body.runtimeEvents as Array<{ type: string }>)[0]?.type
+      if (type === "message.delta") throw new Error("transcript endpoint offline")
+    })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    try {
+      const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
+
+      expect(result.status).toBe("completed")
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("transcript endpoint offline"))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it("writes runtime events in observation order", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    let releaseFirst!: () => void
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve })
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const started: string[] = []
+    connection.setEventWriter(async (body) => {
+      const type = (body.runtimeEvents as Array<{ type: string }>)[0]?.type ?? "unknown"
+      started.push(type)
+      if (type === "message.delta") {
+        markFirstStarted()
+        await firstBlocked
+      }
+    })
+    runtime.setTurnEvents([
+      { type: "message.delta", runtimeSessionId: "ses_default", workDir: "/tmp/ws", payload: { text: "one" } },
+      { type: "reasoning.delta", runtimeSessionId: "ses_default", workDir: "/tmp/ws", payload: { text: "two" } },
+    ])
+
+    const execution = executor.execute(buildAgentJobWork(), new AbortController().signal)
+    await firstStarted
+    expect(started).toEqual(["session.input", "message.delta"])
+    releaseFirst()
+    await execution
+    expect(started).toEqual(["session.input", "message.delta", "reasoning.delta"])
   })
 
   it("does not report a binding when the dispatch carries no AgentSessionId", async () => {
@@ -324,6 +405,20 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("completed")
     expect(connection.attachCalls).toHaveLength(0)
+  })
+
+  it("does not create or prompt when the authoritative binding lookup fails", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = {
+      async getAgentSession() { throw new Error("session lookup offline") },
+    } as unknown as ServerConnection
+    const executor = new AgentJobExecutor(connection, runtime.runtime)
+
+    const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.message).toContain("session lookup offline")
+    expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
   it("attaches the runtimeSessionId from an existing binding on a follow-up dispatch", async () => {
@@ -342,7 +437,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     expect(connection.attachCalls[0].body.runtimeSessionId).toMatch(/ses_/)
   })
 
-  it("tolerates an attach failure (best-effort; the runtime turn already settled)", async () => {
+  it("fails before prompting when the runtime binding cannot be recorded", async () => {
     const runtime = makeFakeRuntime()
     const connection: ServerConnection = {
       async attachAgentSession() {
@@ -355,11 +450,12 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const executor = new AgentJobExecutor(connection, runtime.runtime)
 
     const work = buildAgentJobWork()
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const result = await executor.execute(work, new AbortController().signal)
-    expect(result.status).toBe("completed")
-    expect(errorSpy).toHaveBeenCalled()
-    errorSpy.mockRestore()
+    expect(result.status).toBe("failed")
+    expect(result.message).toBe("OpenCode turn failed")
+    expect(JSON.parse(result.output ?? "{}").diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "turn-failed", message: "attach endpoint offline" }),
+    ]))
   })
 })
 

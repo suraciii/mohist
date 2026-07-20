@@ -33,6 +33,7 @@ import type {
   RuntimeResult,
   RuntimeSessionCreateRequest,
   RuntimeSessionCreateResult,
+  RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
@@ -213,6 +214,7 @@ export class OpenCodeRuntime {
   async runTurn(
     request: RuntimeTurnRequest,
     signal: AbortSignal,
+    observer?: RuntimeTurnObserver,
   ): Promise<RuntimeResult<RuntimeTurnResult>> {
     if (!this.state.server || !this.state.ready || !this.state.events) {
       const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
@@ -234,7 +236,7 @@ export class OpenCodeRuntime {
         events: this.state.events,
         ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
       }
-      return await runTurn(request, deps, signal)
+      return await runTurn(request, deps, signal, observer)
     } finally {
       inFlight.end(sessionKey)
     }

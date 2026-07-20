@@ -51,6 +51,7 @@ import type {
   RuntimeResult,
   RuntimeSessionTarget,
   RuntimeTurnFacts,
+  RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,
@@ -71,6 +72,7 @@ import {
 import { parseModelIdentifier } from "./model-string.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "./event-subscription.js"
 import { createTimeoutSignal } from "../../system/timeout-signal.js"
+import { createRuntimeTurnEventProjector } from "./event-projection.js"
 
 export interface TurnExecutionDeps {
   readonly client: OpencodeClient
@@ -108,6 +110,7 @@ export async function runTurn(
   request: RuntimeTurnRequest,
   deps: TurnExecutionDeps,
   signal: AbortSignal,
+  observer?: RuntimeTurnObserver,
 ): Promise<RuntimeResult<RuntimeTurnResult>> {
   const diagnostics: RuntimeDiagnostic[] = []
 
@@ -122,17 +125,37 @@ export async function runTurn(
   const effectiveSignal = timeoutHandle ? timeoutHandle.signal : signal
 
   try {
-    const sessionResult = await resolvePhysicalSession(request.target, model, deps, effectiveSignal)
-    if (typeof sessionResult !== "string") {
-      return sessionResult
+    const sessionId = await resolvePhysicalSession(request.target, model, deps, effectiveSignal)
+    if (typeof sessionId !== "string") {
+      return sessionId
     }
-    await request.onSessionReady?.(sessionResult, request.target.workDir)
+    if (observer?.onSessionReady) {
+      try {
+        await observer.onSessionReady({ runtimeSessionId: sessionId, workDir: request.target.workDir })
+      } catch (cause) {
+        const error = normalizeTurnFailed({ message: errorMessage(cause, "Runtime Session readiness observer failed") })
+        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
+      }
+    }
+
+    const eventProjector = createRuntimeTurnEventProjector(sessionId, request.target.workDir)
+    const emitProjectedEvent = (event: ReturnType<typeof eventProjector.project>[number]) => {
+      try {
+        observer?.onEvent?.(event)
+      } catch (cause) {
+        diagnostics.push({
+          severity: "warning",
+          code: "turn-event-observer-failed",
+          message: errorMessage(cause, "Runtime turn event observer failed"),
+        })
+      }
+    }
 
     const policy = deps.policy ?? DEFAULT_PROVIDER_ERROR_POLICY
     const promptResult = await executePrompt({
       client: deps.client,
       events: deps.events,
-      sessionId: sessionResult,
+      sessionId,
       directory: request.target.workDir,
       prompt: request.prompt,
       model,
@@ -143,13 +166,8 @@ export async function runTurn(
       deadlineExpired: () => timeoutHandle?.timedOut() === true,
       onEvent: (event) => {
         deps.onEvent?.(event)
-        if (event.sessionID !== sessionResult) return
-        request.onEvent?.({
-          type: event.type,
-          runtimeSessionId: sessionResult,
-          workDir: request.target.workDir,
-          payload: event.payload ?? {},
-        })
+        if (event.sessionID !== sessionId) return
+        for (const projected of eventProjector.project(event)) emitProjectedEvent(projected)
       },
     })
     if (promptResult.kind === "failure") {
@@ -159,6 +177,7 @@ export async function runTurn(
       }
       return { ok: false, error: errorWithDiagnostics, diagnostics: [...diagnostics, ...promptResult.diagnostics] }
     }
+    for (const projected of eventProjector.reconcile(promptResult.value.response)) emitProjectedEvent(projected)
     const value: RuntimeTurnResult = {
       facts: promptResult.value.facts,
       diagnostics: [...diagnostics, ...promptResult.value.diagnostics],
@@ -289,7 +308,7 @@ interface ExecutePromptArgs {
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
 
-type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[] } }
+type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[]; response: unknown } }
 type PromptFailure = {
   kind: "failure"
   error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeDeadlineExceeded> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizePermissionRequired> | ReturnType<typeof normalizeAbortUnconfirmed>
@@ -451,7 +470,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
     runtimeSessionId: args.sessionId,
     workDir: args.directory,
   }
-  return { kind: "success", value: { facts, diagnostics: [...promptDiagnostics] } }
+  return { kind: "success", value: { facts, diagnostics: [...promptDiagnostics], response: promptOutcome.response } }
 }
 
 async function finishTransportFailure(

@@ -240,9 +240,9 @@ public class GenericAgentSessionSummarySpecs
             settings = new { model = "gpt-4o" },
             status = new
             {
-                agentRuntimeSessionId = active || terminalStatus is not null ? "runtime-" + sessionId : null,
+                agentRuntimeSessionId = active ? "runtime-" + sessionId : null,
                 createdAt = CreatedAt,
-                lastDataAt = active || terminalStatus is not null ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
+                lastDataAt = active ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
             },
         }, JSON.Options);
 
@@ -251,7 +251,7 @@ public class GenericAgentSessionSummarySpecs
             Id = sessionId,
             State = stateJson,
             RunnerId = $"runner-{sessionId}",
-            AgentSessionId = "session-" + sessionId,
+            AgentSessionId = "runtime-" + sessionId,
             Status = "opened",
             CreatedAt = CreatedAt,
         };
@@ -406,7 +406,7 @@ public class GenericAgentSessionSummarySpecs
             Id = SessionIdWorkflow,
             State = stateJson,
             RunnerId = $"runner-{SessionIdWorkflow}",
-            AgentSessionId = "session-" + SessionIdWorkflow,
+            AgentSessionId = "runtime-" + SessionIdWorkflow,
             Status = "opened",
             CreatedAt = CreatedAt,
         });

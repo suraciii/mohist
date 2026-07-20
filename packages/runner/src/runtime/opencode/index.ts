@@ -27,6 +27,7 @@ export type {
   RuntimeSessionTarget,
   RuntimeTurnFacts,
   RuntimeTurnEvent,
+  RuntimeTurnObserver,
   RuntimeTurnOptions,
   RuntimeTurnRequest,
   RuntimeTurnResult,

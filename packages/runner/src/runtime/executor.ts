@@ -140,8 +140,8 @@ export class WorkExecutor {
   private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
     // The AgentJob path is owned by the AgentJobExecutor: it drives the
     // shared OpenCodeRuntime directly and never resolves an Action
-    // (no `mohist/opencode` contract, no `mohist/acp-agent`, no
-    // `mohist/agent`). Branch BEFORE Action resolution so the
+    // (no inline-agent contract and no removed or synthetic Action).
+    // Branch BEFORE Action resolution so the
     // registry never sees the dispatch, and so a future refactor
     // that strips the `Uses` field from AgentJob dispatches doesn't
     // surface as "No action found".

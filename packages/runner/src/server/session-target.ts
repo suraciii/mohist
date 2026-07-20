@@ -93,7 +93,7 @@ export function isFollowupTargetUnavailable(value: FollowupTargetResolution): va
  * promotes `binding` from a resume path input to the resolver's
  * authoritative source: the resolver reads `binding.runtimeSessionId`
  * + `binding.workDir` and projects them into a `FollowupTarget`.
- * `binding.runtime !== "opencode"` (e.g. legacy `acp`) is treated as
+ * A legacy binding whose runtime is not `opencode` is treated as
  * missing — the resolver returns `null` and the handler fails with
  * the existing missing taxonomy + Reset hint.
  */
