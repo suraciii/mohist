@@ -19,15 +19,15 @@
  *   `placeholder`. cmdk filters on the `value` prop, so a search like "30"
  *   never matches a timeout field whose current value happens to be 30.
  *
- * - **D4 — Enter navigates and focuses after the target mounts.** After the
- *   dialog closes, the route-based Settings section changes, so the target
- *   focusable element may mount asynchronously after navigation. We observe
- *   DOM changes for up to ~500ms, then call `.focus()` + `scrollIntoView`.
+ * - **D4 — Enter navigates and focuses after the target mounts.** The focus
+ *   intent travels in React Router navigation state so it survives switches
+ *   between application and project settings routes. The destination consumes
+ *   it once, then retries reveal + focus on animation frames for up to ~500ms.
  *   If the target never mounts the navigation still happens, but we surface
  *   a warning instead of silently losing the focus step.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   CommandDialog,
   CommandEmpty,
@@ -56,7 +56,7 @@ const SECTION_LABEL: Record<SettingsTab, string> = {
 }
 
 /**
- * FOCUS_POLL_TIMEOUT_MS bounds target observation after an Enter
+ * FOCUS_POLL_TIMEOUT_MS bounds target discovery after an Enter
  * activation. Settings section content can mount after the route change; ~500ms
  * is plenty in practice but acts as a hard ceiling.
  */
@@ -68,6 +68,31 @@ interface GroupedEntries {
   tab: SettingsTab
   label: string
   entries: SettingsSearchEntry[]
+}
+
+interface PendingFocus {
+  targetId: string
+  revealEvent?: string
+}
+
+const PENDING_FOCUS_STATE_KEY = 'settingsSearchFocus'
+
+function recordState(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function pendingFocusFromState(value: unknown): PendingFocus | null {
+  const pending = recordState(value)[PENDING_FOCUS_STATE_KEY]
+  if (pending === null || typeof pending !== 'object' || Array.isArray(pending)) return null
+  const targetId = (pending as Record<string, unknown>).targetId
+  if (typeof targetId !== 'string' || targetId.length === 0) return null
+  const revealEvent = (pending as Record<string, unknown>).revealEvent
+  return {
+    targetId,
+    revealEvent: typeof revealEvent === 'string' ? revealEvent : undefined,
+  }
 }
 
 function groupEntriesByTab(entries: readonly SettingsSearchEntry[]): GroupedEntries[] {
@@ -111,6 +136,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function SettingsSearch() {
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const sectionPath = useSettingsSectionPath()
   const titleId = useId()
 
@@ -143,43 +169,45 @@ function SettingsSearch() {
 
   function focusTargetElement(targetId: string, revealEvent?: string) {
     cancelPendingFocus.current?.()
-    if (revealEvent) {
-      window.dispatchEvent(new CustomEvent(revealEvent))
-    }
-
-    const tryFocus = () => {
-      const element = document.getElementById(targetId)
-      if (!element) return false
-      element.scrollIntoView({ block: 'center', inline: 'nearest' })
-      element.focus({ preventScroll: true })
-      return true
-    }
-
-    if (tryFocus()) return
-
+    let frameId: number | undefined
     let timeoutId: number | undefined
-    const observer = new MutationObserver(() => {
-      if (tryFocus()) cleanup()
-    })
     const cleanup = () => {
-      observer.disconnect()
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId)
       if (timeoutId !== undefined) window.clearTimeout(timeoutId)
       if (cancelPendingFocus.current === cleanup) cancelPendingFocus.current = null
     }
-
-    observer.observe(document.body, { childList: true, subtree: true })
-    cancelPendingFocus.current = cleanup
-    if (tryFocus()) {
+    const tryRevealAndFocus = () => {
+      if (revealEvent) window.dispatchEvent(new CustomEvent(revealEvent))
+      const element = document.getElementById(targetId)
+      if (!element) {
+        frameId = window.requestAnimationFrame(tryRevealAndFocus)
+        return
+      }
+      element.scrollIntoView({ block: 'center', inline: 'nearest' })
+      element.focus({ preventScroll: true })
       cleanup()
-      return
     }
 
+    cancelPendingFocus.current = cleanup
+    frameId = window.requestAnimationFrame(tryRevealAndFocus)
     timeoutId = window.setTimeout(() => {
       cleanup()
       // eslint-disable-next-line no-console
       console.warn(`[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`)
     }, FOCUS_POLL_TIMEOUT_MS)
   }
+
+  useEffect(() => {
+    const pendingFocus = pendingFocusFromState(location.state)
+    if (!pendingFocus) return
+    focusTargetElement(pendingFocus.targetId, pendingFocus.revealEvent)
+    const nextState = { ...recordState(location.state) }
+    delete nextState[PENDING_FOCUS_STATE_KEY]
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: Object.keys(nextState).length > 0 ? nextState : null,
+    })
+  }, [location.hash, location.pathname, location.search, location.state, navigate])
 
   const handleSelect = useCallback(
     (entry: SettingsSearchEntry) => {
@@ -188,10 +216,17 @@ function SettingsSearch() {
         return
       }
       setOpen(false)
-      navigate(targetPath)
-      focusTargetElement(entry.focusTargetId, entry.revealEvent)
+      navigate(targetPath, {
+        state: {
+          ...recordState(location.state),
+          [PENDING_FOCUS_STATE_KEY]: {
+            targetId: entry.focusTargetId,
+            revealEvent: entry.revealEvent,
+          },
+        },
+      })
     },
-    [navigate, sectionPath],
+    [location.state, navigate, sectionPath],
   )
 
   return (
