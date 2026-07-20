@@ -160,6 +160,7 @@ Never create an epic without confirmation.
 
 ### End-to-end creation checklist
 
+- [ ] Every planned child issue passes the Scope gate defined in `mohist-explore` — **regardless of how the requirement content was produced**. The epic advances one issue at a time, so a child with no standalone value stalls the milestone; fix the split before creating.
 - [ ] `description` follows Goal/Background/Non-goals/Scope.
 - [ ] `priority` is `p0`–`p3`.
 - [ ] No frontmatter/workflow/risk fields invented.

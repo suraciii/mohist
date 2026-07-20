@@ -162,6 +162,7 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 
 ## End-to-end creation checklist
 
+- [ ] The issue passes the Scope gate defined in `mohist-explore` (one-sentence standalone value, every scope item serves that sentence, stop-here test) — **regardless of how the requirement content was produced**. If a check fails, fix the split before creating; do not create an issue that only has value together with a sibling.
 - [ ] `mo issue template list` was run; a template selected via the boundary question (behavior changes / deviates / unchanged).
 - [ ] `mo issue template get <id>` was run; the per-section guidance comments were read and followed.
 - [ ] Each `<placeholder>` in the body is replaced by content from the `mohist-explore` clarification; no placeholder remains.

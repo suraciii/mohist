@@ -2,6 +2,8 @@
 
 Mohist 不内置对话式探索。需求挖掘、产品思考这类**需要实时互动**的工作，由外部 agent 通过 Skill 完成。探索的结果应当是可进入 workflow 的 ready issue。
 
+探索的输入不限形态：一句话的想法、一次讨论的结论、一份现成的需求材料，都可以直接交给探索。Skill 只补齐还没想清楚的部分，不会把已经想清楚的重新问一遍。
+
 ## 为什么探索在外部
 
 探索式对话的本质是**挖掘用户需求**。这件事必须：
@@ -23,28 +25,36 @@ Mohist runtime（workflow 执行）
 
 ## Mohist 分发的 Skill
 
-`mo skills list` 看可分发的 skill。当前有两个：
+`mo skills list` 看可分发的 skill。当前有四个：
 
 ### `mohist`
 
-操作 Mohist 本身的 skill。让外部 agent 能：
+操作 Mohist 本身的 skill，也是场景分发入口。让外部 agent 能：
 
-- 创建 / 查看 / 启动 / 审批 issue
+- 创建 / 查看 / 启动 / 审批 issue，驱动 epic
 - 查项目状态、日志
 - 调用 `mo` CLI
+- 按场景加载下面的专用 skill
 
 适用场景：你在 OpenCode 里写代码，想顺手建个 Mohist issue，不想切到 Web UI。
 
 ### `mohist-explore`
 
-从产品视角探索需求的 skill。引导你：
+从产品视角把需求想清楚的 skill。接受任何成熟度的输入——一句模糊的想法，或一份已经定稿的需求材料——引导你：
 
-- 从用户视角思考（用户价值、用户旅程）
-- 区分"能跑"和"好用"
-- 发现功能缺陷、体验问题、设计机会
-- 把探索结论整理成可进入 workflow 的 issue body
+- 对照它的思考问题清单，标出哪些已经有答案、哪些还没有；已有答案的不再重问
+- 只就缺口提问：用户价值、产品边界、领域约束
+- 决定拆成一个 issue 还是多个（epic）；每个 issue 必须能独立交付价值，并给出依赖顺序
 
-适用场景：你有一个模糊的产品想法，想理清楚边界和验收条件，再交给 Mohist 执行。
+适用场景：你有一个模糊的想法，想理清楚边界和验收条件；或你已有成形的需求材料，想把它切成能独立交付的 issues。
+
+### `mohist-create-issue`
+
+创建 issue 的执行 skill：选模板、填内容、推荐 workflow 与风险、打标签、确认后执行 `mo issue create`。创建前会核对每个 issue 是否能独立交付价值——不论需求内容来自哪条路径。
+
+### `mohist-create-epic`
+
+创建 epic 的执行 skill：写里程碑描述、关联 issues、设置前置依赖、驱动 autopilot 生命周期。
 
 ## 安装 Skill 到外部 Agent
 
@@ -67,6 +77,8 @@ mo skills install
 ```bash
 mo skills get mohist
 mo skills get mohist-explore
+mo skills get mohist-create-issue
+mo skills get mohist-create-epic
 ```
 
 这会输出与当前 Mohist 版本匹配的完整 skill 指令。每次 `mo skills install` 都会刷新。
@@ -154,16 +166,15 @@ Skill **不能**做：
 - 团队 code review checklist
 - 特定类型 issue 的探索流程
 
-skill 是普通文件（在 `.agents/skills/` 下）。看 `mohist-explore` 的 SKILL.md 学结构。
+skill 是普通文件（放在你外部 agent 的 skill 目录下）。看 `mo skills get mohist-explore` 的输出学结构。
 
 分发自己的 skill 当前需要手动复制到外部 agent 目录（roadmap：通过 `mo skills` 统一管理）。
 
 ## 参考
 
-- `mohist-explore` skill 源文件：`.agents/skills/mohist-explore/SKILL.md`
-- `mohist` skill 源文件：`.agents/skills/mohist/SKILL.md`
+- skill 源文件：`packages/cli/Mohist.Cli/skill-data/<skill-name>/SKILL.md`
 - 架构边界：[`design/architecture.md`](../design/architecture.md) 的 "Agent Skill Boundary" 章节
 
 ---
 
-对应源码：`.agents/skills/`、`design/architecture.md`（Agent Skill Boundary）。
+对应源码：`packages/cli/Mohist.Cli/skill-data/`、`design/architecture.md`（Agent Skill Boundary）。
