@@ -78,6 +78,15 @@ export interface RuntimeTurnRequest {
    */
   readonly deadlineMs?: number | null
   readonly options?: RuntimeTurnOptions | null
+  readonly onSessionReady?: (runtimeSessionId: string, workDir: string) => void | Promise<void>
+  readonly onEvent?: (event: RuntimeTurnEvent) => void
+}
+
+export interface RuntimeTurnEvent {
+  readonly type: string
+  readonly runtimeSessionId: string
+  readonly workDir: string
+  readonly payload: Record<string, unknown>
 }
 
 export interface RuntimeTurnOptions {

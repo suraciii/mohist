@@ -6,12 +6,7 @@ import type {
 } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { parseModelIdentifier } from "./opencode/index.js"
-import type {
-  OpenCodeRuntime,
-  RuntimeResult,
-  RuntimeTurnFacts,
-  RuntimeTurnRequest,
-} from "./opencode/index.js"
+import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnFacts, RuntimeTurnRequest } from "./opencode/index.js"
 import type { ServerConnection } from "../server/connection.js"
 
 /**
@@ -77,6 +72,7 @@ export class AgentJobExecutor {
     }
 
     const binding = await resolveBinding(work, this.connection, signal)
+    const eventWrites: Promise<void>[] = []
 
     const turnRequest: RuntimeTurnRequest = {
       target: {
@@ -90,9 +86,48 @@ export class AgentJobExecutor {
         variant: variant ?? null,
         unknownKeys: collectUnknownKeys(payload),
       },
+      onSessionReady: async (runtimeSessionId, readyWorkDir) => {
+        if (!binding.agentSessionId || !work.projectId) return
+        try {
+          await this.connection.attachAgentSession(
+            work.projectId,
+            binding.agentSessionId,
+            {
+              runtimeSessionId,
+              workDir: readyWorkDir,
+              processPid: null,
+              model: modelInput,
+              workId: work.workId,
+              agentJobId: work.agentJobId ?? null,
+            },
+            signal,
+          )
+        } catch (error) {
+          console.error(`agent-session attach failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+        }
+      },
+      onEvent: (event) => {
+        if (!binding.agentSessionId || !work.projectId) return
+        const write = this.connection.agentSessionRuntimeEvents(
+          work.projectId,
+          binding.agentSessionId,
+          {
+            workId: work.workId,
+            workType: work.workType,
+            stage: work.stage,
+            runtimeSessionId: event.runtimeSessionId,
+            runtimeEvents: [{ type: event.type, payload: event.payload }],
+          },
+          signal,
+        ).catch((error) => {
+          console.error(`agent-session runtime event failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+        })
+        eventWrites.push(write)
+      },
     }
 
     const result = await runtime.runTurn(turnRequest, signal)
+    await Promise.all(eventWrites)
     if (!result.ok) {
       const error = result.error
       const isMissing = error.kind === "missing-session"
@@ -116,7 +151,6 @@ export class AgentJobExecutor {
     }
 
     const facts = result.value.facts
-    await this.reportBinding(work, binding, facts, signal)
     const output = JSON.stringify({
       kind: "opencode",
       status: "success",
@@ -135,44 +169,9 @@ export class AgentJobExecutor {
     }
   }
 
-  private async reportBinding(
-    work: RenderedWorkItem,
-    binding: BindingResolution,
-    facts: RuntimeTurnFacts,
-    signal: AbortSignal,
-  ): Promise<void> {
-    if (!binding.alreadyRecorded && binding.agentSessionId && work.projectId) {
-      try {
-        await this.connection.attachAgentSession(
-          work.projectId,
-          binding.agentSessionId,
-          {
-            runtimeSessionId: facts.runtimeSessionId,
-            workDir: facts.workDir,
-            processPid: null,
-            model: readOptionalString(work.with ?? null, "model") ?? null,
-            workId: work.workId,
-            agentJobId: work.agentJobId ?? null,
-          },
-          signal,
-        )
-      } catch (error) {
-        // The agent-session attach is best-effort: the runtime turn
-        // already settled; the AgentJobGrain has the runtime session id
-        // through the result report path, and a transient attach
-        // failure is recoverable by the runner on the next reconcile
-        // pass. Swallow + log.
-        console.error(
-          `agent-session attach failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`,
-        )
-      }
-    }
-  }
 }
 
-type BindingResolution =
-  | { agentSessionId: string | null; runtimeSessionId: string | null; alreadyRecorded: boolean }
-  | { agentSessionId: null; runtimeSessionId: null; alreadyRecorded: true }
+type BindingResolution = { agentSessionId: string | null; runtimeSessionId: string | null }
 
 async function resolveBinding(
   work: RenderedWorkItem,
@@ -181,17 +180,16 @@ async function resolveBinding(
 ): Promise<BindingResolution> {
   const agentSessionId = work.agentSessionId ?? null
   if (!agentSessionId || !work.projectId) {
-    return { agentSessionId: null, runtimeSessionId: null, alreadyRecorded: true }
+    return { agentSessionId: null, runtimeSessionId: null }
   }
   try {
     const opened = await connection.getAgentSession(work.projectId, agentSessionId, signal)
     return {
       agentSessionId,
       runtimeSessionId: opened?.runtimeSessionId ?? null,
-      alreadyRecorded: false,
     }
   } catch {
-    return { agentSessionId, runtimeSessionId: null, alreadyRecorded: false }
+    return { agentSessionId, runtimeSessionId: null }
   }
 }
 

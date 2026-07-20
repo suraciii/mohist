@@ -240,9 +240,9 @@ public class GenericAgentSessionSummarySpecs
             settings = new { model = "gpt-4o" },
             status = new
             {
-                agentRuntimeSessionId = active ? "runtime-" + sessionId : null,
+                agentRuntimeSessionId = active || terminalStatus is not null ? "runtime-" + sessionId : null,
                 createdAt = CreatedAt,
-                lastDataAt = active ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
+                lastDataAt = active || terminalStatus is not null ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
             },
         }, JSON.Options);
 

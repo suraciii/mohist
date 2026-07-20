@@ -6,6 +6,7 @@ import type {
   OpenCodeRuntime,
   RuntimeResult,
   RuntimeTurnFacts,
+  RuntimeTurnEvent,
   RuntimeTurnRequest,
   RuntimeTurnResult,
 } from "../src/runtime/opencode/index.js"
@@ -14,6 +15,7 @@ interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
   runTurnCalls: RuntimeTurnRequest[]
   setTurnResult: (result: RuntimeResult<RuntimeTurnResult>) => void
+  setTurnEvents: (events: RuntimeTurnEvent[]) => void
 }
 
 function makeFakeRuntime(): FakeRuntimeHandles {
@@ -30,11 +32,16 @@ function makeFakeRuntime(): FakeRuntimeHandles {
     },
     diagnostics: [],
   }
+  let nextEvents: RuntimeTurnEvent[] = []
   const runtime: Partial<OpenCodeRuntime> = {
     ready: () => true,
     diagnostic: () => null,
     async runTurn(request: RuntimeTurnRequest, _signal: AbortSignal): Promise<RuntimeResult<RuntimeTurnResult>> {
       runTurnCalls.push(request)
+      if (nextResult.ok) {
+        await request.onSessionReady?.(nextResult.value.facts.runtimeSessionId, nextResult.value.facts.workDir)
+        for (const event of nextEvents) request.onEvent?.(event)
+      }
       return nextResult
     },
   }
@@ -43,6 +50,9 @@ function makeFakeRuntime(): FakeRuntimeHandles {
     runTurnCalls,
     setTurnResult(result) {
       nextResult = result
+    },
+    setTurnEvents(events) {
+      nextEvents = events
     },
   }
 }
@@ -54,11 +64,13 @@ interface FakeConnectionHandles {
     sessionId: string
     body: Record<string, unknown>
   }>
+  eventCalls: Array<{ projectId: string; sessionId: string; body: Record<string, unknown> }>
   setAgentSession: (session: { runtimeSessionId: string | null } | null) => void
 }
 
 function makeFakeConnection(): FakeConnectionHandles {
   const attachCalls: FakeConnectionHandles["attachCalls"] = []
+  const eventCalls: FakeConnectionHandles["eventCalls"] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
   const connection = {
     async attachAgentSession(
@@ -76,10 +88,14 @@ function makeFakeConnection(): FakeConnectionHandles {
         workDir: "/tmp/ws",
       } as never
     },
+    async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: Record<string, unknown>) {
+      eventCalls.push({ projectId, sessionId, body })
+    },
   } as unknown as ServerConnection
   return {
     connection,
     attachCalls,
+    eventCalls,
     setAgentSession(session) {
       agentSession = session
     },
@@ -270,6 +286,33 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
       workId: "aj-1",
       agentJobId: "aj-1",
     })
+  })
+
+  it("forwards matching runtime events to the canonical AgentSession", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    runtime.setTurnEvents([{
+      type: "message.delta",
+      runtimeSessionId: "ses_default",
+      workDir: "/tmp/ws",
+      payload: { text: "working" },
+    }])
+
+    await executor.execute(buildAgentJobWork(), new AbortController().signal)
+
+    expect(connection.attachCalls).toHaveLength(1)
+    expect(connection.eventCalls).toEqual([{
+      projectId: "proj-1",
+      sessionId: "session-1",
+      body: {
+        workId: "aj-1",
+        workType: "task",
+        stage: undefined,
+        runtimeSessionId: "ses_default",
+        runtimeEvents: [{ type: "message.delta", payload: { text: "working" } }],
+      },
+    }])
   })
 
   it("does not report a binding when the dispatch carries no AgentSessionId", async () => {

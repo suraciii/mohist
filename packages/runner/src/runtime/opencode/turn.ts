@@ -126,6 +126,7 @@ export async function runTurn(
     if (typeof sessionResult !== "string") {
       return sessionResult
     }
+    await request.onSessionReady?.(sessionResult, request.target.workDir)
 
     const policy = deps.policy ?? DEFAULT_PROVIDER_ERROR_POLICY
     const promptResult = await executePrompt({
@@ -140,7 +141,16 @@ export async function runTurn(
       signal: effectiveSignal,
       deadlineMs,
       deadlineExpired: () => timeoutHandle?.timedOut() === true,
-      onEvent: deps.onEvent,
+      onEvent: (event) => {
+        deps.onEvent?.(event)
+        if (event.sessionID !== sessionResult) return
+        request.onEvent?.({
+          type: event.type,
+          runtimeSessionId: sessionResult,
+          workDir: request.target.workDir,
+          payload: event.payload ?? {},
+        })
+      },
     })
     if (promptResult.kind === "failure") {
       const errorWithDiagnostics: typeof promptResult.error = {
