@@ -23,7 +23,7 @@ This change crosses the Workflow/Runner published-language boundary but keeps ex
 
 - Profile save/update validation or catalog consensus across multiple Runners.
 - External plugins, versioned `uses`, composite Actions, or runtime Action installation.
-- Replacing the broad `ActionContext`, removing implicit Variable reads, or injecting capabilities from manifests.
+- Removing or capability-gating any existing non-input `ActionContext` field, or removing implicit Variable reads.
 - Replacing the existing `mohist/opencode` name-based promise projection in this issue.
 - Adding nested object/array schemas or runtime validation of declared successful output fields.
 - Changing Workflow completion, check aggregation, or recovery budget semantics.
@@ -54,7 +54,7 @@ type ActionTombstone = Readonly<{ name: string; guidance: string }>
 
 `defineAction` validates and freezes the manifest, verifies static defaults, and returns the manifest paired with its function. Every input uses a non-empty `types` tuple in canonical `string`, `number`, `boolean`, `object`, `array` order. This supports finite unions without Action-specific exceptions; `mohist/opencode.prompt` declares `types: ["string", "object"]`. `ValidatedActionContext` keeps the current `ActionContext` fields and `rawWith`, but narrows `with` to the union inferred from `types`. This gives authors typed input without narrowing server/runtime/Variable capabilities in this issue.
 
-Canonical names match `^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$`. `working-directory` is rejected as a manifest input. Empty/duplicate kind sets, null defaults, and defaults outside the accepted set are rejected. Output entries carry one type and an optional description; errors are a kebab-case code-to-description map. Descriptions are catalog metadata, not runtime behavior.
+Canonical names match `^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$`. `working-directory` is rejected as a manifest input. Empty/duplicate kind sets, null defaults, and defaults outside the accepted set are rejected. Output entries declare a public field name and optional description; they are projection/documentation metadata rather than a runtime output schema. Errors are a kebab-case code-to-description map.
 
 Alternative considered: `defineAction(manifest, run)`. It separates serializable data from code more visibly, but weakens the single-object authoring experience and TypeScript contextual inference between `inputs` and `run`.
 
@@ -110,7 +110,7 @@ Alternative considered: change the aggregate check error to `invalid-input` when
 
 Maintain a constant reserved set containing `invalid-input`, `unexpected-error`, and `timeout`; manifests cannot declare those codes. After an execution function returns, the boundary accepts either a reserved platform code or a business code declared by that manifest. An undeclared business code is a contract violation and is normalized to `unexpected-error` before recovery. Built-in `fail` call sites use a manifest-derived code union where TypeScript can prove the branch; an exhaustive runtime test covers classifiers and other dynamic branches.
 
-Native exceptions from the execution function and malformed task Action results are also normalized to `unexpected-error` at this boundary and enter the same task recovery path. For checks, undeclared errors and exceptions become row-level `unexpected-error` while the aggregate remains `check-failed`; the existing successful-output shape guard continues to produce aggregate `unexpected-error`. Broader executor failures outside the Action boundary retain their existing executor-specific codes and behavior.
+Native exceptions from the execution function and malformed task Action results are also normalized to `unexpected-error` at this boundary and enter the same task recovery path. For checks, malformed result structure, undeclared errors, and exceptions become row-level `unexpected-error` while the aggregate remains `check-failed`; the existing successful-output shape guard continues to produce aggregate `unexpected-error`. Broader executor failures outside the Action boundary retain their existing executor-specific codes and behavior.
 
 Existing built-ins may still return a reserved code for a platform-defined condition, such as semantic invalid input or command timeout. Ownership means these codes are absent from the Action business catalog; it does not require capability/context refactoring in this issue.
 
@@ -133,7 +133,7 @@ The published shape is arrays throughout so cross-language ordering is explicit:
         { "name": "prompt", "types": ["string", "object"], "required": true }
       ],
       "outputs": [
-        { "name": "promise", "type": "string" }
+        { "name": "promise", "description": "Completion promise projected by the task executor" }
       ],
       "errors": [
         { "code": "runtime-unavailable", "description": "The OpenCode runtime is unavailable" }
@@ -186,7 +186,7 @@ This inventory is the pre-migration baseline for known inputs and observable res
 
 Strict validation intentionally removes pre-migration coercion of non-strings to strings, numeric strings to numbers, boolean-like strings to booleans, non-arrays to empty arrays, explicit null to omission, and arbitrary unknown keys. Those are the only generic input compatibility breaks. Focused tests lock every inventory row, including aliases, context-backed omission, output projection, static/dynamic/fallback error codes, and removal of the ignored `create-github-pr.remote` profile field.
 
-Implementation sequencing keeps the registry migration type-honest. The first Runner slice constructs definitions, switches name/tombstone resolution, and invokes each definition through the existing broad `ActionContext`; it does not call that value validated. The dependent validation slice adds `validateActionInput`, atomically changes the execution signature to `ValidatedActionContext`, and migrates direct input reads. This avoids an intermediate cast or duplicate validator while leaving the manifest registry usable before strict validation lands.
+Manifest-backed registry resolution and validated invocation land as one atomic Runner slice. `ActionDefinition.run` is never called through broad unvalidated `ActionContext`: the slice constructs definitions, validates/defaults rendered input, narrows to `ValidatedActionContext`, and then switches production task/check call sites. This larger slice is necessary because separating registry switchover from typed execution would require an unsafe cast or a second temporary execution contract.
 
 Focused Runner unit tests own definition validation, exact-kind input validation, default cloning, error-code enforcement, inventory completeness, and catalog projection. Runner specs own task recovery, check rows, tombstones, and built-in profile traversal. Host tests assert registration/heartbeat catalog payloads. Server API/grain specs assert wire binding and retention across heartbeat repair and activation using in-memory test infrastructure. Runner tasks run `npm run test:ci -w packages/runner`, which includes test-source typechecking and boundary/file-budget guards.
 
@@ -205,11 +205,10 @@ Focused Runner unit tests own definition validation, exact-kind input validation
 
 ## Migration Plan
 
-1. Add manifest/catalog types, `defineAction`, immutable registry construction, all 17 audited manifests, the `mohist/acp-agent` tombstone, inventory tests, and explicit test definitions. Atomically switch production name resolution while retaining broad `ActionContext` invocation.
-2. Add pure input validation/defaulting, narrow the execution signature to `ValidatedActionContext`, enforce result codes, normalize Action-boundary failures, and route task failures through recovery. Add task/check/recovery specs.
-3. In parallel after step 1, add the catalog to Runner registration state and typed Server DTOs/state; verify register, heartbeat repair, persistence reactivation, and host payloads.
-4. Run built-in profile traversal/full-flow regressions, `npm run test:ci -w packages/runner`, Runner production typecheck, and Server tests. No database migration or Web/CLI change is required.
-5. Deploy Server and Runner together and restart the Runner so registration immediately populates the catalog. Existing `RunnerInfo` without a catalog remains readable until that registration.
+1. Add manifest/catalog types, `defineAction`, immutable registry construction, all 17 audited manifests, pure input validation/defaulting, the `mohist/acp-agent` tombstone, result-code enforcement, recovery routing, inventory tests, and explicit test definitions. Atomically switch production name resolution and invocation to `ValidatedActionContext`.
+2. Add the catalog to Runner registration state and typed Server DTOs/state; verify register, heartbeat repair, persistence reactivation, and host payloads.
+3. Run built-in profile traversal/full-flow regressions, `npm run test:ci -w packages/runner`, Runner production typecheck, and Server tests. No database migration or Web/CLI change is required.
+4. Deploy Server and Runner together and restart the Runner so registration immediately populates the catalog. Existing `RunnerInfo` without a catalog remains readable until that registration.
 
 Rollback reverts both binaries. The Server may retain catalog data in last-known Runner state, but older code does not consume it; the next old-Runner registration replaces the state. Workflow definitions and TaskRun persistence require no rollback migration. Rolling back also restores permissive input handling, so tasks rejected only by the new validator can be retried after rollback.
 

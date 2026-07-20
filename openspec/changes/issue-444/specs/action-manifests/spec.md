@@ -49,7 +49,7 @@ The Action collection SHALL support tombstones containing a canonical Action nam
 
 ### Requirement: Runner registration publishes the serializable Action catalog
 
-The Runner's registration state SHALL include a serializable Action catalog derived from its manifest collection. The catalog root MUST contain `actions` and `tombstones` arrays. Each Action entry MUST contain `name`, an `inputs` array of `{ name, types, required, default?, description? }`, an `outputs` array of `{ name, type, description? }`, and an `errors` array of `{ code, description }`. An Action description SHALL be included only when the manifest declares one. Every input's `types` MUST use the canonical order `string`, `number`, `boolean`, `object`, `array`, including a one-element array for a single-kind input. Each tombstone MUST contain `name` and `guidance`. Actions, inputs, outputs, errors, and tombstones MUST be ordered lexicographically by name or code. The catalog MUST exclude execution functions and other implementation-only values. The Server SHALL accept and retain the catalog carried by the Runner's latest registration state without using it to reject Profile saves in this change.
+The Runner's registration state SHALL include a serializable Action catalog derived from its manifest collection. The catalog root MUST contain `actions` and `tombstones` arrays. Each Action entry MUST contain `name`, an `inputs` array of `{ name, types, required, default?, description? }`, an `outputs` array of `{ name, description? }`, and an `errors` array of `{ code, description }`. An Action description SHALL be included only when the manifest declares one. Every input's `types` MUST use the canonical order `string`, `number`, `boolean`, `object`, `array`, including a one-element array for a single-kind input. Each tombstone MUST contain `name` and `guidance`. Actions, inputs, outputs, errors, and tombstones MUST be ordered lexicographically by name or code. The catalog MUST exclude execution functions and other implementation-only values. The Server SHALL accept and retain the catalog carried by the Runner's latest registration state without using it to reject Profile saves in this change.
 
 #### Scenario: Register a Runner with its Action catalog
 - **WHEN** a Runner registers or repairs its registration state
@@ -128,6 +128,11 @@ The platform SHALL own the reserved error codes `invalid-input`, `unexpected-err
 
 #### Scenario: Preserve check failure aggregation for contract errors
 - **WHEN** an individual check Action returns an undeclared error or throws
+- **THEN** that check row SHALL contain `unexpected-error`
+- **AND** the aggregate check verdict SHALL remain `check-failed`
+
+#### Scenario: Reject a malformed check Action result
+- **WHEN** an individual check Action returns a non-object result, both or neither of `output` and `error`, or a non-string error code or message
 - **THEN** that check row SHALL contain `unexpected-error`
 - **AND** the aggregate check verdict SHALL remain `check-failed`
 
