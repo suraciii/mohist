@@ -1,0 +1,81 @@
+{
+  "project": "mohist-local",
+  "description": "Make routing-triggered Named Agents execute in the triggering workflow workspace, record unresolved workspaces as explicit AgentJob failures, expose actionable failure reasons in generic session reads, and trace routed failures from the associated issue event feed.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose AgentJob failure reasons through generic AgentSession API and CLI",
+      "spec": "specs/agent-session-visibility/spec.md#generic-agentsession-summaries-expose-the-agentjob-failure-reason, specs/agent-session-visibility/spec.md#the-generic-agentsession-api-preserves-failure-details, specs/agent-session-visibility/spec.md#mo-agent-session-show-renders-the-failure-reason",
+      "description": "Project `failureReason` and `failureCategory` from the same latest terminal `session.closed` fact, add the reason to the generic AgentSession summary DTO, and render both values separately in `mo agent session show`. Converge server-originated AgentJob failures that currently persist state without closing their generic session onto the shared terminal-close path so every covered failure is queryable.",
+      "acceptanceCriteria": [
+        "A runner-reported failed AgentJob produces a generic AgentSession summary with status `failed`, the exact persisted `failureReason`, and a separate `failureCategory`",
+        "Dispatch-exhausted, report-timeout, and forced server-originated AgentJob failures close the associated generic AgentSession and expose their persisted reason; repeated closure remains idempotent",
+        "A successful generic AgentSession has no non-empty failure reason and no fabricated failure category",
+        "When multiple Runtime Session terminal facts exist, reason and category are selected from the same latest applicable `session.closed` fact rather than mixed across attempts",
+        "The generic AgentSession HTTP response serializes `failureReason` and `failureCategory` as separate fields when present and omits nullable values according to the existing JSON policy",
+        "`mo agent session show <sessionId>` table output prints distinct failure-reason and failure-category rows, while `-o json` preserves both server fields unchanged",
+        "Focused server specs cover terminal projection, API serialization, success omission, server-originated failure closure, and idempotency; CLI command specs cover table and JSON output",
+        "`npm test` completes successfully after the server and CLI changes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Failure-reason projection and terminal-close convergence under packages/server/src/Mohist.Server/Agent and Sessions, additive generic AgentSession API DTO output, separate CLI failure rendering under packages/cli/Mohist.Cli, and focused server/CLI tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implement design decision 4. Use one TerminalFact for reason and category; do not query AgentJob from the Session read path or replace the machine-readable category with operator-facing text. This task provides the terminal visibility path consumed by T-002's unresolved-workspace outcome."
+    },
+    {
+      "id": "T-002",
+      "title": "Make routed Named Agent launches workspace-complete and idempotently fail preflight",
+      "spec": "specs/routing-dispatch/spec.md#a-routed-agent-launch-uses-the-triggering-workflow-workspace, specs/routing-dispatch/spec.md#missing-routed-workspace-fails-explicitly, specs/routing-dispatch/spec.md#matching-and-prompt-rendering-remain-envelope-only, specs/routing-dispatch/spec.md#existing-non-routing-workspace-behavior-is-preserved",
+      "description": "Add post-match routing launch-context resolution that prefers an explicit WorkflowRun workspace and uses the issue's retained/current run only when workflow lineage is absent, then pass the resolved issue/epic/workspace context through the shared Agent launcher. Add an idempotent no-dispatch AgentJob terminal command for a genuinely unresolved workspace, preserving stable event/rule identities and first-writer launch context without sending malformed work to a Runner.",
+      "acceptanceCriteria": [
+        "A matched `com.mohist.workflow.run.failed` event with `workflowrunid` launches one AgentSession and AgentJob whose work directory and dispatched `workspace.path` both equal the persisted WorkflowRun workspace",
+        "An event with issue lineage but no workflow run id resolves that issue's retained/current WorkflowRun workspace and dispatches the same non-empty path",
+        "An explicit workflow run id is authoritative: a missing workspace fails visibly and never falls forward to a newer issue WorkflowRun",
+        "A hit with no resolvable workspace creates one stable failed AgentJob and AgentSession carrying an actionable `workspace-unavailable` reason plus trigger event/rule correlation, and creates no Runner assignment or workspace-less WorkDispatch",
+        "Redelivery of the same event/rule produces one job, one session, and one idempotently correlated terminal close; a later issue-current-workspace change cannot overwrite the first persisted work directory or outcome",
+        "Routed AgentSession metadata retains issue number, epic number when present, trigger event id, trigger rule id, and workspace path for normal and failed launches",
+        "`mo routing test` and real dispatch select the same rules and Agents for identical inputs; workspace and Issue/Workflow reads occur only after selection and never affect match, ordering, `continue`, or prompt rendering",
+        "Manual Named Agent launch with an explicit workspace and Inline Agent `mohist/opencode` workspace behavior remain unchanged in regression specs",
+        "The runner's existing missing-workspace rejection remains covered as a defensive contract, while routing composition specs prove the normal routed path no longer reaches it",
+        "Focused AgentJob grain, AgentLauncher, routing dispatch, and runner contract tests pass; `npm test` and `npm test -w packages/runner` complete successfully"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Post-match routing context resolver and handler integration under packages/server/src/Mohist.Server/Events/Subscriptions, shared launcher failed-outcome composition, idempotent no-dispatch AgentJob command and tests, with no runner production-code change",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Implement design decisions 1-3. Keep Agent as a leaf: the routing application layer resolves Workflow/Issue context and hands AgentLauncher complete inputs. Do not derive paths from layout, inspect runner-local files, submit then race `FailAsync`, or change manual launch semantics."
+    },
+    {
+      "id": "T-003",
+      "title": "Expose routed Agent failures in the associated issue event feed",
+      "spec": "specs/routing-dispatch/spec.md#routed-failures-are-traceable-from-their-triggering-issue",
+      "description": "Add an issue-scoped AgentOps assembler that merges existing Issue and filtered WorkflowRun events with failed routed AgentSession terminal facts selected by project, issue, and trigger labels. Switch the issue events API to this cross-domain read projection while preserving the existing envelope shape, ordering, post-merge limit semantics, and raw CLI consumption.",
+      "acceptanceCriteria": [
+        "`GET /api/projects/{project}/issues/{number}/events` and `mo issue events <number>` include a routed failed `session.closed` outcome for the associated issue",
+        "The projected outcome identifies status, AgentSession id, Agent id/name, failure reason/category, trigger event id, and trigger rule id using the existing event response envelope",
+        "Issue and WorkflowRun events remain present, Workflow invalidated-control-event filtering is preserved, all sources are merged chronologically, and the requested limit is applied after merging",
+        "Manual sessions, successful routed sessions, sessions without both trigger labels, and sessions for another project or issue are excluded",
+        "The implementation lives in AgentOps and introduces no Session/Agent dependency into Workflow and no copied Issue domain event or correlation table",
+        "Focused AgentOps assembler specs cover inclusion, exclusion, ordering, limiting, and correlation fields; API specs verify the serialized event shape and a CLI command spec verifies `mo issue events` preserves it",
+        "Server architecture tests continue to enforce Workflow's dependency boundary and `npm test` completes successfully"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue-scoped event-feed assembler under packages/server/src/Mohist.Server/AgentOps/Services, issue events API composition update, and AgentOps/API/CLI contract tests",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Implement design decision 5. Consume T-002's routed issue/trigger labels and T-001's terminal failure facts. Keep this a read projection; do not append synthetic Issue events or filter the project-wide feed after its project limit has already been applied."
+    }
+  ]
+}
