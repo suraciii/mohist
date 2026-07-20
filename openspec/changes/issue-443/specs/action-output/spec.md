@@ -37,6 +37,21 @@ On successful command execution, `core/process` SHALL return an output object wi
 - **AND** `output.stdout` SHALL resolve to `release-ready`
 - **AND** `output.exitCode` SHALL resolve to the number `0`
 
+### Requirement: Approval feedback adapts explicit process text
+
+When a completed approval-feedback task uses `core/process`, the Workflow SHALL derive `ResolutionSummary` from the task's structured `output.stdout` string and SHALL apply the existing feedback-resolution section extraction to that text. Output from any Action without an explicit feedback-text adapter SHALL NOT be serialized or coerced into summary text; `null` output or an object without adapted text SHALL produce a `null` resolution summary while still allowing the feedback task to resolve normally.
+
+#### Scenario: Process stdout becomes the feedback resolution summary
+
+- **WHEN** an approval-feedback task using `core/process` completes with output `{ "stdout": "Addressed the requested changes", "exitCode": 0 }`
+- **THEN** the feedback SHALL resolve with `ResolutionSummary` equal to `Addressed the requested changes`
+
+#### Scenario: Arbitrary object output is not used as summary text
+
+- **WHEN** an approval-feedback task completes with `null` output or an output object for which no feedback-text adapter is defined
+- **THEN** the feedback SHALL resolve with a `null` `ResolutionSummary`
+- **AND** the Workflow MUST NOT serialize the object into summary text
+
 ### Requirement: Other built-in Action output contracts are preserved
 
 Every built-in Action other than `core/process` SHALL return its established public output as a structured object with unchanged field names, values, JSON types, and meanings. The output MUST NOT add a transport wrapper around those Action-owned fields.

@@ -14,6 +14,7 @@ This change spans the runner, runner HTTP contract, Orleans messages, Workflow p
 - Validate the object-or-null and JSON-serializability invariant once at the Action execution boundary and fail invalid results explicitly.
 - Preserve structured output through runner reporting, Workflow report translation, `TaskRun.Output`, task-output references, recovery, `setVars`, and task-detail APIs without nested JSON strings.
 - Change `core/process` success output to `{ stdout, exitCode }` while preserving every other built-in Action's field contract.
+- Preserve approval-feedback resolution summaries for `core/process` feedback tasks through an explicit `output.stdout` adapter without inventing a generic object-to-text rule.
 - Keep check batches and AgentJob results working through the shared report envelope without treating them as Workflow Action output.
 
 **Non-Goals:**
@@ -68,7 +69,9 @@ Alternative considered: retain tolerant parsing for callers that still return se
 
 `MergeTaskOutputsIntoPayload` continues to expose only completed tasks, but reads the already-object-valued `TaskRun.Output` and places it under `tasks.<definitionId>.outputs` without text conversion. Recovery follow-up context uses the same stored element. Historical non-object values are not rewritten and are not projected as valid task outputs.
 
-String-oriented secondary consumers must inspect `JsonValueKind` explicitly. In particular, approval-feedback resolution must not stringify an arbitrary object into human-readable summary text; historical string values may remain readable, while new object output supplies no generic summary unless that flow defines an Action-specific field in a separate change.
+String-oriented secondary consumers must inspect `JsonValueKind` explicitly. Approval-feedback resolution uses one Action-specific adapter: when the completed feedback task's `Uses` is `core/process` and its output object contains a string `stdout`, that value is passed through the existing `ExtractResolutionSummary` section/trimming logic. `null` and every other Action output object produce no generic summary and are never serialized into human-readable text; the feedback still resolves normally. Historical persisted string output may remain readable, but new reports cannot create it.
+
+Alternative considered: stringify every output object or probe conventional field names such as `text`, `message`, or `summary`. Rejected because field ownership belongs to each Action and a generic heuristic would turn transport details into a hidden Workflow contract.
 
 Alternative considered: keep `TaskReport.Output` as `string` and parse only in the lifecycle. Rejected because it leaves the runner/server contract ambiguous and makes the server responsible for recovering structure.
 
@@ -95,13 +98,14 @@ Alternative considered: keep the public API field as a string and parse only onc
 - [`setVars` PATCH succeeds but its response is lost] -> Keep one atomic server PATCH after complete local projection; retries remain subject to the existing idempotent deep-merge semantics. This change does not add distributed transactions.
 - [Historical scalar `TaskRun.Output` conflicts with the new API contract] -> Do not migrate it or project it into `tasks.*.outputs`; new writes are guarded. Historical read behavior has no compatibility guarantee in this actively developed project.
 - [Task-detail or delivery metadata disappears after removing Web string parsing] -> Add API-to-view regression coverage using object-valued PR and `core/process` outputs before deleting compatibility parsers.
+- [Approval feedback loses a meaningful process-produced summary when output becomes an object] -> Adapt only `core/process.output.stdout`, retain the existing summary-section extractor, and cover process/object/null feedback completion in server specs.
 
 ## Migration Plan
 
 1. Change runner Action/result types and the shared validator; migrate all built-in Action producers and direct consumers. Update check aggregation while keeping AgentJob execution outside the Action validator.
 2. Change the runner report HTTP and Orleans types to `JsonElement?`; adapt Workflow task translation, check translation, AgentJob handling, and direct `TaskRun.Output` assignment.
 3. Change task status/timeline DTOs and Web types to structured output; remove Web parsing fallbacks and verify existing JSON presentation.
-4. Run runner typecheck/tests, server tests, and Web typecheck/tests. Add focused end-to-end specs for `core/process` -> `setVars`, `core/process` -> `tasks.*.outputs`, missing `setVars` paths, recovery matching, check reports, AgentJob reports, and task-detail rendering. Existing built-in Action tests must assert unchanged object fields.
+4. Run runner typecheck/tests, server tests, and Web typecheck/tests. Add focused end-to-end specs for `core/process` -> `setVars`, `core/process` -> `tasks.*.outputs`, missing `setVars` paths, recovery matching, approval-feedback summary adaptation, check reports, AgentJob reports, and task-detail rendering. Existing built-in Action tests must assert unchanged object fields.
 5. Drain or stop active runners, deploy server + runner + Web as one release, and restart dispatch. In-flight work reported by an old runner is not migrated; rerun the affected task/stage after deployment.
 
 Rollback requires rolling server, runner, and Web back together. There is no database schema migration to reverse: new valid outputs are already JSON objects in `TaskRun.Output`, which the old server can persist/read. Any in-flight report crossing the rollback boundary must be retried after all components use the same version.
