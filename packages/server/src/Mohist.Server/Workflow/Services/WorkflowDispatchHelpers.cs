@@ -104,8 +104,7 @@ internal static class WorkflowDispatchHelpers
         if (root.ValueKind == JsonValueKind.Array)
             return root.EnumerateArray().Select(ParseSingleCheckResult).Where(r => r is not null).Cast<CheckResult>().ToList();
 
-        var single = ParseSingleCheckResult(root);
-        return single is not null ? [single] : [];
+        return [];
     }
 
     internal static CheckResult? ParseSingleCheckResult(JsonElement element)

@@ -362,6 +362,20 @@ EpicNumber: ReadEpicNumber(run),
             $"Task work item for workflow '{workflowRunId}' is missing work id");
         var status = ResolveTaskReportStatus(result);
         var detail = NormalizeDetail(result, status);
+
+        // Validate before binding artifacts so malformed Action output cannot
+        // produce durable artifact side effects.
+        if (!TryCanonicalizeTaskOutput(result.Output, out var validatedOutput, out var shapeError))
+        {
+            return new InboundReport.Task(new TaskReport(
+                WorkId: workId,
+                Status: TaskReportStatus.Failed,
+                Output: null,
+                Artifacts: null,
+                Detail: shapeError,
+                Error: new ExecutionError("unexpected-error", shapeError)));
+        }
+
         IReadOnlyList<ArtifactRef>? artifacts = null;
 
         if (result.ArtifactUploadIds is { Length: > 0 })
@@ -395,20 +409,6 @@ EpicNumber: ReadEpicNumber(run),
                 .ToList();
         }
 
-        // Workflow task output must be object-or-null. An invalid shape is
-        // converted to a durable failed task report so the runner can retire
-        // the work instead of looping forever with an incompatible payload.
-        if (!TryCanonicalizeTaskOutput(result.Output, out var validatedOutput, out var shapeError))
-        {
-            return new InboundReport.Task(new TaskReport(
-                WorkId: workId,
-                Status: TaskReportStatus.Failed,
-                Output: null,
-                Artifacts: artifacts,
-                Detail: shapeError,
-                Error: new ExecutionError("unexpected-error", shapeError)));
-        }
-
         return new InboundReport.Task(new TaskReport(
             WorkId: workId,
             Status: status,
@@ -421,6 +421,16 @@ EpicNumber: ReadEpicNumber(run),
 
     private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
+        if (result.Output is not { ValueKind: JsonValueKind.Array })
+        {
+            const string message = "Runner reported an invalid check output shape. Check output must be a JSON array.";
+            var error = new ExecutionError("unexpected-error", message);
+            var failed = (item.Items ?? [])
+                .Select(check => new CheckResult(check.Name, CheckResultStatus.Failed, message, Error: error))
+                .ToList();
+            return new InboundReport.Checks(new CheckReport(item.Stage, failed));
+        }
+
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         return new InboundReport.Checks(new CheckReport(item.Stage, results));
     }

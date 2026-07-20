@@ -74,4 +74,16 @@ describe("Check verdict validation", () => {
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("pass")
   })
+
+  it("invalid check output is reported without serializing the rejected value", async () => {
+    const output: Record<string, unknown> = {}
+    output.self = output
+    mockAction({ output } as unknown as ActionResult)
+
+    const result = await executor.execute(makeCheckWork([{ name: "cyclic", uses: "test/action" }]), new AbortController().signal)
+
+    expect(result).toMatchObject({ status: "fail", error: { code: "unexpected-error" } })
+    expect(() => JSON.stringify(result)).not.toThrow()
+    expect(result.output).toEqual([{ name: "cyclic", status: "fail", message: expect.any(String) }])
+  })
 })

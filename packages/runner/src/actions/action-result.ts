@@ -29,7 +29,10 @@ export function isActionFailure(result: ActionResult): result is Extract<ActionR
 export function validateActionOutputShape(output: unknown): string | null {
   const path: string[] = []
   const seen = new WeakSet<object>()
-  if (!validateJsonValue(output, path, seen)) {
+  if (output !== null && !isJsonObject(output)) {
+    return `successful Action output must be a JSON object or null. Offending value at path '<root>'.`
+  }
+  if (output !== null && !validateJsonValue(output, path, seen)) {
     return `successful Action output must be a JSON object or null. Offending value at path '${path.join(".") || "<root>"}'.`
   }
   return null
@@ -51,6 +54,7 @@ function validateJsonValue(value: unknown, path: string[], seen: WeakSet<object>
       }
       return true
     }
+    if (!isJsonObject(value)) return false
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       path.push(key)
       if (!validateJsonValue(child, path, seen)) return false
@@ -59,6 +63,12 @@ function validateJsonValue(value: unknown, path: string[], seen: WeakSet<object>
     return true
   }
   return false
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 export type { JsonValue }

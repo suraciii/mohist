@@ -68,7 +68,7 @@
 
 ## Pending work before this slice can be marked complete
 
-- Re-run the repository's full verification command; this was not started because the session received an interruption deadline.
+- Fix the review's Web test-file-size findings, then re-run the repository's full verification command.
 - Confirm the final worktree state after full verification.
 
 ## Decisions / gotchas
@@ -79,3 +79,9 @@
 - Feedback summary extraction is one Action-specific adapter: only `core/process` task's `output.stdout` becomes the resolution summary. Every other Action yields null summary (still resolves the feedback).
 - `capturedOutputs` is intentionally not wired into the server (Runner proposal explicitly says not); we keep the runner-local field to keep the Web StageStateRead path unchanged.
 
+## Review fixes in progress
+
+- The Action validator now requires a plain object or null at the root and rejects non-JSON object instances recursively.
+- Invalid check output is removed from the public check-result envelope before report serialization, so cyclic values produce an acknowledged `unexpected-error` instead of a runner retry.
+- Server task translation validates Action output before artifact binding. Malformed check envelopes become failed results for every dispatched check rather than throwing during property access.
+- Focused server translator specs pass; focused runner validation tests are being rerun after removing the internal invalid-output marker from the transport row.

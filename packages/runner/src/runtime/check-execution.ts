@@ -45,7 +45,8 @@ export async function executeCheckDispatch(
     const invalidReason = result.invalidOutputReason
     if (invalidReason) {
       const message = `Check '${result.name ?? "(unnamed)"}' produced invalid output: ${invalidReason}`
-      return { status: "fail", message, error: { code: "unexpected-error", message }, output: results.map(rowToJsonValue) }
+      const publicResults = results.map(({ invalidOutputReason: _ignored, ...row }) => row)
+      return { status: "fail", message, error: { code: "unexpected-error", message }, output: publicResults.map(rowToJsonValue) }
     }
   }
   const cleaned = results.map(({ invalidOutputReason: _ignored, ...row }) => row)
@@ -75,7 +76,7 @@ async function runOneCheck(
     const result = await action({ ...deps.context, workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
     if (isActionFailure(result)) return { name: check.name, status: "fail", message: result.error.message, error: result.error }
     const invalidReason = validateActionOutputShape(result.output)
-    if (invalidReason) return { name: check.name, status: "fail", message: invalidReason, output: result.output, invalidOutputReason: invalidReason }
+    if (invalidReason) return { name: check.name, status: "fail", message: invalidReason, invalidOutputReason: invalidReason }
     return { name: check.name, status: "pass", output: result.output }
   } catch (error) {
     return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
