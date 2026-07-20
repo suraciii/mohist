@@ -86,3 +86,4 @@
 - Server task translation validates Action output before artifact binding. Malformed check envelopes become failed results for every dispatched check rather than throwing during property access.
 - Focused server translator specs and runner validation tests pass after removing the internal invalid-output marker from the transport row.
 - Structured-output UI assertions now live in focused `TaskProgressPanel.output.test.tsx` and `WorkflowView.output.test.tsx`; the original test files are below their size budgets and the focused Web suite passes.
+- The server translator output regressions are split into `WorkflowItemTranslatorOutputSpecs.cs` so the existing translator spec stays below the C# 24 KB test-file ratchet.
