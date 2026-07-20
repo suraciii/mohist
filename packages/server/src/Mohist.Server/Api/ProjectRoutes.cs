@@ -334,24 +334,26 @@ public static class ProjectRoutes
             }
         });
 
-        byRef.MapGet("/workflow-templates/{tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
+        byRef.MapGet("/workflow-templates/{*tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
         {
+            var templateId = Uri.UnescapeDataString(tid);
             var project = context.GetResolvedProject();
-            var def = await manager.GetTemplateAsync(project.Id, tid);
+            var def = await manager.GetTemplateAsync(project.Id, templateId);
             return def is not null
-                ? ApiResults.Ok(new { projectId = project.Id, templateId = tid, definition = def })
+                ? ApiResults.Ok(new { projectId = project.Id, templateId, definition = def })
                 : ApiResults.NotFound("Project template not found");
         });
 
-        byRef.MapPut("/workflow-templates/{tid}", async (HttpContext context, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        byRef.MapPut("/workflow-templates/{*tid}", async (HttpContext context, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
         {
+            var templateId = Uri.UnescapeDataString(tid);
             if (string.IsNullOrWhiteSpace(req.Yaml))
                 return ApiResults.BadRequest("yaml is required");
 
             var project = context.GetResolvedProject();
             try
             {
-                var template = await manager.UpdateTemplateAsync(project.Id, tid, req.Yaml);
+                var template = await manager.UpdateTemplateAsync(project.Id, templateId, req.Yaml);
                 return template is not null
                     ? ApiResults.Ok(template)
                     : ApiResults.NotFound("Project template not found");
@@ -362,10 +364,11 @@ public static class ProjectRoutes
             }
         });
 
-        byRef.MapDelete("/workflow-templates/{tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
+        byRef.MapDelete("/workflow-templates/{*tid}", async (HttpContext context, string tid, ProjectWorkflowProfileManager manager) =>
         {
+            var templateId = Uri.UnescapeDataString(tid);
             var project = context.GetResolvedProject();
-            var deleted = await manager.DeleteTemplateAsync(project.Id, tid);
+            var deleted = await manager.DeleteTemplateAsync(project.Id, templateId);
             return deleted ? ApiResults.Ok(new { deleted = true }) : ApiResults.NotFound("Project template not found");
         });
 

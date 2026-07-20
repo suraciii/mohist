@@ -186,7 +186,8 @@ Runner 所在机器需要安装 GitHub CLI，并登录目标仓库。
 直接编辑 Profile definition。
 
 CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只需在所属 Project
-内唯一；内置 Profile 使用 `mohist/<name>`，自定义 Profile 使用能稳定表达用途的 ID。
+内唯一，可以包含 `/`；通过 CLI 传递时仍是一个完整参数。内置 Profile 使用
+`mohist/<name>`，自定义 Profile 使用能稳定表达用途的 ID。
 
 ## 实装差距
 
