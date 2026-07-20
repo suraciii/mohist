@@ -24,7 +24,12 @@ afterEach(async () => {
 function execute(result: ActionResult) {
   const actions = new ActionRegistry()
   actions.register("test/action", async () => result)
-  const executor = new WorkExecutor(actions, verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }), {} as never, {} as never, null, workDir)
+  const executor = new WorkExecutor(
+    actions,
+    verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+    {} as never,
+    workDir,
+  )
   const work: RenderedWorkItem = {
     workflowRunId: "wf-completion", workId: "review.1", workType: "task", stage: "check",
     title: "Review", uses: "test/action", with: {}, variables: { workspace: { path: workDir, branch: null, changeDir: null } },

@@ -198,13 +198,6 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
-        // Per #410 T-002 design D5: the built-in profile's MergeAgentConfig
-        // projects incoming agent config down to the converged whitelist
-        // ({model, variant}) before merging into vars.agent. Legacy
-        // ACP/liveness keys supplied by callers are not preserved on this
-        // write path. The persisted/legacy-keys round-trip is covered
-        // separately by the IssueModelMetadataTests + storage-integrity
-        // defensive-copy unit tests (no data rewrite).
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -848,7 +841,7 @@ public class MohistLocalWorkflowProfileSpecs
                 recovery:
                   budget: 1
                   handlers:
-                    - when: output.output.promise=FAIL
+                    - when: output.promise=FAIL
                       tasks:
                         - id: recover:fix-review
                           title: Fix review
@@ -955,7 +948,7 @@ public class MohistLocalWorkflowProfileSpecs
         var recovery = aiReview.Recovery!;
         Assert.Equal(2, recovery.Budget);
         var handler = Assert.Single(recovery.Handlers);
-        Assert.Equal("output.output.promise=FAIL", handler.When);
+        Assert.Equal("output.promise=FAIL", handler.When);
         Assert.True(handler.RetrySelf);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);

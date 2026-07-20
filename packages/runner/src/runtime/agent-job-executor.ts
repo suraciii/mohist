@@ -1,12 +1,12 @@
 import { errorMessage } from "../core/errors.js"
 import type {
-  ActionResult,
   JsonObject,
   RenderedWorkItem,
+  WorkItemResult,
 } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { parseModelIdentifier } from "./opencode/index.js"
-import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnFacts, RuntimeTurnObserver, RuntimeTurnRequest } from "./opencode/index.js"
+import type { OpenCodeRuntime, RuntimeResult, RuntimeTurnObserver, RuntimeTurnRequest, RuntimeTurnResult } from "./opencode/index.js"
 import type { ServerConnection } from "../server/connection.js"
 
 /**
@@ -20,7 +20,7 @@ import type { ServerConnection } from "../server/connection.js"
  * launch time from the resolved Agent snapshot and stable for the
  * lifetime of the in-flight request.
  *
- * The returned `ActionResult.output` keeps the legacy
+ * The returned `WorkItemResult.output` keeps the AgentJob terminal
  * `{ kind, status, runtimeSessionId, model, variant, text, error,
  *   failureCategory? }` shape so `AgentJobGrain.ReportResultAsync`'s
  * success/failure parsing and `FailureCategoryFrom` keep working
@@ -36,15 +36,15 @@ export class AgentJobExecutor {
     private readonly runtime: OpenCodeRuntime | null,
   ) {}
 
-  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<ActionResult> {
+  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     if (work.ownerKind !== "agent-job") {
-      return failureResult(work, `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? "null"})`)
+      return failureResult("invalid-dispatch", `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? "null"})`)
     }
 
     const payload = work.with ?? null
     const prompt = readPrompt(payload)
     if (!prompt) {
-      return failureResult(work, "AgentJob requires 'prompt' in dispatch with-payload")
+      return failureResult("invalid-input", "AgentJob requires 'prompt' in dispatch with-payload")
     }
 
     const instructions = readOptionalString(payload, "instructions")
@@ -54,28 +54,28 @@ export class AgentJobExecutor {
     const variant = readOptionalString(payload, "variant")
     const model = parseModel(modelInput)
     if (modelInput && model.kind === "failure") {
-      return failureResult(work, `AgentJob ${model.message}`)
+      return failureResult("invalid-input", `AgentJob ${model.message}`)
     }
 
     const runtime = this.runtime
     if (!runtime) {
-      return failureResult(work, "AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
+      return failureResult("runtime-unavailable", "AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
     }
     if (!runtime.ready()) {
       const diagnostic = runtime.diagnostic()
-      return failureResult(work, `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+      return failureResult("runtime-unavailable", `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
     }
 
     const workDir = resolveWorkDir(work)
     if (!workDir) {
-      return failureResult(work, "AgentJob requires 'workspace.path' in dispatch variables")
+      return failureResult("invalid-input", "AgentJob requires 'workspace.path' in dispatch variables")
     }
 
     let binding: BindingResolution
     try {
       binding = await resolveBinding(work, this.connection, signal)
     } catch (error) {
-      return failureResult(work, `AgentJob failed to resolve the AgentSession binding: ${errorMessage(error)}`)
+      return failureResult("session-binding-failed", `AgentJob failed to resolve the AgentSession binding: ${errorMessage(error)}`)
     }
     let eventWrite = Promise.resolve()
 
@@ -156,45 +156,7 @@ export class AgentJobExecutor {
 
     const result = await runtime.runTurn(turnRequest, signal, observer)
     await eventWrite
-    if (!result.ok) {
-      const error = result.error
-      const isMissing = error.kind === "missing-session"
-      const output = JSON.stringify({
-        kind: "opencode",
-        status: "failure",
-        runtimeSessionId: null,
-        model: modelInput ?? null,
-        variant: variant ?? null,
-        text: null,
-        error: error.message,
-        diagnostics: result.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-        ...(isMissing ? { hint: "reset" } : {}),
-      })
-      return {
-        status: "failed",
-        message: error.message,
-        output,
-        exitCode: 1,
-      }
-    }
-
-    const facts = result.value.facts
-    const output = JSON.stringify({
-      kind: "opencode",
-      status: "success",
-      runtimeSessionId: facts.runtimeSessionId,
-      model: modelInput ?? null,
-      variant: variant ?? null,
-      text: facts.finalAssistantText,
-      error: null,
-      diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-    })
-    return {
-      status: "completed",
-      message: "AgentJob completed",
-      output,
-      exitCode: 0,
-    }
+    return projectTurnToWorkItemResult(result, modelInput ?? null, variant ?? null)
   }
 }
 
@@ -265,18 +227,16 @@ function collectUnknownKeys(payload: JsonObject | null): readonly string[] | und
   return unknown.length > 0 ? unknown : undefined
 }
 
-function failureResult(work: RenderedWorkItem, message: string): ActionResult {
+function failureResult(code: string, message: string): WorkItemResult {
   return {
     status: "failed",
     message,
+    error: { code, message },
+    exitCode: 1,
   }
 }
 
-/**
- * Internal helper exposed for tests. Wraps a turn's runtime result in
- * the legacy output envelope used by `AgentJobGrain.ReportResultAsync`.
- */
-export function buildActionOutputFromTurn(
+function buildAgentJobOutput(
   ok: boolean,
   runtimeSessionId: string | null,
   model: string | null,
@@ -284,6 +244,7 @@ export function buildActionOutputFromTurn(
   text: string | null,
   error: string | null,
   diagnostics: readonly { code: string; message: string }[],
+  hint?: "reset",
 ): string {
   return JSON.stringify({
     kind: "opencode",
@@ -294,56 +255,53 @@ export function buildActionOutputFromTurn(
     text,
     error,
     diagnostics,
+    ...(hint ? { hint } : {}),
   })
 }
 
 /**
- * Convert a {@link RuntimeResult} into the {@link ActionResult} shape
- * expected by the legacy `AgentJobGrain.ReportResultAsync` parsing
- * path. Used by tests to verify the runner's output envelope stays
- * drop-in compatible.
+ * Convert the runtime result directly into the AgentJob-owned work result.
+ * This path deliberately does not cross the Workflow Action boundary.
  */
-export function projectTurnToActionResult(
-  result: RuntimeResult<{ facts: RuntimeTurnFacts; diagnostics: readonly { code: string; message: string }[] }>,
+export function projectTurnToWorkItemResult(
+  result: RuntimeResult<RuntimeTurnResult>,
   model: string | null,
   variant: string | null,
-): ActionResult {
+): WorkItemResult {
   if (!result.ok) {
     const error = result.error
-    const output = JSON.stringify({
-      kind: "opencode",
-      status: "failure",
-      runtimeSessionId: null,
+    const output = buildAgentJobOutput(
+      false,
+      null,
       model,
       variant,
-      text: null,
-      error: error.message,
-      diagnostics: result.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-    })
+      null,
+      error.message,
+      result.diagnostics,
+      error.kind === "missing-session" ? "reset" : undefined,
+    )
     return {
-      status: "failure",
+      status: "failed",
       message: error.message,
+      error: { code: error.kind, message: error.message },
       output,
       exitCode: 1,
-      turnFact: { finalAssistantText: null },
     }
   }
   const facts = result.value.facts
-  const output = JSON.stringify({
-    kind: "opencode",
-    status: "success",
-    runtimeSessionId: facts.runtimeSessionId,
+  const output = buildAgentJobOutput(
+    true,
+    facts.runtimeSessionId,
     model,
     variant,
-    text: facts.finalAssistantText,
-    error: null,
-    diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
-  })
+    facts.finalAssistantText,
+    null,
+    result.value.diagnostics,
+  )
   return {
-    status: "success",
-    message: "OpenCode agent task completed",
+    status: "completed",
+    message: "AgentJob completed",
     output,
     exitCode: 0,
-    turnFact: { finalAssistantText: facts.finalAssistantText },
   }
 }

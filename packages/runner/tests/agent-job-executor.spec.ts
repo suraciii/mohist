@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { AgentJobExecutor, buildActionOutputFromTurn, projectTurnToActionResult } from "../src/runtime/agent-job-executor.js"
+import { AgentJobExecutor, projectTurnToWorkItemResult } from "../src/runtime/agent-job-executor.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { RenderedWorkItem } from "../src/core/types.js"
 import type {
@@ -578,24 +578,8 @@ describe("AgentJobExecutor surfaces a missing-session turn as a Reset hint", () 
   })
 })
 
-describe("legacy AgentJob action-output envelope helper", () => {
-  it("buildActionOutputFromTurn emits a drop-in compatible shape", () => {
-    const out = JSON.parse(
-      buildActionOutputFromTurn(true, "ses_x", "openai/gpt-5.5", "high", "done", null, []),
-    )
-    expect(out).toMatchObject({
-      kind: "opencode",
-      status: "success",
-      runtimeSessionId: "ses_x",
-      model: "openai/gpt-5.5",
-      variant: "high",
-      text: "done",
-      error: null,
-      diagnostics: [],
-    })
-  })
-
-  it("projectTurnToActionResult maps a successful RuntimeResult to a success ActionResult", () => {
+describe("AgentJob work-result projection", () => {
+  it("maps a successful RuntimeResult to a completed work result", () => {
     const result: RuntimeResult<RuntimeTurnResult> = {
       ok: true,
       value: {
@@ -608,25 +592,27 @@ describe("legacy AgentJob action-output envelope helper", () => {
       },
       diagnostics: [],
     }
-    const action = projectTurnToActionResult(result, "openai/gpt-5.5", "high")
-    expect(action.status).toBe("success")
-    expect(action.exitCode).toBe(0)
-    const parsed = JSON.parse(action.output ?? "{}")
+    const workResult = projectTurnToWorkItemResult(result, "openai/gpt-5.5", "high")
+    expect(workResult.status).toBe("completed")
+    expect(workResult.exitCode).toBe(0)
+    expect(workResult.error).toBeUndefined()
+    const parsed = JSON.parse(workResult.output ?? "{}")
     expect(parsed.status).toBe("success")
     expect(parsed.runtimeSessionId).toBe("ses_a")
     expect(parsed.text).toBe("yes")
   })
 
-  it("projectTurnToActionResult maps a failed RuntimeResult to a failure ActionResult", () => {
+  it("maps a failed RuntimeResult to a failed work result with the runtime error", () => {
     const result: RuntimeResult<RuntimeTurnResult> = {
       ok: false,
       error: { kind: "turn-failed", message: "boom", diagnostics: [] },
       diagnostics: [],
     }
-    const action = projectTurnToActionResult(result, null, null)
-    expect(action.status).toBe("failure")
-    expect(action.exitCode).toBe(1)
-    const parsed = JSON.parse(action.output ?? "{}")
+    const workResult = projectTurnToWorkItemResult(result, null, null)
+    expect(workResult.status).toBe("failed")
+    expect(workResult.error).toEqual({ code: "turn-failed", message: "boom" })
+    expect(workResult.exitCode).toBe(1)
+    const parsed = JSON.parse(workResult.output ?? "{}")
     expect(parsed.status).toBe("failure")
     expect(parsed.error).toBe("boom")
   })
