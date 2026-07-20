@@ -123,7 +123,8 @@ Action Output 与 `mohist/opencode` 相同：只在命中 promise marker 时返�
 `{ "promise": "..." }`，否则为 `null`。
 
 Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许
-的操作直接执行。执行超时会中断当前回合；提交结果不确定时不会自动重放 Prompt，避免
+的操作直接执行。Workflow 回合期限固定为 60 分钟，本 issue 不提供 Action Input 覆盖；
+期限到达会中断当前回合。提交结果不确定时不会自动重放 Prompt，避免
 同一任务被执行两次。Runner 主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，
 不能用缺少 marker 覆盖 timeout，也不会替换当前 Session 绑定或自动 Reset。
 
