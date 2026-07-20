@@ -3,8 +3,9 @@ import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
-import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
+import type { OpenCodeRuntime, RuntimeTurnObserver } from "../runtime/opencode/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
+import { WorkflowAgentSessionReporter } from "./workflow-agent-session-reporter.js"
 
 export const OPENCODE_USES = "mohist/opencode"
 
@@ -155,7 +156,10 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   }
 
   const turnRequest = buildTurnRequest(binding, prompt, options, resolveTurnDeadlineMs(context))
-  const result = await runtime.runTurn(turnRequest, context.signal)
+  const reporter = createWorkflowReporter(context, sessionName, binding.runtimeSessionId, prompt)
+  const observer = createWorkflowObserver(reporter)
+  const result = await runtime.runTurn(turnRequest, context.signal, observer)
+  await reporter?.settle()
   if (!result.ok) {
     return fail(runtimeErrorCode(result.error.kind), result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
@@ -246,6 +250,41 @@ function runtimeErrorCode(kind: string): string {
   if (kind === "deadline-exceeded") return "timeout"
   if (kind === "missing-session") return "runtime-session-missing"
   return kind
+}
+
+function createWorkflowReporter(
+  context: ActionContext,
+  sessionName: string | undefined,
+  runtimeSessionId: string | null,
+  composedPrompt: string,
+): WorkflowAgentSessionReporter | null {
+  if (!sessionName) return null
+  if (!context.serverConnection || !context.projectId) return null
+  if (!runtimeSessionId) return null
+  if (typeof context.serverConnection.workflowAgentSessionRuntimeEvents !== "function") return null
+  const reporter = new WorkflowAgentSessionReporter({
+    connection: context.serverConnection,
+    projectId: context.projectId,
+    workflowRunId: context.workflowRunId,
+    sessionName,
+    workMetadata: {
+      workId: context.workId,
+      workType: context.workType,
+      stage: context.stage ?? null,
+    },
+    signal: context.signal,
+  })
+  reporter.enqueueInput(composedPrompt, runtimeSessionId)
+  return reporter
+}
+
+function createWorkflowObserver(reporter: WorkflowAgentSessionReporter | null): RuntimeTurnObserver | undefined {
+  if (!reporter) return undefined
+  return {
+    onEvent: (event) => {
+      reporter.enqueueEvent(event)
+    },
+  }
 }
 
 function resolveTurnDeadlineMs(context: ActionContext): number {

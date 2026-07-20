@@ -1,0 +1,141 @@
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.SpecTests.Support;
+using Xunit;
+
+namespace Mohist.Server.SpecTests.Specs.Sessions;
+
+public abstract class AgentSessionGrainInputBoundarySpecsBase : IClassFixture<AgentSessionGrainFixture>
+{
+    protected readonly AgentSessionGrainFixture Fixture;
+
+    protected AgentSessionGrainInputBoundarySpecsBase(AgentSessionGrainFixture fixture)
+    {
+        Fixture = fixture;
+        Fixture.Reset();
+    }
+
+    protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-input-boundary-{Guid.NewGuid():N}");
+
+    protected OpenAgentSessionCommand Open(string runtime = "test") => new(
+        "runner-1",
+        runtime,
+        WorkDir: "/work",
+        Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
+
+    protected async Task<IAgentSessionGrain> OpenBoundGrainAsync(string runtime = "test")
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(Open(runtime));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
+        return grain;
+    }
+}
+
+public class AgentSessionGrainInputBoundaryPersistSuccessSpecs : AgentSessionGrainInputBoundarySpecsBase
+{
+    public AgentSessionGrainInputBoundaryPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task AppendRuntimeEvents_TwoBackToBackInputs_ProduceDistinctTurnsWithoutTimeAdvance()
+    {
+        // The new `session.input` boundary fences pending transcript data
+        // before accepting a later input. Two back-to-back inputs on the
+        // same logical and physical session must produce two distinct
+        // persisted turns with their own prompts and parts, with a single
+        // explicit flush at the end for observation.
+        var grain = await OpenBoundGrainAsync();
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"first-prompt\",\"kind\":\"task\"}"),
+                new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"first-answer\"}"),
+            }, "runtime-1"));
+
+        // No flush or fake-time advance between inputs: the next input
+        // is what triggers the persistence fence.
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"second-prompt\",\"kind\":\"task\"}"),
+                new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"second-answer\"}"),
+            }, "runtime-1"));
+
+        await grain.FlushForTestAsync();
+
+        Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
+        var firstFlush = Fixture.TranscriptStore.Flushes[0];
+        var secondFlush = Fixture.TranscriptStore.Flushes[1];
+        Assert.NotNull(firstFlush.Turn);
+        Assert.NotNull(secondFlush.Turn);
+        Assert.NotEqual(firstFlush.Turn, secondFlush.Turn);
+        Assert.Equal("first-prompt", firstFlush.Turn.PromptText);
+        Assert.Equal("second-prompt", secondFlush.Turn.PromptText);
+        Assert.Equal("runtime-1", firstFlush.Turn.RuntimeSessionId);
+        Assert.Equal("runtime-1", secondFlush.Turn.RuntimeSessionId);
+
+        Assert.Single(firstFlush.Parts);
+        Assert.Single(secondFlush.Parts);
+        Assert.Equal("first-answer", firstFlush.Parts[0].TextDelta);
+        Assert.Equal("second-answer", secondFlush.Parts[0].TextDelta);
+        Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
+    }
+}
+
+public class AgentSessionGrainInputBoundaryPersistFailureSpecs : AgentSessionGrainInputBoundarySpecsBase
+{
+    public AgentSessionGrainInputBoundaryPersistFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task AppendRuntimeEvents_TranscriptFailureOnSecondInput_LeavesFirstPendingRetryable()
+    {
+        // The first turn is appended with a session.input and an
+        // activity event. The second input arrives while the first
+        // transcript flush has not yet succeeded; the persistence
+        // fence triggers a deterministic flush of the prior data.
+        // When that flush fails, the new input is rejected, the
+        // prior pending accumulator state remains retryable, and no
+        // part of the second input is appended.
+        var grain = await OpenBoundGrainAsync();
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"first-prompt\",\"kind\":\"task\"}"),
+                new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"first-answer\"}"),
+            }, "runtime-1"));
+
+        // The next input will trigger the prior-data flush; that
+        // flush must fail so the new input is rejected.
+        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+
+        var secondInputResults = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"second-prompt\",\"kind\":\"task\"}"),
+                new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"second-answer\"}"),
+            }, "runtime-1"));
+
+        Assert.Empty(secondInputResults);
+
+        // No flush completed; the first turn is still pending and must
+        // contain its own prompt (no overwrite, no append of the
+        // second input).
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+        var warning = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("rejected session.input", warning.Message);
+
+        // Retry persistence deterministically (no scheduler waits, no
+        // fake time): the next flush must surface the first turn
+        // unchanged, with no second-input parts anywhere.
+        await grain.FlushForTestAsync();
+
+        Assert.Single(Fixture.TranscriptStore.Flushes);
+        var retryFlush = Fixture.TranscriptStore.Flushes[0];
+        Assert.Equal("first-prompt", retryFlush.Turn.PromptText);
+        Assert.Single(retryFlush.Parts);
+        Assert.Equal("first-answer", retryFlush.Parts[0].TextDelta);
+    }
+}

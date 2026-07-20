@@ -777,6 +777,28 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 return terminalEntries;
         }
 
+        // `session.input` is the canonical cross-source turn delimiter.
+        // Before the new input reaches `TranscriptAccumulator` (which
+        // would replace the active prompt), flush any prior pending
+        // transcript data so rapid reused Workflow turns cannot merge
+        // or overwrite an input that is still waiting for deferred
+        // persistence. A failed flush rejects the new input and
+        // retains the uncommitted prior accumulator state for the
+        // existing later persistence attempt.
+        var hasSessionInput = runtimeEvents.Any(e =>
+            string.Equals(e.Type, RuntimeEventTypes.SessionInput, StringComparison.Ordinal));
+        if (hasSessionInput && _transcript.HasPending)
+        {
+            if (!await FlushPendingTranscriptAsync(session, CancellationToken.None))
+            {
+                _log.LogWarning(
+                    "AgentSessionGrain rejected session.input for {SessionId} because prior transcript data is pending and could not be persisted; retry once persistence succeeds",
+                    SessionId);
+                return [];
+            }
+            _session = session;
+        }
+
         var now = Now();
         if (runtimeEvents.Any(e => string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
             session.Status = session.Status with { CurrentTurnEndedAt = now };
@@ -1153,6 +1175,44 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var success = await FlushAsync(CancellationToken.None);
         if (success)
             DisposePersistTimer();
+    }
+
+    /// <summary>
+    /// Flush only the pending transcript data (and any pending recovery
+    /// evidence) without committing state or domain events. Used as the
+    /// deterministic fence before accepting a new <c>session.input</c>
+    /// so a rapid reused Workflow turn cannot overwrite an input that
+    /// is still waiting for deferred persistence. On failure the prior
+    /// pending accumulator state is retained for the existing later
+    /// persistence attempt — callers can react by rejecting the new
+    /// input and waiting for the next timer tick or a forced flush.
+    /// </summary>
+    private async Task<bool> FlushPendingTranscriptAsync(AgentSession session, CancellationToken ct)
+    {
+        if (!await FlushPendingTranscriptEvidenceAsync(session, ct))
+            return false;
+
+        if (!_transcript.HasPending)
+            return true;
+
+        var now = Now();
+        var transcript = _transcript.BuildFlush(session, now);
+        if (transcript is null)
+            return true;
+
+        try
+        {
+            await _transcriptStore.SaveAsync(transcript, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentSessionGrain failed to flush pending transcript before accepting session.input for {SessionId}; parts={PartCount}",
+                SessionId, transcript.Parts.Count);
+            return false;
+        }
+        _transcript.CommitFlush();
+        return true;
     }
 
     private async Task<bool> FlushAsync(CancellationToken ct)

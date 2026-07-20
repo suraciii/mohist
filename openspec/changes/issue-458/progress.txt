@@ -1,0 +1,24 @@
+# T-001 progress notes
+
+## Codebase Patterns
+
+- The runner Workflow adapter `opencodeAction` already resolves or attaches a Workflow AgentSession binding before calling `runtime.runTurn`. The new transcript reporter wires in only after the binding has a non-null `runtimeSessionId`, so the `session.input` event always carries the current physical binding.
+- `RuntimeTurnObserver.onEvent` is called synchronously from `turn.ts` `executePrompt`, which means the reporter must accept events synchronously without awaiting HTTP. The existing `agent-job-executor.ts` shows the pattern: chain `eventWrite` via `.then(...)` so a later rejection does not poison later attempts.
+- `session.input` is the canonical cross-source turn delimiter on `AgentSessionGrain`. The grain's `AppendEventsAsync` is the single entry point for both AgentJob (`agentSessionRuntimeEvents`) and Workflow (`workflowAgentSessionRuntimeEvents`) routes, so the persistence fence belongs there, not in the route or in `TranscriptAccumulator`.
+- The TranscriptAccumulator accumulates until `_transcript.HasPending` is true; flushes are driven by `FlushAsync` (state + transcript together). For the input fence we only need the transcript portion — extracted as `FlushPendingTranscriptAsync` so the input-fence path cannot accidentally trigger a state-save round-trip.
+- `AgentSessionGrainFixture` exposes a fake transcript store that supports `NextException`, so failure-during-input-fence coverage can target exactly the input-boundary flush without dirtying other paths.
+
+## Implementation notes
+
+- Reporter lives at `packages/runner/src/actions/workflow-agent-session-reporter.ts` — Workflow-local; not exposed to AgentJob.
+- Input acceptance gate: a single `inputRejected` boolean read by every later upload callback so the chain serializes naturally and rejects later uploads without a separate "skip if rejected" wrapper.
+- `controller.signal` is independent of the runner host signal — bounded by a 30 s timeout (`DEFAULT_REPORT_TIMEOUT_MS`), so a stalled upload cannot retain the Action indefinitely.
+- `createWorkflowReporter` defensively checks `typeof connection.workflowAgentSessionRuntimeEvents === "function"` so older test fakes that only stub `openWorkflowAgentSession`/`attachWorkflowAgentSession` (e.g., `opencode-action-turn.spec.ts`) keep working unchanged.
+- The new Session grain tests use `FakeAgentSessionTranscriptStore.NextException` plus a single explicit `FlushForTestAsync` for observation — no fake-time advance and no scheduler waits, matching the acceptance criterion that correctness does not depend on the 200 ms persistence timer.
+
+## Verification surface
+
+- `npm run typecheck -w packages/runner` — green.
+- `npm test -w packages/runner` — 1183 tests pass (98 files).
+- `npm test` (root) — 1361 cli + 1260 server unit + 30 server arch + 2890 server spec + 4995 web + 1183 runner = 11719 tests pass.
+- `git status` — only the three source/test files I touched and two new files; no generated artifacts.
