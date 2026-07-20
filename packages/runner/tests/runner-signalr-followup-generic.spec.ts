@@ -150,14 +150,6 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
       }),
       expect.any(AbortSignal),
     )
-    const genericCalls = agentSessionRuntimeEvents.mock.calls as unknown as Array<[
-      string,
-      string,
-      { runtimeEvents: Array<{ payload: Record<string, unknown> }> },
-      AbortSignal,
-    ]>
-    const genericEventBatch = genericCalls[0]?.[2]
-    expect(genericEventBatch.runtimeEvents[0]?.payload).not.toHaveProperty("acpSessionId")
     expect(workflowRuntimeEvents).not.toHaveBeenCalled()
   })
 

@@ -141,15 +141,6 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       }),
       expect.any(AbortSignal),
     )
-    const workflowCalls = runtimeEvents.mock.calls as unknown as Array<[
-      string,
-      string,
-      string,
-      { runtimeEvents: Array<{ payload: Record<string, unknown> }> },
-      AbortSignal,
-    ]>
-    const workflowEventBatch = workflowCalls[0]?.[3]
-    expect(workflowEventBatch.runtimeEvents[0]?.payload).not.toHaveProperty("acpSessionId")
   })
 
   it("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async () => {

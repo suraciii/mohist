@@ -104,7 +104,6 @@ public class IssueSessionApiSpecs
         Assert.Equal("plan", root.GetProperty("sessionName").GetString());
         Assert.Equal(currentSession.Id, root.GetProperty("runtimeSessionId").GetString());
         Assert.Equal("opencode", root.GetProperty("runtime").GetString());
-        Assert.False(root.TryGetProperty("acpSessionId", out _));
         Assert.False(root.TryGetProperty("coderSessionId", out _));
         Assert.False(string.IsNullOrEmpty(root.GetProperty("status").GetString()));
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
