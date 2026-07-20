@@ -97,6 +97,9 @@ AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重�
 用户在 Session 页面提交的 follow-up 是例外：当前回合仍在执行时，它会进入当前回合；
 Session 空闲时，它会开始下一回合。
 
+Session 用量分别记录 input、output、cache read、cache write 与 thought tokens（Pi 提供时）；
+cache write 不会并入 cache read，也不会因事件重投而重复累加。
+
 ## Pi Session 操作
 
 当 AgentSession 当前绑定 Pi 时，Session 页面和对应 CLI 命令按以下方式执行：

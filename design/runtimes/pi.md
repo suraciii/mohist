@@ -220,7 +220,7 @@ compaction 事实：
 - `message_start` / `message_update`（`text_delta`、`thinking_delta`、
   `toolcall_start` / `delta` / `end`）/ `message_end` → transcript 与 tool 事实；
 - `tool_execution_start` / `update` / `end` → 工具执行事实（按 `toolCallId` 关联）；
-- assistant message 上的 `usage`（input / output / cacheRead / cacheWrite / cost）
+- assistant message 上的 `usage`（input / output / cacheRead / cacheWrite / thought / cost）
   → usage 事实；
 - `compaction_start` / `compaction_end` → compaction 事实；
 - `auto_retry_start` / `auto_retry_end` → provider 重试事实（见下节）。
@@ -356,6 +356,9 @@ Pi 是第二个 Runtime，以下既有单 Runtime 假设需要泛化（均不改
 - AgentJob executor：按 dispatch 携带的 runtime 分派到 `OpenCodeRuntime` 或
   `PiRuntime`，两条路径共享 Session 基础设施但不共享 Runtime 实例。
 - Runner 的 open / attach 回写：runtime 值来自调用方解析结果，不再写死。
+- Session usage：`AgentUsageSummary`、grain state/surrogate、runtime-event parser、API/read
+  model 与 Web 共用类型新增独立 `cachedWriteTokens`；新增 Orleans field id 只追加不重排，
+  缺省为 null/0 语义并与 `cachedReadTokens` 分别累加。
 - TaskRun 分类：`mohist/pi` 与 `mohist/opencode` 同样归为 UserFacing。
 - 模型 catalog API：opencode 专属路由泛化为按 runtime 查询，或并列新增 Pi 路由。
 - Session 命令 handler（Follow-up / Cancel / Compact / Reset）：按 AgentSession 当前
