@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { defineTestActions } from "./support/action-registry-test.js"
 
 // Cross-boundary recovery round. The executor/connection tests cover each
 // boundary in isolation; this spec composes the real production components
@@ -38,10 +38,12 @@ afterEach(async () => {
 })
 
 function executor(): WorkExecutor {
-  const registry = new ActionRegistry()
-  // Every attempt fails with output that matches the declared recovery handler,
-  // so each attempt schedules a recovery round.
-  registry.register("test/matching", async () => ({ error: { code: "conflict", message: "conflict" } }))
+  const registry = defineTestActions({
+    "test/matching": {
+      run: async () => ({ error: { code: "conflict", message: "conflict" } }),
+      errors: [{ code: "conflict" }],
+    },
+  })
   return new WorkExecutor(
     registry,
     verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),

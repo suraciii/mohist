@@ -90,7 +90,11 @@ const PR_VIEW_MERGED = JSON.stringify({
 describe("mohist/github-pr-status registry", () => {
   it("registers github-pr-status in the default registry", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/github-pr-status")).toBe(githubPrStatusAction)
+    const resolved = registry.resolve("mohist/github-pr-status")
+    expect(resolved.kind).toBe("definition")
+    if (resolved.kind === "definition") {
+      expect(resolved.definition.manifest.name).toBe("mohist/github-pr-status")
+    }
   })
 })
 

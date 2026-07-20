@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   mergeReadyAction,
   setDeliveryGitRunnerForTest,
-} from "../src/actions/registry.js"
+} from "../src/actions/merge-ready.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 type WorkspaceCall = { workDir: string; args: string[] }

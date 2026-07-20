@@ -1,199 +1,170 @@
-import { join } from "node:path"
-import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { arrayInput, numberInput, stringInput } from "../core/json.js"
-import { stringAt } from "../core/json-path.js"
-import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource } from "./delivery-context.js"
-import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
-import { timeoutSignal } from "../system/timeout-signal.js"
-import { opencodeAction } from "./opencode.js"
-import { resolveActionPath } from "./expectations.js"
-import {
-  createGitHubPrAction,
-  markGitHubPrReadyAction,
-  mergeGitHubPrAction,
-} from "./github-pr.js"
-import { githubPrStatusAction } from "./github-pr-status.js"
-import { archiveChangeAction, openspecArtifactsAction, openspecTasksAction } from "./openspec.js"
-import { rebaseAction, rebaseStatusAction } from "./rebase.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
-import { pushAction } from "./push.js"
-import { workspacePrepareAction } from "./workspace-prepare.js"
-import { fail, succeed } from "./action-result.js"
+import type {
+  ActionCatalog,
+  ActionCatalogEntry,
+  ActionCatalogInput,
+  ActionCatalogOutput,
+  ActionCatalogError,
+  ActionCatalogTombstone,
+  ActionDefinition,
+  ActionManifest,
+  ActionTombstone,
+  ResolvedAction,
+} from "./manifest.js"
 
-export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
+const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-let git: GitRunner = defaultGit
-
-export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
+export class ActionRegistryConstructionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ActionRegistryConstructionError"
+  }
 }
 
 export class ActionRegistry {
-  private readonly actions = new Map<string, ActionHandler>()
+  private readonly byName = new Map<string, ActionDefinition>()
+  private readonly tombstonesByName = new Map<string, ActionTombstone>()
+  private readonly catalog: ActionCatalog
 
-  register(uses: string, handler: ActionHandler) {
-    this.actions.set(uses.toLowerCase(), handler)
-  }
-
-  resolve(uses?: string | null) {
-    if (!uses) return undefined
-    return this.actions.get(uses.toLowerCase())
-  }
-}
-
-export function createDefaultRegistry() {
-  const registry = new ActionRegistry()
-  registry.register("core/process", processAction)
-  registry.register("core/script", scriptAction)
-  registry.register("core/artifact-exists", artifactExistsAction)
-  registry.register("core/marker", markerAction)
-  registry.register("mohist/opencode", opencodeAction)
-  registry.register("mohist/openspec-tasks", openspecTasksAction)
-  registry.register("mohist/openspec-artifacts", openspecArtifactsAction)
-  registry.register("mohist/archive-change", archiveChangeAction)
-  registry.register("mohist/rebase", rebaseAction)
-  registry.register("mohist/rebase-status", rebaseStatusAction)
-  registry.register("mohist/merge-ready", mergeReadyAction)
-  registry.register("mohist/push", pushAction)
-  registry.register("mohist/create-github-pr", createGitHubPrAction)
-  registry.register("mohist/mark-github-pr-ready", markGitHubPrReadyAction)
-  registry.register("mohist/merge-github-pr", mergeGitHubPrAction)
-  registry.register("mohist/github-pr-status", githubPrStatusAction)
-  registry.register("mohist/workspace-prepare", workspacePrepareAction)
-  return registry
-}
-
-async function processAction(context: ActionContext): Promise<ActionResult> {
-  const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
-  if (!command) return fail("invalid-input", "Process action requires command")
-  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
-  if (result.exitCode === 0) {
-    const output: JsonObject = {
-      stdout: result.stdout.trim(),
-      exitCode: result.exitCode,
+  constructor(definitions: ReadonlyArray<ActionDefinition>, tombstones: ReadonlyArray<ActionTombstone> = []) {
+    for (const definition of definitions) {
+      this.addDefinition(definition)
     }
-    return succeed(output, { exitCode: result.exitCode })
-  }
-  return fail("process-failed", result.stderr.trim() || `Process exited with code ${result.exitCode}`, { exitCode: result.exitCode })
-}
-
-async function scriptAction(context: ActionContext): Promise<ActionResult> {
-  const run = stringInput(context.with, "run")
-  if (!run?.trim()) return fail("invalid-input", "Script action requires 'run'")
-  const shell = stringInput(context.with, "shell") || (process.platform === "win32" ? "pwsh" : "bash")
-  const file = join(context.workDir, `_${randomUUID().replace(/-/g, "")}${process.platform === "win32" ? ".ps1" : ".sh"}`)
-  await writeText(file, run)
-  try {
-    const timeoutMs = numberInput(context.with, "timeout")
-    const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
-    const result = await runCommand(shell, [file], context.workDir, signal, undefined, logLineOptions(context, "action:script"))
-    if (result.exitCode !== 0) {
-      return fail(result.status === "timeout" ? "timeout" : "script-failed", `Script failed: ${firstLine(run)}${result.stderr.trim() ? `: ${trim(result.stderr)}` : ""}`, { exitCode: result.exitCode })
+    for (const tombstone of tombstones) {
+      this.addTombstone(tombstone)
     }
-    const output: JsonObject = { kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }
-    return succeed(output, { exitCode: result.exitCode })
-  } finally {
-    await deleteFile(file)
+    this.catalog = buildCatalog(definitions, tombstones)
+  }
+
+  resolve(uses?: string | null): ResolvedAction {
+    const trimmed = uses?.trim()
+    if (!trimmed) return { kind: "unknown", canonicalName: "" }
+    const key = trimmed.toLowerCase()
+    const definition = this.byName.get(key)
+    if (definition) {
+      return { kind: "definition", definition, canonicalName: definition.manifest.name }
+    }
+    const tombstone = this.tombstonesByName.get(key)
+    if (tombstone) {
+      return { kind: "tombstone", tombstone, canonicalName: tombstone.name }
+    }
+    return { kind: "unknown", canonicalName: key }
+  }
+
+  resolveExecutable(uses?: string | null): ActionDefinition | null {
+    const resolved = this.resolve(uses)
+    return resolved.kind === "definition" ? resolved.definition : null
+  }
+
+  resolveTombstone(uses?: string | null): ActionTombstone | null {
+    const resolved = this.resolve(uses)
+    return resolved.kind === "tombstone" ? resolved.tombstone : null
+  }
+
+  definitions(): ReadonlyArray<ActionDefinition> {
+    return [...this.byName.values()]
+  }
+
+  tombstones(): ReadonlyArray<ActionTombstone> {
+    return [...this.tombstonesByName.values()]
+  }
+
+  getActionCatalog(): ActionCatalog {
+    return this.catalog
+  }
+
+  private addDefinition(definition: ActionDefinition): void {
+    if (!definition || typeof definition !== "object") {
+      throw new ActionRegistryConstructionError("Action definitions must be non-null objects")
+    }
+    const manifest = definition.manifest
+    if (!manifest || typeof manifest !== "object") {
+      throw new ActionRegistryConstructionError("Action definition is missing a manifest")
+    }
+    if (typeof manifest.name !== "string" || !NAME_PATTERN.test(manifest.name)) {
+      throw new ActionRegistryConstructionError(
+        `Action name '${String(manifest.name)}' must match lowercase <namespace>/<action>`,
+      )
+    }
+    const key = manifest.name.toLowerCase()
+    if (this.byName.has(key)) {
+      throw new ActionRegistryConstructionError(`Duplicate Action name '${manifest.name}'`)
+    }
+    if (this.tombstonesByName.has(key)) {
+      throw new ActionRegistryConstructionError(
+        `Executable Action '${manifest.name}' collides with a tombstone`,
+      )
+    }
+    this.byName.set(key, definition)
+  }
+
+  private addTombstone(tombstone: ActionTombstone): void {
+    if (!tombstone || typeof tombstone !== "object") {
+      throw new ActionRegistryConstructionError("Tombstones must be non-null objects")
+    }
+    if (typeof tombstone.name !== "string" || !NAME_PATTERN.test(tombstone.name)) {
+      throw new ActionRegistryConstructionError(
+        `Tombstone name '${String(tombstone.name)}' must match lowercase <namespace>/<action>`,
+      )
+    }
+    const key = tombstone.name.toLowerCase()
+    if (this.tombstonesByName.has(key)) {
+      throw new ActionRegistryConstructionError(`Duplicate tombstone name '${tombstone.name}'`)
+    }
+    if (this.byName.has(key)) {
+      throw new ActionRegistryConstructionError(
+        `Tombstone '${tombstone.name}' collides with an executable Action`,
+      )
+    }
+    if (typeof tombstone.guidance !== "string" || tombstone.guidance.length === 0) {
+      throw new ActionRegistryConstructionError(`Tombstone '${tombstone.name}' must declare non-empty guidance`)
+    }
+    this.tombstonesByName.set(key, tombstone)
   }
 }
 
-async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
-  if (!path) return fail("invalid-input", "Artifact check requires 'path'")
-  const found = exists(path)
-  const output: JsonObject = { kind: "artifact-exists", path, exists: found }
-  return found ? succeed(output) : fail("artifact-missing", `Artifact missing: ${path}`)
-}
-
-async function markerAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
-  const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
-  if (!path || !expect) return fail("invalid-input", "Marker check requires 'path' and 'expect'")
-  if (!exists(path)) return fail("artifact-missing", `Marker file missing: ${path}`)
-  const content = await readText(path)
-  const found = matchesMarker(content, expect)
-  const output: JsonObject = { kind: "marker", path, marker: expect, found }
-  return found ? succeed(output) : fail("marker-missing", `Marker missing in ${path}`)
-}
-
-function matchesMarker(content: string, expect: string) {
-  if (isPromiseVerdict(expect)) {
-    const verdicts = [...content.matchAll(/<promise>\s*(PASS|FAIL)\s*<\/promise>/g)].map((match) => `<promise>${match[1]}</promise>`)
-    return verdicts.length === 1 && verdicts[0] === expect
+function buildCatalog(definitions: ReadonlyArray<ActionDefinition>, tombstones: ReadonlyArray<ActionTombstone>): ActionCatalog {
+  const entries: ActionCatalogEntry[] = definitions
+    .map((definition) => projectEntry(definition.manifest))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const tombstoneEntries: ActionCatalogTombstone[] = tombstones
+    .map((tombstone) => ({ name: tombstone.name, guidance: tombstone.guidance }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return {
+    actions: entries,
+    tombstones: tombstoneEntries,
   }
-
-  return content.includes(expect)
 }
 
-function isPromiseVerdict(value: string) {
-  return /^<promise>\s*(PASS|FAIL)\s*<\/promise>$/.test(value)
-}
+export { createDefaultRegistry } from "./index.js"
 
-export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return fail("invalid-input", "Merge readiness requires the authoritative repository base branch")
-  const remote = resolveDeliveryRemote(context)
-  if (!remote) return fail("invalid-input", "Merge readiness requires the authoritative repository origin")
-  const baseRef = `${remote}/${baseBranch}`
-  const source = resolveDeliverySource(context)
-  if (!source) return fail("invalid-input", "Merge readiness requires the authoritative workspace branch")
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
-  const checkedAt = new Date().toISOString()
-  const opts: GitOptions | undefined = context.log ? { sink: { log: context.log, source: "action:merge-ready" } } : undefined
-
-  // Ref-only preflight: the workflow workspace never has its branch
-  // switched. The branch-stable contract requires this action to never
-  // run `checkout`, `merge --squash`, `fetch`, or any clone — only
-  // `rev-parse` and `merge-base` against the workflow workspace refs.
-  const base = await git(workDir, ["rev-parse", baseRef], context.signal, opts)
-  if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], checkedAt)
-
-  const head = await git(workDir, ["rev-parse", source], context.signal, opts)
-  if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], checkedAt)
-
-  const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal, opts)
-  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal, opts)
-  const mergeBaseSha = mergeBase.success ? mergeBase.stdout.trim() : null
-
-  if (!ancestorCheck.success) {
-    return mergeReadyResult(
-      false,
-      baseBranch,
-      base.stdout.trim(),
-      head.stdout.trim(),
-      mergeBaseSha,
-      `Merge candidate '${source}' does not contain the latest '${baseRef}' tip; rebase is required.`,
-      ancestorCheck.exitCode,
-      [],
-      checkedAt,
-    )
+function projectEntry(manifest: ActionManifest): ActionCatalogEntry {
+  const inputs: ActionCatalogInput[] = Object.keys(manifest.inputs)
+    .sort()
+    .map((name) => {
+      const declaration = manifest.inputs[name]!
+      const projected: { name: string; types: ReadonlyArray<string>; required: boolean; default?: unknown; description?: string } = {
+        name,
+        types: [...declaration.types],
+        required: declaration.required === true,
+      }
+      if (declaration.default !== undefined) projected.default = declaration.default
+      if (declaration.description !== undefined) projected.description = declaration.description
+      return projected as ActionCatalogInput
+    })
+  const outputs: ActionCatalogOutput[] = [...manifest.outputs]
+    .map((output) => ({ name: output.name, description: output.description }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const errors: ActionCatalogError[] = [...manifest.errors]
+    .map((error) => ({ code: error.code, description: error.description }))
+    .sort((a, b) => a.code.localeCompare(b.code))
+  const entry: ActionCatalogEntry = {
+    name: manifest.name,
+    inputs,
+    outputs,
+    errors,
   }
-
-  return mergeReadyResult(true, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBaseSha, null, 0, [], checkedAt)
-}
-
-function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null, conflictFiles: string[], checkedAt: string): ActionResult {
-  if (!canMerge) return fail("merge-not-ready", error ?? "Merge is not ready", { exitCode })
-  const output: JsonObject = { kind: "merge-ready", targetBranch: baseBranch, strategy: "squash", baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles, checkedAt }
-  return succeed(output, { exitCode })
-}
-
-function firstLine(value: string) {
-  return value.replace(/\r\n/g, "\n").trim().split("\n")[0]
-}
-
-function trim(value: string) {
-  return value.length <= 20_000 ? value : value.slice(0, 20_000)
-}
-
-function logLineOptions(context: ActionContext, source: string): CommandLineOptions | undefined {
-  return context.log ? { onLine: (line) => context.log!.write(source, line) } : undefined
+  if (manifest.description !== undefined) {
+    return { ...entry, description: manifest.description }
+  }
+  return entry
 }
