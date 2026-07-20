@@ -94,7 +94,7 @@
         "A post-admission local append failure fixes session-reporting-failed, interrupts an active Pi turn, quarantines that physical Session from later Prompt/rebind admission, retains the fact in memory, and does not replay the Prompt",
         "Startup closes prepared-but-not-admitted checkpoints without Runtime replay; for admitted Pi checkpoints it opens the persisted Session through an injected repair hook, reconciles required final facts using persisted fingerprints, and clears reporting quarantine only after repair; an absent/unreadable Pi file records uncertain submission and leaves runtime-session-missing with Reset guidance without replacement or replay",
         "Recognizable orphan temporary files are removable, but corrupt/unreadable committed snapshots are preserved and expose actionable reporting-unavailable diagnostics rather than being discarded",
-        "Tests of the production codec/state machine cover OpenCode -> Pi -> OpenCode stream creation/drain/seal, atomic old-or-new replacement, append failure before/after admission, corrupt snapshots, duplicate/gap recovery, restart reconciliation/drain, pre-admission and pre-rebind failure, and no replay; fake filesystem-operation tests cover only physical-adapter call ordering",
+        "Tests of the production codec/state machine cover OpenCode -> Pi -> OpenCode stream creation/drain/seal, atomic old-or-new replacement, append failure before/after admission, corrupt snapshots, duplicate/gap recovery, restart reconciliation/drain, pre-admission and pre-rebind failure, and no replay; default tests do not instantiate the production filesystem adapter",
         "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test pass"
       ],
       "priority": 3,
