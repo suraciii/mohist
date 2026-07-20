@@ -19,13 +19,12 @@
  *   `placeholder`. cmdk filters on the `value` prop, so a search like "30"
  *   never matches a timeout field whose current value happens to be 30.
  *
- * - **D4 — Enter navigates and focuses via rAF element-poll.** After the
+ * - **D4 — Enter navigates and focuses after the target mounts.** After the
  *   dialog closes, the route-based Settings section changes, so the target
- *   focusable element may mount asynchronously after navigation. We poll
- *   `document.getElementById(focusTargetId)` on each `requestAnimationFrame`
- *   up to ~500ms, then call `.focus()` + `scrollIntoView`. If the poll
- *   times out the navigation still happens, but we surface a warning instead
- *   of silently losing the focus step.
+ *   focusable element may mount asynchronously after navigation. We observe
+ *   DOM changes for up to ~500ms, then call `.focus()` + `scrollIntoView`.
+ *   If the target never mounts the navigation still happens, but we surface
+ *   a warning instead of silently losing the focus step.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -57,7 +56,7 @@ const SECTION_LABEL: Record<SettingsTab, string> = {
 }
 
 /**
- * FOCUS_POLL_TIMEOUT_MS bounds the rAF element-poll that follows an Enter
+ * FOCUS_POLL_TIMEOUT_MS bounds target observation after an Enter
  * activation. Settings section content can mount after the route change; ~500ms
  * is plenty in practice but acts as a hard ceiling.
  */
@@ -138,31 +137,48 @@ function SettingsSearch() {
 
   const grouped = useMemo(() => groupEntriesByTab(settingsSearchRegistry), [])
 
-  const focusTargetAfterNavigation = useRef<string | null>(null)
+  const cancelPendingFocus = useRef<(() => void) | null>(null)
+
+  useEffect(() => () => cancelPendingFocus.current?.(), [])
 
   function focusTargetElement(targetId: string, revealEvent?: string) {
-    const start = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    cancelPendingFocus.current?.()
+    if (revealEvent) {
+      window.dispatchEvent(new CustomEvent(revealEvent))
+    }
+
     const tryFocus = () => {
-      if (revealEvent) {
-        window.dispatchEvent(new CustomEvent(revealEvent))
-      }
       const element = document.getElementById(targetId)
-      if (element) {
-        element.scrollIntoView({ block: 'center', inline: 'nearest' })
-        element.focus({ preventScroll: true })
-        focusTargetAfterNavigation.current = null
-        return
-      }
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      if (now - start < FOCUS_POLL_TIMEOUT_MS) {
-        requestAnimationFrame(tryFocus)
-        return
-      }
+      if (!element) return false
+      element.scrollIntoView({ block: 'center', inline: 'nearest' })
+      element.focus({ preventScroll: true })
+      return true
+    }
+
+    if (tryFocus()) return
+
+    let timeoutId: number | undefined
+    const observer = new MutationObserver(() => {
+      if (tryFocus()) cleanup()
+    })
+    const cleanup = () => {
+      observer.disconnect()
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+      if (cancelPendingFocus.current === cleanup) cancelPendingFocus.current = null
+    }
+
+    observer.observe(document.body, { childList: true, subtree: true })
+    cancelPendingFocus.current = cleanup
+    if (tryFocus()) {
+      cleanup()
+      return
+    }
+
+    timeoutId = window.setTimeout(() => {
+      cleanup()
       // eslint-disable-next-line no-console
       console.warn(`[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`)
-      focusTargetAfterNavigation.current = null
-    }
-    requestAnimationFrame(tryFocus)
+    }, FOCUS_POLL_TIMEOUT_MS)
   }
 
   const handleSelect = useCallback(
@@ -171,10 +187,8 @@ function SettingsSearch() {
       if (!targetPath) {
         return
       }
-      focusTargetAfterNavigation.current = entry.focusTargetId
       setOpen(false)
       navigate(targetPath)
-      // Poll for the focus target after the target settings route renders.
       focusTargetElement(entry.focusTargetId, entry.revealEvent)
     },
     [navigate, sectionPath],
