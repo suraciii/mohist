@@ -91,7 +91,7 @@ For a routed launch whose event carries issue lineage, the resulting AgentSessio
 
 The issue event feed SHALL project each failed routed AgentSession as exactly one CloudEvent-shaped `session.closed` entry. The selected transcript part SHALL be the AgentJob-owned terminal fact whose persisted delivery id and correlation key equal `agent-job:{jobKey}:terminal`; Runtime-owned, follow-up, or otherwise unrelated close parts SHALL NOT be projected as routing outcomes. Its numeric `id` SHALL be the source-local terminal transcript-part id; `eventId` SHALL be the stable value `{sessionId}:closed:{terminalDeliveryId}`; `source` SHALL be the canonical AgentSession source; `subject` SHALL be the Session id; `time` SHALL be the terminal part's persisted last-seen time; `specVersion` SHALL be `1.0`; and `dataContentType` SHALL be `application/json`. Extensions SHALL include canonical project and issue lineage. Data SHALL preserve terminal delivery id, status, exit code, failure reason/category and add Session id, Agent id/name, trigger event id, and trigger rule id.
 
-The feed SHALL select the newest global `limit` entries across Issue, valid WorkflowRun, and routed AgentSession sources, then return those entries in ascending order. Both selection and output SHALL use one total ordering key: time, origin rank (`issue` before `workflow-run` before `agent-session`), source ordinal, source-local numeric id, then event id ordinal. Equal timestamps and colliding numeric ids across stores SHALL therefore remain deterministic.
+The feed SHALL gather the complete issue-scoped Issue sequence, the complete WorkflowRun sequence after invalidated control events are removed, and all canonical routed AgentSession failure entries before applying the requested limit. It SHALL select the newest global `limit` entries across those sources, then return those entries in ascending order. Both selection and output SHALL use one total ordering key: time, origin rank (`issue` before `workflow-run` before `agent-session`), source ordinal, source-local numeric id, then event id ordinal. Equal timestamps, non-monotonic timestamps relative to source ids, and colliding numeric ids across stores SHALL therefore remain deterministic.
 
 #### Scenario: Projected routed failure has complete stable envelope
 
@@ -115,6 +115,12 @@ The feed SHALL select the newest global `limit` entries across Issue, valid Work
 
 - **WHEN** entries from different stores have equal timestamps and colliding numeric ids
 - **THEN** repeated reads SHALL return the same order determined by origin rank, source, numeric id, and event id
+
+#### Scenario: Workflow candidate selection follows event time rather than event id
+
+- **WHEN** a valid WorkflowRun event with a lower event id has a newer timestamp than another event and belongs in the global newest limit
+- **THEN** the newer event SHALL remain eligible for global selection
+- **AND** source-local id truncation SHALL NOT discard it before the total ordering is applied
 
 ### Requirement: Existing non-routing workspace behavior is preserved
 

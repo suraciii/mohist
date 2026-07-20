@@ -110,7 +110,7 @@ AgentJob failure paths used by this change must all close the generic AgentSessi
 Add an issue-scoped assembler under `AgentOps/Services`. It combines:
 
 - Issue events from `IEventStore`;
-- WorkflowRun events through `WorkflowEventQuerier.ListWorkflowEventsAsync`, preserving Workflow's invalidated-control-event filtering;
+- WorkflowRun events through an unbounded `WorkflowEventQuerier.ListValidWorkflowEventsAsync` read, preserving Workflow's invalidated-control-event filtering without source-local truncation;
 - the single AgentJob-owned failed `session.closed` transcript part for each generic AgentSession matching project, agent-launch issue label, and non-empty trigger event/rule labels. Selection requires payload delivery id and transcript correlation key to equal the stable `agent-job:{jobKey}:terminal` value; Runtime and follow-up closes are excluded.
 
 The assembler projects a failed routed Session into the existing `StoredCloudEventDto` shape as follows:
@@ -123,7 +123,9 @@ The assembler projects a failed routed Session into the existing `StoredCloudEve
 - extensions: canonical `projectid` and `issue` lineage;
 - data: terminal delivery id, status, exit code, reason, and category plus Session id, Agent id/name, trigger event id, and trigger rule id.
 
-Each source query loads at most its newest `limit` candidates, which is sufficient to determine the global newest `limit`. Define one ascending total key `(time, originRank, source ordinal, source-local id, eventId ordinal)`, where origin rank is Issue, WorkflowRun, then AgentSession. Merge candidates, take the greatest `limit` by the exact reverse key, then return that selected set by the ascending key. This resolves equal timestamps and numeric-id collisions across stores without pretending `id` is global. This is a read projection only; it does not append an Issue event or copy Session authority into another aggregate.
+Candidate collection does not truncate any source before global ordering. The assembler loads the complete issue-scoped Issue sequence (`IEventStore.ListIssueEventsAsync` with an unbounded internal limit), all canonical routed Session failures for the issue, and the complete valid WorkflowRun sequence. Workflow exposes an unbounded `ListValidWorkflowEventsAsync` read (or equivalent reusable invalidation filter) that removes invalidated control events but does not take by event id; the existing public limited Workflow read may delegate to it. This is necessary because event timestamps are not specified to be monotonic with source-local ids.
+
+Define one ascending total key `(time, originRank, source ordinal, source-local id, eventId ordinal)`, where origin rank is Issue, WorkflowRun, then AgentSession. Merge the complete candidates, take the greatest `limit` by the exact reverse key, then return that selected set by the ascending key. This resolves non-monotonic timestamps, equal timestamps, and numeric-id collisions across stores without pretending `id` is global. This is a read projection only; it does not append an Issue event or copy Session authority into another aggregate.
 
 `WorkflowEventRoutes` delegates the issue endpoint to this AgentOps assembler. `WorkflowEventQuerier` keeps WorkflowRun-specific selection and invalidation logic but no longer owns cross-domain issue-feed composition. The CLI already prints issue events as returned JSON, so no new CLI event renderer is needed.
 
@@ -134,6 +136,7 @@ Only the canonical AgentJob-owned failure of a routed Session is added by this c
 - Query Session rows directly from `WorkflowEventQuerier`: rejected by Workflow's zero-business-context-dependency invariant.
 - Append a durable Issue event when AgentSession closes: rejected because it duplicates a Session fact and introduces a cross-aggregate mutation solely for a read view.
 - Filter the project-wide activity feed in memory: rejected because unrelated project events can consume the limit before issue filtering, and its current synthetic lifecycle envelope omits trigger correlation.
+- Take `limit` candidates from `WorkflowEventQuerier.ListWorkflowEventsAsync`: rejected because that read truncates by source event id, which is not the issue feed's time-first total key and can discard a globally newer event.
 
 ### 6. Verify at product and ownership boundaries
 
@@ -155,6 +158,7 @@ Focused coverage will include:
 - `[Risk] AgentJob terminal save succeeds but AgentSession close persistence fails` -> Persist `PendingSessionClose`, keep a durable reminder until synchronous Session acknowledgement, and retry the stable delivery id across activation loss and report replay.
 - `[Risk] Persisted workspace identity points to a directory already cleaned on the runner` -> Keep filesystem authority on the runner; the turn may fail with an actionable runtime/workspace reason, but it will no longer fail because dispatch omitted the path.
 - `[Risk] New session events alter issue-feed limit results for existing clients` -> Merge before applying the limit, retain chronological ordering and the existing envelope shape, and add only failed routed outcomes required by the spec.
+- `[Trade-off] Correct global newest-N selection loads complete issue-scoped source sequences` -> Accept the bounded per-issue read cost for correctness in this change; keep invalidation in Workflow and leave a future database union/keyset optimization behind the same AgentOps contract.
 - `[Risk] Historical routed sessions lack issue labels` -> Apply visibility forward only; avoid an unreliable backfill from retained event data.
 - `[Trade-off] Workspace resolution adds one Workflow read and sometimes one Issue read per routing hit` -> Perform reads only after a rule is selected, use the explicit WorkflowRun fast path, and keep dry-run free of these reads.
 
