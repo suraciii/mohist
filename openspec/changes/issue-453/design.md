@@ -4,14 +4,14 @@ The issue detail page already derives a `RuntimeDecision` from the Issue, Workfl
 
 Status is similarly repeated by `StatusHeadline`, the header `RuntimeSummaryPill`, the current-task pill, and stage rows in `IssueDetailsCard`. Transcript navigation is available only as a small active-session link, while the modeled inspect action is permanently disabled. Disabled runtime and Rebase controls rely mainly on `title` and generic opacity, which does not provide a visible reason on touch devices.
 
-This is a Web-only presentation and orchestration change. The Server remains the state authority and continues to decide workflow action availability; no API, persistence, Runner, CLI, workflow profile, or lifecycle contract changes are required. The primary stakeholders are issue owners using desktop and phone viewports, including keyboard and touch users.
+Composite parents are a required issue-detail case but intentionally have no workflow run or `RuntimeDecision`; their current actions still live in the rail. This is a Web-only presentation and orchestration change. The Server remains the state authority and continues to decide workflow action availability, while current Issue facts remain authoritative for existing lifecycle applicability; no API, persistence, Runner, CLI, workflow profile, or lifecycle contract changes are required. The primary stakeholders are issue owners using desktop and phone viewports, including keyboard and touch users.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Make the sticky headline the only runtime status statement and remove repeated task/stage status metadata.
-- Build one canonical issue-detail action model from the existing runtime decision plus existing lifecycle, delegation, and session facts.
+- Make the sticky headline the only issue status statement and remove repeated task/stage status metadata.
+- Build one canonical issue-detail context and action model from the optional runtime decision plus existing Issue lifecycle, delegation, child-summary, and session facts.
 - Drive desktop and mobile controls from the same action list and command controller.
 - Preserve server authorization while giving every displayed unavailable action a visible product-language reason and unmistakable disabled styling.
 - Keep workflow evidence available while removing its independent approval mutation path.
@@ -27,18 +27,20 @@ This is a Web-only presentation and orchestration change. The Server remains the
 
 ## Decisions
 
-### Keep workflow adjudication separate from page action composition
+### Normalize workflow and issue-only decision context at the page boundary
 
-`RuntimeDecision` and `deriveRuntimeDecision` remain limited to workflow status, rationale, next action, and server-offered workflow commands. A pure page model under `pages/issue-detail/model` will derive `IssueDecisionAction` descriptors by composing:
+`RuntimeDecision` and `deriveRuntimeDecision` remain limited to workflow status, rationale, next action, and server-offered workflow commands. A page-owned `IssueDecisionContext` will use that decision unchanged for workflow-capable issues. When a composite parent has no runtime decision, it will instead derive an issue-only headline, rationale, and next action from the parent's current Issue status, health, draft state, and child summary; it will not invent a workflow stage, task, or workflow action.
+
+The same pure page model under `pages/issue-detail/model` will derive `IssueDecisionAction` descriptors by composing:
 
 - The existing runtime actions and their primary ordering.
 - Existing issue lifecycle predicates for mark ready, close, and mark as done.
 - Ask Agent navigation.
 - A transcript action when a workflow session exists.
 
-Each descriptor will carry a stable kind, label, enabled state, optional disabled reason, emphasis/destructive intent, and interaction mode such as immediate, confirmation, feedback, or navigation. Mutation objects and callbacks stay outside the pure derivation function. This gives desktop and mobile one ordered contract without making workflow adjudication depend on page navigation, child-issue facts, or lifecycle mutations.
+Each descriptor will carry a stable kind, label, enabled state, optional disabled reason, emphasis/destructive intent, and interaction mode such as immediate, confirmation, feedback, or navigation. Mutation objects and callbacks stay outside the pure derivation function. Workflow descriptors are copied from `RuntimeDecision`; lifecycle descriptors continue to use the existing Issue predicates. A composite parent therefore receives only applicable issue lifecycle and delegation descriptors. This gives desktop and mobile one ordered contract without making workflow adjudication depend on page navigation, child-issue facts, or lifecycle mutations.
 
-Alternative considered: extend `RuntimeActionKind` and `deriveRuntimeDecision` with lifecycle, agent, transcript, and Rebase actions. This would reuse the existing `primary/actions` shape, but would mix server-projected workflow decisions with page-owned navigation and issue lifecycle policy, so it is rejected.
+Alternative considered: extend `RuntimeActionKind` and `deriveRuntimeDecision` with composite-parent status, lifecycle, agent, transcript, and Rebase actions. This would reuse the existing `primary/actions` shape, but would fabricate workflow decisions for parents and mix server-projected workflow decisions with page-owned navigation and issue lifecycle policy, so it is rejected.
 
 ### Use one action controller for both responsive presentations
 
@@ -50,7 +52,7 @@ Alternative considered: enhance `MobileActionBar` independently while leaving `R
 
 ### Centralize applicability but preserve existing authorization
 
-Lifecycle applicability predicates currently embedded in `IssueActionsCard` will move into the pure page action derivation and retain their current behavior for drafts, composite parents, active execution, stopped/completed workflows, archived issues, and terminal issue states. Workflow actions remain enabled only when the existing runtime projection and local readiness gates allow them.
+Lifecycle applicability predicates currently embedded in `IssueActionsCard` will move into the pure page action derivation and retain their current behavior for drafts, composite parents, active execution, stopped/completed workflows, archived issues, and terminal issue states. These predicates consume current Issue facts; they are not additions to the workflow projection. Workflow actions remain enabled only when the existing runtime projection and local readiness gates allow them, and no workflow descriptor is emitted without a runtime decision.
 
 Actions that are irrelevant to the current state will be omitted. Actions that remain relevant but are temporarily unavailable, such as Start blocked by a draft or capacity and Stop unavailable during an active task boundary, will remain visible with a reason. This reduces dead control sets without inventing permissions. If a running issue has no executable action, the decision context will state the blocking condition and next transition rather than presenting unexplained disabled buttons.
 
@@ -58,7 +60,7 @@ Alternative considered: display every possible action in every state. This makes
 
 ### Make status and decision copy have one authority
 
-`StatusHeadline` remains sticky and renders the summary, headline, stage progress, and current task as one textual status statement. The header runtime pill, the separate current-task pill, and Issue/Workflow Stage rows in `IssueDetailsCard` will be removed; relationship, project, and repository metadata remain.
+`StatusHeadline` remains sticky and renders the normalized issue decision context as one textual status statement. Workflow-capable issues render the runtime summary, headline, stage progress, and current task; composite parents render an issue-only summary and child-progress context with no workflow stage or task. The header runtime pill, the separate current-task pill, and Issue/Workflow Stage rows in `IssueDetailsCard` will be removed; relationship, project, and repository metadata remain.
 
 `runtime-presentations` remains the authority for rationale and next-action copy. Its approval wording will describe a pending approval decision without assuming the viewer is the approver. Existing approval and interrupted/recovery facts will distinguish approval pauses from manual stops; summary precedence itself will not change.
 
@@ -87,6 +89,7 @@ Alternative considered: keep a disabled transcript placeholder until a session b
 ## Risks / Trade-offs
 
 - `[Risk] Lifecycle predicates change while moving out of IssueActionsCard` -> Preserve them in a table-driven unit test covering draft, archived, composite-parent, active-agent, stopped, completed, done, and cancelled states before deleting the old card.
+- `[Risk] Composite parents lose their only status or action entry when runtime-only UI is removed` -> Derive and test an issue-only decision context and lifecycle/delegation action set before removing the Details status rows and rail Actions card.
 - `[Risk] Desktop and mobile still diverge through separate markup` -> Keep ordering, enabled state, reasons, dispatch, pending state, and errors in the shared descriptor/controller; limit renderer differences to layout and disclosure.
 - `[Risk] A disabled primary action blocks access to enabled secondary mobile actions` -> Keep the action-sheet launcher independently enabled and test mixed enabled/disabled action sets at phone width.
 - `[Risk] Session ordering selects the wrong transcript` -> Use explicit status priority and timestamp/name ordering rather than API array order; retain the sessions panel for access to all sessions.
@@ -96,7 +99,7 @@ Alternative considered: keep a disabled transcript placeholder until a session b
 
 ## Migration Plan
 
-1. Add the pure issue-detail action derivation and unit matrix while keeping existing renderers in place.
+1. Add the normalized issue decision context, pure action derivation, and unit matrix for both workflow-capable issues and composite parents while keeping existing renderers in place.
 2. Add the shared action controller and migrate desktop runtime actions, lifecycle actions, Ask Agent, and transcript navigation to the composed descriptors.
 3. Replace the primary-only mobile path with the compact bar and complete action sheet backed by the same descriptors/controller.
 4. Remove the rail Actions card, synthetic inspect action, duplicate header/status metadata, repeated Details rows, and workflow-local approval controls.

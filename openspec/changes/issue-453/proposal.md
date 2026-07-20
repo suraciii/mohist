@@ -4,12 +4,12 @@ Issue owners cannot quickly determine whether a running, waiting, or blocked iss
 
 ## What Changes
 
-- Present the current issue and workflow status once, in the sticky status headline, including the current task without duplicate status or task pills and repeated stage metadata.
-- Consolidate workflow controls, issue lifecycle controls, and agent delegation into one runtime decision surface, removing the separate rail Actions card and duplicate workflow approval controls.
+- Present the current issue and, when one exists, workflow status once in the sticky status headline, including the current task without duplicate status or task pills and repeated stage metadata; composite parents receive an issue-only status statement rather than a fabricated workflow state.
+- Consolidate workflow controls, issue lifecycle controls, and agent delegation into one issue decision surface, removing the separate rail Actions card and duplicate workflow approval controls.
 - Make every action applicable to the current state reachable on narrow viewports, together with the rationale and next-action context available on desktop.
 - Give every unavailable action a visible, accessible, plain-language reason and make disabled controls visually distinct from enabled controls, including Stop and Rebase.
 - Remove the permanently disabled View transcript action and offer a working transcript action whenever an execution session exists.
-- Continue deriving status and action availability from the existing runtime decision projection; no lifecycle actions or authorization rules are added.
+- Continue deriving workflow status and workflow action availability from the existing runtime decision projection, while issue lifecycle action applicability continues to derive from the existing Issue facts and rules; no lifecycle actions or authorization rules are added.
 
 ## Capabilities
 

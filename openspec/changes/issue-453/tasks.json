@@ -6,10 +6,11 @@
       "id": "T-001",
       "title": "Consolidate issue status and decision context",
       "spec": "specs/issue-decision-surface/spec.md#requirement-issue-status-has-one-authoritative-presentation",
-      "description": "Make the sticky status headline the sole runtime status statement while retaining stage progress and integrating the current task into that statement. Remove repeated runtime and stage metadata, and make approval-pause versus manually-stopped rationale and next-action copy explicit without changing runtime summary precedence.",
+      "description": "Make the sticky status headline the sole issue status statement while retaining workflow stage progress and integrating the current task when a runtime decision exists. Add an issue-only headline/context for composite parents, remove repeated runtime and stage metadata, and make approval-pause versus manually-stopped rationale and next-action copy explicit without changing runtime summary precedence.",
       "acceptanceCriteria": [
         "For running, queued, approval-required, blocked, failed, and done issues, the page renders exactly one runtime summary in StatusHeadline; the header RuntimeSummaryPill is removed and no replacement runtime badge is added elsewhere.",
         "When a current task exists, StatusHeadline communicates it once as part of the headline/status text and does not render the separate current-task pill; stage progress remains visible when available and backlog issues do not fabricate task or progress data.",
+        "A composite parent with no RuntimeDecision receives one sticky issue-only status statement using its current Issue status and child summary; it renders no workflow stage or current task and does not require a workflow request.",
         "IssueDetailsCard no longer accepts or renders Issue Stage or Workflow Stage, while parent/child relationships, project, repository name, base branch, and Git URL remain unchanged.",
         "Approval-pause rationale states that an approval decision is pending without saying the viewer must review or approve; interrupted or manually stopped workflow copy identifies the stop/recovery situation and does not describe it as awaiting approval.",
         "Runtime summary precedence and server-offered workflow actions are unchanged, verified by the existing derive-runtime-decision behavior matrix remaining green.",
@@ -22,16 +23,17 @@
       "output": "Updated issue-detail StatusHeadline, header composition, IssueDetailsCard, runtime decision copy, and focused Web regression tests.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep StatusHeadline sticky and preserve the existing summary derivation. This task establishes the corrected rationale/next-action text consumed by T-002's desktop and mobile decision presentations. Do not restructure the reading flow or remove non-status Details metadata."
+      "notes": "Keep StatusHeadline sticky and preserve the existing runtime summary derivation for workflow-capable issues. The composite-parent path is a page-owned issue presentation, not a fabricated RuntimeDecision. This task establishes the corrected context consumed by T-002's desktop and mobile decision presentations. Do not restructure the reading flow or remove non-status Details metadata."
     },
     {
       "id": "T-002",
       "title": "Deliver the unified responsive issue decision surface",
       "spec": "specs/issue-decision-surface/spec.md#requirement-issue-actions-use-one-decision-surface",
-      "description": "Implement the complete issue-detail action slice: derive one page-owned action list from the existing RuntimeDecision plus lifecycle, delegation, and concrete-session facts; bind it to one controller; and use it for both desktop controls and a complete mobile action sheet. Remove the rail and workflow-local command paths, replace synthetic transcript inspection with real session navigation, and make every displayed unavailable runtime action visibly and accessibly explained.",
+      "description": "Implement the complete issue-detail action slice: derive one page-owned action list from an optional RuntimeDecision plus authoritative Issue lifecycle, delegation, and concrete-session facts; bind it to one controller; and use it for both desktop controls and a complete mobile action sheet. Preserve issue-only actions for composite parents, remove the rail and workflow-local command paths, replace synthetic transcript inspection with real session navigation, and make every displayed unavailable runtime action visibly and accessibly explained.",
       "acceptanceCriteria": [
-        "A pure issue-detail action model emits stable descriptors for server-offered approve, send back, retry, resume, rerun stage, stop, and start actions plus applicable mark ready, close, mark as done, Ask Agent, and View transcript actions; it carries ordering, primary emphasis, enabled state, product-language reason, destructive intent, and interaction mode without containing mutation objects or callbacks.",
+        "A pure issue-detail action model copies server-offered approve, send back, retry, resume, rerun stage, stop, and start descriptors from RuntimeDecision when one exists, and derives applicable mark ready, close, mark as done, Ask Agent, and View transcript descriptors from current Issue/session facts; it carries ordering, primary emphasis, enabled state, product-language reason, destructive intent, and interaction mode without containing mutation objects or callbacks.",
         "A table-driven unit matrix preserves existing lifecycle applicability for drafts, composite parents, active execution, stopped/completed workflows, archived issues, and terminal issue states; irrelevant actions are omitted and consolidation never enables an action that the RuntimeDecision or existing issue lifecycle facts do not authorize.",
+        "A composite parent with no RuntimeDecision receives its applicable mark ready, close, and Ask Agent actions in the desktop and mobile issue decision surface, receives no workflow action or transcript action without a concrete session, and does not lose actions when the rail Actions card is removed.",
         "One action controller and one runtime mutation adapter own dispatch, pending/error state, recoverable versus terminal Stop selection, Stop confirmation, and send-back feedback validation for both desktop and mobile renderers; MobileActionBar no longer duplicates runtime dispatch or pending/error lookup.",
         "The desktop decision surface is the sole location for applicable workflow, lifecycle, and Ask Agent commands; the reference-rail Actions card and IssueActionsCard usage are removed, and WorkflowView retains task/check/artifact/report/feedback evidence without InlineApprovalControls or another approve/request-changes mutation path.",
         "Approval and send-back remain available together when server-authorized, send-back still requires non-empty feedback and the approval stage, and action errors remain visible without changing API calls or query invalidation behavior.",
@@ -52,7 +54,7 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Keep this one vertical slice: switching desktop without mobile or removing the rail before lifecycle actions enter the shared model would leave a supported viewport unusable. Keep RuntimeDecision focused on workflow adjudication; compose page-owned lifecycle/navigation actions under pages/issue-detail. Reuse the corrected decision context from T-001. Do not add reopen or move Rebase into this action list."
+      "notes": "Keep this one vertical slice: switching desktop without mobile or removing the rail before lifecycle actions enter the shared model would leave a supported viewport or composite parent unusable. RuntimeDecision is authoritative only for workflow actions; current Issue facts and unchanged lifecycle predicates are authoritative for lifecycle actions. Compose them under pages/issue-detail and reuse the normalized context from T-001. Do not add reopen or move Rebase into this action list."
     },
     {
       "id": "T-003",

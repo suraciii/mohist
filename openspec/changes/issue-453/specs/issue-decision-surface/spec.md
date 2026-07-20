@@ -1,6 +1,6 @@
 ### Requirement: Issue status has one authoritative presentation
 
-The issue detail page SHALL state the current issue and workflow status exactly once in the sticky status headline. The headline SHALL include the current task when one exists, and the page SHALL NOT repeat the runtime summary in the issue header, repeat the current task as a second pill, or repeat Issue Stage and Workflow Stage in the Details section.
+The issue detail page SHALL state the current issue and, when one exists, workflow status exactly once in the sticky status headline. The headline SHALL include the current task when one exists, and the page SHALL NOT repeat the runtime summary in the issue header, repeat the current task as a second pill, or repeat Issue Stage and Workflow Stage in the Details section. A composite parent without a workflow decision SHALL receive an issue-only status statement and SHALL NOT fabricate a workflow status or current task.
 
 #### Scenario: Running issue has one status statement
 
@@ -12,6 +12,12 @@ The issue detail page SHALL state the current issue and workflow status exactly 
 
 - **WHEN** an owner opens an issue that is waiting, blocked, failed, paused, or done
 - **THEN** its runtime summary SHALL appear exactly once in the sticky status headline
+
+#### Scenario: Composite parent has an issue-only status statement
+
+- **WHEN** an owner opens a composite parent that has no workflow decision
+- **THEN** the sticky status headline SHALL present its issue status exactly once
+- **AND** the page SHALL NOT present a workflow status or current task for that parent
 
 ### Requirement: Decision context explains the current state
 
@@ -31,7 +37,7 @@ The decision surface SHALL present a plain-language rationale for the current st
 
 ### Requirement: Issue actions use one decision surface
 
-The runtime decision surface SHALL be the sole action location for approve, send back, retry, resume, rerun stage, stop, start, mark ready, close, mark as done, and ask agent whenever those actions apply to the current issue state. The page SHALL NOT render a separate rail Actions card or a second approve/request-changes implementation inside the workflow view. Consolidation MUST preserve the existing runtime decision and server-authorized action rules and MUST NOT introduce a new lifecycle action.
+The issue decision surface SHALL be the sole action location for approve, send back, retry, resume, rerun stage, stop, start, mark ready, close, mark as done, and ask agent whenever those actions apply to the current issue state. Workflow action availability SHALL come from the existing runtime decision and server-authorized rules; issue lifecycle action applicability SHALL come from the current Issue facts and existing lifecycle rules. The page SHALL NOT render a separate rail Actions card or a second approve/request-changes implementation inside the workflow view, and consolidation MUST NOT introduce a new lifecycle action.
 
 #### Scenario: Approval actions are not duplicated
 
@@ -49,6 +55,12 @@ The runtime decision surface SHALL be the sole action location for approve, send
 
 - **WHEN** the current runtime decision or issue state does not authorize an action
 - **THEN** consolidating the page SHALL NOT make that action executable
+
+#### Scenario: Composite parent retains applicable lifecycle actions
+
+- **WHEN** a composite parent has no workflow decision and an issue lifecycle or delegation action applies
+- **THEN** that action SHALL be reachable from the issue decision surface
+- **AND** the surface SHALL NOT offer a workflow action for the parent
 
 ### Requirement: Narrow viewports preserve the complete decision
 
