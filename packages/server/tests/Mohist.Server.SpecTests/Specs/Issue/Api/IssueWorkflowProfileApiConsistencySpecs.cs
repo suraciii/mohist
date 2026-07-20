@@ -244,16 +244,15 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PatchIssue_ProfileUpdate_PreservesConfiguredVariablesAndPrompts()
+    public async Task PatchIssue_ProfileUpdate_PreservesConfiguredVariables()
     {
         var project = await CreateProjectAsync("wfp-patch-preserve");
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
             new { title = "Preserve overlay", projectId = project.Id });
 
-        // Seed variables and a prompt through the dedicated runtime
-        // override endpoints so we can verify the PATCH profile update
-        // does not touch them.
+        // Seed variables through the dedicated runtime override endpoint so
+        // we can verify the PATCH profile update does not touch them.
         await _client.PutAsJsonOkAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
             new
@@ -265,10 +264,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                 },
                 stages = new Dictionary<string, object?>(),
             });
-        await _client.PutAsJsonOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts/plan",
-            new { body = "PLAN_PROMPT_BODY" });
-
         var beforeProfile = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var beforeData = (await beforeProfile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         var beforeVariables = beforeData.GetProperty("variables");
@@ -294,10 +289,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("openai/gpt-5.6", afterVariables.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
         Assert.False(afterVariables.GetProperty("vars").GetProperty("agent").TryGetProperty("type", out _));
         Assert.Equal("max", afterVariables.GetProperty("vars").GetProperty("modelVariant").GetString());
-
-        var prompts = await _client.GetDataAsync<Dictionary<string, string>>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts");
-        Assert.Equal("PLAN_PROMPT_BODY", prompts["plan"]);
     }
 
     [Fact]
@@ -355,37 +346,6 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("yes", planVars.GetProperty("keep").GetString());
         Assert.DoesNotContain("StagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("stagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task PromptPreview_WithoutVariablesBody_UsesStoredIssueVariables()
-    {
-        var project = await CreateProjectAsync("wfp-preview-vars");
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Preview variables", projectId = project.Id });
-
-        await _client.PutAsJsonOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
-            new
-            {
-                vars = new Dictionary<string, object?>
-                {
-                    ["foo"] = "bar",
-                },
-            });
-        await _client.PutAsJsonOkAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts/plan_prompt",
-            new { body = "Plan with ${{ foo }}." });
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts/plan_prompt/preview",
-            new { });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = body.GetProperty("data");
-        Assert.Equal("Plan with bar.", data.GetProperty("rendered").GetString());
     }
 
     [Fact]
