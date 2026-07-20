@@ -856,3 +856,11 @@ Decisions / gotchas for downstream tasks:
 - Added Compact-pending and Reset-pending tooltip specs. The action-weight
   proposal, design, task, and capability spec now record `anyPending` as an
   existing presentation input without adding a new reason attribute.
+
+## Zero-Turn Closed Composer Fix (2026-07-20)
+
+- The shell now keeps the composer region visible for non-running sessions
+  even when they have no transcript turns, so terminal sessions show their
+  closed-state explanation and end time.
+- Added completed and failed zero-turn page integration specs, and recorded
+  the scenario in the follow-up capability spec and task acceptance criteria.
