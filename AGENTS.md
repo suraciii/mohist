@@ -88,6 +88,8 @@ npm test           -w packages/runner
 
 两层各自的 WIP/未实装标注惯例见 [`docs/README.md`](docs/README.md) 与 [`design/README.md`](design/README.md)。
 
+spec 定稿后规划实施 issues 时，把 spec 作为已有需求材料交给 `mohist-explore` skill（`mo skills get mohist-explore`）切分——切分必须过它的 Scope 门槛：每个 issue 的独立交付价值能用一句话说清。
+
 ## 测试原则
 
 详见 [`design/testing.md`](design/testing.md)。要点：

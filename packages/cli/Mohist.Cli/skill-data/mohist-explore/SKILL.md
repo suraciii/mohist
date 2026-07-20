@@ -1,22 +1,23 @@
 ---
 name: mohist-explore
-description: Distill a fuzzy product idea into a clear, bounded requirement clarification for a Mohist issue. Use when the user arrives with a sentence, a vague hunch, or an unwritten improvement intent and needs to explore the current product form and technical implementation, ending in a well-thought-out requirement clarification. Trigger phrases include "distill the requirement", "write a PRD", "capture as an issue", "requirement doc", "explore", "flesh out an issue".
+description: Distill requirement input at any maturity — a sentence, a vague hunch, a discussion conclusion, an existing requirement document, or a proposed issue split — into a clear, bounded requirement clarification for Mohist issues. The skill maps the input onto its lens questions, keeps what is already answered, and elicits only the gaps. Use before creating issues or epics. Trigger phrases include "distill the requirement", "write a PRD", "capture as an issue", "requirement doc", "explore", "flesh out an issue", "split into issues".
 ---
 
 # mohist-explore
 
-Use this skill to **distill** a fuzzy idea into a clear, bounded requirement clarification for a Mohist issue.
+Use this skill to **distill** requirement input into a clear, bounded requirement clarification for a Mohist issue.
 
-The input is a seed — a sentence, a vague hunch, an improvement intent, or a half-formed thought. The output is a requirement clarification that is clear enough for the `mohist-create-issue` skill to fill an issue template against. This skill is about *thinking clearly*; it does not define issue-body sections, prescribe their format, or touch the CLI. Section structure and per-section writing rules live in the issue templates; this skill only makes sure the right questions are answered before an issue is created.
+The input is requirement material at any maturity — a sentence, a vague hunch, a half-formed thought, a conclusion from a prior discussion, an existing requirement document, or an already-proposed issue split. The output is a requirement clarification that is clear enough for the `mohist-create-issue` skill to fill an issue template against. This skill is about *thinking clearly*; it does not define issue-body sections, prescribe their format, or touch the CLI. Section structure and per-section writing rules live in the issue templates; this skill only makes sure the right questions are answered before an issue is created.
 
 ## When to use
 
 - The user arrives with a fuzzy idea and wants it turned into a Mohist issue.
 - The user has a few sentences and needs them sharpened into something with a real boundary.
+- The user has a settled requirement — a document, a discussed conclusion — and wants it sliced into issues (and possibly an epic) that each stand alone.
 - An issue exists but its thinking is too vague, too wide, or missing the domain context needed to plan implementation.
 - The user wants to think through a product change before committing it to an issue.
 
-Do **not** use this skill for unfocused product patrols ("go find anything broken"). That is a different mode. This skill always starts from a seed the user provides.
+Do **not** use this skill for unfocused product patrols ("go find anything broken"). That is a different mode. This skill always starts from requirement input the user provides.
 
 ## The three thinking lenses
 
@@ -42,9 +43,19 @@ These govern how you explore and how you record the user's thinking. They are no
 
 ## Workflow
 
+### 0. Map the input onto the lenses
+
+Before any lens work, lay the input against the lens questions and the Scope questions: which are already answered, which are open.
+
+- For each answered question, record the answer **with its source** — the user's own words, the provided document, the prior discussion.
+- Answered questions are settled. Do not re-interview or re-derive them; reopen one only when a later lens uncovers a contradiction, and say so explicitly (see Iteration).
+- Work the lenses in order as usual, but within each lens elicit **only the unanswered questions**.
+
+Both extremes are the same procedure, not separate modes: a one-sentence hunch answers nothing (every lens runs as a full interview); a settled requirement document may answer every lens question, in which case go straight to Scope. The gates still run either way — maturity changes how much you ask, never which bars must be cleared.
+
 ### 1. Capture User Voice
 
-Act as an interviewer. The goal here is to **record**, not to solve.
+Act as an interviewer **for the unanswered questions**. The goal here is to **record**, not to solve. When the input already answers this lens, restate the captured voice with its source and move on.
 
 - Restate the user's seed in the user's own words. Do not translate into product or technical terms yet.
 - Ask about the scenario: when does this matter? What is the user trying to decide or do? Where does the current experience fail them?
@@ -114,7 +125,13 @@ Produce as part of the output:
 
 Prefer fewer dependencies — if two issues seem tightly coupled, re-check whether they are really one issue, or whether the split seam is wrong. But do not invent fake independence: if B genuinely needs A's contract, say so. The `mohist-create-epic` skill turns this list into issue prerequisites at creation time, so the epic can advance issue-by-issue without false starts.
 
-**Gate:** Does every proposed issue deliver standalone value? Check that different-context work is split one issue per context, within-context splits each still stand alone, and scattered trivial changes are bundled — not over-split. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
+**Gate:** Run three checks on **every** proposed issue; each must pass:
+
+1. **One-sentence value.** State the issue's standalone value in one sentence: "after this issue alone, the user can/gets …". If the sentence only works by mentioning a sibling issue, the split is wrong.
+2. **Every scope item serves that sentence.** Each piece of the issue's scope must contribute to its own value sentence. An item that only serves a *different* issue's value belongs in that issue.
+3. **Stop-here test.** If the epic (or the whole plan) stopped right after this issue, what has shipped is still worth having.
+
+Then check the split shape: different-context work is split one issue per context, within-context splits each still pass the three checks, and scattered trivial changes are bundled — not over-split. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
 
 ### 5. Converge
 
@@ -123,7 +140,7 @@ The output of this skill is a **requirement clarification** — the answers gath
 Branch on the scope decision:
 
 - **Single issue:** present the clarified requirement (the three lenses' answers + non-goals + acceptance intent) to the user for confirmation.
-- **Epic + issues:** present the epic milestone (Goal / Background / Non-goals / Scope) plus one clarification per child issue, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
+- **Epic + issues:** present the epic milestone (Goal / Background / Non-goals / Scope) plus one clarification per child issue, each scoped to its own context + concern and opening with its one-sentence standalone value from the Scope gate. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
 
 Present the assembled output to the user for confirmation before anything is created.
 
@@ -145,7 +162,7 @@ Common backtrack triggers:
 - Do not define issue-body sections or their writing rules. Section structure and per-section guidance live in the issue templates, applied by `mohist-create-issue`.
 - Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist-create-issue` skill's responsibility.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
-- Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
+- Do not start from a blank slate and patrol for random problems. Always begin from user-provided requirement input.
 - Do not let the Domain Model lens grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement, or skip it.
 
 ## Handoff
