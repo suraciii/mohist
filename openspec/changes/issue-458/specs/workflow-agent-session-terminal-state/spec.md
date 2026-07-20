@@ -24,7 +24,7 @@ The terminal event SHALL be reported only after all input and projected runtime-
 
 ### Requirement: Reused Workflow AgentSessions converge after each turn
 
-When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSession, each turn SHALL record its own input and runtime activity and SHALL attempt its own terminal event. Starting a later turn MUST allow the session to record new activity, and the later turn's accepted terminal event SHALL determine the session's latest completed or failed state.
+When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSession, each turn SHALL record its own input and runtime activity and SHALL attempt its own terminal event. Before accepting activity that resumes a session after `session.closed`, the system MUST persist the pending prior turn as a distinct transcript turn. This boundary MUST NOT depend on a persistence timer firing, elapsed wall time, runner delay, or an explicit test-only flush. Starting a later turn MUST allow the session to record new activity, and the later turn's accepted terminal event SHALL determine the session's latest completed or failed state.
 
 #### Scenario: A later turn reuses a completed Workflow session
 
@@ -32,6 +32,19 @@ When multiple Workflow OpenCode turns reuse the same logical Workflow AgentSessi
 - **THEN** the later turn SHALL record new input and runtime activity in that same logical AgentSession
 - **AND** the later turn SHALL attempt a new `session.closed` event after it finishes
 - **AND** the latest accepted close event SHALL determine the session's current terminal state
+
+#### Scenario: Back-to-back turns retain distinct transcript boundaries
+
+- **WHEN** two `session.input` / activity / `session.closed` sequences for the same logical and physical Workflow AgentSession are accepted back-to-back without advancing time or manually flushing persistence
+- **THEN** the transcript SHALL contain two distinct turns in input order
+- **AND** each turn SHALL retain its own input and activity
+- **AND** the first turn's input and parts MUST NOT be overwritten, merged into the second turn, or assigned to the second input
+
+#### Scenario: Prior turn persistence fails before resume
+
+- **WHEN** new activity would resume a Workflow AgentSession after `session.closed` but persistence of the pending prior turn fails
+- **THEN** the system SHALL reject that new activity without appending it to the pending prior turn
+- **AND** the pending prior turn SHALL remain available for a later persistence attempt
 
 ### Requirement: Terminal reporting failure does not control Workflow completion
 
