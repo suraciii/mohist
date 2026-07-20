@@ -32,7 +32,7 @@ For an unbound Pi logical AgentSession, the Runner SHALL create a physical Pi Se
 
 ### Requirement: Current Pi bindings are reused without model-driven rotation
 
-The current Pi binding SHALL be reused for the same logical AgentSession across Workflow tasks, task retries, cleanup turns, and Runner restarts. A model or variant change SHALL be applied to the existing physical Session and MUST NOT replace the session-file path, append lineage, or discard conversation context. After Runner restart, the runtime SHALL lazily restore the physical Session from the persisted absolute session-file path rather than creating a replacement. A Workflow change from another runtime to Pi SHALL preserve the logical AgentSession identity, establish a new Pi physical binding, and append the new binding to lineage without migrating the previous runtime's context.
+The current Pi binding SHALL be reused for the same logical AgentSession across Workflow tasks, task retries, cleanup turns, and Runner restarts. A model or variant change SHALL be applied to the existing physical Session and MUST NOT replace the session-file path, append lineage, or discard conversation context. After Runner restart, the runtime SHALL lazily restore the physical Session from the persisted absolute session-file path rather than creating a replacement. A Workflow change between Pi and another registered runtime in either direction SHALL preserve the logical AgentSession identity, establish a new physical binding under an expected-current guard, and append the new binding to lineage without migrating the previous runtime's context.
 
 #### Scenario: Retry reuses the physical Session
 
@@ -58,6 +58,12 @@ The current Pi binding SHALL be reused for the same logical AgentSession across 
 - **THEN** Mohist SHALL keep the same logical AgentSession identity and establish a new Pi binding
 - **AND** it SHALL append the Pi session-file path and runtime to the Session lineage without migrating old context
 
+#### Scenario: Switching from Pi to another runtime uses the same guard
+
+- **WHEN** a Workflow task selects another registered runtime for a logical AgentSession currently bound to Pi
+- **THEN** Mohist SHALL keep the same logical AgentSession identity and establish the replacement binding only when the expected Pi binding is still current
+- **AND** it SHALL append the replacement runtime binding to lineage without migrating Pi context
+
 ### Requirement: Invalid persisted bindings fail without silent replacement
 
 Before submitting a prompt, the Runner SHALL verify that the authoritative working directory matches the logical AgentSession's immutable bound directory. A mismatch SHALL fail with `session-workspace-mismatch`. When a current Pi binding exists but its session file is missing, unreadable, corrupt, or otherwise cannot be restored, the task SHALL fail with `runtime-session-missing` and an explicit Reset instruction. The runtime MUST NOT create a replacement physical Session, change lineage, or submit the prompt in either case. A binding created before Pi wrote its first assistant message SHALL follow the same missing-file rule after a Runner restart.
@@ -82,7 +88,7 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 ### Requirement: One Workflow work turn executes per logical AgentSession
 
-Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome. Different logical AgentSessions SHALL remain independently executable.
+Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine that physical Session and later work MUST NOT start on it until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -95,9 +101,15 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 - **WHEN** concurrent Pi tasks target different logical AgentSessions
 - **THEN** serialization of one Session SHALL NOT serialize the other Session
 
+#### Scenario: Unconfirmed stop prevents overlap
+
+- **WHEN** a turn ends with interruption unconfirmed and another Workflow task targets the same logical AgentSession
+- **THEN** the later task SHALL fail as runtime unavailable rather than start on the quarantined physical Session
+- **AND** no two Pi Prompts SHALL overlap on that physical Session
+
 ### Requirement: Pi turn facts populate the existing Session audit record
 
-For every Pi Workflow turn, the Runner SHALL report the submitted prompt and normalized Pi events to the current logical AgentSession. The projection SHALL include assistant text, reasoning when present, tool-call lifecycle and result facts, resolved model observations, and token usage including input, output, cache, and thought tokens when Pi provides them. Events SHALL carry the current physical session-file binding, and the Session authority SHALL reject facts for a stale physical binding. Pi message IDs and tool-call IDs SHALL make repeated event delivery idempotent. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
+For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt and normalized Pi events to the current logical AgentSession. The projection SHALL include assistant text, reasoning when present, tool-call lifecycle and result facts, resolved model observations, and token usage including input, output, cache, and thought tokens when Pi provides them. Before prompt admission, `session.input` SHALL be durably accepted by the Session authority. After admission, each normalized fact SHALL be written to a Runner-local durable outbox before the Action returns; delivery SHALL retry across transport loss and Runner restart without replaying the Prompt. Each binding SHALL use one stable event stream identity and monotonically increasing sequence. The Session authority SHALL atomically ignore an already-applied sequence before updating transcript, usage, or model state, reject a gap, and reject facts for a stale physical binding. A runtime change MUST NOT replace the binding until the previous binding's durable outbox is drained. Pi message IDs and tool-call IDs SHALL also suppress duplicate SDK projections before enqueue. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
 
 #### Scenario: Session view shows a completed Pi turn
 
@@ -109,6 +121,24 @@ For every Pi Workflow turn, the Runner SHALL report the submitted prompt and nor
 
 - **WHEN** the same Pi message or tool event is delivered more than once
 - **THEN** the Session projection SHALL use its message ID or tool-call ID to avoid duplicate transcript or usage facts
+
+#### Scenario: Post-admission transport failure is retried durably
+
+- **WHEN** a Pi event cannot reach the Server after the Prompt has been admitted
+- **THEN** the Runner SHALL retain the ordered event in its durable outbox and preserve the Action result
+- **AND** it SHALL retry delivery without replaying the Prompt, including after Runner restart
+
+#### Scenario: Ambiguous delivery does not duplicate usage or transcript
+
+- **WHEN** the Server applies an event but the acknowledgement is lost and the Runner sends the same stream sequence again
+- **THEN** the Session authority SHALL acknowledge the repeated sequence without applying it again
+- **AND** transcript text, tool facts, and usage totals SHALL remain unchanged by the duplicate
+
+#### Scenario: Event sequence gaps are rejected
+
+- **WHEN** the Session authority receives a current-binding event whose sequence skips an unapplied predecessor
+- **THEN** it SHALL reject that event without changing Session state
+- **AND** the Runner SHALL retain and resend the missing ordered outbox entries
 
 #### Scenario: Stale binding events are rejected
 

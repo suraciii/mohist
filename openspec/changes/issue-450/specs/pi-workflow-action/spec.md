@@ -16,7 +16,7 @@ A Workflow task with `uses: mohist/pi` SHALL execute one Pi-backed Inline Agent 
 
 ### Requirement: Pi Action input is explicit and recursively expanded
 
-The Action input SHALL consist of required `prompt`, optional `session`, and optional `options`. `prompt` SHALL resolve to non-empty text. `options`, when present, SHALL be an object whose `model` and `variant` values are strings or null. A present model SHALL have non-empty provider and model portions separated by the first `/`. Unknown option keys, including `runtime`, SHALL be ignored and recorded as diagnostics without affecting execution. The recursively expanded Action input SHALL be the only turn configuration; the Action MUST NOT read `vars.agent` or another hidden fallback unless the Workflow explicitly binds that value into `options`. Legacy `with.agent`, `with.kind`, and `with.type` inputs SHALL be rejected before execution with an actionable error.
+The Action input SHALL consist of required `prompt`, optional `session`, and optional `options`. `prompt` SHALL resolve to non-empty text. An omitted or null `session` SHALL use the current Work ID; a present `session` SHALL be a string whose trimmed value is non-empty, and that trimmed value SHALL be the logical Session name. A whitespace-only or non-string `session` SHALL fail with `invalid-input` and MUST NOT be stringified into a Session identity. `options`, when present, SHALL be an object whose `model` and `variant` values are strings or null. A present model SHALL have non-empty provider and model portions separated by the first `/`. Unknown option keys, including `runtime`, SHALL be ignored and recorded as diagnostics without affecting execution. The recursively expanded Action input SHALL be the only turn configuration; the Action MUST NOT read `vars.agent` or another hidden fallback unless the Workflow explicitly binds that value into `options`. Legacy `with.agent`, `with.kind`, and `with.type` inputs SHALL be rejected before execution with an actionable error.
 
 #### Scenario: Explicit variable binding preserves an options object
 
@@ -30,6 +30,22 @@ The Action input SHALL consist of required `prompt`, optional `session`, and opt
 - **THEN** the Action MUST NOT read `vars.agent`
 - **AND** Pi SHALL use the current Session selection or Pi default
 
+#### Scenario: Omitted or null session uses Work ID
+
+- **WHEN** `session` is omitted or explicitly null
+- **THEN** the Action SHALL use the current Work ID as the logical Session name
+
+#### Scenario: Explicit session is trimmed
+
+- **WHEN** `session` is a string with non-empty text surrounded by whitespace
+- **THEN** the Action SHALL use the trimmed text as the logical Session name
+
+#### Scenario: Invalid session cannot become an identity
+
+- **WHEN** `session` is whitespace-only, a number, an object, an array, or a boolean
+- **THEN** the Action SHALL fail with `invalid-input`
+- **AND** no logical or physical Session SHALL be created
+
 #### Scenario: Unknown options are diagnostic only
 
 - **WHEN** `options` contains valid `model` or `variant` values plus unknown keys such as `runtime`
@@ -38,7 +54,7 @@ The Action input SHALL consist of required `prompt`, optional `session`, and opt
 
 #### Scenario: Invalid input prevents a turn
 
-- **WHEN** the prompt resolves to empty text, options is not an object, model or variant has an invalid type, or model lacks a non-empty provider/model split
+- **WHEN** the prompt resolves to empty text, session is invalid, options is not an object, model or variant has an invalid type, or model lacks a non-empty provider/model split
 - **THEN** the Action SHALL fail with `invalid-input`
 - **AND** no physical Session SHALL be created and no prompt SHALL be submitted
 

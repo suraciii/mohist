@@ -92,7 +92,7 @@ An explicit model SHALL use `provider/model` form, split only at the first `/`, 
 
 ### Requirement: Workflow deadlines interrupt Pi deterministically
 
-A Pi Workflow turn SHALL use the executor's declared deadline, defaulting to 60 minutes when no explicit deadline is provided. The runtime SHALL inject one task-independent wrap-up warning five minutes before the deadline, or at turn start when less than five minutes remain. At the deadline it SHALL first fix the result as deadline exceeded, then request Pi interruption and verify whether execution stopped. A late prompt resolution MUST NOT replace the deadline result. If stopping cannot be confirmed, the runtime SHALL report interruption as unconfirmed and MUST NOT represent the turn as safely stopped. The runtime MUST NOT automatically replay the prompt after any timeout, interruption, or uncertain submission result.
+A Pi Workflow turn SHALL use the executor's declared deadline, defaulting to 60 minutes when no explicit deadline is provided. The runtime SHALL inject one task-independent wrap-up warning five minutes before the deadline, or at turn start when less than five minutes remain. At the deadline it SHALL first fix the result as deadline exceeded, then request Pi interruption and verify whether execution stopped. A late prompt resolution MUST NOT replace the deadline result. If stopping cannot be confirmed, the runtime SHALL report interruption as unconfirmed, mark that physical Session quarantined, and MUST NOT represent the turn as safely stopped. The runtime MUST reject later work on that physical Session with `unavailable-runtime` until stop is observed or the Runner process restarts; different physical Sessions SHALL remain available. Runner restart clears the quarantine because process termination ends every in-process Pi turn. The runtime MUST NOT automatically replay the prompt after any timeout, interruption, or uncertain submission result.
 
 #### Scenario: Deadline fixes timeout before interruption cleanup
 
@@ -111,6 +111,19 @@ A Pi Workflow turn SHALL use the executor's declared deadline, defaulting to 60 
 - **WHEN** the Runner cannot determine whether a prompt was admitted or completed
 - **THEN** the runtime MUST NOT automatically submit that prompt again
 - **AND** it SHALL report the uncertain interruption or failure to the work owner
+
+#### Scenario: Unconfirmed interruption quarantines the physical Session
+
+- **WHEN** Pi interruption is requested but the runtime cannot confirm that streaming stopped
+- **THEN** the current turn SHALL report interruption as unconfirmed
+- **AND** later work targeting that physical Session SHALL fail with `unavailable-runtime` instead of starting another Prompt
+- **AND** work on different physical Sessions SHALL remain admissible
+
+#### Scenario: Confirmed stop or Runner restart clears quarantine
+
+- **WHEN** the runtime later observes that the quarantined Pi turn stopped, or the Runner process restarts
+- **THEN** the physical Session SHALL become eligible for a later turn
+- **AND** the failed Prompt MUST NOT be replayed
 
 ### Requirement: Non-recoverable provider failures end the turn promptly
 
@@ -133,6 +146,26 @@ The runtime SHALL derive provider retry facts from Pi retry events and MUST NOT 
 - **WHEN** a recoverable provider error reaches the configured retry-attempt threshold before the turn completes
 - **THEN** the runtime SHALL interrupt and fail the turn as `turn-failed`
 - **AND** it SHALL preserve the current physical Session binding
+
+### Requirement: Provider failure policy has validated Runner configuration
+
+The Runner SHALL configure the shared provider failure policy at startup. `MOHIST_PROVIDER_RETRY_THRESHOLD` SHALL accept a positive integer and default to `5`. `MOHIST_PROVIDER_NON_RECOVERABLE_TERMS` SHALL accept a JSON array of non-empty literal strings that are matched case-insensitively in addition to the built-in quota, credit, balance, billing, plan allowance, and usage-limit terms. Invalid values SHALL prevent Pi readiness and SHALL produce an actionable configuration diagnostic; regular expressions supplied by operators MUST NOT be evaluated. The same parsed policy object SHALL be supplied to OpenCode and Pi so the promised failure semantics have one configuration authority.
+
+#### Scenario: Non-default retry threshold reaches Pi
+
+- **WHEN** the Runner starts with `MOHIST_PROVIDER_RETRY_THRESHOLD=3`
+- **THEN** Pi SHALL classify the third consecutive recoverable provider retry as non-recoverable
+
+#### Scenario: Additional literal term fails immediately
+
+- **WHEN** `MOHIST_PROVIDER_NON_RECOVERABLE_TERMS` contains `monthly allowance exhausted` and a provider retry message contains that text with different letter case
+- **THEN** the runtime SHALL classify the first occurrence as non-recoverable
+
+#### Scenario: Invalid policy configuration blocks readiness
+
+- **WHEN** the retry threshold is not a positive integer or the additional terms value is not a JSON array of non-empty strings
+- **THEN** Pi SHALL remain not-ready with an actionable configuration diagnostic
+- **AND** no operator-supplied regular expression SHALL execute
 
 ### Requirement: Default tests isolate the Pi SDK and external environment
 
