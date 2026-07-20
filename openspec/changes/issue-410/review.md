@@ -2,26 +2,22 @@
 
 ## Findings
 
-### P1: OpenCode test fixtures still use ACP-prefixed runtime session ids
+### P1: Four ordinary OpenCode fixtures still use ACP-prefixed session ids
 
-The planned ACP removal explicitly includes renaming legacy-string
-`runtimeSessionId` fixtures. The current tree still contains many active
-fixtures that pair `runtime: "opencode"` with values such as `"acp-1"`,
-`"acp-old"`, and `"acp-123"`. Representative locations are
-`packages/runner/tests/runner-signalr-followup.spec.ts:28`,
-`packages/runner/tests/runner-signalr-cancel.spec.ts:190`,
-`packages/runner/tests/server-connection-generic-session.spec.ts:27`,
-`packages/web/src/widgets/coder-session/model/session-timeline-reducer.test.ts:275`,
-`packages/web/src/widgets/coder-session/model/useSessionTimeline.dom.test.ts:30`,
-and `packages/web/tests/SessionLiveUpdates.spec.tsx:30`.
+The fixture sweep in `6fa58340f` missed four values that still attach an
+ACP-prefixed id to ordinary OpenCode sessions:
 
-These are ordinary OpenCode binding fixtures, not the required legacy-runtime
-transition coverage, so their values should use neutral/current identifiers
-such as `runtime-1`, `runtime-old`, and `runtime-123`. Sweep equivalent
-fixtures across runner and web tests while retaining explicit legacy-binding
-tests that exercise the Reset-hint behavior. This is required by the plan's
-test-fixture sweep and avoids retaining the removed runtime identity in active
-OpenCode examples.
+- `packages/web/tests/browser/coder-session-compact-viewport.spec.ts:59,107`
+  sets `runtime: "opencode"` with ``acp-${sessionName}``.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs:254,265,334,409`
+  seeds summary and transcript records with `acp-` identifiers without testing
+  a legacy runtime.
+
+Rename these to neutral runtime/session identifiers while preserving the
+explicit `runtime: "acp"` tests that cover the legacy Reset-hint transition.
+The issue plan specifically requires legacy-string runtime-session fixtures to
+be renamed; these leftovers keep the removed identity in current OpenCode test
+data.
 
 ## Verification
 
