@@ -121,6 +121,18 @@ Existing Session commands SHALL NOT be allowed to start idle work on a binding w
 - **THEN** the shared logical-Session boundary SHALL reject the later task as runtime unavailable before rebind
 - **AND** no OpenCode Prompt SHALL start until Pi stop is observed or the Runner process restarts
 
+#### Scenario: Observed stop clears the logical quarantine
+
+- **WHEN** PiRuntime reports `cleared` for the generation that quarantined a physical path and logical Session key
+- **THEN** the coordinator SHALL remove that matching logical quarantine and admit later work on the key
+- **AND** it MUST NOT replay the failed Prompt
+
+#### Scenario: Runner restart starts without execution quarantine
+
+- **WHEN** the Runner process restarts after an unconfirmed in-process Pi interruption
+- **THEN** the new PiRuntime and coordinator SHALL start with empty execution-quarantine state
+- **AND** persisted reporting or missing-session state SHALL continue to apply independently
+
 #### Scenario: A command reservation acquired first blocks Workflow bind
 
 - **WHEN** Follow-up, Compact, or Reset reserves or starts work on the current binding before a Workflow runtime bind reaches the AgentSession authority

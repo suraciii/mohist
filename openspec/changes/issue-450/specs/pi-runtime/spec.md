@@ -98,6 +98,8 @@ An explicit model SHALL use `provider/model` form, split only at the first `/`, 
 
 ### Requirement: Workflow deadlines interrupt Pi deterministically
 
+The runtime SHALL publish ordered process-local execution-quarantine lifecycle notifications with a unique generation and physical Session path. It SHALL publish `entered` after installing physical quarantine and before returning any unconfirmed-interruption result, then publish `cleared` for the same generation when subscribed lifecycle state proves that execution stopped. A clearance for an older generation MUST NOT clear a newer quarantine on the same path. These notifications contain execution coordination facts only and MUST NOT be persisted as AgentSession or Workflow state.
+
 A Pi Workflow turn SHALL use a 60-minute duration declared by the Workflow executor through Runner-private Action context. `mohist/pi` Action input MUST NOT expose or honor `timeout`, `deadline`, or another user-authored override in this issue. After Session binding, input acknowledgement, model/thinking application, and event subscription are ready, the runtime SHALL read its injected clock immediately before calling the SDK Prompt and derive the absolute deadline from that instant. Queue wait, binding, and reporting preflight MUST NOT consume the Prompt budget. Each cleanup Prompt SHALL be a separate turn with a fresh duration. The runtime SHALL inject one task-independent wrap-up warning five minutes before the deadline. At the deadline it SHALL first fix the result as deadline exceeded, then request Pi interruption and verify whether execution stopped. A late prompt resolution MUST NOT replace the deadline result. If stopping cannot be confirmed, the runtime SHALL report interruption as unconfirmed, mark that physical Session quarantined, and MUST NOT represent the turn as safely stopped. The runtime MUST reject later work on that physical Session with `unavailable-runtime` until stop is observed or the Runner process restarts; different physical Sessions SHALL remain available. Runner restart clears the quarantine because process termination ends every in-process Pi turn. The runtime MUST NOT automatically replay the prompt after any timeout, interruption, or uncertain submission result.
 
 #### Scenario: Deadline fixes timeout before interruption cleanup
@@ -143,6 +145,12 @@ A Pi Workflow turn SHALL use a 60-minute duration declared by the Workflow execu
 - **WHEN** the runtime later observes that the quarantined Pi turn stopped, or the Runner process restarts
 - **THEN** the physical Session SHALL become eligible for a later turn
 - **AND** the failed Prompt MUST NOT be replayed
+
+#### Scenario: Runtime publishes ordered quarantine lifecycle
+
+- **WHEN** interruption cannot be confirmed and Pi later reports that the physical turn stopped
+- **THEN** the runtime SHALL publish `entered` before returning the unconfirmed result and later publish `cleared` with the same generation and physical path
+- **AND** a stale generation MUST NOT clear a newer quarantine
 
 #### Scenario: External cancellation fixes interruption before cleanup
 
