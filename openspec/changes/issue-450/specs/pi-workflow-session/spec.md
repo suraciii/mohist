@@ -88,7 +88,7 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 ### Requirement: One Workflow work turn executes per logical AgentSession
 
-Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. Every Workflow Inline Agent Action SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL remain inside it through Prompt completion and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine that physical Session and later work MUST NOT start on it until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
+Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. Every Workflow Inline Agent Action SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL remain inside it through Prompt completion and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current work turn reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine both the physical Pi Session and the logical serialization key before the current operation leaves the boundary. Later work MUST NOT start a Prompt or runtime rebind on that logical AgentSession until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -112,6 +112,12 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 - **WHEN** a turn ends with interruption unconfirmed and another Workflow task targets the same logical AgentSession
 - **THEN** the later task SHALL fail as runtime unavailable rather than start on the quarantined physical Session
 - **AND** no two Pi Prompts SHALL overlap on that physical Session
+
+#### Scenario: Runtime switching cannot bypass an unconfirmed stop
+
+- **WHEN** a Pi turn's interruption is unconfirmed and a later Workflow task selects OpenCode for the same logical AgentSession
+- **THEN** the shared logical-Session boundary SHALL reject the later task as runtime unavailable before rebind
+- **AND** no OpenCode Prompt SHALL start until Pi stop is observed or the Runner process restarts
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
@@ -149,6 +155,12 @@ If a durable outbox append fails after Prompt admission, the Action SHALL fix `s
 - **WHEN** the Runner restarts with a pre-created stream manifest whose turn did not durably append every required final fact
 - **THEN** it SHALL reconcile the persisted Pi Session messages through the manifest's projector fingerprints
 - **AND** it SHALL append and drain missing required facts before admitting later work on that Session
+
+#### Scenario: Admitted checkpoint without a Pi file follows missing-session recovery
+
+- **WHEN** restart finds an admitted checkpoint but the bound Pi session file was never created or is unreadable
+- **THEN** recovery SHALL record the uncertain-submission diagnostic and leave the binding failed as `runtime-session-missing` with Reset guidance
+- **AND** it MUST NOT create a replacement Session or replay the Prompt
 
 #### Scenario: Corrupt committed outbox state is not discarded
 

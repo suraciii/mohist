@@ -194,8 +194,9 @@ in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明�
 这是与 OpenCode 一致的已接受限制。
 
 外部取消信号遵守同一顺序：先把结果固定为 `interrupted`，再调用 `session.abort()` 并
-确认停止。无法确认停止时，当前物理 Session 进入隔离状态；同一 Session 的后续 Prompt
-被拒绝，直到订阅观察到停止或 Runner 进程重启。取消路径同样不自动重放 Prompt。
+确认停止。无法确认停止时，当前物理 Session 与它对应的逻辑 AgentSession 执行 key 都进入
+隔离状态；后续 Prompt 与 Runtime rebind 被拒绝，直到订阅观察到停止或 Runner 进程重启。
+取消路径同样不自动重放 Prompt。
 
 ## 回合期限与两段式收尾
 
