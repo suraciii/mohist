@@ -36,6 +36,17 @@ describe('SettingsSearch navigation', () => {
     await waitFor(() => expect(document.activeElement?.id).toBe('agent-runtime-timeout'))
   })
 
+  it('focuses an already mounted route target without waiting for an animation frame', async () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/ai')
+    openSettingsSearch()
+    await user.type(await screen.findByTestId('settings-search-input'), 'session timeout')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(document.activeElement?.id).toBe('agent-runtime-timeout'))
+  })
+
   it('dispatches an entry reveal event after the target route renders', async () => {
     let revealPath: string | null = null
     const recordRevealPath = () => {

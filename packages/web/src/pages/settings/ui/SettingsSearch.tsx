@@ -22,7 +22,8 @@
  * - **D4 — Enter navigates and focuses after the target mounts.** The focus
  *   intent travels in React Router navigation state so it survives switches
  *   between application and project settings routes. The destination consumes
- *   it once, then retries reveal + focus on animation frames for up to ~500ms.
+ *   it once, tries reveal + focus immediately, then retries on animation frames
+ *   for up to ~500ms.
  *   If the target never mounts the navigation still happens, but we surface
  *   a warning instead of silently losing the focus step.
  */
@@ -189,12 +190,12 @@ function SettingsSearch() {
     }
 
     cancelPendingFocus.current = cleanup
-    frameId = window.requestAnimationFrame(tryRevealAndFocus)
     timeoutId = window.setTimeout(() => {
       cleanup()
       // eslint-disable-next-line no-console
       console.warn(`[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`)
     }, FOCUS_POLL_TIMEOUT_MS)
+    tryRevealAndFocus()
   }
 
   useEffect(() => {
