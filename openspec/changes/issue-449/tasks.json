@@ -6,36 +6,41 @@
       "id": "T-001",
       "title": "Expose AgentJob failure reasons through generic AgentSession API and CLI",
       "spec": "specs/agent-session-visibility/spec.md#generic-agentsession-summaries-expose-the-agentjob-failure-reason, specs/agent-session-visibility/spec.md#the-generic-agentsession-api-preserves-failure-details, specs/agent-session-visibility/spec.md#mo-agent-session-show-renders-the-failure-reason",
-      "description": "Project `failureReason` and `failureCategory` from the same latest terminal `session.closed` fact, add the reason to the generic AgentSession summary DTO, and render both values separately in `mo agent session show`. Converge server-originated AgentJob failures that currently persist state without closing their generic session onto the shared terminal-close path so every covered failure is queryable.",
+      "description": "Implement a durable AgentJob-to-AgentSession terminal protocol: persist a pending close payload and reminder with every terminal transition, and add an idempotent AgentSession command that acknowledges only after the terminal transcript fact is durable. Then project `failureReason` and `failureCategory` from the same latest terminal fact, add the reason to the generic AgentSession summary DTO, and render both values separately in `mo agent session show`.",
       "acceptanceCriteria": [
         "A runner-reported failed AgentJob produces a generic AgentSession summary with status `failed`, the exact persisted `failureReason`, and a separate `failureCategory`",
-        "Dispatch-exhausted, report-timeout, and forced server-originated AgentJob failures close the associated generic AgentSession and expose their persisted reason; repeated closure remains idempotent",
+        "Runner-reported completion/failure, preflight failure, dispatch exhaustion, report timeout, and forced failure persist a stable pending Session-close delivery and durable reminder before terminal acknowledgement",
+        "The AgentSession terminal command deduplicates by stable AgentJob delivery id across Session turns and returns success only after state/events and transcript are durably flushed",
+        "If the first Session close fails after AgentJob terminal save, reminder/activation/report replay retries the original payload and eventually persists exactly one close fact",
+        "Activation loss before transcript flush does not lose the pending delivery; a fake persistence failure and forced reactivation prove convergence without wall-clock polling",
         "A successful generic AgentSession has no non-empty failure reason and no fabricated failure category",
         "When multiple Runtime Session terminal facts exist, reason and category are selected from the same latest applicable `session.closed` fact rather than mixed across attempts",
         "The generic AgentSession HTTP response serializes `failureReason` and `failureCategory` as separate fields when present and omits nullable values according to the existing JSON policy",
         "`mo agent session show <sessionId>` table output prints distinct failure-reason and failure-category rows, while `-o json` preserves both server fields unchanged",
-        "Focused server specs cover terminal projection, API serialization, success omission, server-originated failure closure, and idempotency; CLI command specs cover table and JSON output",
+        "Focused server specs cover terminal projection, API serialization, success omission, all terminal sources, close persistence failure, activation loss, report replay repair, and idempotency; CLI command specs cover table and JSON output",
         "`npm test` completes successfully after the server and CLI changes"
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Failure-reason projection and terminal-close convergence under packages/server/src/Mohist.Server/Agent and Sessions, additive generic AgentSession API DTO output, separate CLI failure rendering under packages/cli/Mohist.Cli, and focused server/CLI tests",
+      "output": "Durable PendingSessionClose/reminder handling in AgentJob, synchronously durable idempotent AgentSession terminal command, failure-reason/category projection, additive generic AgentSession API output, separate CLI failure rendering, and focused server/CLI tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Implement design decision 4. Use one TerminalFact for reason and category; do not query AgentJob from the Session read path or replace the machine-readable category with operator-facing text. This task provides the terminal visibility path consumed by T-002's unresolved-workspace outcome."
+      "notes": "Implement design decisions 2 and 4's terminal protocol before T-002 consumes it. Use an Orleans reminder plus persisted pending payload; do not rely on in-memory timers, swallowed close exceptions, or a Session append that returns before flush. Tests use injected failures/signals and explicit reactivation, never wall-clock waits."
     },
     {
       "id": "T-002",
       "title": "Make routed Named Agent launches workspace-complete and idempotently fail preflight",
       "spec": "specs/routing-dispatch/spec.md#a-routed-agent-launch-uses-the-triggering-workflow-workspace, specs/routing-dispatch/spec.md#missing-routed-workspace-fails-explicitly, specs/routing-dispatch/spec.md#matching-and-prompt-rendering-remain-envelope-only, specs/routing-dispatch/spec.md#existing-non-routing-workspace-behavior-is-preserved",
-      "description": "Add post-match routing launch-context resolution that prefers an explicit WorkflowRun workspace and uses the issue's retained/current run only when workflow lineage is absent, then pass the resolved issue/epic/workspace context through the shared Agent launcher. Add an idempotent no-dispatch AgentJob terminal command for a genuinely unresolved workspace, preserving stable event/rule identities and first-writer launch context without sending malformed work to a Runner.",
+      "description": "Add post-match routing execution-context resolution that validates WorkflowRun project/issue/epic ownership, prefers explicit run lineage, and uses an issue's currently bound nonterminal run only when workflow lineage is absent. Fence redelivery by persisting a canonical prepared AgentJob launch plan before Session open, then open Session from that returned plan and activate it for normal dispatch or durable preflight failure without sending malformed work to a Runner.",
       "acceptanceCriteria": [
         "A matched `com.mohist.workflow.run.failed` event with `workflowrunid` launches one AgentSession and AgentJob whose work directory and dispatched `workspace.path` both equal the persisted WorkflowRun workspace",
-        "An event with issue lineage but no workflow run id resolves that issue's retained/current WorkflowRun workspace and dispatches the same non-empty path",
-        "An explicit workflow run id is authoritative: a missing workspace fails visibly and never falls forward to a newer issue WorkflowRun",
+        "An event with issue lineage but no workflow run id resolves only that issue's currently bound nonterminal WorkflowRun and dispatches its non-empty path",
+        "An explicit workflow run id is authoritative: a missing workspace fails visibly and never falls forward to a newer issue WorkflowRun; an issue-only terminal/stale binding is not reused",
+        "A WorkflowRun whose project, issue, or epic conflicts with event lineage, or whose workspace path is null/blank, produces a workspace-unavailable preflight failure and no Runner assignment",
         "A hit with no resolvable workspace creates one stable failed AgentJob and AgentSession carrying an actionable `workspace-unavailable` reason plus trigger event/rule correlation, and creates no Runner assignment or workspace-less WorkDispatch",
-        "Redelivery of the same event/rule produces one job, one session, and one idempotently correlated terminal close; a later issue-current-workspace change cannot overwrite the first persisted work directory or outcome",
+        "EnsurePreparedAsync stores one canonical executable-or-failed launch plan before Session open; prepared jobs cannot auto-dispatch on activation",
+        "Redelivery opens Session from the canonical plan returned by the AgentJob rather than newly resolved caller values, producing one job/session/close and preventing later workspace or lineage overwrite",
         "Routed AgentSession metadata retains issue number, epic number when present, trigger event id, trigger rule id, and workspace path for normal and failed launches",
         "`mo routing test` and real dispatch select the same rules and Agents for identical inputs; workspace and Issue/Workflow reads occur only after selection and never affect match, ordering, `continue`, or prompt rendering",
         "Manual Named Agent launch with an explicit workspace and Inline Agent `mohist/opencode` workspace behavior remain unchanged in regression specs",
@@ -45,12 +50,12 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Post-match routing context resolver and handler integration under packages/server/src/Mohist.Server/Events/Subscriptions, shared launcher failed-outcome composition, idempotent no-dispatch AgentJob command and tests, with no runner production-code change",
+      "output": "Ownership-validating post-match routing context resolver, prepared-launch first-writer protocol and handler integration, canonical shared launcher activation/failure composition, and focused tests, with no runner production-code change",
       "dependsOn": [
         "T-001"
       ],
       "passes": false,
-      "notes": "Implement design decisions 1-3. Keep Agent as a leaf: the routing application layer resolves Workflow/Issue context and hands AgentLauncher complete inputs. Do not derive paths from layout, inspect runner-local files, submit then race `FailAsync`, or change manual launch semantics."
+      "notes": "Implement design decisions 1-3. Keep Agent as a leaf and add a narrow Workflow routing-context read that returns ownership lineage, status, and workspace. Persist the launch plan before Session open; do not derive paths from layout, inspect runner-local files, merge replay metadata, submit then race `FailAsync`, or change manual launch semantics."
     },
     {
       "id": "T-003",

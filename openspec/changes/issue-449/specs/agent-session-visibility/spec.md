@@ -31,6 +31,28 @@ The generic AgentSession summary API SHALL include `failureReason` and `failureC
 - **THEN** the JSON response SHALL include the persisted `failureReason`
 - **AND** the response SHALL include `failureCategory` separately when present
 
+### Requirement: AgentJob terminal facts are durably delivered to AgentSession
+
+Every AgentJob terminal transition SHALL retain a durable pending terminal-delivery record until the associated AgentSession has synchronously persisted one idempotently identified `session.closed` fact. This SHALL apply to runner-reported completion or failure, preflight failure, dispatch exhaustion, report timeout, and forced failure. An AgentJob report or retry that observes terminal state with a pending delivery SHALL retry the same delivery; process or activation loss SHALL NOT clear it.
+
+#### Scenario: Session close fails after AgentJob terminal save
+
+- **WHEN** an AgentJob persists its terminal state and the first attempt to persist `session.closed` fails
+- **THEN** the AgentJob SHALL retain the pending terminal delivery durably
+- **AND** a durable retry SHALL eventually persist exactly one `session.closed` fact with the original status, reason, category, and recorded time
+
+#### Scenario: Activation loss before Session transcript flush
+
+- **WHEN** the Session receives an AgentJob terminal command but loses activation before the terminal transcript fact is durably stored
+- **THEN** the AgentJob pending delivery SHALL remain retryable after reactivation
+- **AND** the Session SHALL acknowledge success only after the terminal fact is durable
+
+#### Scenario: Terminal report replay repairs pending delivery
+
+- **WHEN** a Runner repeats a result report for an already-terminal AgentJob whose Session delivery is still pending
+- **THEN** the AgentJob SHALL retry the stored terminal delivery instead of rejecting the report without repair
+- **AND** repeated delivery SHALL NOT create duplicate terminal facts
+
 ### Requirement: mo agent session show renders the failure reason
 
 `mo agent session show <sessionId>` SHALL display the failure reason text for a failed generic AgentSession. Table output SHALL present the failure reason separately from the failure category, and JSON output SHALL preserve the server response without omitting either field.

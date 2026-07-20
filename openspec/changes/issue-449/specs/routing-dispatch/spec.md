@@ -1,23 +1,23 @@
 ### Requirement: A routed Agent launch uses the triggering workflow workspace
 
-After a routing rule matches and selects a Named Agent, the real dispatch path SHALL resolve the execution workspace identified by the triggering event's workflow or issue lineage. When the event carries a workflow run id whose persisted run has a workspace, the launch SHALL use that workspace path for both the AgentSession work directory and the AgentJob dispatch. When the event identifies an issue but not a workflow run, the launch SHALL use the workspace of that issue's current workflow run when one exists. The Runner SHALL receive a non-empty `workspace.path` for every such routed AgentJob.
+After a routing rule matches and selects a Named Agent, the real dispatch path SHALL resolve an execution context identified by the triggering event's workflow or issue lineage. The resolved WorkflowRun SHALL belong to the event's project and, when the event carries issue or epic lineage, SHALL match that lineage. When the event carries a workflow run id whose persisted run has a non-empty workspace path, the launch SHALL use that path for both the AgentSession work directory and the AgentJob dispatch. When the event identifies an issue but not a workflow run, the launch SHALL use the workspace of that issue's currently bound, nonterminal WorkflowRun. The Runner SHALL receive a non-empty `workspace.path` for every such routed AgentJob.
 
 #### Scenario: Failed workflow event launches in its persisted workspace
 
 - **WHEN** a routing rule matches a `com.mohist.workflow.run.failed` event carrying a workflow run id and issue number, and that WorkflowRun has a persisted workspace
 - **THEN** the triggered AgentSession work directory SHALL equal the WorkflowRun workspace path
 - **AND** the AgentJob dispatch SHALL carry the same non-empty path as `workspace.path`
-- **AND** the Runner SHALL start the Agent turn instead of rejecting it for a missing workspace
+- **AND** the Runner executor SHALL proceed past required-workspace validation rather than rejecting the dispatch for an absent `workspace.path`
 
 #### Scenario: Issue lineage resolves the current workflow workspace
 
-- **WHEN** a routing rule matches an event carrying an issue number but no workflow run id, and the issue has a current WorkflowRun with a persisted workspace
+- **WHEN** a routing rule matches an event carrying an issue number but no workflow run id, and the issue is currently bound to a nonterminal WorkflowRun with a persisted non-empty workspace path
 - **THEN** the triggered Agent SHALL run in that WorkflowRun workspace
 - **AND** the AgentJob dispatch SHALL NOT omit `workspace.path`
 
 ### Requirement: Missing routed workspace fails explicitly
 
-A matched routing hit for which no execution workspace can be resolved SHALL NOT submit a malformed AgentJob dispatch with an absent or empty `workspace.path`. The routed outcome SHALL be recorded as failed with an actionable failure reason that identifies the missing or unavailable workspace, and SHALL retain the triggering event id and routing rule id so the operator can diagnose the hit.
+A matched routing hit for which no valid execution context can be resolved SHALL NOT submit a malformed AgentJob dispatch with an absent or empty `workspace.path`. Missing runs, project/issue/epic lineage mismatches, null or whitespace workspace paths, and issue-only references to terminal or stale runs SHALL produce this outcome. The routed outcome SHALL be recorded as failed with an actionable failure reason that identifies the missing or invalid workspace context, and SHALL retain the triggering event id and routing rule id so the operator can diagnose the hit.
 
 #### Scenario: Workflow run has no resolvable workspace
 
@@ -25,6 +25,34 @@ A matched routing hit for which no execution workspace can be resolved SHALL NOT
 - **THEN** the system SHALL NOT dispatch an AgentJob with an absent or empty `workspace.path`
 - **AND** the routed outcome SHALL expose a failure reason identifying that an execution workspace could not be resolved
 - **AND** the failure SHALL remain correlated with the triggering event id and routing rule id
+
+#### Scenario: Explicit WorkflowRun lineage mismatch is rejected
+
+- **WHEN** a routing rule matches an event whose workflow run belongs to a different project or conflicts with the event's issue or epic lineage
+- **THEN** the system SHALL NOT launch the Agent in that WorkflowRun workspace
+- **AND** the routed outcome SHALL fail with a reason identifying the lineage mismatch
+
+#### Scenario: Issue-only terminal or stale run is not reused
+
+- **WHEN** a routing rule matches an issue event with no workflow run id and the issue has no currently bound nonterminal WorkflowRun with a non-empty workspace path
+- **THEN** the system SHALL NOT reuse a retained terminal or stale run workspace
+- **AND** the routed outcome SHALL fail explicitly without creating a Runner assignment
+
+### Requirement: Routed launch preparation is first-writer fenced
+
+An idempotent routed launch SHALL persist one canonical launch plan, keyed by project id, event id, and rule id, before opening its AgentSession or making work dispatchable. The plan SHALL include the AgentJob input, Session launch metadata and work directory, and either an executable disposition or a preflight failure. Redelivery SHALL reuse that persisted plan and SHALL NOT merge newly resolved workspace or lineage values into the Session or AgentJob.
+
+#### Scenario: Unresolved first delivery remains canonical
+
+- **WHEN** the first delivery of an event-rule pair persists a workspace-unavailable launch plan and a later delivery can resolve a workspace
+- **THEN** the later delivery SHALL reuse the original failed plan
+- **AND** SHALL NOT add the later workspace to the AgentSession or dispatch the AgentJob
+
+#### Scenario: Prepared launch is not dispatched before Session open
+
+- **WHEN** a routed executable launch plan has been persisted but its AgentSession has not yet been durably opened from that plan
+- **THEN** the AgentJob SHALL remain non-dispatchable
+- **AND** redelivery SHALL complete the same Session open before enabling dispatch
 
 ### Requirement: Matching and prompt rendering remain envelope-only
 
