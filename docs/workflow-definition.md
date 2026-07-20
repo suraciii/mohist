@@ -96,14 +96,17 @@ Variables，供后续任务用 `${{ vars.* }}` 读取。任一字段写入失败
 recovery:
   budget: 2                 # 可选，默认 0。一轮连续自动恢复的上限
   handlers:                 # 有序，命中第一个匹配的 handler
-    - when: errorCode=conflict   # 必填。按 字段=值 匹配任务输出的任意字段
+    - when: errorCode=conflict   # 可选。按 字段=值 匹配任务输出的任意字段
       tasks:                # 可选。恢复任务，可以嵌套自己的 recovery
         - <Task>
       retrySelf: true       # 可选，默认 false。恢复任务之后重试原任务
 ```
 
 - handler 至少声明 `tasks` 或 `retrySelf` 之一。
-- 匹配只看任务输出，与任务成败无关：成功任务的输出命中 `when` 同样触发恢复。
+- 声明 `when` 的 handler 按顺序匹配任务输出，与任务成败无关：成功任务的输出命中
+  `when` 同样触发恢复。
+- 可省略 `when` 声明一个默认 handler。每个 recovery 最多一个默认 handler，且必须排在
+  最后；它只在任务失败且前面的显式 handler 均未命中时触发。
 - 恢复任务是真实的 Workflow 任务，出现在进度和时间线中。
 - 预算用尽后不再自动恢复，任务失败并暴露原因；人工 retry 开启新一轮，重新获得完整
   预算。

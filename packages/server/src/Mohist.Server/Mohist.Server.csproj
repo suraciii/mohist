@@ -39,7 +39,6 @@
   </ItemGroup>
 
   <Target Name="BuildWebAssets" BeforeTargets="Build" Condition="'$(SkipWebBuild)' != 'true'">
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm install" />
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm run build -w packages/web" />
   </Target>
 

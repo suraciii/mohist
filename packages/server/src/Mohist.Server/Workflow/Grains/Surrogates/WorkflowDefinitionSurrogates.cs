@@ -92,7 +92,7 @@ public sealed class RecoveryDefinitionSurrogateConverter : IConverter<RecoveryDe
 [GenerateSerializer]
 public struct RecoveryHandlerDefinitionSurrogate
 {
-    [Id(0)] public string When;
+    [Id(0)] public string? When;
     [Id(1)] public List<TaskDefinition> Tasks;
     [Id(2)] public bool RetrySelf;
 }

@@ -99,6 +99,26 @@ describe("WorkExecutor recovery", () => {
     expect(result.addTasks).toBeUndefined()
   })
 
+  it("uses a default handler only for failed results after explicit handlers miss", () => {
+    const recovery = {
+      budget: 1,
+      handlers: [
+        { when: "errorCode=conflict", tasks: [{ id: "specific", title: "Specific" }], retrySelf: false },
+        { tasks: [{ id: "fix-ci", title: "Fix CI" }], retrySelf: true },
+      ],
+    }
+
+    const failed = tryRecovery(work({ recovery, recoveryRemaining: 1 }), { status: "failed", message: "worktree dirty" })
+    expect(failed).toMatchObject({
+      status: "completed",
+      message: "Rebase branch failed (default); recovery scheduled",
+      addTasks: [{ id: "fix-ci" }, { id: "integrate:rebase", recoveryRemaining: 0 }],
+    })
+
+    const completed = tryRecovery(work({ recovery, recoveryRemaining: 1 }), { status: "completed", output: JSON.stringify({ errorCode: "other" }) })
+    expect(completed).toBeNull()
+  })
+
   it("expands ${{ failure.output.<field> }} in the recovery handler's `with` using the triggering action output", async () => {
     const executor = executorFor({
       status: "failure",

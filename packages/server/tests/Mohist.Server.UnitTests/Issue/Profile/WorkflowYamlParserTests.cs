@@ -315,6 +315,59 @@ public class WorkflowYamlParserTests
     }
 
     [Fact]
+    public void WorkflowYamlParser_AllowsLastRecoveryHandlerWithoutWhenAndOmitsItOnRoundTrip()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks:
+              - id: verify
+                title: Verify
+                uses: core/script
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: errorCode=script-failed
+                      retrySelf: true
+                    - tasks:
+                        - id: recover:fix-ci
+                          title: Fix CI
+                          uses: mohist/opencode
+                      retrySelf: true
+            checks: []
+        """);
+
+        var handlers = definition.Stages.Single().Tasks.Single().Recovery!.Handlers;
+        Assert.Equal("errorCode=script-failed", handlers[0].When);
+        Assert.Null(handlers[1].When);
+
+        var emitted = WorkflowYamlSerializer.ToYaml(definition);
+        Assert.Contains("when: errorCode=script-failed", emitted);
+        Assert.DoesNotContain("when: null", emitted);
+    }
+
+    [Fact]
+    public void WorkflowYamlParser_RejectsDefaultRecoveryHandlerBeforeExplicitHandler()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks:
+              - id: verify
+                title: Verify
+                uses: core/script
+                recovery:
+                  handlers:
+                    - retrySelf: true
+                    - when: errorCode=script-failed
+                      retrySelf: true
+            checks: []
+        """));
+
+        Assert.Contains("default handler must be last", ex.Message);
+    }
+
+    [Fact]
     public void WorkflowYamlParser_ProfileWithoutDescriptionYieldsNullDescription()
     {
         var definition = MohistWorkflow.ParseYaml("""

@@ -28,7 +28,7 @@ plan → approval → build → check → approval → integrate（sequential，
 
 - 每个 stage 以 `workspace-prepare` 开头，task 总在就位的 workspace 上执行。
 - **plan**：`proposal → specs → design → tasks → self-review`。`self-review` 用 `expect.markers` 声明 `<promise>PASS/FAIL</promise>`，`failIf` 把 FAIL 映射成 task 失败；recovery handler `when: promise=FAIL` 触发修复 task 后 `retrySelf`。stage check `plan-artifacts`（`mohist/openspec-artifacts`）验证 openspec 产物齐全。
-- **build**：`load-tasks`（`mohist/openspec-tasks`）按 `tasks.json` 展开子 task，prompt 由 `mohist/openspec-task-prompt` 组合；`verify` 跑 `vars.ci.verify`，`errorCode=script-failed` → 修复 agent → `retrySelf`。
+- **build**：`load-tasks`（`mohist/openspec-tasks`）按 `tasks.json` 展开子 task，prompt 由 `mohist/openspec-task-prompt` 组合；`verify` 跑 `vars.ci.verify`，失败时由默认 recovery 的 `recover:fix-ci` 诊断并修复，再 `retrySelf`。
 - **check**：`ai-review` 复用与 `self-review` 相同的 promise-marker + recovery 模式。
 - **审批反馈**：profile 顶层 `approval.feedback.task` 声明 `apply-feedback`，session 取被驳回 stage 的同名 session，反馈修复延续该 stage 的上下文。
 - **rebase 冲突统一走 task-level recovery**：`mohist/rebase` 冲突时返回 `errorCode: conflict` 并保留 rebase 进行中，嵌套 handler 派 agent 解冲突并完成 rebase（该 handler 不 `retrySelf`，agent 自己收尾）。恢复 prompt 用命名模板引用（如 `${{ prompts.resolve-rebase-conflicts }}`），模板可访问 `${{ failure.output }}`。

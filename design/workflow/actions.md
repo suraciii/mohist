@@ -91,7 +91,8 @@ VALUE。`_output` 不读取文件系统，evidence 也不会把它当作可抓�
 Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。
 
 Recovery `when` 可以匹配任意字段，例如 `errorCode=base-moved`、`promise=FAIL`、
-`errorCode=conflict`。
+`errorCode=conflict`。没有 `when` 的最后一个 handler 是失败结果的兜底，不匹配 Action
+output；它可以处理 executor 在 Action 完成后发现的失败，例如工作区不干净。
 
 系统没有全局 error enum，Engine 也不理解具体错误含义。Recovery 设计见
 [`recovery.md`](recovery.md)。
