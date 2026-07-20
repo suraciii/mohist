@@ -79,14 +79,12 @@ describe("WorkExecutor rawWith", () => {
     const registry = new ActionRegistry()
     registry.register("test/capture-parent-context", async (ctx) => {
       capturedContext = ctx
-      return { status: "success" }
+      return { output: null }
     })
     const executor = new WorkExecutor(
       registry,
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       {} as never,
-      {} as never,
-      null,
       workDir,
     )
     const workItem: RenderedWorkItem = {
