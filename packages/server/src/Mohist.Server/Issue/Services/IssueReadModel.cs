@@ -47,6 +47,7 @@ public class IssueReadModel
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
+    public bool CanBeParent { get; set; }
     public IssueStartBlockerDto? Blocker { get; set; }
     public string? RepositoryName { get; set; }
     public RepositoryInfo? Repository { get; set; }
@@ -54,6 +55,7 @@ public class IssueReadModel
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
     public IssueParentRef? ParentIssueRef { get; set; }
     public ChildIssuesSummary? ChildIssuesSummary { get; set; }
+    public IssueChildRef[] Children { get; set; } = [];
     public IssueFeedbackDto[] Feedback { get; set; } = [];
 }
 

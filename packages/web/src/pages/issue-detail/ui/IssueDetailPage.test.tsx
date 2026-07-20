@@ -789,10 +789,10 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
     const description = await waitFor(() => screen.getByTestId('description-section'))
     expect(description.className).not.toContain('border-gray-200')
 
-    const comments = screen.getByTestId('comments-section')
+    const comments = await waitFor(() => screen.getByTestId('comments-section'))
     expect(comments.className).not.toContain('border-gray-200')
 
-    const commits = screen.getByTestId('commits-section')
+    const commits = await waitFor(() => screen.getByTestId('commits-section'))
     expect(commits.className).not.toContain('border-gray-200')
   })
 })

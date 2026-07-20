@@ -41,13 +41,13 @@ export interface RebaseRecoveryResult {
   workspace: RebaseRecoveryWorkspaceView
 }
 
-export function useRebaseRecovery(issueNumber: number): RebaseRecoveryResult {
+export function useRebaseRecovery(issueNumber: number, enabled: boolean = true): RebaseRecoveryResult {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
   const [rebaseQueued, setRebaseQueued] = useState(false)
 
-  const { data, isLoading } = useWorkspaceStatus(issueNumber, true)
+  const { data, isLoading } = useWorkspaceStatus(issueNumber, enabled)
 
   const rebaseMutation = useMutation({
     mutationFn: () => rebaseIssue(issueNumber, projectId),

@@ -94,12 +94,12 @@ export function useLabels() {
   })
 }
 
-export function useIssueDiff(number: number) {
+export function useIssueDiff(number: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['issues', number, projectId, 'diff'],
     queryFn: () => getIssueDiff(number, projectId),
-    enabled: number > 0 && !!projectId,
+    enabled: enabled && number > 0 && !!projectId,
   })
 }
 
@@ -116,12 +116,12 @@ export function useIssueEvents(number: number, enabled: boolean = true) {
   return useQuery(issueEventsQueryOptions(projectId, number, enabled))
 }
 
-export function useIssueCommits(number: number) {
+export function useIssueCommits(number: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['issues', number, projectId, 'commits'],
     queryFn: () => getIssueCommits(number, projectId),
-    enabled: number > 0 && !!projectId,
+    enabled: enabled && number > 0 && !!projectId,
   })
 }
 

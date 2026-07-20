@@ -395,6 +395,7 @@ describe('Control workspace: approval-required path', () => {
     const approveBtn = within(surface).getByTestId('runtime-action-approve')
     expect(approveBtn.getAttribute('data-primary')).toBe('true')
 
+    await waitFor(() => within(surface).getByTestId('runtime-evidence'))
     expect(within(surface).getByTestId('runtime-evidence')).toBeTruthy()
     expect(within(surface).getByTestId('runtime-evidence-list')).toBeTruthy()
 
@@ -668,6 +669,7 @@ describe('Control workspace: failed path', () => {
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(surface.getAttribute('data-summary')).toBe('failed')
 
+    await waitFor(() => within(surface).getByTestId('runtime-evidence'))
     expect(within(surface).getByTestId('runtime-evidence')).toBeTruthy()
     expect(within(surface).getByTestId('runtime-evidence-list')).toBeTruthy()
 

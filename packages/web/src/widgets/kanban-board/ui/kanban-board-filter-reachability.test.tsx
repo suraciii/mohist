@@ -78,15 +78,16 @@ describe('First-screen filter/search/sort reachability', () => {
   })
 
   describe('Desktop FilterBar is a single compact row above the board', () => {
-    it('exposes search-input, priority chips, label affordance, and all three sort buttons in a single flex-wrap row', () => {
+    it('exposes search-input, priority chips, label affordance, repository selector, and all three sort buttons in a single flex-wrap row', () => {
       const issues = [
-        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: { kind: 'bug' } }),
+        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: { kind: 'bug' }, repositoryName: 'web' }),
         makeIssue({
           number: 2,
           status: IssueStatus.InProgress,
           labels: { kind: 'feature' },
+          repositoryName: 'server',
         }),
-        makeIssue({ number: 3, status: IssueStatus.Done }),
+        makeIssue({ number: 3, status: IssueStatus.Done, repositoryName: 'web' }),
       ]
       renderWith(issues)
 
@@ -97,6 +98,7 @@ describe('First-screen filter/search/sort reachability', () => {
       expect(within(filterBar).getByTestId('priority-chip-p1')).toBeInTheDocument()
       expect(within(filterBar).getByTestId('priority-chip-p2')).toBeInTheDocument()
       expect(within(filterBar).getByTestId('label-chip')).toBeInTheDocument()
+      expect(within(filterBar).getByTestId('repository-filter')).toBeInTheDocument()
       expect(within(filterBar).getByTestId('sort-priority')).toBeInTheDocument()
       expect(within(filterBar).getByTestId('sort-number')).toBeInTheDocument()
       expect(within(filterBar).getByTestId('sort-updated')).toBeInTheDocument()
