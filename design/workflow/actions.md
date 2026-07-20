@@ -74,8 +74,9 @@ artifacts:
 `expect` 是由 Workflow 拥有的 task 完成契约，与 Action Input 分离。作者可见语义
 （失败规则、与 `artifacts` 的搭配）见
 [docs 的 expect 节](../../docs/workflow-definition.md#expect--完成要求)。Runner 的
-Workflow task executor 同时接收展开后的 Action Input 和 `expect`，在 Action 执行后
-应用完成判断；Action 与 Runtime 模块都不解释它。
+Workflow task executor 同时接收展开后的 Action Input 和 `expect`，只在 Action 成功后
+应用完成判断；Action 失败、取消或超时时直接保留原始失败，不读取文件或 marker。Action 与
+Runtime 模块都不解释它。
 
 marker 的 `path` 可以是特殊值 `_output`，表示对回合最终 assistant 文本匹配，而不是
 文件内容。task executor 从 Action result 携带的回合事实中取得该文本；它不进入

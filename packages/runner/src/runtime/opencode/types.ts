@@ -126,6 +126,7 @@ export type RuntimeErrorKind =
   | "missing-session"
   | "incompatible-runtime"
   | "permission-required"
+  | "deadline-exceeded"
   | "interrupted"
   | "turn-failed"
 

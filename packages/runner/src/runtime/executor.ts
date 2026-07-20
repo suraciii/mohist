@@ -160,7 +160,10 @@ export class WorkExecutor {
       // never be serialized into WorkItemResult.output, recovery matching,
       // setVars projections, captured outputs, or artifacts (design D4).
       const { publicActionResult, turnFact } = stripRunnerPrivateFacts(result)
-      const completion = await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
+      const actionSucceeded = publicActionResult.status === "success" || publicActionResult.status === "completed"
+      const completion = actionSucceeded
+        ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
+        : null
       const projected = projectTaskOutput(work, publicActionResult, completion)
       const normalized = normalize(work, projected)
       const recoveryResult = tryRecovery(work, normalized, variables)
@@ -319,10 +322,11 @@ function stripRunnerPrivateFacts(result: ActionResult): {
 function projectTaskOutput(
   work: RenderedWorkItem,
   result: ActionResult,
-  completion: CompletionEvaluation,
+  completion: CompletionEvaluation | null,
 ): ActionResult {
   const uses = work.uses?.trim().toLowerCase() ?? ""
   if (PROMISE_PROJECTED_ACTIONS.has(uses)) {
+    if (completion === null) return { ...result, output: null }
     const value = promiseValue(completion.matched ?? null)
     const projectedOutput = value !== null ? JSON.stringify({ promise: value }) : null
     // For opencode, an unmet completion contract (no promise marker,
@@ -333,6 +337,7 @@ function projectTaskOutput(
     const message = completion.satisfied ? result.message : completion.message
     return { ...result, status: statusFlip, output: projectedOutput, message }
   }
+  if (completion === null) return result
   // Action failure stays an Action failure. An unmet expectation only
   // fails the task when the Action itself succeeded (so an Action that
   // returned `failure` does not get re-judged by completion).

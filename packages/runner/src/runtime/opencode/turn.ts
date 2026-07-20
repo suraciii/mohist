@@ -59,6 +59,7 @@ import {
   DEFAULT_PROVIDER_ERROR_POLICY,
   isNonRecoverableProviderRetry,
   normalizeAbortUnconfirmed,
+  normalizeDeadlineExceeded,
   isTransportFailure,
   normalizeInterrupted,
   normalizeInvalidInput,
@@ -138,6 +139,7 @@ export async function runTurn(
       policy,
       signal: effectiveSignal,
       deadlineMs,
+      deadlineExpired: () => timeoutHandle?.timedOut() === true,
       onEvent: deps.onEvent,
     })
     if (promptResult.kind === "failure") {
@@ -273,18 +275,19 @@ interface ExecutePromptArgs {
   readonly policy: RuntimeProviderErrorPolicy
   readonly signal: AbortSignal
   readonly deadlineMs?: number
+  readonly deadlineExpired: () => boolean
   readonly onEvent?: (event: RuntimeGlobalEvent) => void
 }
 
 type PromptSuccess = { kind: "success"; value: { facts: RuntimeTurnFacts; diagnostics: RuntimeDiagnostic[] } }
 type PromptFailure = {
   kind: "failure"
-  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizePermissionRequired> | ReturnType<typeof normalizeAbortUnconfirmed>
+  error: ReturnType<typeof normalizeInterrupted> | ReturnType<typeof normalizeDeadlineExceeded> | ReturnType<typeof normalizeTurnFailed> | ReturnType<typeof normalizeUnavailableRuntime> | ReturnType<typeof normalizeMissingSession> | ReturnType<typeof normalizePermissionRequired> | ReturnType<typeof normalizeAbortUnconfirmed>
   diagnostics: RuntimeDiagnostic[]
 }
 type PromptResult = PromptSuccess | PromptFailure
 
-type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "signal"
+type AbortReason = "provider" | "reconciliation-failed" | "permission-reply-failed" | "deadline" | "signal"
 
 interface ProviderRetryStatus {
   readonly type?: string
@@ -365,7 +368,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
 
   let abortHandler: (() => void) | null = null
   const onAbort = () => {
-    resolveAbort("signal")
+    resolveAbort(args.deadlineExpired() ? "deadline" : "signal")
   }
   if (args.signal.aborted) {
     onAbort()
@@ -423,7 +426,7 @@ async function executePrompt(args: ExecutePromptArgs): Promise<PromptResult> {
       return finishAbortedTurn(args, retryTracker, "reconciliation-failed", reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (args.signal.aborted) {
-      return finishAbortedTurn(args, retryTracker, "signal", reconciliationFailure, permissionFailure, promptDiagnostics)
+      return finishAbortedTurn(args, retryTracker, args.deadlineExpired() ? "deadline" : "signal", reconciliationFailure, permissionFailure, promptDiagnostics)
     }
     if (isTransportFailure(promptOutcome.cause)) {
       return finishTransportFailure(args, promptOutcome.cause, promptDiagnostics)
@@ -554,6 +557,13 @@ async function finishAbortedTurn(
     ...promptDiagnostics,
   ]
   const abortResult = await abortAndConfirmSession(args.client, args.sessionId, args.directory)
+  if (reason === "deadline") {
+    const diagnostics = abortResult.ok
+      ? contextDiagnostics
+      : [...contextDiagnostics, { severity: "error" as const, code: "abort-unconfirmed", message: abortResult.message }]
+    const error = normalizeDeadlineExceeded(args.deadlineMs ?? 0, diagnostics)
+    return { kind: "failure", error, diagnostics: [...error.diagnostics] }
+  }
   if (!abortResult.ok) {
     const error = normalizeAbortUnconfirmed(abortResult.message, contextDiagnostics)
     return { kind: "failure", error, diagnostics: [...error.diagnostics] }

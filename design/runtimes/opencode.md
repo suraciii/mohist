@@ -186,8 +186,9 @@ Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执�
 
 `client.session.prompt()` 本身就是携带完成结果的请求，不存在第二次 `wait()`。
 `OpenCodeRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。Workflow task
-executor 在 Action 返回后应用 `expect`、artifacts、`failIf`、Action Output 与 recovery
-语义；AgentJob executor 通过由 Agent 拥有的契约校验和报告自己的结果。
+executor 只在 Action 成功后应用 `expect`、artifacts、`failIf`、Action Output 与 recovery
+语义；Action 失败、取消或超时时保留原始失败，不读取文件或 marker。AgentJob executor
+通过由 Agent 拥有的契约校验和报告自己的结果。
 
 SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的 Prompt 响应决定回合
 是否结束。工作回合的执行期限由 Workflow task executor 与 AgentJob executor 各自
@@ -213,8 +214,9 @@ Prompt ID 或 replay reconstruction。
 
 1. 期限前 5 分钟，对当前物理 Session 调用 `client.session.promptAsync()` 注入一条
    收尾警告后立即返回，不等待其完成。期限不足 5 分钟时，警告在回合开始即注入。
-2. 期限到达时调用 `client.session.abort()` 终止回合，向调用者返回 interrupted
-   result。
+2. 期限到达时 runner 立即将回合结果固定为 `deadline-exceeded`，随后调用
+   `client.session.abort()` 收尾。abort 与状态核对只能补充诊断，不能改变 timeout 主结果；
+   迟到的 Prompt 响应也不能翻转该结果。
 
 警告文案任务无关，大意固定、措辞由实现维护：你将在约 5 分钟后被中断——立即停止
 新工作，提交当前改动，在本任务的进度渠道留下记录，然后结束。警告不引用具体
@@ -236,6 +238,7 @@ abort，最坏情况退化为无警告的直接终止。警告与终止都投影
 - 不把期限值暴露给 prompt：agent 没有可靠时钟，静态数字不可执行；可执行的
   「即将终止」信号由警告在需要时送达。
 - 不在终止后自动提交或回滚残留现场；现场处理维持现状。
+- 不在终止后替换、清除或重建 Runtime Session 绑定；Reset 只能由用户显式执行。
 - 不为 housekeeping prompt（如 worktree cleanup follow-up）引入「回合角色」
   概念：警告文案与其指令（提交或还原）语义相容，统一适用。
 
@@ -287,7 +290,8 @@ Runtime 使用当前锁定 SDK 的类型化调用面执行
 Session 绑定保持不变，不提示 Reset。
 
 abort 请求失败、返回值不确认成功，或 status 仍为 busy/retry 时，Runtime 返回
-`abort-unconfirmed` 诊断，不声称回合已经停止。OpenCode 是第三方依赖；Mohist 不修改其
+`abort-unconfirmed` 诊断，不声称回合已经停止。对 runner deadline，该诊断附加在
+`deadline-exceeded` 结果上，不覆盖 timeout。OpenCode 是第三方依赖；Mohist 不修改其
 重试实现，因此结构化分类不足时长期保留 message 兜底与 Mohist 自己的重试上限。
 
 ## Session 命令
@@ -351,7 +355,7 @@ directory 时还必须与当前 workDir 一致。相同 request ID 在同一 tur
 
 在 `OpenCodeRuntime` 边界把 SDK error 规范化为少量 Mohist result：`invalid input`、
 `unavailable runtime`、`missing Session`、`incompatible runtime`、
-`permission required`、`interrupted` 与 `turn failed`。Provider-specific detail 只作为
+`permission required`、`deadline exceeded`、`interrupted` 与 `turn failed`。Provider-specific detail 只作为
 诊断信息，不成为 Action output 字段。不要建立全局 Workflow error enum；各调用者通过
 自己的 TaskRun 或 AgentJob 契约报告失败。
 

@@ -34,6 +34,7 @@ export {
   isNonRecoverableProviderRetry,
   errorKindFor,
   normalizeAbortUnconfirmed,
+  normalizeDeadlineExceeded,
   normalizeInterrupted,
   normalizeInvalidInput,
   normalizeIncompatibleRuntime,
