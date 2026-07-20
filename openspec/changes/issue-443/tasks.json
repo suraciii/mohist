@@ -4,9 +4,9 @@
   "tasks": [
     {
       "id": "T-001",
-      "title": "Switch Workflow Action output to a structured runner-server contract",
+      "title": "Implement structured Workflow Action output end to end",
       "spec": "specs/action-output/spec.md",
-      "description": "Atomically migrate the runner Action boundary, shared report envelope, and server Workflow boundary from serialized output strings to structured JSON. Convert all built-in Action producers and runner consumers, add object-or-null validation, expose core/process as {stdout, exitCode}, preserve check and AgentJob behavior at their domain boundaries, store TaskRun output directly, and project the same object into setVars, recovery, task references, dynamic artifact capture, and task status APIs.",
+      "description": "Atomically migrate the runner Action boundary, shared report envelope, server Workflow boundary, task-status API, and Web consumers from serialized output strings to structured JSON. Convert all built-in Action producers and runner consumers, add object-or-null validation, expose core/process as {stdout, exitCode}, preserve check and AgentJob behavior at their domain boundaries, and project the same object into setVars, recovery, task references, dynamic artifact capture, persistence, and task details. Remove Web output reparsing in the same deliverable so no intermediate revision drops task output.",
       "acceptanceCriteria": [
         "ActionResult success output is typed as JsonObject | null, succeed accepts that shape, and one runtime validator shared by task and check execution rejects a string (including serialized object text), array, scalar, cyclic object, non-finite number, undefined/function/bigint value, or other non-JSON value with an actionable invalid-action-output failure before completion, recovery output matching, artifact capture, or setVars runs; null remains a successful output.",
         "core/process success output is exactly {stdout: <trimmed standard output>, exitCode: <numeric exit code>}; its existing top-level WorkItemResult.exitCode fact remains available, and runner tests prove output.stdout and output.exitCode retain string and number types.",
@@ -18,40 +18,22 @@
         "A completed task's persisted object is projected under tasks.<definitionId>.outputs without conversion, and an integration spec proves a later task resolves ${{ tasks.process.outputs.stdout }} to a string and ${{ tasks.process.outputs.exitCode }} to a number. Historical non-object TaskRun output is neither rewritten nor projected as valid task output.",
         "Check dispatch output is a structured result-row array whose passing rows contain object-or-null Action output, and server check translation consumes the JsonElement array directly. AgentJob report/terminal-output and failure-category behavior remain unchanged through an explicit Agent adapter; focused regression tests cover both shared-envelope variants.",
         "TaskStatusView.Output is JsonElement? and server status/timeline responses expose object-valued TaskRun output as a nested JSON object or null, mapping historical non-object values to null; API/spec tests cover core/process output, another built-in Action output, null output, and invalid report rejection.",
+        "WorkflowTimelineTask.output and related Web task-state inputs accept Record<string, unknown> | null (or the repository's equivalent structured JSON type), not string output.",
+        "parseTimelineTaskOutput, the TaskProgressPanel-local parseTaskOutput helper, and string JSON parsing fallbacks used for task-output/delivery metadata are removed; StageBar and TaskProgressPanel pass API output directly to the existing structured-output renderer.",
+        "A completed core/process task with {stdout: \"release-ready\", exitCode: 0} displays both fields and their values in every task-detail/progress surface without an intermediate JSON.parse; null output renders no fabricated object or wrapped string.",
+        "Existing built-in PR delivery output remains discoverable from object-valued task output with unchanged prNumber, prUrl, mergeCommitSha, and targetBranch semantics; task status, failure guidance, logs, artifacts, and reading-flow layout remain unchanged.",
+        "Web unit/spec coverage exercises structured core/process output, structured PR output, and null output in both StageBar and TaskProgressPanel paths.",
         "The built-in mohist/github-pr profile regression covers its existing setVars fields, task-output references, recovery output matching, and unchanged Action output fields using the structured report contract.",
         "design/workflow/actions.md no longer lists string Action output and core/process bare stdout as an implementation gap; no Action manifest, input validation, output declaration/schema, or new Workflow YAML syntax is introduced.",
-        "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test all pass with no real network, process, filesystem, database service, or wall-clock dependency added to tests."
+        "npm run typecheck -w packages/runner, npm test -w packages/runner, npm test, npm run typecheck -w packages/web, and npm run test:run -w packages/web all pass with no real network, process, filesystem, database service, or wall-clock dependency added to tests."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Structured Action/result types and validation across packages/runner/src/core, actions, runtime, and server connection; JsonElement runner-report and Workflow persistence/projection contract across packages/server; updated runner/server tests and the closed output gap in design/workflow/actions.md",
+      "output": "Structured Action/result types and validation across packages/runner; JsonElement runner-report, Workflow persistence/projection, and task-status API across packages/server; direct structured-output rendering across packages/web; runner/server/Web regression tests; and the closed output gap in design/workflow/actions.md",
       "dependsOn": [],
       "passes": false,
-      "notes": "This is one atomic task because runner and server wire formats are intentionally incompatible in mixed versions. Keep ActionResult.output narrower (JsonObject | null) than shared WorkItemResult.output (JsonValue | null). Key boundaries: packages/runner/src/core/types.ts, actions/action-result.ts, runtime/executor.ts, runtime/check-execution.ts, runtime/set-vars.ts, runtime/recovery.ts, runtime/artifact-capture.ts, server/connection.ts; packages/server Api/RunnerRoutes.cs, Runner/Grains/IRunnerGrain.cs, Runner/Services/WorkflowItemTranslator.cs, Workflow/Domain/Run/WorkItem.cs, Workflow/Grains/WorkflowWorkLifecycle.cs, Workflow/Services/WorkflowDispatchHelpers.cs, Workflow/Services/WorkflowStatusMapper.cs, and AgentJob report handling. Do not wire the currently disconnected capturedOutputs field into the server."
-    },
-    {
-      "id": "T-002",
-      "title": "Render structured task output directly in Web workflow views",
-      "spec": "specs/action-output/spec.md#Task details expose structured output",
-      "description": "Migrate Web task timeline and progress models to consume the structured object-or-null API delivered by T-001. Remove JSON-string parsing and compatibility fallbacks from task-output presentation and delivery metadata extraction while preserving the existing structured JSON display and workflow reading flow.",
-      "acceptanceCriteria": [
-        "WorkflowTimelineTask.output and related task-state inputs accept Record<string, unknown> | null (or the repository's equivalent structured JSON type), not string output.",
-        "parseTimelineTaskOutput, the TaskProgressPanel-local parseTaskOutput helper, and string JSON parsing fallbacks used for task-output/delivery metadata are removed; StageBar and TaskProgressPanel pass API output directly to the existing structured-output renderer.",
-        "A completed core/process task with {stdout: \"release-ready\", exitCode: 0} displays both fields and their values in every task-detail/progress surface without an intermediate JSON.parse.",
-        "Existing built-in PR delivery output remains discoverable from object-valued task output with the same prNumber, prUrl, mergeCommitSha, and targetBranch semantics.",
-        "A null output renders no fabricated empty object or wrapped string, and task status, failure guidance, logs, artifacts, and reading-flow layout remain unchanged.",
-        "Web unit/spec coverage exercises structured core/process output, structured PR output, and null output in both StageBar and TaskProgressPanel paths; npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
-      ],
-      "priority": 2,
-      "mode": "AFK",
-      "type": "WRITE",
-      "output": "Structured workflow-task output types and direct rendering in packages/web/src/entities/issue, widgets/issue-workflow, and shared delivery metadata helpers, with Web regression tests",
-      "dependsOn": [
-        "T-001"
-      ],
-      "passes": false,
-      "notes": "Consumes the TaskStatusView.Output API established by T-001, so it cannot run in parallel. Preserve the current JSON renderer and layout; this task changes the data contract, not the visual design. Key files: packages/web/src/entities/issue/model/workflow-timeline.ts, widgets/issue-workflow/ui/format.ts, StageBar.tsx, TaskProgressPanel.tsx, shared/lib/pr-delivery.ts, and their tests."
+      "notes": "This is one atomic task because runner/server wire formats and the server/Web task-output API are incompatible in mixed versions. Keep ActionResult.output narrower (JsonObject | null) than shared WorkItemResult.output (JsonValue | null). Key boundaries: packages/runner/src/core/types.ts, actions/action-result.ts, runtime/executor.ts, runtime/check-execution.ts, runtime/set-vars.ts, runtime/recovery.ts, runtime/artifact-capture.ts, server/connection.ts; packages/server Api/RunnerRoutes.cs, Runner/Grains/IRunnerGrain.cs, Runner/Services/WorkflowItemTranslator.cs, Workflow/Domain/Run/WorkItem.cs, Workflow/Grains/WorkflowWorkLifecycle.cs, Workflow/Services/WorkflowDispatchHelpers.cs, Workflow/Services/WorkflowStatusMapper.cs, and AgentJob report handling; packages/web entities/issue/model/workflow-timeline.ts, widgets/issue-workflow/ui/format.ts, StageBar.tsx, TaskProgressPanel.tsx, shared/lib/pr-delivery.ts, and their tests. Preserve the current Web renderer/layout and do not wire the disconnected capturedOutputs field into the server."
     }
   ]
 }
