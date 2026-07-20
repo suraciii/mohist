@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Domain;
 
-public class ApprovalFeedbackTests
+public partial class ApprovalFeedbackTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

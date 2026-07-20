@@ -1,16 +1,19 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { ActionRegistry, createDefaultRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { TaskLogCollector } from "../src/runtime/task-log.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { WorkspaceManager } from "../src/runtime/workspace.js"
+import { setProcessSpawnerForTest } from "../src/system/process.js"
+import { FakeProcessSpawner } from "./support/fake-process.js"
 
 let workDir: string
+let processSpawner: FakeProcessSpawner
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -23,11 +26,14 @@ const nonGitRunner: GitRunner = async () => ({
 beforeEach(async () => {
   workDir = await mkdtemp(join(tmpdir(), "mohist-task-log-executor-"))
   setExecutorGitRunnerForTest(nonGitRunner)
+  processSpawner = new FakeProcessSpawner()
+  setProcessSpawnerForTest(processSpawner.spawn)
 })
 
 afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
   setExecutorGitRunnerForTest(null)
+  setProcessSpawnerForTest(null)
 })
 
 function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
@@ -89,6 +95,33 @@ describe("WorkExecutor forwards action output to the task log", () => {
     expect(allSeqs).toEqual([...allSeqs].sort((a, b) => a - b))
     expect(rebaseSeqs[1]).toBe(rebaseSeqs[0]! + 1)
     expect(others.every((seq) => seq > rebaseSeqs[0]! || seq < rebaseSeqs[1]!)).toBe(true)
+  })
+
+  it("ProjectsCoreProcessOutputThroughSetVars", async () => {
+    const patches: Array<Record<string, unknown>> = []
+    const executor = new WorkExecutor(
+      createDefaultRegistry(),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      { patchRunVars: async (_workflowRunId: string, vars: Record<string, unknown>) => { patches.push(vars) } } as never,
+      workDir,
+    )
+    const running = executor.execute(buildWork({
+      uses: "core/process",
+      with: { command: "fake-command", args: [] },
+      setVars: {
+        "release.result": "output.stdout",
+        "release.exitCode": "output.exitCode",
+      },
+    }), new AbortController().signal)
+    await vi.waitFor(() => expect(processSpawner.children).toHaveLength(1))
+    processSpawner.children[0]!.writeStdout("release-ready\n")
+    processSpawner.children[0]!.close(0)
+
+    await expect(running).resolves.toMatchObject({
+      status: "completed",
+      output: { stdout: "release-ready", exitCode: 0 },
+    })
+    expect(patches).toEqual([{ release: { result: "release-ready", exitCode: 0 } }])
   })
 
   it("PassesWorkspacePreparationOutputThroughWorkspacePrepSource", async () => {

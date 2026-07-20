@@ -50,6 +50,33 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task Dispatch_AfterCoreProcessOutput_ExposesTypedTaskOutputFields()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+            [
+                new("process", "Run process", "core/process"),
+                new("consume", "Consume process output", "spec/task")
+            ],
+            [])
+        ]));
+
+        var (process, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, process.WorkId, new WorkResult(
+            "completed",
+            Output: JSON.DeserializeElement("""{"stdout":"artifact.zip","exitCode":0}""")));
+
+        var (consume, _) = await PollWorkAnyAsync();
+        Assert.NotNull(consume.Variables);
+        var variables = JsonSerializer.Deserialize<JsonElement>(consume.Variables);
+        var output = variables.GetProperty("tasks").GetProperty("process").GetProperty("outputs");
+        Assert.Equal("artifact.zip", output.GetProperty("stdout").GetString());
+        Assert.Equal(JsonValueKind.Number, output.GetProperty("exitCode").ValueKind);
+        Assert.Equal(0, output.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
     public async Task Dispatch_RuntimeVariablesTakePrecedenceOverLowerPrecedenceSources()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
