@@ -93,3 +93,4 @@
 - Parallel-check specs now report every declared check result, matching the structured check-batch contract enforced at the runner/server boundary.
 - Check-set follow-up verification passes: `npm test` (including 2,878 server specs, 4,929 Web tests, and 1,162 runner tests).
 - Added active-suite coverage for actual fake-process `core/process` execution through `setVars`, typed process fields in later dispatch variables, and configured `core/process` approval-feedback summary adaptation for plain, sectioned, empty, null, and non-adapted output.
+- Core-process coverage verification passes: `npm test` (including 1,259 server unit tests, 2,879 server specs, 4,929 Web tests, and 1,163 runner tests).
