@@ -175,6 +175,8 @@ public sealed class IssueParentRef
     public string Title { get; set; } = null!;
 }
 
+public sealed record ParentIssueContext(string Title, string? Body);
+
 public sealed class ChildIssuesSummary
 {
     public bool HasChildren { get; set; }
