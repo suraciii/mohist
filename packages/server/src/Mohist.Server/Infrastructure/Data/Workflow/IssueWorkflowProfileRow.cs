@@ -27,10 +27,5 @@ public class IssueWorkflowProfile
     /// </summary>
     public string Variables { get; set; } = "{}";
 
-    /// <summary>
-    /// Issue 级提示词。key → body。
-    /// </summary>
-    public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
-
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

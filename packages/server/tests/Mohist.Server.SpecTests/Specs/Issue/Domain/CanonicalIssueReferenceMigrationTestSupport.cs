@@ -126,8 +126,8 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
     {
         var emptyJson = "{}";
         return context.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO "IssueWorkflowProfiles" ("IssueId", "Variables", "Prompts", "UpdatedAt")
-            VALUES ({issueId}, {emptyJson}, {emptyJson}, {SeedTime})
+            INSERT INTO "IssueWorkflowProfiles" ("IssueId", "Variables", "UpdatedAt")
+            VALUES ({issueId}, {emptyJson}, {SeedTime})
             """);
     }
 

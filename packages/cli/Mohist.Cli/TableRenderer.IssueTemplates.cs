@@ -92,7 +92,6 @@ internal sealed partial class TableRenderer
 
         RenderWorkflowProfileTemplate(hasCustomTemplate, yaml);
         RenderWorkflowProfileVariables(data["variables"]);
-        RenderWorkflowProfilePrompts(data["prompts"]);
     }
 
     private void RenderWorkflowProfileTemplate(bool hasCustomTemplate, string? yaml)
@@ -179,33 +178,6 @@ internal sealed partial class TableRenderer
             return jv.ToJsonString();
         }
         return value.ToJsonString();
-    }
-
-    private void RenderWorkflowProfilePrompts(JsonNode? prompts)
-    {
-        _out.WriteLine("");
-        _out.WriteLine("prompts:");
-        if (prompts is not JsonObject obj || obj.Count == 0)
-        {
-            _out.WriteLine("  (none)");
-            return;
-        }
-
-        var ordered = obj.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
-        foreach (var kvp in ordered)
-        {
-            var key = kvp.Key;
-            var raw = kvp.Value is JsonValue jv && jv.TryGetValue<string>(out var s) ? s : null;
-            if (raw is null)
-            {
-                _out.WriteLine($"  {key}: <invalid>");
-                continue;
-            }
-            var preview = Truncate(raw.Replace("\r\n", "\n"), 200);
-            _out.WriteLine($"  {key}:");
-            foreach (var line in preview.Split('\n'))
-                _out.WriteLine($"    | {line.TrimEnd('\r')}");
-        }
     }
 
     private void RenderWorkflowProfilePrompt(JsonNode? data)

@@ -6,7 +6,7 @@ internal static partial class IssueCommands
 {
     private static Command BuildWorkflowConfigSet(MohistCliApi api)
     {
-        var cmd = new Command("set", "Composite config writes (template / variables / prompts)");
+        var cmd = new Command("set", "Composite config writes (template / variables)");
         var numberArg = NumberArg();
         var templateOpt = new Option<string?>("--template")
         {
@@ -22,18 +22,12 @@ internal static partial class IssueCommands
             Description = "Set a stage-scoped variable as '<stage>.k=v'. Repeatable; merged into the same PATCH.",
             AllowMultipleArgumentsPerToken = true,
         };
-        var promptOpt = new Option<string[]?>("--prompt")
-        {
-            Description = "Set a prompt as 'key=body' or 'key=@<file>'. Repeatable; one PUT /workflow-profile/prompts/<key> per occurrence.",
-            AllowMultipleArgumentsPerToken = true,
-        };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(templateOpt);
         cmd.Options.Add(varOpt);
         cmd.Options.Add(stageVarOpt);
-        cmd.Options.Add(promptOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -43,22 +37,20 @@ internal static partial class IssueCommands
             var template = ctx.GetValue(templateOpt);
             var vars = ctx.GetValue(varOpt);
             var stageVars = ctx.GetValue(stageVarOpt);
-            var prompts = ctx.GetValue(promptOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
             var templateProvided = ctx.GetResult(templateOpt) is not null;
             var varProvided = ctx.GetResult(varOpt) is not null;
             var stageVarProvided = ctx.GetResult(stageVarOpt) is not null;
-            var promptProvided = ctx.GetResult(promptOpt) is not null;
             return SetAsync();
 
             async Task<int> SetAsync()
             {
-                var hasAnyChange = templateProvided || varProvided || stageVarProvided || promptProvided;
+                var hasAnyChange = templateProvided || varProvided || stageVarProvided;
                 if (!hasAnyChange)
                 {
-                    api.Error.WriteLine("nothing to change — pass at least one of --template, --var, --stage-var, or --prompt");
+                    api.Error.WriteLine("nothing to change — pass at least one of --template, --var, or --stage-var");
                     return 1;
                 }
 
@@ -75,7 +67,6 @@ internal static partial class IssueCommands
                 var varsPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
                 var stagesPayload = new Dictionary<string, object?>(StringComparer.Ordinal);
                 string? templateText = null;
-                var promptPayloads = new List<(string Key, string Body)>();
 
                 if (varProvided)
                 {
@@ -148,36 +139,6 @@ internal static partial class IssueCommands
                     templateText = ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value;
                 }
 
-                if (promptProvided)
-                {
-                    foreach (var entry in prompts!)
-                    {
-                        var eq = entry.IndexOf('=');
-                        if (eq <= 0)
-                        {
-                            api.Error.WriteLine($"--prompt '{entry}' must be in 'key=body' or 'key=@<file>' form");
-                            return 1;
-                        }
-                        var key = entry[..eq];
-                        if (string.IsNullOrWhiteSpace(key))
-                        {
-                            api.Error.WriteLine($"--prompt '{entry}' has an empty key");
-                            return 1;
-                        }
-                        if (key.Contains('/'))
-                        {
-                            api.Error.WriteLine($"--prompt key '{key}' must not contain '/'");
-                            return 1;
-                        }
-
-                        var rawBody = entry[(eq + 1)..];
-                        var expanded = await api.ExpandAtFileAsync(rawBody, "--prompt");
-                        if (expanded is MohistCliApi.ExpandAtFileResult.Failure)
-                            return 1;
-                        promptPayloads.Add((key, ((MohistCliApi.ExpandAtFileResult.Success)expanded).Value));
-                    }
-                }
-
                 if (varProvided || stageVarProvided)
                 {
                     var patchBody = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -204,20 +165,6 @@ internal static partial class IssueCommands
                         nameof(MohistCliApi.TableShape.WorkflowProfile));
                     if (putExit != 0)
                         return putExit;
-                }
-
-                if (promptProvided)
-                {
-                    foreach (var prompt in promptPayloads)
-                    {
-                        var promptExit = await api.PrintPutWithOutputAsync(
-                            $"{issuePath}/prompts/{Uri.EscapeDataString(prompt.Key)}",
-                            new { body = prompt.Body },
-                            mode,
-                            nameof(MohistCliApi.TableShape.WorkflowProfilePrompt));
-                        if (promptExit != 0)
-                            return promptExit;
-                    }
                 }
 
                 return 0;

@@ -140,7 +140,7 @@ Prompts 使用独立 API，不挂在 `/workflow-profiles/{*profileId}` 下。
 - 当前实现把 system profile、project template 和 Project 的单例 workflow config 分成
   三套概念；目标模型统一为 Project-scoped `WorkflowProfile` collection。
 - 当前 `ProjectWorkflowProfile`、`IssueWorkflowProfile` 和 `WorkflowRunProfile` 记录还
-  混合保存 Variables 或 Prompt overrides；目标模型将这些资源完全分开。
+  混合保存 Variables；目标模型将这些资源完全分开。
 - 当前 Issue 还可以保存 inline template；目标模型只允许选择 Project 中已有的 Profile。
 - 当前有活动 WorkflowRun 时，Issue 的 Profile 选择会被锁定；目标模型允许记录新选择，
   但只对下一次新建的 WorkflowRun 生效。

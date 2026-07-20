@@ -1,5 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -106,6 +110,14 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var profile = await db.IssueWorkflowProfiles
+            .AsNoTracking()
+            .SingleAsync(row => row.ProjectId == project.Id && row.IssueNumber == issue.Number);
+        using var variables = JsonDocument.Parse(profile.Variables);
+        Assert.False(variables.RootElement.TryGetProperty("prompts", out _));
     }
 
     private sealed record StartProjectDto(string Id);
