@@ -73,4 +73,38 @@ describe("WorkExecutor rawWith", () => {
     expect((rawWith.task as JsonObject).with).toEqual({ options: placeholder })
     expect((renderedWith.task as JsonObject).with).toEqual({ options: agentObject })
   })
+
+  it("propagates parent issue context only through ActionContext", async () => {
+    let capturedContext: ActionContext | null = null
+    const registry = new ActionRegistry()
+    registry.register("test/capture-parent-context", async (ctx) => {
+      capturedContext = ctx
+      return { status: "success" }
+    })
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      {} as never,
+      {} as never,
+      null,
+      workDir,
+    )
+    const workItem: RenderedWorkItem = {
+      workflowRunId: "wf-parent-context",
+      workId: "work-parent-context",
+      workType: "task",
+      stage: "plan",
+      uses: "test/capture-parent-context",
+      with: { prompt: "child prompt" },
+      variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+      parentIssueContext: { title: "Parent", body: "Parent body" },
+    }
+
+    const result = await executor.execute(workItem, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(capturedContext!.parentIssueContext).toEqual({ title: "Parent", body: "Parent body" })
+    expect(capturedContext!.with).toEqual({ prompt: "child prompt" })
+    expect(capturedContext!.variables).not.toHaveProperty("parentIssueContext")
+  })
 })

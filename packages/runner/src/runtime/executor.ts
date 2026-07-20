@@ -418,6 +418,7 @@ export function baseContext(
     projectId: work.projectId,
     issueNumber: work.issueNumber,
     epicNumber: work.epicNumber,
+    parentIssueContext: work.parentIssueContext,
     ownerKind,
     agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,

@@ -96,6 +96,32 @@ describe("ServerConnection.poll recovery state", () => {
     expect(Object.prototype.hasOwnProperty.call(works[2], "recoveryRemaining")).toBe(false)
   })
 
+  it("decodes parent issue context while preserving null and absence", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify({
+        dispatches: [
+          {
+            workflowRunId: "wf-1",
+            workId: "plan-1",
+            workType: "task",
+            parentIssueContext: { title: "Parent", body: "Parent body" },
+          },
+          { workflowRunId: "wf-1", workId: "plan-2", workType: "task", parentIssueContext: null },
+          { workflowRunId: "wf-1", workId: "plan-3", workType: "task" },
+        ],
+      }),
+    }))
+
+    const connection = new ServerConnection(options())
+    const works = await connection.poll(new AbortController().signal)
+
+    expect(works[0]?.parentIssueContext).toEqual({ title: "Parent", body: "Parent body" })
+    expect(works[1]?.parentIssueContext).toBeNull()
+    expect(Object.prototype.hasOwnProperty.call(works[1], "parentIssueContext")).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(works[2], "parentIssueContext")).toBe(false)
+  })
+
   it("parses expect from the dispatch response into RenderedWorkItem.expect", async () => {
     // T-003 acceptance: "RenderedWorkItem and AddTaskInput carry
     // expect; connection.ts toWorkItem parses expect from the dispatch

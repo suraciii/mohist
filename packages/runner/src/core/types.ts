@@ -68,6 +68,11 @@ export interface TaskArtifactCapture {
  * linkage, and the owner identity (`ownerKind` + `agentJobId` for
  * agent-job work, `workflowRunId` for workflow work).
  */
+export interface ParentIssueContext {
+  title: string
+  body: string | null
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -87,6 +92,7 @@ export type WorkDispatchResponse = {
   projectId?: string | null
   issueNumber?: number | null
   epicNumber?: number | null
+  parentIssueContext?: ParentIssueContext | null
   artifacts?: string | null
   outputs?: string | null
   setVars?: string | null
@@ -161,6 +167,7 @@ export interface RenderedWorkItem {
   projectId?: string | null
   issueNumber?: number | null
   epicNumber?: number | null
+  parentIssueContext?: ParentIssueContext | null
   artifacts?: JsonObject | null
   outputs?: Array<{ name: string; from: string }> | null
   setVars?: Record<string, string> | null
@@ -238,6 +245,7 @@ export interface ActionContext {
   projectId?: string | null
   issueNumber?: number | null
   epicNumber?: number | null
+  parentIssueContext?: ParentIssueContext | null
   ownerKind?: string | null
   agentJobId?: string | null
   agentSessionId?: string | null

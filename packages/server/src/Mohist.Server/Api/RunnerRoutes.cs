@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
@@ -96,6 +97,7 @@ public static class RunnerRoutes
             HttpRequest request,
             IGrainFactory grains,
             Mohist.Server.Runner.Services.DispatchService dispatch,
+            IssueQuerier issues,
             CancellationToken ct) =>
         {
             RunnerPollRequest req = new([], []);
@@ -116,27 +118,9 @@ public static class RunnerRoutes
             var response = await dispatch.PollAsync(runnerId, req, ct);
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
-            return Results.Ok(new RunnerPollResponseDto(
-                response.Dispatches.Select(work => new WorkDispatchResponse(
-                    work.WorkflowRunId,
-                    work.WorkId,
-                    work.Uses,
-                    work.With,
-                    work.Variables,
-                    work.WorkType,
-                    work.Stage,
-                    work.Title,
-                    work.Issue?.ProjectId ?? work.ProjectId,
-                    work.Issue?.IssueNumber,
-                    work.EpicNumber,
-                    work.Artifacts,
-                    work.SetVars,
-                    work.OwnerKind,
-                    work.AgentJobId,
-                    AgentSessionId: work.AgentSessionId,
-                    Recovery: work.Recovery,
-                    RecoveryRemaining: work.RecoveryRemaining,
-                    Expect: work.Expect)).ToList()));
+            var dispatches = await Task.WhenAll(response.Dispatches.Select(work =>
+                ToWorkDispatchResponseAsync(work, issues.GetParentIssueContextAsync)));
+            return Results.Ok(new RunnerPollResponseDto(dispatches.ToList()));
         });
 
         // Dedicated runner config channel. Separate from /poll so runner-side
@@ -430,6 +414,48 @@ public static class RunnerRoutes
         return app;
     }
 
+    internal static async Task<WorkDispatchResponse> ToWorkDispatchResponseAsync(
+        WorkDispatch work,
+        Func<string, int, Task<ParentIssueContext?>> resolveParentIssueContext)
+    {
+        ParentIssueContextResponse? parentIssueContext = null;
+        var projectId = work.Issue?.ProjectId ?? work.ProjectId;
+        var issueNumber = work.Issue?.IssueNumber;
+        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
+            && string.Equals(work.WorkType, WorkItemTypes.Task, StringComparison.Ordinal)
+            && string.Equals(work.Stage, "plan", StringComparison.Ordinal)
+            && string.Equals(work.Uses, "mohist/opencode", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(projectId)
+            && issueNumber is > 0)
+        {
+            var resolved = await resolveParentIssueContext(projectId, issueNumber.Value);
+            if (resolved is not null)
+                parentIssueContext = new ParentIssueContextResponse(resolved.Title, resolved.Body);
+        }
+
+        return new WorkDispatchResponse(
+            work.WorkflowRunId,
+            work.WorkId,
+            work.Uses,
+            work.With,
+            work.Variables,
+            work.WorkType,
+            work.Stage,
+            work.Title,
+            projectId,
+            issueNumber,
+            work.EpicNumber,
+            work.Artifacts,
+            work.SetVars,
+            work.OwnerKind,
+            work.AgentJobId,
+            AgentSessionId: work.AgentSessionId,
+            Recovery: work.Recovery,
+            RecoveryRemaining: work.RecoveryRemaining,
+            Expect: work.Expect,
+            ParentIssueContext: parentIssueContext);
+    }
+
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
         new(
             session.AgentSessionId,
@@ -680,7 +706,10 @@ public record WorkDispatchResponse(
     string? AgentSessionId = null,
     string? Recovery = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
-    string? Expect = null);
+    string? Expect = null,
+    ParentIssueContextResponse? ParentIssueContext = null);
+
+public sealed record ParentIssueContextResponse(string Title, string? Body);
 
 /// <summary>
 /// Poll response carrying zero or more dispatches. Replaces the old single-
