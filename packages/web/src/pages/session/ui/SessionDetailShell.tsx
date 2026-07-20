@@ -201,6 +201,7 @@ export function SessionDetailShell({
   const failedGroupIds = selectToolCallGroupIds(displayTurns)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
+  const initializedAutoScrollSessionRef = useRef<string | null>(null)
   const [queuedFollowup, setQueuedFollowup] = useState<{
     sessionKey: string
     transcriptVersion: number
@@ -326,18 +327,23 @@ export function SessionDetailShell({
   }, [])
 
   useEffect(() => {
-    if (!isRunning) return
+    if (!isRunning) {
+      initializedAutoScrollSessionRef.current = null
+      return
+    }
     const container = scrollContainerRef.current
-    if (!container || !isNearBottomRef.current || isUserScrollingRef.current || isSelectingTextRef.current) return
-    container.scrollTop = container.scrollHeight
-  }, [isRunning, transcriptVersion])
+    if (!container) return
 
-  useEffect(() => {
-    if (!isRunning) return
-    const container = scrollContainerRef.current
-    if (!container || !isNearBottomRef.current || isUserScrollingRef.current || isSelectingTextRef.current) return
+    if (initializedAutoScrollSessionRef.current !== sessionKey) {
+      if (turns.length === 0) return
+      initializedAutoScrollSessionRef.current = sessionKey
+      handleScroll()
+      return
+    }
+
+    if (!isNearBottomRef.current || isUserScrollingRef.current || isSelectingTextRef.current) return
     container.scrollTop = container.scrollHeight
-  }, [isRunning, meta?.status])
+  }, [handleScroll, isRunning, meta?.status, sessionKey, transcriptVersion, turns.length])
 
   useEffect(() => {
     if (queuedFollowup?.sessionKey === sessionKey && transcriptVersion > queuedFollowup.transcriptVersion) {
@@ -361,13 +367,18 @@ export function SessionDetailShell({
     if (!container) return
 
     const handleResize = () => {
-      if (isNearBottomRef.current && !isUserScrollingRef.current && !isSelectingTextRef.current) {
+      if (
+        initializedAutoScrollSessionRef.current === sessionKey
+        && isNearBottomRef.current
+        && !isUserScrollingRef.current
+        && !isSelectingTextRef.current
+      ) {
         container.scrollTop = container.scrollHeight
       }
     }
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [isRunning])
+  }, [isRunning, sessionKey])
 
   if (notFound) {
     return (
