@@ -84,4 +84,5 @@
 - The Action validator now requires a plain object or null at the root and rejects non-JSON object instances recursively.
 - Invalid check output is removed from the public check-result envelope before report serialization, so cyclic values produce an acknowledged `unexpected-error` instead of a runner retry.
 - Server task translation validates Action output before artifact binding. Malformed check envelopes become failed results for every dispatched check rather than throwing during property access.
-- Focused server translator specs pass; focused runner validation tests are being rerun after removing the internal invalid-output marker from the transport row.
+- Focused server translator specs and runner validation tests pass after removing the internal invalid-output marker from the transport row.
+- Structured-output UI assertions now live in focused `TaskProgressPanel.output.test.tsx` and `WorkflowView.output.test.tsx`; the original test files are below their size budgets and the focused Web suite passes.
