@@ -85,6 +85,7 @@ export class ServerConnection {
       projectId: work.projectId,
       status: result.status,
       message: result.message,
+      error: result.error,
       output: result.output,
       exitCode: result.exitCode,
       artifactUploadIds: result.artifactUploadIds ?? null,

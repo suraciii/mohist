@@ -30,7 +30,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(SessionName(retried));
         Assert.Equal(r1, r2);
     }
-
     [Fact]
     public async Task TaskFailsBeforeLaterTasks_UserRetriesWorkflow_NewAttemptRunsBeforeLaterTasks()
     {
@@ -56,7 +55,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (task2, _) = await PollWorkAnyAsync();
         Assert.StartsWith("task-2.1", task2.WorkId);
     }
-
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_PreviousAttemptStaysFailed()
     {
@@ -75,7 +73,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.NotNull(task1);
         Assert.Equal("failed", task1.Status);
     }
-
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_StatusNoLongerShowsActiveFailure()
     {
@@ -96,7 +93,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var buildStage = Assert.Single(status.Stages, s => s.Stage == "build");
         Assert.Null(buildStage.Failure);
     }
-
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_WorkflowContinuesAfterTaskSucceeds()
     {
@@ -124,7 +120,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             2,
             [
                 new RecoveryHandlerDefinition(
-                    "errorCode=base-moved",
+                    "error.code=base-moved",
                     [
                         new TaskDefinition(
                             "recover:rebase",
@@ -159,7 +155,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(retriedAttempt.RecoveryRemaining);
         using (var recoveryJson = JsonDocument.Parse(retriedAttempt.Recovery!))
         {
-            Assert.Equal("errorCode=base-moved",
+            Assert.Equal("error.code=base-moved",
                 recoveryJson.RootElement
                     .GetProperty("handlers")[0]
                     .GetProperty("when")
@@ -168,7 +164,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await ReportAsync(r2, retriedAttempt.WorkId, new WorkResult(
             "completed",
-            "Merge PR failed (errorCode=base-moved); recovery scheduled",
+            "Merge PR failed (error.code=base-moved); recovery scheduled",
             Output: """{"errorCode":"base-moved"}""",
             AddTasks:
             [
@@ -201,7 +197,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
@@ -227,7 +223,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
@@ -253,7 +249,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     {
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: false)]);
         await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
@@ -312,7 +308,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var recovery = new RecoveryDefinition(
             2,
             [new RecoveryHandlerDefinition(
-                "errorCode=fail",
+                "error.code=fail",
                 [new TaskDefinition("fix", "Fix", "spec/fix")],
                 RetrySelf: true)]);
         var workflow = await StartWorkflowAsync(SingleStage(
@@ -451,7 +447,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         // The workflow is dispatched with an apply-feedback task, not
         // Failed, and the available actions list shows a request-changes
         // action (instead of the prior retry/rerun failure-recovery
-        // actions).
 #pragma warning disable CS0618
         await workflow.RequestChangesAsync("needs rework");
 #pragma warning restore CS0618

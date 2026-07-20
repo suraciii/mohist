@@ -20,6 +20,7 @@ import { rebaseAction, rebaseStatusAction } from "./rebase.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import { pushAction } from "./push.js"
 import { workspacePrepareAction } from "./workspace-prepare.js"
+import { fail, succeed } from "./action-result.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -74,16 +75,16 @@ export function createDefaultRegistry() {
 
 async function processAction(context: ActionContext): Promise<ActionResult> {
   const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
-  if (!command) return { status: "failure", message: "Process action requires command" }
+  if (!command) return fail("invalid-input", "Process action requires command")
   const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
   return result.exitCode === 0
-    ? { status: "success", message: "Process completed", output: result.stdout.trim(), exitCode: result.exitCode }
-    : { status: "failure", message: result.stderr.trim() || `Process exited with code ${result.exitCode}`, output: result.stdout.trim(), exitCode: result.exitCode }
+    ? succeed(result.stdout.trim(), { exitCode: result.exitCode })
+    : fail("process-failed", result.stderr.trim() || `Process exited with code ${result.exitCode}`, { exitCode: result.exitCode })
 }
 
 async function scriptAction(context: ActionContext): Promise<ActionResult> {
   const run = stringInput(context.with, "run")
-  if (!run?.trim()) return { status: "failure", message: "Script action requires 'run'" }
+  if (!run?.trim()) return fail("invalid-input", "Script action requires 'run'")
   const shell = stringInput(context.with, "shell") || (process.platform === "win32" ? "pwsh" : "bash")
   const file = join(context.workDir, `_${randomUUID().replace(/-/g, "")}${process.platform === "win32" ? ".ps1" : ".sh"}`)
   await writeText(file, run)
@@ -91,21 +92,10 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
     const timeoutMs = numberInput(context.with, "timeout")
     const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
     const result = await runCommand(shell, [file], context.workDir, signal, undefined, logLineOptions(context, "action:script"))
-    return {
-      status: result.exitCode === 0 ? "success" : "failure",
-      message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
-      output: JSON.stringify({
-        kind: "script",
-        status: result.exitCode === 0 ? "success" : "failure",
-        errorCode: result.exitCode === 0 ? null : "script-failed",
-        run,
-        shell,
-        exitCode: result.exitCode,
-        stdout: trim(result.stdout),
-        stderr: trim(result.stderr),
-      }),
-      exitCode: result.exitCode,
+    if (result.exitCode !== 0) {
+      return fail(result.status === "timeout" ? "timeout" : "script-failed", `Script failed: ${firstLine(run)}${result.stderr.trim() ? `: ${trim(result.stderr)}` : ""}`, { exitCode: result.exitCode })
     }
+    return succeed(JSON.stringify({ kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }), { exitCode: result.exitCode })
   } finally {
     await deleteFile(file)
   }
@@ -113,21 +103,21 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
 
 async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
-  if (!path) return { status: "failure", message: "Artifact check requires 'path'" }
+  if (!path) return fail("invalid-input", "Artifact check requires 'path'")
   const found = exists(path)
   const output = JSON.stringify({ kind: "artifact-exists", path, exists: found })
-  return found ? { status: "success", message: `Artifact exists: ${path}`, output } : { status: "failure", message: `Artifact missing: ${path}`, output }
+  return found ? succeed(output) : fail("artifact-missing", `Artifact missing: ${path}`)
 }
 
 async function markerAction(context: ActionContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
-  if (!path || !expect) return { status: "failure", message: "Marker check requires 'path' and 'expect'" }
-  if (!exists(path)) return { status: "failure", message: `Marker file missing: ${path}` }
+  if (!path || !expect) return fail("invalid-input", "Marker check requires 'path' and 'expect'")
+  if (!exists(path)) return fail("artifact-missing", `Marker file missing: ${path}`)
   const content = await readText(path)
   const found = matchesMarker(content, expect)
   const output = JSON.stringify({ kind: "marker", path, marker: expect, found })
-  return found ? { status: "success", message: `Marker found in ${path}`, output } : { status: "failure", message: `Marker missing in ${path}`, output }
+  return found ? succeed(output) : fail("marker-missing", `Marker missing in ${path}`)
 }
 
 function matchesMarker(content: string, expect: string) {
@@ -145,12 +135,12 @@ function isPromiseVerdict(value: string) {
 
 export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return { status: "failure", message: "Merge readiness requires the authoritative repository base branch" }
+  if (!baseBranch) return fail("invalid-input", "Merge readiness requires the authoritative repository base branch")
   const remote = resolveDeliveryRemote(context)
-  if (!remote) return { status: "failure", message: "Merge readiness requires the authoritative repository origin" }
+  if (!remote) return fail("invalid-input", "Merge readiness requires the authoritative repository origin")
   const baseRef = `${remote}/${baseBranch}`
   const source = resolveDeliverySource(context)
-  if (!source) return { status: "failure", message: "Merge readiness requires the authoritative workspace branch" }
+  if (!source) return fail("invalid-input", "Merge readiness requires the authoritative workspace branch")
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const checkedAt = new Date().toISOString()
   const opts: GitOptions | undefined = context.log ? { sink: { log: context.log, source: "action:merge-ready" } } : undefined
@@ -187,8 +177,8 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
 }
 
 function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null, conflictFiles: string[], checkedAt: string): ActionResult {
-  const output = JSON.stringify({ kind: "merge-ready", targetBranch: baseBranch, strategy: "squash", baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles, checkedAt, error })
-  return canMerge ? { status: "success", message: "Merge ready", output, exitCode } : { status: "failure", message: error ?? "Merge is not ready", output, exitCode }
+  if (!canMerge) return fail("merge-not-ready", error ?? "Merge is not ready", { exitCode })
+  return succeed(JSON.stringify({ kind: "merge-ready", targetBranch: baseBranch, strategy: "squash", baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles, checkedAt }), { exitCode })
 }
 
 function firstLine(value: string) {

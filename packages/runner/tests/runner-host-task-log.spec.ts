@@ -122,7 +122,7 @@ beforeEach(() => {
   blockingAction.mockImplementation(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
     log?.write("action:rebase", "rebasing commit a1b2c3")
     log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
-    return { status: "success", message: "ok", output: JSON.stringify({ rebase: "ok" }) }
+    return { output: JSON.stringify({ rebase: "ok" }) }
   })
 })
 
@@ -185,7 +185,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       log?.write("action:test", "line before completion")
       actionStarted.resolve()
       await release.promise
-      return { status: "success", message: "ok" }
+      return { output: "ok" }
     })
 
     const controller = new AbortController()
@@ -258,7 +258,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       // flushes before either work completes.
       await gate.promise
       await release.promise
-      return { status: "success", message: "ok" }
+      return { output: "ok" }
     })
 
     const controller = new AbortController()
@@ -334,7 +334,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       log?.write("action:test", "fallback live line")
       actionStarted.resolve()
       await release.promise
-      return { status: "success", message: "ok" }
+      return { output: "ok" }
     })
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
@@ -511,7 +511,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     stopSignalR.mockResolvedValue(undefined)
     blockingAction.mockImplementationOnce(async ({ log }: { signal: AbortSignal; log?: { write: (source: string, text: string) => void } }) => {
       log?.write("action:rebase", "final line")
-      return { status: "failed", message: "boom" }
+      return { error: { code: "action-failed", message: "boom" } }
     })
     poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-verdict", workId: "work-verdict", agentJobId: "aj-verdict" })]).mockImplementation(async () => [])
 

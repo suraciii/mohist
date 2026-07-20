@@ -1,7 +1,8 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
-import { numberInput, objectInput, safeParseObject } from "../core/json.js"
+import { isActionFailure } from "../actions/action-result.js"
+import { numberInput, objectInput } from "../core/json.js"
 import { errorMessage, isNotFoundError } from "../core/errors.js"
 import { runCommand } from "../system/process.js"
 import {
@@ -216,20 +217,11 @@ export function dirtyWorktreeFailure(
   const message = detail
     ? `${baseMessage}; ${detail}; ${summary}`.slice(0, 4000)
     : `${baseMessage}; ${summary}`.slice(0, 4000)
-  const existingOutput = safeParseObject(result.output)
-  const output = JSON.stringify({
-    ...(existingOutput ?? {}),
-    kind: "dirty-worktree",
-    staged: evidence.staged,
-    unstaged: evidence.unstaged,
-    untracked: evidence.untracked,
-    cleanupAttempts: evidence.cleanupAttempts,
-  })
   return {
     ...result,
     status: "failed",
     message,
-    output,
+    error: { code: "worktree-dirty", message },
     cleanupAttempts,
   }
 }
@@ -240,23 +232,12 @@ export function gitIndexLockFailure(
   cleanupAttempts: number,
   recovery: Extract<GitIndexLockRecovery, { status: "blocked" }>,
 ): WorkItemResult {
-  const existingOutput = safeParseObject(result.output)
   const message = `${result.message?.trim() || "Task completed by action but Git index is locked"}; git index lock blocked cleanup: ${recovery.reason}`.slice(0, 4000)
   return {
     ...result,
     status: "failed",
     message,
-    output: JSON.stringify({
-      ...(existingOutput ?? {}),
-      kind: "git-index-lock",
-      lockPath: recovery.lockPath,
-      lockAgeMs: recovery.ageMs,
-      reason: recovery.reason,
-      staged: snapshot.staged,
-      unstaged: snapshot.unstaged,
-      untracked: snapshot.untracked,
-      cleanupAttempts,
-    }),
+    error: { code: "git-index-locked", message },
     cleanupAttempts,
   }
 }
@@ -271,23 +252,12 @@ export function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): str
 }
 
 export function worktreeProbeFailure(work: RenderedWorkItem, error: WorktreeProbeError): WorkItemResult {
-  const evidence: DirtyWorktreeEvidence = {
-    kind: "dirty-worktree",
-    staged: [],
-    unstaged: [],
-    untracked: [],
-    cleanupAttempts: 0,
-    ...({
-      probeError: error.message,
-      probeExitCode: error.exitCode,
-    } as unknown as Pick<DirtyWorktreeEvidence, never>),
-  } as DirtyWorktreeEvidence
   const label = work.title?.trim() || work.uses || work.workId
   const message = `git worktree probe failed for ${label}: ${error.message}`.slice(0, 4000)
   return {
     status: "failed",
     message,
-    output: JSON.stringify(evidence),
+    error: { code: "worktree-probe-failed", message },
     cleanupAttempts: 0,
   }
 }
@@ -386,8 +356,8 @@ export async function runAgentCleanupAttempt(
     const message = error instanceof Error ? error.message : String(error)
     return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} threw: ${message}`)
   }
-  if (result.status !== "success" && result.status !== "completed") {
-    return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} failed: ${result.message ?? result.status}`)
+  if (isActionFailure(result)) {
+    return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} failed: ${result.error.message}`)
   }
   return "ok"
 }

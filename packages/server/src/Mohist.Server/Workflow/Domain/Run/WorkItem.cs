@@ -63,7 +63,8 @@ public sealed record TaskReport(
     [property: Id(2)] string? Output,
     [property: Id(3)] IReadOnlyList<ArtifactRef>? Artifacts,
     [property: Id(4)] string? Detail = null,
-    [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null);
+    [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null,
+    [property: Id(6)] ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record CheckReport(

@@ -97,7 +97,7 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
     if (result === "completed") return
     expect(result.failureReason).toBe("provider_error")
     expect(result.error).toContain("Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
-    expect(result.providerError?.message).toContain("Token Plan usage limit reached")
+    expect(result.error).toContain("Token Plan usage limit reached")
     expect(cancelled).toBe(true)
 
     const failed = (context.serverConnection as unknown as FakeServerConnection).calls
@@ -159,8 +159,8 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
       return action
     })
 
-    expect(result.status).toBe("failure")
-    expect(result.message ?? "").toContain("Timed out")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message ?? "").toContain("Timed out")
     expect(tracked.cleanupCount()).toBeGreaterThanOrEqual(1)
   })
 
@@ -182,8 +182,8 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     controller.abort()
     const result = await action
 
-    expect(result.status).toBe("failure")
-    expect(result.message ?? "").toMatch(/stopped by user/i)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message ?? "").toMatch(/stopped by user/i)
     expect(agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
     const extraCleanups = tracked.cleanupCount() - cleanupBefore
     expect(extraCleanups).toBeLessThanOrEqual(1)
@@ -206,8 +206,8 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
       return action
     })
 
-    expect(result.status).toBe("failure")
-    expect(result.message ?? "").toContain("Timed out")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message ?? "").toContain("Timed out")
     expect(shared.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
   })
 })
@@ -230,12 +230,9 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
       return action
     })
 
-    expect(result.status).toBe("failure")
-    expect(result.message ?? "").toContain("Timed out after")
-    expect(result.message ?? "").not.toContain("Opencode provider error")
-
-    const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
-    expect(output.providerError).toBeUndefined()
+    expect(result.error).toBeDefined()
+    expect(result.error?.message ?? "").toContain("Timed out after")
+    expect(result.error?.message ?? "").not.toContain("Opencode provider error")
 
     const failed = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -269,12 +266,9 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
       return action
     })
 
-    expect(result.status).toBe("failure")
-    expect(result.message ?? "").toContain("Timed out after")
-    expect(result.message ?? "").not.toContain("Opencode provider error")
-
-    const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
-    expect(output.providerError).toBeUndefined()
+    expect(result.error).toBeDefined()
+    expect(result.error?.message ?? "").toContain("Timed out after")
+    expect(result.error?.message ?? "").not.toContain("Opencode provider error")
 
     const failed = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -306,8 +300,8 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
       return action
     })
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("Timed out after 3600s")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("Timed out after 3600s")
   })
 
   it("PromptTimesOut_EmitsLivenessFailedEventWithPromptTimeoutFailureReason", async () => {

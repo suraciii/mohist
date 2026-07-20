@@ -91,7 +91,7 @@ stages:
         recovery:
           budget: 1
           handlers:
-            - when: promise=FAIL
+            - when: output.promise=FAIL
               tasks:
                 - id: recover:fix-plan-review
                   title: Fix plan review findings
@@ -146,7 +146,7 @@ stages:
         recovery:
           budget: 1
           handlers:
-            - when: errorCode=script-failed
+            - when: error.code=script-failed
               tasks:
                 - id: recover:fix-build-health
                   title: Fix build health
@@ -209,7 +209,7 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: promise=FAIL
+            - when: output.promise=FAIL
               tasks:
                 - id: recover:fix-review-findings
                   title: Fix review findings
@@ -231,7 +231,7 @@ stages:
         recovery:
           budget: 1
           handlers:
-            - when: errorCode=script-failed
+            - when: error.code=script-failed
               tasks:
                 - id: recover:fix-check-health
                   title: Fix check health
@@ -260,7 +260,7 @@ stages:
                   recovery:
                     budget: 2
                     handlers:
-                      - when: errorCode=conflict
+                      - when: error.code=conflict
                         tasks:
                           - id: recover:resolve-rebase-conflicts
                             title: Resolve rebase conflicts
@@ -290,7 +290,7 @@ stages:
         recovery:
           budget: 3
           handlers:
-            - when: errorCode=retry-safe
+            - when: error.code=retry-safe
               retrySelf: true
       - id: integrate:rebase
         title: Rebase and squash branch
@@ -303,7 +303,7 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: errorCode=conflict
+            - when: error.code=conflict
               tasks:
                 - id: recover:resolve-rebase-conflicts
                   title: Resolve rebase conflicts
@@ -328,7 +328,7 @@ stages:
         recovery:
           budget: 1
           handlers:
-            - when: errorCode=script-failed
+            - when: error.code=script-failed
               tasks:
                 - id: recover:fix-integrate-health
                   title: Fix integrate health

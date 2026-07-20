@@ -58,7 +58,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
 
     const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(mergeStateCallCount()).toBe(2)
   })
 
@@ -71,10 +71,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
     )
 
     const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
+    expect(result.error).toMatchObject({ code: "retry-safe" })
     // 1 initial attempt + 2 retries.
     expect(mergeStateCallCount()).toBe(3)
   })
@@ -100,7 +97,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
 
     const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
 
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(localCalls.filter((c) => c === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus").length).toBe(1)
   })
 })
@@ -178,15 +175,8 @@ describe("mohist/merge-github-pr network timeouts", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
-    const mergeStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-merge")
-    expect(mergeStep).toBeDefined()
-    expect(mergeStep.output).toContain("timed out")
-    expect(mergeStep.exitCode).toBe(124)
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
   })
 
   it("GhPrViewTimeout_IsNotRetriedAndSurfacesDuration", async () => {
@@ -210,18 +200,8 @@ describe("mohist/merge-github-pr network timeouts", () => {
       method: "squash",
       subjectFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
     expect(ghCalls.filter((c) => c.command === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")).toHaveLength(1)
-    const viewStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-view")
-    expect(viewStep).toMatchObject({
-      command: "pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
-      exitCode: 124,
-      status: "timeout",
-      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-    })
-    expect(viewStep.output).toContain("timed out")
   })
 })

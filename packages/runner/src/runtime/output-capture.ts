@@ -1,10 +1,11 @@
 import type { ActionResult, JsonObject, JsonValue, RenderedWorkItem } from "../core/types.js"
+import { isActionFailure } from "../actions/action-result.js"
 
 export function captureOutputs(
   outputs: RenderedWorkItem["outputs"],
   actionResult: ActionResult,
 ): JsonObject | undefined {
-  if (actionResult.status !== "success" && actionResult.status !== "completed") return undefined
+  if (isActionFailure(actionResult)) return undefined
   if (!outputs || outputs.length === 0) return undefined
   if (!actionResult.output) return undefined
 

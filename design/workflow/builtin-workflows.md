@@ -27,11 +27,11 @@ plan → approval → build → check → approval → integrate（sequential，
 ```
 
 - 每个 stage 以 `workspace-prepare` 开头，task 总在就位的 workspace 上执行。
-- **plan**：`proposal → specs → design → tasks → self-review`。`self-review` 用 `expect.markers` 声明 `<promise>PASS/FAIL</promise>`，`failIf` 把 FAIL 映射成 task 失败；recovery handler `when: promise=FAIL` 触发修复 task 后 `retrySelf`。stage check `plan-artifacts`（`mohist/openspec-artifacts`）验证 openspec 产物齐全。
+- **plan**：`proposal → specs → design → tasks → self-review`。`self-review` 用 `expect.markers` 声明 `<promise>PASS/FAIL</promise>`，`failIf` 把 FAIL 映射成 task 失败；recovery handler `when: output.promise=FAIL` 触发修复 task 后 `retrySelf`。stage check `plan-artifacts`（`mohist/openspec-artifacts`）验证 openspec 产物齐全。
 - **build**：`load-tasks`（`mohist/openspec-tasks`）按 `tasks.json` 展开子 task，prompt 由 `mohist/openspec-task-prompt` 组合；`verify` 跑 `vars.ci.verify`，失败时由默认 recovery 的 `recover:fix-ci` 诊断并修复，再 `retrySelf`。
 - **check**：`ai-review` 复用与 `self-review` 相同的 promise-marker + recovery 模式。
 - **审批反馈**：profile 顶层 `approval.feedback.task` 声明 `apply-feedback`，session 取被驳回 stage 的同名 session，反馈修复延续该 stage 的上下文。
-- **rebase 冲突统一走 task-level recovery**：`mohist/rebase` 冲突时返回 `errorCode: conflict` 并保留 rebase 进行中，嵌套 handler 派 agent 解冲突并完成 rebase（该 handler 不 `retrySelf`，agent 自己收尾）。恢复 prompt 用命名模板引用（如 `${{ prompts.resolve-rebase-conflicts }}`），模板可访问 `${{ failure.output }}`。
+- **rebase 冲突统一走 task-level recovery**：`mohist/rebase` 冲突时返回 `error.code: conflict` 并保留 rebase 进行中，嵌套 handler 派 agent 解冲突并完成 rebase（该 handler 不 `retrySelf`，agent 自己收尾）。恢复 prompt 用命名模板引用（如 `${{ prompts.resolve-rebase-conflicts }}`），模板可访问 `${{ failure.error }}`。
 
 Recovery 机制本身见 [`recovery.md`](recovery.md)，action 契约见 [`actions.md`](actions.md)。
 
@@ -40,8 +40,8 @@ Recovery 机制本身见 [`recovery.md`](recovery.md)，action 契约见 [`actio
 最短交付路径：不开 PR、不依赖 GitHub。
 
 - **check** 比 github-pr 多一个 `merge-ready` task：进入审批前确认分支可合入 base，`canMerge=false` 时先 rebase onto base（内嵌 conflict 恢复）再 `retrySelf`。设计意图：审批通过时分支已经可合，integrate 不再因分支落后而失败。
-- **integrate**：`archive-change`（`errorCode=retry-safe` 直接 `retrySelf`）→ `rebase --squash`（commit message 取 `issue.title`）→ `push` 到 base branch。
-- 各 stage 带 `git diff --check` 的 health task（plan 里是 stage check），`errorCode=script-failed` 时由 agent 只修 whitespace / patch 格式问题后 `retrySelf`。
+- **integrate**：`archive-change`（可重试 error code 直接 `retrySelf`）→ `rebase --squash`（commit message 取 `issue.title`）→ `push` 到 base branch。
+- 各 stage 带 `git diff --check` 的 health task（plan 里是 stage check），`error.code=script-failed` 时由 agent 只修 whitespace / patch 格式问题后 `retrySelf`。
 
 ## mohist/github-pr
 
@@ -73,11 +73,11 @@ workspace 是可重建的执行副本；远程 workflow branch 是阶段间恢�
 
 ### merge-pr 的恢复
 
-`mohist/merge-github-pr` 用 action-owned `errorCode` 表达 recoverable failure，全部由 profile 在 `merge-pr.recovery` 显式声明，不靠 stage hook 或隐式边界动作：
+`mohist/merge-github-pr` 用 action-owned `error.code` 表达 recoverable failure，全部由 profile 在 `merge-pr.recovery` 显式声明，不靠 stage hook 或隐式边界动作：
 
-- `errorCode=base-moved` → `recover:rebase`（`squash: false`，内嵌 conflict → agent 解冲突）→ `recover:push`（force）→ `retrySelf`。
-- `errorCode=pr-checks-failed` → `recover:fix-pr-checks`（agent 修失败的 checks）→ `recover:push`（forceWithLease）→ `retrySelf`。
-- `errorCode=protection-conflict` → 直接 `retrySelf`。
+- `error.code=base-moved` → `recover:rebase`（`squash: false`，内嵌 conflict → agent 解冲突）→ `recover:push`（force）→ `retrySelf`。
+- `error.code=pr-checks-failed` → `recover:fix-pr-checks`（agent 修失败的 checks）→ `recover:push`（forceWithLease）→ `retrySelf`。
+- `error.code=protection-conflict` → 直接 `retrySelf`。
 
 ### 不变量
 

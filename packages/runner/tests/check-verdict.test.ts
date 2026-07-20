@@ -53,7 +53,7 @@ describe("Check verdict validation", () => {
   })
 
   it("MissingPASSVerdictMarker_ReportsCheckVerdictFailure", async () => {
-    mockAction({ status: "failure", message: "Marker missing in /tmp/test-work/review.md" })
+    mockAction({ error: { code: "marker-failed", message: "Marker missing in /tmp/test-work/review.md" } })
     const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "/tmp/test-work/review.md", expect: "<promise>PASS</promise>" } }])
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("fail")
@@ -63,7 +63,7 @@ describe("Check verdict validation", () => {
   })
 
   it("VerdictMarkerFAILInReviewMd_ReportedAsCheckVerdictFailure_NotTaskArtifact", async () => {
-    mockAction({ status: "failure", message: "Marker missing in /tmp/test-work/review.md" })
+    mockAction({ error: { code: "marker-failed", message: "Marker missing in /tmp/test-work/review.md" } })
     const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "/tmp/test-work/review.md", expect: "<promise>PASS</promise>" } }])
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("fail")
@@ -74,7 +74,7 @@ describe("Check verdict validation", () => {
   })
 
   it("AllChecksPass_ReturnsPassStatus", async () => {
-    mockAction({ status: "success", message: "Marker found in /tmp/test-work/review.md" })
+    mockAction({ output: "Marker found in /tmp/test-work/review.md" })
     const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "/tmp/test-work/review.md", expect: "<promise>PASS</promise>" } }])
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("pass")

@@ -42,6 +42,13 @@ describe("expandFailureReferences", () => {
     expect(expanded).toEqual(failureContext)
   })
 
+  it("expands an Action error field from the structured failure context", () => {
+    expect(expandFailureReferences("${{ failure.error.message }}", {
+      output: null,
+      error: { code: "timeout", message: "OpenCode turn timed out" },
+    })).toBe("OpenCode turn timed out")
+  })
+
   it("walks object values and expands nested failure references", () => {
     const expanded = expandFailureReferences(
       {

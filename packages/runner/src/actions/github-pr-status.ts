@@ -5,6 +5,7 @@ import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { timeoutStepMetadata } from "./github-pr-types.js"
 import { resolveGitHubRepository } from "./delivery-context.js"
+import { fail, succeed } from "./action-result.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:github-pr-status"
@@ -91,16 +92,12 @@ function combinedGhOutput(result: { stdout: string; stderr: string }): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
 }
 
-function buildOutput(payload: GitHubPrStatusOutput): ActionResult {
-  const json = JSON.stringify(payload)
+function buildOutput(payload: GitHubPrStatusOutput, failureCode = "pr-status-failed"): ActionResult {
   if (payload.status === "verified") {
-    return { status: "success", message: payload.message ?? `PR #${payload.prNumber ?? "?"} status verified`, output: json }
+    const { message: _message, ...success } = payload
+    return succeed(JSON.stringify(success))
   }
-  return {
-    status: "failure",
-    message: payload.message ?? `PR #${payload.prNumber ?? "?"} status check failed`,
-    output: json,
-  }
+  return fail(failureCode, payload.message ?? `PR #${payload.prNumber ?? "?"} status check failed`)
 }
 
 function emptyStatusOutput(message: string): GitHubPrStatusOutput {
@@ -122,11 +119,7 @@ function emptyStatusOutput(message: string): GitHubPrStatusOutput {
 export async function githubPrStatusAction(context: ActionContext): Promise<ActionResult> {
   const prNumber = numberInput(context.with, "prNumber") ?? numberFromVariables(context.variables)
   if (prNumber === null || !Number.isFinite(prNumber)) {
-    return {
-      status: "failure",
-      message: "GitHub PR status check requires 'prNumber' (or vars.github.pr.number)",
-      output: JSON.stringify(emptyStatusOutput("missing prNumber")),
-    }
+    return fail("invalid-input", "GitHub PR status check requires 'prNumber' (or vars.github.pr.number)")
   }
 
   const expect = parseGitHubPrStatusExpectation(stringInput(context.with, "expect"))
@@ -172,7 +165,7 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
       message: `gh pr view ${prNumber} failed: ${viewOutput}`,
       output: viewOutput,
       steps,
-    })
+    }, viewResult.status === "timeout" ? "timeout" : undefined)
   }
 
   const view = parsePrViewFull(viewResult.stdout)

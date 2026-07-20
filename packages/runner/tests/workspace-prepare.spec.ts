@@ -105,12 +105,10 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toBe("Workspace prepared")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       kind: "workspace-prepare",
       status: "success",
-      failureKind: null,
       expectedBranch: EXPECTED_BRANCH,
       head: { commit: "clean-head-sha", ref: EXPECTED_BRANCH },
       residual: { rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false },
@@ -136,17 +134,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("git status --porcelain failed")
-    expect(output).toMatchObject({
-      kind: "workspace-prepare",
-      status: "failure",
-      failureKind: "workspace-setup",
-      step: "status",
-      expectedBranch: EXPECTED_BRANCH,
-      head: { commit: "clean-head-sha", ref: EXPECTED_BRANCH },
-      residual: { rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false },
-    })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("git status --porcelain failed")
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
@@ -161,11 +150,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("git rev-parse HEAD failed")
-    expect(output.step).toBe("head")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.head).toMatchObject({ commit: "", ref: EXPECTED_BRANCH })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("git rev-parse HEAD failed")
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
@@ -180,11 +166,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("git rev-parse --abbrev-ref HEAD failed")
-    expect(output.step).toBe("head-ref")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.head).toMatchObject({ commit: "clean-head-sha", ref: "(detached)" })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("git rev-parse --abbrev-ref HEAD failed")
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
@@ -199,11 +182,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("git rev-parse --git-path rebase-merge failed")
-    expect(output.step).toBe("residual")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.residual).toMatchObject({ rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false })
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("git rev-parse --git-path rebase-merge failed")
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
@@ -222,7 +202,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, "rebase --abort")).toBe(true)
     expect(hasCommand(calls, "merge --abort")).toBe(false)
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(false)
@@ -249,17 +229,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "workspace-prepare",
-      status: "failure",
-      failureKind: "workspace-setup",
-      expectedBranch: EXPECTED_BRANCH,
-      head: { commit: "clean-head-sha", ref: EXPECTED_BRANCH },
-      residual: { rebaseMerge: true, rebaseApply: false, mergeHead: false, cherryPickHead: false },
-      step: "abort-rebase",
-    })
-    expect(result.message).toContain("rebase --abort failed")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("rebase --abort failed")
     expect(hasCommand(calls, "merge --abort")).toBe(false)
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(false)
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
@@ -277,11 +248,8 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("abort-rebase")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.residual.rebaseMerge).toBe(true)
-    expect(result.message).toContain("still in progress")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("still in progress")
     expect(hasCommand(calls, "merge --abort")).toBe(false)
   })
 
@@ -299,7 +267,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, "merge --abort")).toBe(true)
     expect(hasCommand(calls, "rebase --abort")).toBe(false)
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(false)
@@ -320,7 +288,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(true)
     expect(hasCommand(calls, "rebase --abort")).toBe(false)
     expect(hasCommand(calls, "merge --abort")).toBe(false)
@@ -337,10 +305,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("abort-merge")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.residual.mergeHead).toBe(true)
+    expect(result.error).toBeDefined()
     expect(hasCommand(calls, "rebase --abort")).toBe(false)
     expect(hasCommand(calls, "cherry-pick --abort")).toBe(false)
   })
@@ -355,10 +320,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("abort-cherry-pick")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.residual.cherryPickHead).toBe(true)
+    expect(result.error).toBeDefined()
   })
 
   it("DetachedHead_ChecksOutExpectedBranch", async () => {
@@ -379,7 +341,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
     expect(output.head.ref).toBe(EXPECTED_BRANCH)
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
@@ -403,7 +365,7 @@ describe("mohist/workspace-prepare", () => {
 
     const result = await workspacePrepareAction(context())
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
   })
 
@@ -419,9 +381,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("checkout")
-    expect(output.failureKind).toBe("workspace-setup")
+    expect(result.error).toBeDefined()
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
@@ -450,7 +410,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.head.ref).toBe(EXPECTED_BRANCH)
     const resetIdx = calls.findIndex((c) => commandOf(c) === "reset --hard HEAD")
     const cleanIdx = calls.findIndex((c) => commandOf(c) === "clean -fd")
@@ -481,7 +441,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(true)
     expect(hasCommand(calls, "clean -fd")).toBe(true)
     const resetIdx = calls.findIndex((c) => commandOf(c) === "reset --hard HEAD")
@@ -504,9 +464,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("reset")
-    expect(output.failureKind).toBe("workspace-setup")
+    expect(result.error).toBeDefined()
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
@@ -523,9 +481,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("clean")
-    expect(output.failureKind).toBe("workspace-setup")
+    expect(result.error).toBeDefined()
   })
 
   it("HealthVerifyFailure_DirtyTreeAfterCleanup_ReportsWorkspaceSetupFailure", async () => {
@@ -547,10 +503,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("verify")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.porcelain).toContain("still-dirty.txt")
+    expect(result.error).toBeDefined()
   })
 
   it("HealthVerifyFailure_WrongBranchAfterCleanup_ReportsWorkspaceSetupFailure", async () => {
@@ -565,10 +518,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("verify")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.head.ref).toBe("feature/other")
+    expect(result.error).toBeDefined()
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
   })
 
@@ -587,10 +537,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("verify")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.residual.rebaseMerge).toBe(true)
+    expect(result.error).toBeDefined()
     expect(hasCommand(calls, "rebase --abort")).toBe(true)
   })
 
@@ -613,10 +560,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context({ workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.step).toBe("resolve")
-    expect(output.failureKind).toBe("workspace-setup")
-    expect(output.expectedBranch).toBe("(none)")
+    expect(result.error).toBeDefined()
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
     expect(hasCommand(calls, "rebase --abort")).toBe(false)
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
@@ -647,7 +591,7 @@ describe("mohist/workspace-prepare", () => {
     const result = await workspacePrepareAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       kind: "workspace-prepare",
       status: "success",

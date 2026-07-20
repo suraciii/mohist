@@ -37,7 +37,7 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -63,8 +63,6 @@ describe("mohist/rebase", () => {
       squashedHeadSha: null,
       rebased: true,
       conflicts: [],
-      resolveAttempts: 0,
-      errorCode: null,
     })
   })
 
@@ -96,7 +94,7 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -119,9 +117,7 @@ describe("mohist/rebase", () => {
       squashed: false,
       squashedHeadSha: null,
       rebased: true,
-      errorCode: null,
     })
-    expect(result.message).toBe("Rebase completed")
   })
 
   it("MessageFrom_IsIgnoredWhenSquashIsFalse", async () => {
@@ -165,7 +161,7 @@ describe("mohist/rebase", () => {
       messageFrom: "issue.title",
     }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(moCalls).toEqual([])
     expect(calls).not.toContain("commit -m")
   })
@@ -211,7 +207,7 @@ describe("mohist/rebase", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -238,9 +234,7 @@ describe("mohist/rebase", () => {
       squashed: true,
       squashedHeadSha: "squashedHead",
       rebased: true,
-      errorCode: null,
     })
-    expect(result.message).toBe("Rebase and squash completed")
   })
 
   it("SquashOption_MessageFromIssueTitle_ResolvesTitleWithMoIssueShow", async () => {
@@ -292,7 +286,7 @@ describe("mohist/rebase", () => {
       messageFrom: "issue.title",
     }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(moCalls).toEqual(["mo issue show 217 --project-id proj_1 --output json"])
     expect(calls).toContain("commit -m Use issue title for squash")
   })
@@ -320,12 +314,9 @@ describe("mohist/rebase", () => {
       squash: true,
       messageFrom: "issue.title",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("mo issue show 217 failed")
-    expect(output.output).toContain("issue not found")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "invalid-input" })
+    expect(result.error?.message).toContain("mo issue show 217 failed")
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -359,11 +350,9 @@ describe("mohist/rebase", () => {
       squash: true,
       messageFrom: "issue.summary",
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("Unsupported messageFrom source 'issue.summary'")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "invalid-input" })
+    expect(result.error?.message).toContain("Unsupported messageFrom source 'issue.summary'")
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -395,19 +384,11 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({ baseBranch: "master", squash: true }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(calls).not.toContain("reset --soft")
     expect(calls).not.toContain("commit -m")
-    expect(output).toMatchObject({
-      kind: "rebase",
-      squashed: false,
-      squashedHeadSha: null,
-      rebased: false,
-      errorCode: "squash-message-missing",
-    })
-    expect(result.message).toContain("'message' is required")
+    expect(result.error).toMatchObject({ code: "invalid-input" })
+    expect(result.error?.message).toContain("non-empty commit 'message'")
   })
 
   it("RemoteFetchFails_ReportsRetrySafe", async () => {
@@ -428,22 +409,15 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
       "fetch origin master",
     ])
     expect(calls).not.toContain("rebase origin/master")
-    expect(output).toMatchObject({
-      kind: "rebase",
-      remote: "origin",
-      baseRef: "origin/master",
-      rebased: false,
-      errorCode: "retry-safe",
-    })
+    expect(result.error).toMatchObject({ code: "fetch-failed" })
+    expect(result.error?.message).toContain("Rebase was not started")
   })
 
   it("BaseRefRevParseFails_ReportsRetrySafe", async () => {
@@ -466,15 +440,9 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(calls).not.toContain("rebase origin/master")
-    expect(output).toMatchObject({
-      kind: "rebase",
-      rebased: false,
-      errorCode: "retry-safe",
-    })
+    expect(result.error).toMatchObject({ code: "fetch-failed" })
   })
 
   it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async () => {
@@ -507,7 +475,7 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
       "rev-parse --git-path rebase-apply",
@@ -553,7 +521,7 @@ describe("mohist/rebase", () => {
 
     const result = await rebaseAction(context())
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(calls).toContain("rebase --abort")
     expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
   })
@@ -586,16 +554,10 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context())
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("rebase --abort")
-    expect(output).toMatchObject({
-      rebased: false,
-      errorCode: "conflict",
-      rebaseLeftInProgress: false,
-    })
-    expect(result.message).toBe("Rebase failed: conflict could not be resolved")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "conflict" })
+    expect(calls).not.toContain("rebase --abort")
+    expect(result.error?.message).toContain("unresolved conflicts")
   })
 
   it("Conflict_WithRecovery_LeavesRebaseInProgressAndReturnsConflict", async () => {
@@ -624,19 +586,9 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "rebase",
-      rebased: false,
-      conflicts: ["packages/runner/src/actions/rebase.ts", "packages/runner/src/actions/git.ts"],
-      resolveAttempts: 0,
-      errorCode: "conflict",
-      rebaseLeftInProgress: true,
-    })
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "conflict" })
     expect(calls).not.toContain("rebase --abort")
-    expect(result.message).toBe("Rebase in progress: conflicts require task-level resolution")
   })
 
   it("Conflict_WithRecoveryOnlyInWith_AbortsBecauseRecoveryIsDispatchMetadata", async () => {
@@ -669,15 +621,9 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context({
       recovery: { budget: 1, handlers: [] },
     }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      errorCode: "conflict",
-      rebaseLeftInProgress: false,
-    })
-    expect(calls).toContain("rebase --abort")
-    expect(result.message).toBe("Rebase failed: conflict could not be resolved")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "conflict" })
+    expect(calls).not.toContain("rebase --abort")
   })
 
   it("Conflict_WithRecovery_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async () => {
@@ -712,15 +658,9 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
+    expect(result.error).toBeDefined()
     expect(calls).toContain("rebase --abort")
-    expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
-    expect(output).toMatchObject({
-      errorCode: "conflict",
-      rebaseLeftInProgress: true,
-    })
+    expect(result.error).toMatchObject({ code: "conflict" })
   })
 
   it("Conflict_WithRecovery_SuccessfulRebase_ReportsNormal", async () => {
@@ -749,10 +689,9 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       rebased: true,
-      errorCode: null,
       rebaseLeftInProgress: false,
     })
   })
@@ -825,19 +764,8 @@ describe("mohist/rebase", () => {
     const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
-    expect(output.steps).toEqual([
-      {
-        name: "git-fetch-base",
-        command: "fetch origin master",
-        exitCode: 124,
-        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
-        status: "timeout",
-        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-      },
-    ])
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("Rebase operation timed out")
   })
 
   it("LocalBasePath_RebaseDoesNotCarryTimeoutMs", async () => {

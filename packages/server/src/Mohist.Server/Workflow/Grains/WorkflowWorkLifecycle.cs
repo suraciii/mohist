@@ -40,7 +40,10 @@ internal sealed class WorkflowWorkLifecycle
         if (report.Status == TaskReportStatus.Succeeded)
         {
             if (currentTask is not null)
+            {
                 currentTask.Output = ParseOutputToJsonElement(report.Output);
+                currentTask.Error = report.Error;
+            }
             var hasFollowUpTasks = taskAttempts.Count > 0;
             events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
 
@@ -66,8 +69,12 @@ internal sealed class WorkflowWorkLifecycle
         }
         else
         {
-            if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(report.Output);
-            var taskResult = new TaskResult("failed", report.Detail ?? report.Output);
+            if (currentTask is not null)
+            {
+                currentTask.Output = ParseOutputToJsonElement(report.Output);
+                currentTask.Error = report.Error;
+            }
+            var taskResult = new TaskResult("failed", report.Detail ?? report.Output, report.Error);
             events.AddRange(run.FailTask(taskResult, now));
         }
 

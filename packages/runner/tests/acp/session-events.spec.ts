@@ -44,7 +44,7 @@ describe("mohist/acp-agent shared session observability", () => {
     }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const resolvedModelEvent = shared.serverConnection.calls
       .filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "model.resolved")
       .map((entry) => entry.payload as Record<string, unknown>)
@@ -66,7 +66,7 @@ describe("mohist/acp-agent shared session observability", () => {
     }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const resumeCall = shared.agent.calls.find((entry) => entry.event === "resumeSession")
     expect(resumeCall).toBeTruthy()
     const meta = resumeCall?._meta as Record<string, unknown> | undefined
@@ -88,7 +88,7 @@ describe("mohist/acp-agent shared session observability", () => {
     }, undefined, { ...shared.context(), agentSessionId: "shared-session", ownerKind: "agent-job" })
     const result = await runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const resumeCall = shared.agent.calls.find((entry) => entry.event === "resumeSession")
     const meta = resumeCall?._meta as Record<string, unknown> | undefined
     const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined

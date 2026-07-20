@@ -24,8 +24,7 @@ describe("mohist/openspec-artifacts", () => {
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toMatch(/OpenSpec artifacts present under /)
+    expect(result.error).toBeUndefined()
     expect(output.kind).toBe("openspec-artifacts")
     expect(output.changeDir).toBe(changeDir)
     expect(output.present).toBe(true)
@@ -41,13 +40,9 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("OpenSpec artifacts missing")
-    expect(result.message).toContain(join(changeDir, "proposal.md"))
-    expect(output.present).toBe(false)
-    expect(output.missing).toEqual([join(changeDir, "proposal.md")])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("OpenSpec artifacts missing")
+    expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
   })
 
   it("returns failure listing only the specs directory when specs/ is missing", async () => {
@@ -59,15 +54,9 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("OpenSpec artifacts missing")
-    expect(result.message).toContain(join(changeDir, "specs"))
-    expect(output.kind).toBe("openspec-artifacts")
-    expect(output.changeDir).toBe(changeDir)
-    expect(output.present).toBe(false)
-    expect(output.missing).toEqual([join(changeDir, "specs")])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("OpenSpec artifacts missing")
+    expect(result.error?.message).toContain(join(changeDir, "specs"))
   })
 
   it("returns failure listing only design.md when design.md is missing", async () => {
@@ -79,12 +68,8 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain(join(changeDir, "design.md"))
-    expect(output.present).toBe(false)
-    expect(output.missing).toEqual([join(changeDir, "design.md")])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(join(changeDir, "design.md"))
   })
 
   it("returns failure listing only tasks.json when tasks.json is missing", async () => {
@@ -96,12 +81,8 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain(join(changeDir, "tasks.json"))
-    expect(output.present).toBe(false)
-    expect(output.missing).toEqual([join(changeDir, "tasks.json")])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(join(changeDir, "tasks.json"))
   })
 
   it("returns failure when a required directory is present as a file", async () => {
@@ -114,12 +95,8 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain(join(changeDir, "specs"))
-    expect(output.present).toBe(false)
-    expect(output.missing).toContain(join(changeDir, "specs"))
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(join(changeDir, "specs"))
   })
 
   it("returns failure when a required file is present as a directory", async () => {
@@ -131,12 +108,8 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain(join(changeDir, "proposal.md"))
-    expect(output.present).toBe(false)
-    expect(output.missing).toContain(join(changeDir, "proposal.md"))
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
   })
 
   it("returns failure listing every missing artifact when changeDir is empty", async () => {
@@ -145,20 +118,11 @@ describe("mohist/openspec-artifacts", () => {
     await mkdir(changeDir, { recursive: true })
 
     const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.present).toBe(false)
-    expect(output.missing).toEqual([
-      join(changeDir, "proposal.md"),
-      join(changeDir, "specs"),
-      join(changeDir, "design.md"),
-      join(changeDir, "tasks.json"),
-    ])
-    expect(result.message).toContain(join(changeDir, "proposal.md"))
-    expect(result.message).toContain(join(changeDir, "specs"))
-    expect(result.message).toContain(join(changeDir, "design.md"))
-    expect(result.message).toContain(join(changeDir, "tasks.json"))
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
+    expect(result.error?.message).toContain(join(changeDir, "specs"))
+    expect(result.error?.message).toContain(join(changeDir, "design.md"))
+    expect(result.error?.message).toContain(join(changeDir, "tasks.json"))
   })
 
   it("fails with a clear message when only changeDir is supplied (the action's sole input)", async () => {
@@ -176,11 +140,8 @@ describe("mohist/openspec-artifacts", () => {
       signal: new AbortController().signal,
       writeVars: vi.fn(),
     })
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/requires 'changeDir'/)
-    expect(output.kind).toBeUndefined()
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/requires 'changeDir'/)
   })
 
   it("ignores other inputs beyond changeDir (only changeDir is consulted)", async () => {
@@ -196,7 +157,7 @@ describe("mohist/openspec-artifacts", () => {
       extra: "noise",
     }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
   })
 })
 

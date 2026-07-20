@@ -40,6 +40,7 @@ public sealed class TaskRun
     public string? CausedByFeedbackId { get; init; }
     public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
+    public ExecutionError? Error { get; set; }
 }
 
 public static class TaskRunExtensions

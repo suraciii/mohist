@@ -59,7 +59,7 @@ public static partial class WorkflowRunExtensions
 
             task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
-            current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason);
+            current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason, Error: result.Error);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;

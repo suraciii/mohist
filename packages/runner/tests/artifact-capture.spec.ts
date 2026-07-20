@@ -99,7 +99,7 @@ describe("declaredArtifactPaths", () => {
 
 describe("actionProducedArtifacts", () => {
   it("readsProducedArtifactsFromActionOutputJson", () => {
-    const result = { status: "success", output: JSON.stringify({ producedArtifacts: [{ path: "logs/run.log" }, { path: "data.json" }] }) }
+    const result = { output: JSON.stringify({ producedArtifacts: [{ path: "logs/run.log" }, { path: "data.json" }] }) }
     expect(actionProducedArtifacts(result)).toEqual([
       { path: "logs/run.log", source: "dynamic" },
       { path: "data.json", source: "dynamic" },
@@ -108,10 +108,10 @@ describe("actionProducedArtifacts", () => {
 
   it("missingOrMalformedOutput_YieldsEmptyList", () => {
     expect(actionProducedArtifacts(undefined)).toEqual([])
-    expect(actionProducedArtifacts({ status: "success" })).toEqual([])
-    expect(actionProducedArtifacts({ status: "success", output: "not json" })).toEqual([])
-    expect(actionProducedArtifacts({ status: "success", output: JSON.stringify({}) })).toEqual([])
-    expect(actionProducedArtifacts({ status: "success", output: JSON.stringify({ producedArtifacts: "nope" }) })).toEqual([])
+    expect(actionProducedArtifacts({ output: null })).toEqual([])
+    expect(actionProducedArtifacts({ output: "not json" })).toEqual([])
+    expect(actionProducedArtifacts({ output: JSON.stringify({}) })).toEqual([])
+    expect(actionProducedArtifacts({ output: JSON.stringify({ producedArtifacts: "nope" }) })).toEqual([])
   })
 })
 

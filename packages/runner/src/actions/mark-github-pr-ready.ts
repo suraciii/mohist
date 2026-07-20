@@ -8,6 +8,7 @@ import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { resolveGitHubRepository } from "./delivery-context.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MarkGitHubPrReadyOutput } from "./github-pr-types.js"
+import { fail, succeed } from "./action-result.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:mark-github-pr-ready"
@@ -66,7 +67,7 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
   const viewOutput = combinedGhOutput(viewResult)
   record("gh-pr-view", `pr view ${prNumber} --json state,isDraft,url`, viewResult.exitCode, viewOutput, timeoutStepMetadata(viewResult))
   if (viewResult.exitCode !== 0) {
-    return fail(classifyGhFailure(viewResult.stdout, viewResult.stderr), `gh pr view ${prNumber} failed: ${viewOutput}`, { output: viewOutput })
+    return fail(classifyGhFailure(viewResult.stdout, viewResult.stderr, viewResult.status), `gh pr view ${prNumber} failed: ${viewOutput}`, { output: viewOutput })
   }
 
   const view = parsePrViewWithDraft(viewResult.stdout)
@@ -103,7 +104,7 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
   const readyOutput = combinedGhOutput(readyResult)
   record("gh-pr-ready", `pr ready ${prNumber}`, readyResult.exitCode, readyOutput, timeoutStepMetadata(readyResult))
   if (readyResult.exitCode !== 0) {
-    return fail(classifyGhFailure(readyResult.stdout, readyResult.stderr), `gh pr ready ${prNumber} failed: ${readyOutput}`, {
+    return fail(classifyGhFailure(readyResult.stdout, readyResult.stderr, readyResult.status), `gh pr ready ${prNumber} failed: ${readyOutput}`, {
       output: readyOutput,
       prUrl,
       previousState,
@@ -137,16 +138,11 @@ function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
 }
 
 export function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {
-  const json = JSON.stringify(output)
   if (output.status === "completed") {
-    return { status: "success", message: output.message ?? "Mark GitHub PR ready", output: json }
+    const { errorCode: _errorCode, message: _message, ...success } = output
+    return succeed(JSON.stringify(success))
   }
-  return {
-    status: "failure",
-    message: `Mark GitHub PR ready failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
-    output: json,
-    exitCode: 1,
-  }
+  return fail(output.errorCode ?? "mark-ready-failed", output.message ?? output.output, { exitCode: 1 })
 }
 
 function withGitHubRepository(args: string[], githubRepository?: string): string[] {

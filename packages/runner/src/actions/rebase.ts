@@ -5,6 +5,7 @@ import { stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
 import { resolveDeliveryBaseBranch, resolveDeliveryRemote } from "./delivery-context.js"
+import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -56,35 +57,38 @@ export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return { status: "failure", message: "Rebase requires the authoritative repository base branch" }
+  if (!baseBranch) return fail("invalid-input", "Rebase requires the authoritative repository base branch")
   const remote = resolveDeliveryRemote(context, null)
   const squash = booleanInput(context.with, "squash") === true
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const opts = sinkOptions(context)
   const abortResult = await abortRebaseIfInProgress(context, opts)
   if (!abortResult.success) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, abortResult.combinedOutput, "retry-safe", abortResult.exitCode)
+    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], abortResult.combinedOutput, "abort-failed", abortResult.exitCode)
   }
   const squashMessageResult = squash ? await resolveSquashMessage(context) : { kind: "ok" as const, message: undefined }
   const squashMessage = squashMessageResult.kind === "ok" ? squashMessageResult.message : undefined
   if (squashMessageResult.kind === "failure") {
-    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, squashMessageResult.message, "retry-safe", 1)
+    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], squashMessageResult.message, "invalid-input", 1)
+  }
+  if (squash && !squashMessage) {
+    return fail("invalid-input", "Rebase with squash requires a non-empty commit 'message' or 'messageFrom'")
   }
   if (remote) {
     const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal, networkOptions(context))
     if (!fetch.success) {
       const steps = [rebaseStep("git-fetch-base", `fetch ${remote} ${baseBranch}`, fetch)]
-      return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, fetch.combinedOutput, "retry-safe", fetch.exitCode, false, steps)
+      return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], fetch.combinedOutput, fetch.status === "timeout" ? "timeout" : "fetch-failed", fetch.exitCode, false, steps)
     }
   }
   const baseShaResult = await git(context.workDir, ["rev-parse", baseRef], context.signal, opts)
   if (!baseShaResult.success) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, baseShaResult.combinedOutput, "retry-safe", baseShaResult.exitCode)
+    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], baseShaResult.combinedOutput, "base-resolve-failed", baseShaResult.exitCode)
   }
   const baseSha = baseShaResult.stdout.trim()
   const sourceCommit = await commitPendingChanges(context.workDir, `Prepare rebase onto ${baseBranch}`, context.signal, opts)
   if (!sourceCommit.success) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, null, null, null, false, [], 0, sourceCommit.combinedOutput, "retry-safe", sourceCommit.exitCode)
+    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, null, null, null, false, [], sourceCommit.combinedOutput, "prepare-failed", sourceCommit.exitCode)
   }
   const before = await git(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const beforeSha = before.success ? before.stdout.trim() : null
@@ -103,7 +107,6 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
       rebasedHeadSha: afterSha,
       rebaseSucceeded: true,
       conflicts: [],
-      resolveAttempts: 0,
       rebaseOutput: result.combinedOutput,
       squash,
       squashMessage,
@@ -112,19 +115,10 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
 
   let conflicts = await conflictFiles(context, opts)
   if (conflicts.length === 0) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, [], 0, result.combinedOutput, "retry-safe", result.exitCode)
+    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, [], result.combinedOutput, result.status === "timeout" ? "timeout" : "rebase-failed", result.exitCode)
   }
 
-  // When the caller configured recovery, leave the rebase in-progress so the
-  // recovery handler's resolve-rebase-conflicts task can take over and finish
-  // it. Without recovery, abort cleanly and fail.
-  const hasRecovery = context.recovery != null
-  if (hasRecovery) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, true)
-  }
-
-  await git(context.workDir, ["rebase", "--abort"], context.signal, opts)
-  return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, false)
+  return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, result.combinedOutput, "conflict", 1, true)
 }
 
 async function resolveSquashMessage(context: ActionContext): Promise<{ kind: "ok"; message: string | undefined } | { kind: "failure"; message: string }> {
@@ -152,7 +146,6 @@ interface SquashRequest {
   rebasedHeadSha: string | null
   rebaseSucceeded: boolean
   conflicts: string[]
-  resolveAttempts: number
   rebaseOutput: string
   squash: boolean
   squashMessage: string | undefined
@@ -171,7 +164,6 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       null,
       false,
       req.conflicts,
-      req.resolveAttempts,
       req.rebaseOutput,
       null,
       null,
@@ -189,9 +181,8 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       null,
       false,
       req.conflicts,
-      req.resolveAttempts,
       req.rebaseOutput,
-      "squash-message-missing",
+      "invalid-input",
       1,
     )
   }
@@ -208,9 +199,8 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       null,
       false,
       req.conflicts,
-      req.resolveAttempts,
       [req.rebaseOutput, softReset.combinedOutput].filter(Boolean).join("\n\n"),
-      "retry-safe",
+      softReset.status === "timeout" ? "timeout" : "squash-failed",
       softReset.exitCode,
     )
   }
@@ -227,9 +217,8 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       null,
       false,
       req.conflicts,
-      req.resolveAttempts,
       [req.rebaseOutput, softReset.combinedOutput, commit.combinedOutput].filter(Boolean).join("\n\n"),
-      "retry-safe",
+      commit.status === "timeout" ? "timeout" : "squash-failed",
       commit.exitCode,
     )
   }
@@ -247,14 +236,23 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
     squashedHeadSha,
     true,
     req.conflicts,
-    req.resolveAttempts,
     squashOutput,
     null,
     null,
   )
 }
 
-type RebaseFailureKind = "retry-safe" | "conflict" | "squash-message-missing" | null
+type RebaseFailureCode =
+  | "abort-failed"
+  | "invalid-input"
+  | "fetch-failed"
+  | "base-resolve-failed"
+  | "prepare-failed"
+  | "rebase-failed"
+  | "conflict"
+  | "squash-failed"
+  | "timeout"
+  | null
 
 function rebaseOutput(
   rebased: boolean,
@@ -267,16 +265,18 @@ function rebaseOutput(
   squashedHeadSha: string | null,
   squashed: boolean,
   conflicts: string[],
-  resolveAttempts: number,
   gitOutput: string,
-  failureKind: RebaseFailureKind = null,
+  failureCode: RebaseFailureCode = null,
   exitCode: number | null = null,
   rebaseLeftInProgress: boolean = false,
   steps: RebaseStep[] = [],
 ): ActionResult {
+  if (!rebased) {
+    return fail(failureCode ?? "rebase-failed", rebaseFailureMessage(failureCode, baseRef, conflicts, gitOutput), { exitCode: exitCode ?? 1 })
+  }
   const output = JSON.stringify({
     kind: "rebase",
-    status: rebased ? "completed" : "failed",
+    status: "completed",
     baseBranch,
     remote,
     baseRef,
@@ -287,23 +287,23 @@ function rebaseOutput(
     squashedHeadSha,
     rebased,
     conflicts,
-    resolveAttempts,
-    errorCode: failureKind,
-    rebaseLeftInProgress,
+    rebaseLeftInProgress: false,
     output: gitOutput,
     steps,
   })
-  if (rebased) {
-    return { status: "success", message: squashed ? "Rebase and squash completed" : "Rebase completed", output }
+  return succeed(output, { exitCode: exitCode ?? 0 })
+}
+
+function rebaseFailureMessage(code: RebaseFailureCode, baseRef: string, conflicts: string[], output: string): string {
+  const detail = output.trim() || "unknown error"
+  if (code === "conflict") {
+    const files = conflicts.length > 0 ? ` Conflicts: ${conflicts.join(", ")}.` : ""
+    return `Rebase onto ${baseRef} has unresolved conflicts.${files}`
   }
-  const label = failureKind === "conflict"
-    ? rebaseLeftInProgress
-      ? "Rebase in progress: conflicts require task-level resolution"
-      : "Rebase failed: conflict could not be resolved"
-    : failureKind === "squash-message-missing"
-      ? "Rebase squashed: a commit 'message' is required when 'squash' is true"
-      : `Rebase failed after ${resolveAttempts} conflict resolution attempts`
-  return { status: "failure", message: label, output, exitCode: exitCode ?? 1 }
+  if (code === "fetch-failed") return `Failed to fetch ${baseRef}: ${detail}. Rebase was not started.`
+  if (code === "timeout") return `Rebase operation timed out while preparing ${baseRef}.`
+  if (code === "invalid-input") return detail
+  return `Rebase onto ${baseRef} failed: ${detail}`
 }
 
 function rebaseStep(name: string, command: string, result: GitResult): RebaseStep {
@@ -351,7 +351,7 @@ export function combinedRebaseGitOutput(outputs: string[]) {
 
 export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return { status: "failure", message: "Rebase status requires the authoritative repository base branch" }
+  if (!baseBranch) return fail("invalid-input", "Rebase status requires the authoritative repository base branch")
   const remote = resolveDeliveryRemote(context, null)
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const opts = sinkOptions(context)
@@ -374,7 +374,7 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
     mergeBaseSha: mergeBase?.success ? mergeBase.stdout.trim() : null,
     output: [base.combinedOutput, mergeBase?.combinedOutput].filter(Boolean).join("\n"),
   })
-  return verified ? { status: "success", message: "Rebase verified", output } : { status: "failure", message: "Rebase is not complete or not clean", output }
+  return verified ? succeed(output) : fail("rebase-incomplete", "Rebase is not complete or not clean")
 }
 
 async function conflictFiles(context: ActionContext, opts?: GitOptions) {

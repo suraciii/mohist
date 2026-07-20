@@ -52,15 +52,13 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toMatch(/archived and committed/)
+    expect(result.error).toBeUndefined()
     expect(output.kind).toBe("archive-change")
     expect(output.destination).toBe(destination)
     expect(output.changed).toBe(true)
     expect(output.noChange).toBe(false)
     expect(output.commitMessage).toBe("Archive OpenSpec change: issue-127")
     expect(output.commitSha).toBe("def5678")
-    expect(output.errorCode).toBeNull()
     expect(output.changedFiles).toEqual([
       `${destinationRel}/proposal.md`,
       `${destinationRel}/specs/workflow-definition/spec.md`,
@@ -106,8 +104,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toMatch(/archived and committed/)
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
     expect(output.changed).toBe(true)
     expect(output.noChange).toBe(false)
@@ -148,12 +145,10 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toMatch(/already archived/)
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
     expect(output.changed).toBe(false)
     expect(output.noChange).toBe(true)
-    expect(output.errorCode).toBeNull()
     expect(calls.map((args) => args.join(" "))).toEqual([
       `add -A ${destinationRel}`,
       `rm -rf --cached --ignore-unmatch ${sourceRel}`,
@@ -193,7 +188,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.commitSha).toBe("9999999")
     expect(calls.map((args) => args.join(" "))).toContain(
       `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`,
@@ -223,12 +218,9 @@ describe("mohist/archive-change", () => {
     }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain(changeDir)
-    expect(result.message).toContain(archivedDir)
-    expect(output.errorCode).toBe("partial-archive")
-    expect(output.source).toBe(changeDir)
-    expect(output.archive).toBe(archivedDir)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain(changeDir)
+    expect(result.error?.message).toContain(archivedDir)
     expect(calls).toEqual([])
   })
 
@@ -245,11 +237,9 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/not found/)
-    expect(result.message).toContain(changeDir)
-    expect(output.errorCode).toBe("missing-source")
-    expect(output.source).toBe(changeDir)
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/not found/)
+    expect(result.error?.message).toContain(changeDir)
     expect(calls).toEqual([])
   })
 
@@ -292,10 +282,8 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(result.message).toMatch(/archived and committed/)
+    expect(result.error).toBeUndefined()
     expect(output.commitSha).toBe("fed4321")
-    expect(output.errorCode).toBeNull()
     expect(calls.map((args) => args.join(" "))).toContain(
       `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`,
     )
@@ -333,7 +321,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.changedFiles).toEqual([`${destinationRel}/proposal.md`])
     expect(output.changedFiles.find((file: string) => file.includes("unrelated"))).toBeUndefined()
   })
@@ -362,14 +350,9 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(result.message).toMatch(/git commit archive change failed/)
-    expect(result.message).toContain("cannot commit without a user identity")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.stage).toBe("commit")
-    expect(output.changedFiles).toEqual([`${destinationRel}/proposal.md`])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toMatch(/git commit archive change failed/)
+    expect(result.error?.message).toContain("cannot commit without a user identity")
   })
 
   it("ArchiveChangePersistsArchiveNameBeforeMove", async () => {
@@ -407,7 +390,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
     expect(writeSeenBeforeMove).toBe(true)
     expect(patchRunVars).toHaveBeenCalledTimes(1)
@@ -454,11 +437,7 @@ describe("mohist/archive-change", () => {
     })
 
     const firstResult = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars: firstPatchRunVars }))
-    const firstOutput = JSON.parse(firstResult.output ?? "{}")
-
-    expect(firstResult.status).toBe("failure")
-    expect(firstOutput.stage).toBe("commit")
-    expect(firstOutput.destination).toBe(versionedDestination)
+    expect(firstResult.error).toBeDefined()
     expect(firstPatchRunVars).toHaveBeenCalledWith(
       "workflow-1",
       { openspecArchiveName: versionedArchiveName },
@@ -483,7 +462,7 @@ describe("mohist/archive-change", () => {
     const retryResult = await archiveChangeAction(archiveContext(workDir, changeDir, persistedVars, { patchRunVars: retryPatchRunVars }))
     const retryOutput = JSON.parse(retryResult.output ?? "{}")
 
-    expect(retryResult.status).toBe("success")
+    expect(retryResult.error).toBeUndefined()
     expect(retryOutput.destination).toBe(versionedDestination)
     expect(retryOutput.commitSha).toBe("abc1234")
     expect(retryPatchRunVars).not.toHaveBeenCalled()
@@ -520,7 +499,7 @@ describe("mohist/archive-change", () => {
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
     expect(patchRunVars).not.toHaveBeenCalled()
   })
@@ -552,10 +531,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, variables, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("config-error")
-    expect(output.stage).toBe("validate-archive-name")
-    expect(output.archivePrefix).toBe(unsafePrefix)
+    expect(result.error).toBeDefined()
     expect(calls).toEqual([])
     expect(patchRunVars).not.toHaveBeenCalled()
   })
@@ -591,7 +567,7 @@ describe("mohist/archive-change", () => {
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
@@ -615,10 +591,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.stage).toBe("persist-name")
-    expect(output.source).toBe(changeDir)
+    expect(result.error).toBeDefined()
   })
 
   it("ArchiveChangeBackfillsArchiveNameWhenSourceMissingAndArchiveExists", async () => {
@@ -657,7 +630,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
@@ -702,9 +675,8 @@ describe("mohist/archive-change", () => {
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
-    expect(output.errorCode).toBeNull()
     expect(patchRunVars).not.toHaveBeenCalled()
   })
 
@@ -729,10 +701,7 @@ describe("mohist/archive-change", () => {
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.stage).toBe("persist-name")
-    expect(output.source).toBe(changeDir)
+    expect(result.error).toBeDefined()
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
       "workflow-1",
@@ -776,7 +745,7 @@ describe("mohist/archive-change", () => {
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(join(workDir, destinationRel))
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
@@ -822,9 +791,8 @@ describe("mohist/archive-change", () => {
     } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(archivedDir)
-    expect(output.errorCode).toBeNull()
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
       "workflow-1",
@@ -873,7 +841,7 @@ describe("mohist/archive-change", () => {
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output.destination).toBe(newArchivedDir)
     expect(patchRunVars).not.toHaveBeenCalled()
   })

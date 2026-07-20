@@ -207,7 +207,7 @@ public static class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks);
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks, req.Error);
 
             // Agent-job: route through the runner grain (push-model ledger).
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
@@ -598,7 +598,8 @@ public record RunnerReportRequest(
     string[]? ArtifactUploadIds = null,
     string? OwnerKind = null,
     string? AgentJobId = null,
-    List<RuntimeTaskInput>? AddTasks = null);
+    List<RuntimeTaskInput>? AddTasks = null,
+    ExecutionError? Error = null);
 public record RunnerReportResponse(
     string WorkflowRunId,
     string? WorkflowStatus,

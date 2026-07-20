@@ -3,6 +3,7 @@ import type { ActionContext, ActionResult } from "../core/types.js"
 import { stringAt } from "../core/json-path.js"
 import { exists } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
+import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -326,7 +327,6 @@ function successOutput(workDir: string, expectedBranch: string, snapshot: Worksp
   const output = JSON.stringify({
     kind: "workspace-prepare",
     status: "success",
-    failureKind: null,
     expectedBranch,
     head: snapshot.head,
     residual: snapshot.residual,
@@ -334,7 +334,7 @@ function successOutput(workDir: string, expectedBranch: string, snapshot: Worksp
     step: null,
     workDir,
   })
-  return { status: "success", message: "Workspace prepared", output, exitCode: 0 }
+  return succeed(output, { exitCode: 0 })
 }
 
 function failureOutput(
@@ -345,16 +345,9 @@ function failureOutput(
   message: string,
   exitCode: number | null,
 ): ActionResult {
-  const output = JSON.stringify({
-    kind: "workspace-prepare",
-    status: "failure",
-    failureKind: "workspace-setup",
-    expectedBranch,
-    head: snapshot.head,
-    residual: snapshot.residual,
-    porcelain: snapshot.porcelain,
-    step,
-    workDir,
-  })
-  return { status: "failure", message, output, exitCode: exitCode ?? 1 }
+  void workDir
+  void expectedBranch
+  void snapshot
+  void step
+  return fail("workspace-setup", message, { exitCode: exitCode ?? 1 })
 }

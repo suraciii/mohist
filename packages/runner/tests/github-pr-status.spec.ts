@@ -106,7 +106,7 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const parsed = JSON.parse(result.output!)
     expect(parsed.kind).toBe("github-pr-status")
     expect(parsed.status).toBe("verified")
@@ -129,17 +129,14 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository()))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(commands).toEqual(["gh pr view 42 --json url,state,isDraft --repo github.com/acme/repo"])
   })
 
   it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
     const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.message).toContain("authoritative GitHub repository URL")
-    expect(output.steps).toEqual([])
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("authoritative GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {
@@ -153,7 +150,7 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(withLog(context({ prNumber: 42 }), writes))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft" }])
   })
 
@@ -166,10 +163,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
-    expect(result.status).toBe("failure")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.expectations).toEqual(["open", "ready"])
-    expect(parsed.missing).toEqual(["ready"])
+    expect(result.error).toBeDefined()
+    expect(result.error?.code).toBe("pr-status-failed")
   })
 
   it("rejects a non-open PR by default", async () => {
@@ -181,10 +176,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
-    expect(result.status).toBe("failure")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.expectations).toEqual(["open", "ready"])
-    expect(parsed.missing).toEqual(["open", "ready"])
+    expect(result.error).toBeDefined()
+    expect(result.error?.code).toBe("pr-status-failed")
   })
 
   it("fails with expect=merged when the PR state is OPEN", async () => {
@@ -196,11 +189,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42, expect: "merged" }))
 
-    expect(result.status).toBe("failure")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.kind).toBe("github-pr-status")
-    expect(parsed.status).toBe("failed")
-    expect(parsed.missing).toContain("merged")
+    expect(result.error).toBeDefined()
+    expect(result.error?.code).toBe("pr-status-failed")
   })
 
   it("passes expect=merged when the PR state is MERGED", async () => {
@@ -212,7 +202,7 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42, expect: "merged" }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const parsed = JSON.parse(result.output!)
     expect(parsed.status).toBe("verified")
     expect(parsed.missing).toEqual([])
@@ -227,9 +217,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42, expect: "ready" }))
 
-    expect(result.status).toBe("failure")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.missing).toContain("ready")
+    expect(result.error).toBeDefined()
+    expect(result.error?.code).toBe("pr-status-failed")
   })
 
   it("resolves prNumber from vars.github.pr.number when omitted from with", async () => {
@@ -243,7 +232,7 @@ describe("mohist/github-pr-status action", () => {
       github: { pr: { number: 7, url: "https://github.com/acme/repo/pull/7" } },
     }))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     const parsed = JSON.parse(result.output!)
     expect(parsed.prNumber).toBe(7)
   })
@@ -251,8 +240,8 @@ describe("mohist/github-pr-status action", () => {
   it("returns failure with a clear message when prNumber is missing", async () => {
     const result = await githubPrStatusAction(context({}))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("prNumber")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("prNumber")
   })
 
   it("returns failure when gh pr view fails", async () => {
@@ -260,11 +249,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("gh pr view 42 failed")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.kind).toBe("github-pr-status")
-    expect(parsed.status).toBe("failed")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("gh pr view 42 failed")
   })
 
   it("returns failure when gh pr view returns unparseable JSON", async () => {
@@ -272,8 +258,8 @@ describe("mohist/github-pr-status action", () => {
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
 
-    expect(result.status).toBe("failure")
-    expect(result.message).toContain("unparseable JSON")
+    expect(result.error).toBeDefined()
+    expect(result.error?.message).toContain("unparseable JSON")
   })
 
   it("ignores unknown expectation tokens", async () => {
@@ -316,18 +302,9 @@ describe("mohist/github-pr-status action", () => {
     })
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    // The action surfaces the raw gh failure without going through
-    // classifyGhFailure; the existing gh-pr-view failure path stays
-    // unchanged so a timeout is reported as a plain `failed` status
-    // with the captured output. The classifier is reserved for the
-    // delivery actions (push, create-pr, mark-ready, merge).
-    expect(output.status).toBe("failed")
-    expect(output.output).toContain("timed out")
-    expect(output.steps[0].name).toBe("gh-pr-view")
-    expect(output.steps[0].output).toContain("timed out")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
   })
 })
 

@@ -295,7 +295,7 @@ public class WorkflowYamlParserTests
                 recovery:
                   budget: 1
                   handlers:
-                    - when: promise=FAIL
+                    - when: output.promise=FAIL
                       tasks:
                         - id: recover:fix-review
                           title: Fix review
@@ -327,7 +327,7 @@ public class WorkflowYamlParserTests
                 recovery:
                   budget: 1
                   handlers:
-                    - when: errorCode=script-failed
+                    - when: error.code=script-failed
                       retrySelf: true
                     - tasks:
                         - id: recover:fix-ci
@@ -338,11 +338,11 @@ public class WorkflowYamlParserTests
         """);
 
         var handlers = definition.Stages.Single().Tasks.Single().Recovery!.Handlers;
-        Assert.Equal("errorCode=script-failed", handlers[0].When);
+        Assert.Equal("error.code=script-failed", handlers[0].When);
         Assert.Null(handlers[1].When);
 
         var emitted = WorkflowYamlSerializer.ToYaml(definition);
-        Assert.Contains("when: errorCode=script-failed", emitted);
+        Assert.Contains("when: error.code=script-failed", emitted);
         Assert.DoesNotContain("when: null", emitted);
     }
 
@@ -359,7 +359,7 @@ public class WorkflowYamlParserTests
                 recovery:
                   handlers:
                     - retrySelf: true
-                    - when: errorCode=script-failed
+                    - when: error.code=script-failed
                       retrySelf: true
             checks: []
         """));

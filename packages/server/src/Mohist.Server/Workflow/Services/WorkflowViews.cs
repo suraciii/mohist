@@ -52,7 +52,8 @@ public sealed record FailureStatusView(
     string? Stage,
     string? TaskId,
     string? CheckName,
-    string? Message);
+    string? Message,
+    ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record AvailableActionView(
@@ -102,7 +103,8 @@ public sealed record TaskStatusView(
     DateTimeOffset? StartedAt = null,
     DateTimeOffset? CompletedAt = null,
     long? DurationMs = null,
-    string? Output = null);
+    string? Output = null,
+    ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(
@@ -110,7 +112,8 @@ public sealed record CheckStatusView(
     string Title,
     string? Uses,
     string Status,
-    string? Message);
+    string? Message,
+    ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record PendingWorkView(

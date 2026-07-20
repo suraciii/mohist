@@ -1,5 +1,6 @@
 import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, safeParseObject } from "../core/json.js"
+import { getPath } from "../core/json-path.js"
 
 interface RecoveryHandler {
   when?: string
@@ -36,11 +37,14 @@ export function tryRecovery(
   if (remaining <= 0) return null
 
   const output = safeParseObject(result.output)
-  const handler = (output ? recovery.handlers.find((h) => h.when !== undefined && matchesWhen(h.when, output)) : undefined)
-    ?? (result.status === "failed" ? recovery.handlers.find((h) => h.when === undefined) : undefined)
+  const failureContext: JsonObject = {
+    output,
+    error: result.error ? { code: result.error.code, message: result.error.message } : null,
+  }
+  const handler = recovery.handlers.find((h) => h.when !== undefined && matchesWhen(h.when!, failureContext))
+    ?? (result.error ? recovery.handlers.find((h) => h.when === undefined) : undefined)
   if (!handler) return null
 
-  const failureContext: JsonObject = output ?? {}
   const effectiveVariables = variables ?? work.variables ?? null
   const renderedHandlerTasks: AddTaskInput[] = []
   for (const task of handler.tasks) {
@@ -76,18 +80,19 @@ export function tryRecovery(
   const label = work.title?.trim() || work.uses || work.workId
   return {
     status: "completed",
-    message: `${label} failed (${handler.when ?? "default"}); recovery scheduled`,
+    message: result.error?.message ?? `${label} recovery scheduled`,
+    error: result.error,
     output: result.output,
     addTasks,
   }
 }
 
-export function matchesWhen(when: string, output: JsonObject): boolean {
+export function matchesWhen(when: string, context: JsonObject): boolean {
   const eq = when.indexOf("=")
   if (eq === -1) return false
-  const field = when.slice(0, eq).trim()
+  const path = when.slice(0, eq).trim()
   const expected = when.slice(eq + 1).trim()
-  return String(output[field]) === expected
+  return String(getPath(context, path)) === expected
 }
 
 export function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryConfig | null {
@@ -147,7 +152,8 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
  * the dispatch-time and execution-time rules in `task-dispatch.md`.
  *
  * Behavior per spec (`specs/recovery-failure-context/spec.md`):
- * - Whole-string `${{ failure.output }}` or `${{ failure.output.X }}`
+ * - Whole-string `${{ failure.output }}`, `${{ failure.output.X }}`, or
+ *   `${{ failure.error.X }}`
  *   preserves the resolved JSON type (object / array / number /
  *   boolean) rather than coercing to a serialized string.
  * - Embedded `... ${{ failure.output.X }} ...` resolves via plain
@@ -163,7 +169,10 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
  * namespace.
  */
 export function expandFailureReferences(value: JsonValue, failureContext: JsonObject): JsonValue {
-  return expandFailureValue(value, failureContext)
+  const context = "output" in failureContext || "error" in failureContext
+    ? failureContext
+    : { output: failureContext, error: null }
+  return expandFailureValue(value, context)
 }
 
 function expandFailureValue(value: JsonValue, failureContext: JsonObject): JsonValue {
@@ -222,8 +231,8 @@ function resolveFailurePath(failureContext: JsonObject, path: string): JsonValue
   if (parts[0] !== "failure") return undefined
   const remainder = parts.slice(1)
   if (remainder.length === 0) return failureContext
-  if (remainder[0] !== "output") return undefined
-  let current: JsonValue = failureContext
+  if (remainder[0] !== "output" && remainder[0] !== "error") return undefined
+  let current: JsonValue = failureContext[remainder[0]]
   for (const part of remainder.slice(1)) {
     if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
     current = (current as JsonObject)[part]
@@ -294,14 +303,16 @@ function resolvePromptBody(variables: JsonObject | null, key: string): JsonValue
 }
 
 function formatFailureDiagnostic(recoveryTaskId: string, path: string): string {
-  return `recovery task '${recoveryTaskId}' references unresolved failure path '${path}'. Ensure the triggering action emits the referenced field in its structured output.`
+  return `recovery task '${recoveryTaskId}' references unresolved failure path '${path}'. Ensure the triggering action emits the referenced field in its output or error.`
 }
 
 function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
+  const failureMessage = `${label}: ${message}`
   return {
     status: "failed",
-    message: `${label}: ${message}`,
+    message: failureMessage,
+    error: { code: "recovery-reference-unresolved", message: failureMessage },
   }
 }
 

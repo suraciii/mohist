@@ -13,16 +13,12 @@ import type { OpenCodeRuntime } from "./opencode/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
-import {
-  attachBranchStabilityEvidence,
-  checkBranchStability,
-  expectedWorkspaceBranch,
-  type BranchStabilityEvidence,
-} from "./branch-stability.js"
+import { checkBranchStability, expectedWorkspaceBranch } from "./branch-stability.js"
 import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
 import { tryRecovery } from "./recovery.js"
 import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
+import { isActionFailure } from "../actions/action-result.js"
 import {
   evaluateCompletion,
   promiseValue,
@@ -48,10 +44,6 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  * (design D5).
  */
 const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
-
-function isPromiseProjected(uses?: string | null): boolean {
-  return !!uses && PROMISE_PROJECTED_ACTIONS.has(uses.trim().toLowerCase())
-}
 
 export class WorkExecutor {
   constructor(
@@ -160,7 +152,7 @@ export class WorkExecutor {
       // never be serialized into WorkItemResult.output, recovery matching,
       // setVars projections, captured outputs, or artifacts (design D4).
       const { publicActionResult, turnFact } = stripRunnerPrivateFacts(result)
-      const actionSucceeded = publicActionResult.status === "success" || publicActionResult.status === "completed"
+      const actionSucceeded = !isActionFailure(publicActionResult)
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
         : null
@@ -168,22 +160,13 @@ export class WorkExecutor {
       const normalized = normalize(work, projected)
       const recoveryResult = tryRecovery(work, normalized, variables)
       if (recoveryResult) return recoveryResult
-      // For `mohist/opencode`, the public Action Output is the minimal
-      // `null | { promise }` shape — branch-stability evidence and
-      // other diagnostics MUST NOT pollute it (opencode-action-contract
-      // spec). For every other Action, we embed the evidence as the
-      // task surfaced output so the UI/server can inspect it.
-      const promiseProjected = isPromiseProjected(work.uses)
       if (normalized.status !== "completed") {
-        return promiseProjected
-          ? normalized
-          : attachBranchStabilityEvidence(normalized, startCheck.evidence)
+        return normalized
       }
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
       if (endCheck.kind === "violation") {
         return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
       }
-      const evidenceStack: BranchStabilityEvidence[] = [startCheck.evidence, endCheck.evidence]
       const worktreeResult = await enforceCleanWorktree(
         work,
         workDir,
@@ -198,14 +181,9 @@ export class WorkExecutor {
       if (worktreeResult.status !== "completed") {
         const recoveryResult = tryRecovery(work, worktreeResult, variables)
         if (recoveryResult) return recoveryResult
-        return promiseProjected
-          ? worktreeResult
-          : attachBranchStabilityEvidence(worktreeResult, evidenceStack)
+        return worktreeResult
       }
-      const withEvidence = promiseProjected
-        ? worktreeResult
-        : attachBranchStabilityEvidence(worktreeResult, evidenceStack)
-      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, withEvidence, publicActionResult, variables, signal)
+      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, publicActionResult, variables, signal)
       const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, publicActionResult)
       return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
     } catch (error) {
@@ -298,20 +276,17 @@ function stripRunnerPrivateFacts(result: ActionResult): {
 
 /**
  * Project the public task output AFTER completion evaluation so a
- * matched promise marker can drive `recovery when: promise=FAIL`
- * matching. The projection only rewires the `output` field; the rest
- * of the Action result (status/message/exitCode) flows through
- * unchanged.
+ * matched promise marker can drive `recovery when: output.promise=FAIL`
+ * matching. This is the Action-to-Task boundary: an Action error becomes a
+ * failed work result with the same error object, while Task-owned completion
+ * checks may add an error after a successful Action output.
  *
  * Behavior (design D5):
  *  - `mohist/opencode`: handler output is discarded. If completion
  *    matched a promise marker, output becomes `{ "promise": "<value>" }`;
  *    otherwise output is `null`. Other Action-owned fields do NOT
  *    appear.
- *  - Every other Action: output is preserved unchanged, including any
- *    structured `errorCode`/`prNumber`/etc. Completion diagnostics
- *    live in `result.message` (or in a failIf-driven status flip), not
- *    in `output`.
+ *  - Every other Action: successful output is preserved unchanged.
  *
  * A successful Action with unsatisfied expectations (missing files,
  * missing markers, failIf matched) becomes an ordinary failed
@@ -323,33 +298,42 @@ function projectTaskOutput(
   work: RenderedWorkItem,
   result: ActionResult,
   completion: CompletionEvaluation | null,
-): ActionResult {
+): WorkItemResult {
+  if (isActionFailure(result)) {
+    return {
+      status: failureStatus(work),
+      message: result.error.message,
+      error: result.error,
+      exitCode: result.exitCode,
+    }
+  }
   const uses = work.uses?.trim().toLowerCase() ?? ""
   if (PROMISE_PROJECTED_ACTIONS.has(uses)) {
-    if (completion === null) return { ...result, output: null }
+    if (completion === null) return { status: "completed", output: null, exitCode: result.exitCode }
     const value = promiseValue(completion.matched ?? null)
     const projectedOutput = value !== null ? JSON.stringify({ promise: value }) : null
-    // For opencode, an unmet completion contract (no promise marker,
-    // missing files, failIf matched) still drops the handler's raw
-    // output. The status flip for "Action succeeded but completion
-    // unsatisfied" lives in the non-opencode branch below.
-    const statusFlip = completion.satisfied ? result.status : "failure"
-    const message = completion.satisfied ? result.message : completion.message
-    return { ...result, status: statusFlip, output: projectedOutput, message }
+    if (!completion.satisfied) {
+      return {
+        status: failureStatus(work),
+        message: completion.message,
+        error: { code: "expectation-failed", message: completion.message },
+        output: projectedOutput,
+        exitCode: result.exitCode,
+      }
+    }
+    return { status: "completed", output: projectedOutput, exitCode: result.exitCode }
   }
-  if (completion === null) return result
-  // Action failure stays an Action failure. An unmet expectation only
-  // fails the task when the Action itself succeeded (so an Action that
-  // returned `failure` does not get re-judged by completion).
-  if (result.status !== "success" && result.status !== "completed") {
-    return result
-  }
-  // Successful Action + unsatisfied expectation → failed completion with
-  // the diagnostic message and the Action's exitCode preserved.
+  if (completion === null) return { status: "completed", output: result.output, exitCode: result.exitCode }
   if (!completion.satisfied) {
-    return { ...result, status: "failure", message: completion.message }
+    return {
+      status: failureStatus(work),
+      message: completion.message,
+      error: { code: "expectation-failed", message: completion.message },
+      output: result.output,
+      exitCode: result.exitCode,
+    }
   }
-  return result
+  return { status: "completed", output: result.output, exitCode: result.exitCode }
 }
 
 /**
@@ -417,17 +401,16 @@ function baseContext(
   }
 }
 
-// Workspace-prepare failure (clone/base-branch/checkout): `output.kind` is
-// structured so the CLI/API/UI render it distinctly from ordinary task failures.
 function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
-  const output = error instanceof WorkspaceNetworkTimeoutError
-    ? JSON.stringify({ kind: "workspace-setup", failureKind: "retry-safe", step: error.step })
-    : JSON.stringify({ kind: "workspace-setup" })
+  const detail = error instanceof WorkspaceNetworkTimeoutError
+    ? `workspace preparation timed out: ${message}`
+    : `could not prepare workflow workspace: ${message}`
+  const failureMessage = detail.slice(0, 4000)
   return {
     status: failureStatus(work),
-    message: `could not prepare workflow workspace (workspace-setup): ${message}`.slice(0, 4000),
-    output,
+    message: failureMessage,
+    error: { code: "workspace-setup", message: failureMessage },
   }
 }
 
@@ -440,7 +423,7 @@ function normalize(work: RenderedWorkItem, result: WorkItemResult): WorkItemResu
 }
 
 function failure(work: RenderedWorkItem, message: string): WorkItemResult {
-  return { status: failureStatus(work), message }
+  return { status: failureStatus(work), message, error: { code: "runner-failed", message } }
 }
 
 function failureStatus(work: RenderedWorkItem): "fail" | "failed" {

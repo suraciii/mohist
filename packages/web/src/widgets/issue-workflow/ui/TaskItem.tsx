@@ -6,7 +6,7 @@ import { getFileContent } from '../../../entities/issue'
 import type { StageTaskState, WorkflowArtifactSummary } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { ArtifactContentViewer, type ArtifactContentHook } from './ArtifactContentViewer'
-import { resolveDeliveryFailureFromOutput, resolveDeliveryFailureFromMessage } from '../../../shared/lib/delivery-failure'
+import { getDeliveryFailureGuidance } from '../../../shared/lib/delivery-failure'
 import { formatClock, formatDuration, formatOriginLabel, formatOriginTitle } from './format'
 import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, SpinnerIcon } from './StageStatusIcons'
 import { DeliveryFailureBanner } from './failure-panels'
@@ -212,21 +212,10 @@ export function TaskItem({
   const artifactSummaries = task.artifactSummaries ?? []
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
-  const taskReason = typeof task.reason === 'string' ? task.reason : null
-  const outputResolution = resolveDeliveryFailureFromOutput(taskOutput)
-  const messageResolution = resolveDeliveryFailureFromMessage(taskReason)
+  const taskReason = task.error?.message ?? (typeof task.reason === 'string' ? task.reason : null)
   const deliveryFailure = isFailed && isDeliveryTask
-    ? (outputResolution.guidance ?? messageResolution.guidance)
+    ? getDeliveryFailureGuidance(task.error?.code)
     : null
-  const branchEvidence =
-    (outputResolution.failureKind === 'branch-invariant-violation'
-      ? outputResolution.evidence
-      : null) ??
-    (messageResolution.failureKind === 'branch-invariant-violation'
-      ? messageResolution.evidence
-      : null)
-  const workspaceEvidence =
-    outputResolution.workspaceEvidence ?? messageResolution.workspaceEvidence
   const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
@@ -240,7 +229,7 @@ export function TaskItem({
     icon = <EmptyCircleIcon className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
   }
 
-  const hasReason = task.reason != null
+  const hasReason = taskReason != null
   const originLabel = formatOriginLabel(task.origin)
   const originTitle = formatOriginTitle(task.origin)
   const sessionName = task.sessionName?.trim()
@@ -269,7 +258,7 @@ export function TaskItem({
           </div>
         )}
         {hasReason && (
-          <span className="text-xs text-warning flex-shrink-0" title={task.reason}>reason</span>
+          <span className="text-xs text-warning flex-shrink-0" title={taskReason ?? undefined}>reason</span>
         )}
         {originLabel && (
           <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
@@ -303,13 +292,11 @@ export function TaskItem({
                 failureKind={deliveryFailure.failureKind}
                 label={deliveryFailure.label}
                 nextAction={deliveryFailure.nextAction}
-                evidence={branchEvidence}
-                workspaceEvidence={workspaceEvidence}
               />
             )}
             {hasReason && (
               <div className="text-xs text-warning bg-warning-subtle rounded px-2 py-1">
-                {task.reason}
+                {taskReason}
               </div>
             )}
             {hasArtifacts && (

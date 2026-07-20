@@ -6,16 +6,23 @@ namespace Mohist.Server.Workflow.Domain.Run;
 // and can be retried. Nothing in the system produces it anymore.
 public enum FailureReason { TaskFailed, CheckFailed, ApprovalRejected, ContextExhaustion }
 
+[GenerateSerializer]
+public sealed record ExecutionError(
+    [property: Id(0)] string Code,
+    [property: Id(1)] string Message);
+
 public sealed record FailureDetails(
     FailureReason Reason,
     string Stage,
     string? TaskId = null,
     string? CheckName = null,
-    string? Message = null);
+    string? Message = null,
+    ExecutionError? Error = null);
 
 public sealed record TaskResult(
     string Status,
-    string? Reason = null);
+    string? Reason = null,
+    ExecutionError? Error = null);
 
 /// <summary>
 /// The per-run head ref the execution plane prepares inside the workflow

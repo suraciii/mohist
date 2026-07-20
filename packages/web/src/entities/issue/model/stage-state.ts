@@ -31,7 +31,13 @@ export interface WorkflowFailureDetails {
   taskId?: string
   checkName?: string
   message?: string | null
+  error?: WorkflowExecutionError | null
   causedBy?: WorkflowTaskCause | null
+}
+
+export interface WorkflowExecutionError {
+  code: string
+  message: string
 }
 
 export interface StageTaskState {
@@ -47,6 +53,7 @@ export interface StageTaskState {
   artifacts: string[]
   artifactSummaries?: WorkflowArtifactSummary[]
   output: unknown
+  error?: WorkflowExecutionError | null
   startedAt: string | null
   completedAt: string | null
   updatedAt: string
@@ -62,6 +69,7 @@ export interface StageCheckState {
   status: StageCheckStatus
   message: string | null
   output: unknown
+  error?: WorkflowExecutionError | null
   runCount: number
   lastRunAt: string | null
   origin?: WorkItemOrigin | null

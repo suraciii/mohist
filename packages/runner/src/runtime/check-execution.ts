@@ -1,6 +1,7 @@
-import type { ActionContext, JsonObject, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionError, JsonObject, WorkItemResult } from "../core/types.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
+import { isActionFailure } from "../actions/action-result.js"
 
 export interface CheckDeclaration {
   name?: string
@@ -14,6 +15,7 @@ export interface CheckResultRow {
   status: string
   message?: string | null
   output?: string | null
+  error?: ActionError | null
 }
 
 export interface CheckExecutionDeps {
@@ -29,13 +31,17 @@ export async function executeCheckDispatch(
   variables: JsonObject,
   deps: CheckExecutionDeps,
 ): Promise<WorkItemResult> {
-  if (checks.length === 0) return { status: "fail", message: "No checks found in dispatch" }
+  if (checks.length === 0) {
+    const message = "No checks found in dispatch"
+    return { status: "fail", message, error: { code: "invalid-check-dispatch", message } }
+  }
 
   const results = await Promise.all(checks.map((check) => runOneCheck(check, variables, deps)))
   const verdict = results.every((result) => result.status === "pass") ? "pass" : "fail"
   const output = JSON.stringify(results)
   if (verdict === "fail") {
-    return { status: "fail", message: `Check verdict failure: ${checkFailureDetails(results, checks)}`, output }
+    const message = `Check verdict failure: ${checkFailureDetails(results, checks)}`
+    return { status: "fail", message, error: { code: "check-failed", message }, output }
   }
   return { status: "pass", output }
 }
@@ -55,7 +61,8 @@ async function runOneCheck(
     const renderedWith = renderTemplate(check.with ?? null, variables)
     const workDir = await deps.resolveWorkDir(renderedWith)
     const result = await action({ ...deps.context, workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
-    return { name: check.name, status: deps.toCheckStatus(result.status), message: result.message, output: result.output }
+    if (isActionFailure(result)) return { name: check.name, status: "fail", message: result.error.message, error: result.error }
+    return { name: check.name, status: "pass", output: result.output }
   } catch (error) {
     return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
   }

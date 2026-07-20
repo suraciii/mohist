@@ -83,16 +83,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     installGh(() => ghOk("never called"))
 
     const result = await markGitHubPrReadyAction(context({}))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "mark-github-pr-ready",
-      errorCode: "config-error",
-      prNumber: null,
-      transitioned: false,
-    })
-    expect(output.message).toContain("requires prNumber")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("requires prNumber")
   })
 
   it("is idempotent: a PR already marked READY returns success without gh pr ready", async () => {
@@ -115,7 +108,7 @@ describe("mohist/mark-github-pr-ready action", () => {
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       kind: "mark-github-pr-ready",
       status: "completed",
@@ -124,9 +117,8 @@ describe("mohist/mark-github-pr-ready action", () => {
       state: "READY",
       previousState: "READY",
       transitioned: false,
-      errorCode: null,
     })
-    expect(output.message).toContain("already ready")
+    expect(output.output).toContain("already READY")
     expect(ghCalls.some((call) => call === "gh pr ready 42")).toBe(false)
   })
 
@@ -145,7 +137,7 @@ describe("mohist/mark-github-pr-ready action", () => {
 
     const result = await markGitHubPrReadyAction(withLog(context({ prNumber: 42 }), writes))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:mark-github-pr-ready" && write.text.includes("gh pr ready 42"))).toBe(true)
   })
 
@@ -171,7 +163,7 @@ describe("mohist/mark-github-pr-ready action", () => {
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(output).toMatchObject({
       kind: "mark-github-pr-ready",
       status: "completed",
@@ -180,7 +172,6 @@ describe("mohist/mark-github-pr-ready action", () => {
       state: "READY",
       previousState: "DRAFT",
       transitioned: true,
-      errorCode: null,
     })
     expect(ghCalls).toContain("gh pr ready 42")
   })
@@ -198,18 +189,16 @@ describe("mohist/mark-github-pr-ready action", () => {
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository()))
 
-    expect(result.status).toBe("success")
+    expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
     expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
   })
 
   it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("config-error")
-    expect(output.message).toContain("authoritative GitHub repository URL")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("authoritative GitHub repository URL")
   })
 
   it("does not call git push or update title/body — the action is a state transition only", async () => {
@@ -251,15 +240,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "mark-github-pr-ready",
-      errorCode: "config-error",
-      prNumber: 42,
-    })
-    expect(output.message).toContain("gh CLI is not installed")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "config-error" })
+    expect(result.error?.message).toContain("gh CLI is not installed")
   })
 
   it("returns errorCode pr-state-conflict if the PR is closed", async () => {
@@ -277,17 +260,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "mark-github-pr-ready",
-      errorCode: "pr-state-conflict",
-      prNumber: 42,
-      prUrl: "https://github.com/example/repo/pull/42",
-      transitioned: false,
-    })
-    expect(output.message).toContain("in state CLOSED")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "pr-state-conflict" })
+    expect(result.error?.message).toContain("in state CLOSED")
   })
 
   it("classifies gh pr ready failures via the shared classifier", async () => {
@@ -307,17 +282,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "mark-github-pr-ready",
-      errorCode: "retry-safe",
-      prNumber: 42,
-      previousState: "DRAFT",
-      transitioned: false,
-    })
-    expect(output.message).toContain("gh pr ready 42 failed")
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "retry-safe" })
+    expect(result.error?.message).toContain("gh pr ready 42 failed")
   })
 
   it("falls back to errorCode retry-safe when gh pr view returns unparseable JSON", async () => {
@@ -335,14 +302,8 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "mark-github-pr-ready",
-      errorCode: "retry-safe",
-      prNumber: 42,
-    })
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "retry-safe" })
   })
 
   it("NetworkGhCalls_AllReceiveTimeoutMs", async () => {
@@ -394,15 +355,9 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
 
     const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.errorCode).toBe("retry-safe")
-    expect(output.output).toContain("timed out")
-    const readyStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-ready")
-    expect(readyStep).toBeDefined()
-    expect(readyStep.output).toContain("timed out")
-    expect(readyStep.exitCode).toBe(124)
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: "timeout" })
+    expect(result.error?.message).toContain("timed out")
   })
 })
 

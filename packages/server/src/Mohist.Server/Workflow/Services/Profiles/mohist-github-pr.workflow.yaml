@@ -105,7 +105,7 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: promise=FAIL
+            - when: output.promise=FAIL
               tasks:
                 - id: recover:fix-plan-review
                   title: Fix plan review findings
@@ -220,7 +220,7 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: promise=FAIL
+            - when: output.promise=FAIL
               tasks:
                 - id: recover:fix-review-findings
                   title: Fix review findings
@@ -272,7 +272,7 @@ stages:
         recovery:
           budget: 3
           handlers:
-            - when: errorCode=retry-safe
+            - when: error.code=retry-safe
               retrySelf: true
 
       - id: push
@@ -293,7 +293,7 @@ stages:
         recovery:
           budget: 2
           handlers:
-            - when: errorCode=base-moved
+            - when: error.code=base-moved
               tasks:
                 - id: recover:rebase
                   title: Rebase after base moved
@@ -305,7 +305,7 @@ stages:
                   recovery:
                     budget: 2
                     handlers:
-                      - when: errorCode=conflict
+                      - when: error.code=conflict
                         tasks:
                           - id: recover:resolve-rebase-conflicts
                             title: Resolve rebase conflicts
@@ -323,7 +323,7 @@ stages:
                     remote: origin
                     force: true
               retrySelf: true
-            - when: errorCode=pr-checks-failed
+            - when: error.code=pr-checks-failed
               tasks:
                 - id: recover:fix-pr-checks
                   title: Fix failing GitHub PR checks
@@ -341,7 +341,7 @@ stages:
                     remote: origin
                     force: true
               retrySelf: true
-            - when: errorCode=protection-conflict
+            - when: error.code=protection-conflict
               retrySelf: true
 
     checks:

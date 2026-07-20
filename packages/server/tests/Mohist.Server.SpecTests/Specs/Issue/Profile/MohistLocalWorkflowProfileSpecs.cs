@@ -801,7 +801,7 @@ public class MohistLocalWorkflowProfileSpecs
                 recovery:
                   budget: 1
                   handlers:
-                    - when: promise=FAIL
+                    - when: output.output.promise=FAIL
                       tasks:
                         - id: recover:fix-review
                           title: Fix review
@@ -888,7 +888,7 @@ public class MohistLocalWorkflowProfileSpecs
         // The ai-review task declares an expect marker that accepts either
         // PASS or FAIL. When the agent produces a FAIL review, the runner
         // reports the task as completed with output.promise: FAIL, and
-        // recovery.handlers matches when: promise=FAIL to trigger the
+        // recovery.handlers matches when: output.promise=FAIL to trigger the
         // recover:fix-review-findings (auto-fix) recovery task and retries
         // ai-review (re-review) via retrySelf: true. The check stage
         // carries only health and merge-ready checks, no review-passed.
@@ -908,7 +908,7 @@ public class MohistLocalWorkflowProfileSpecs
         var recovery = aiReview.Recovery!;
         Assert.Equal(2, recovery.Budget);
         var handler = Assert.Single(recovery.Handlers);
-        Assert.Equal("promise=FAIL", handler.When);
+        Assert.Equal("output.output.promise=FAIL", handler.When);
         Assert.True(handler.RetrySelf);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
@@ -962,7 +962,7 @@ public class MohistLocalWorkflowProfileSpecs
         var recovery = rebase.Recovery!;
         Assert.Equal(2, recovery.Budget);
         var handler = Assert.Single(recovery.Handlers);
-        Assert.Equal("errorCode=conflict", handler.When);
+        Assert.Equal("error.code=conflict", handler.When);
         Assert.False(handler.RetrySelf);
         var task = Assert.Single(handler.Tasks);
         Assert.Equal("recover:resolve-rebase-conflicts", task.Id);

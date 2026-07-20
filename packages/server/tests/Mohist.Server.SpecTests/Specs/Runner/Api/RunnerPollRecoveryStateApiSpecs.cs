@@ -32,7 +32,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         var runnerId = $"runner-recovery-{Guid.NewGuid():N}";
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+            [new RecoveryHandlerDefinition("output.promise=FAIL", [], RetrySelf: true)]);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
         try
@@ -65,7 +65,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                             budget = 2,
                             handlers = new[]
                             {
-                                new { when = "promise=FAIL", tasks = Array.Empty<object>(), retrySelf = true },
+                                new { when = "output.promise=FAIL", tasks = Array.Empty<object>(), retrySelf = true },
                             },
                         },
                         recoveryRemaining = 1,
@@ -92,7 +92,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         var runnerId = $"runner-recovery-malformed-{Guid.NewGuid():N}";
         var recovery = new RecoveryDefinition(
             2,
-            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+            [new RecoveryHandlerDefinition("output.promise=FAIL", [], RetrySelf: true)]);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
         try
@@ -124,7 +124,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                             budget = 2,
                             handlers = new[]
                             {
-                                new { when = "promise=FAIL", tasks = Array.Empty<object>(), retrySelf = true },
+                                new { when = "output.promise=FAIL", tasks = Array.Empty<object>(), retrySelf = true },
                             },
                         },
                     },

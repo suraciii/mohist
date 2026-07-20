@@ -4,7 +4,7 @@ import { Button } from '@/shared/ui/components/button'
 import { IssueStatus, IssueHealth, WorkflowStage, startIssue } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
-import { resolveDeliveryFailureFromMessage, type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
+import { type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
 import { CrossIcon } from './StageStatusIcons'
 
 export function DeliveryFailureBanner({
@@ -100,22 +100,11 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   let healthSummary = ''
   let healthLogExcerpt = ''
   let nextAction = 'Review the failure above and take action to resolve the issue.'
-  const deliveryResolution = resolveDeliveryFailureFromMessage(blockedReason)
-  const deliveryGuidance = deliveryResolution.guidance
-  const branchEvidence = deliveryResolution.evidence
-  const workspaceEvidence = deliveryResolution.workspaceEvidence
-  let deliveryFailureLabel: string | null = null
 
   if (blockedReason) {
     if (blockedReason.includes('archive')) {
       failingStep = 'Archive OpenSpec change'
       nextAction = 'Check disk space and permissions. Retry the archive step or return to Build.'
-    } else if (deliveryGuidance) {
-      failingStep = blockedReason.includes('Prepare') || blockedReason.includes('prepare')
-        ? 'Prepare branch'
-        : 'Publish changes'
-      deliveryFailureLabel = deliveryGuidance.label
-      nextAction = deliveryGuidance.nextAction
     } else if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
       failingStep = 'Merge to target branch'
       nextAction = 'Resolve any merge conflicts and return to Build for re-check.'
@@ -124,10 +113,6 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
       nextAction = 'Review the health check failure and fix the underlying issue. Return to Build for re-check.'
     }
   }
-
-  const isBranchViolation =
-    deliveryGuidance?.failureKind === 'branch-invariant-violation' && branchEvidence
-  const isWorkspaceSetupFailure = deliveryGuidance?.failureKind === 'workspace-setup'
 
   return (
     <div className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-3">
@@ -139,47 +124,6 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
         <div className="text-xs text-danger">
           <span className="font-medium">Failing step:</span> {failingStep}
         </div>
-        {deliveryFailureLabel && deliveryGuidance && (
-          <div className="text-xs text-danger">
-            <span className="font-medium">Failure kind:</span>{' '}
-            <span className="rounded bg-card/70 px-1.5 py-0.5 font-mono text-[11px] mr-1">{deliveryGuidance.failureKind}</span>
-            {deliveryFailureLabel}
-          </div>
-        )}
-        {isBranchViolation && branchEvidence && (
-          <div className="rounded border border-info-border bg-info-subtle px-2.5 py-2 text-xs text-info space-y-0.5 font-mono">
-            <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
-            {branchEvidence.boundary && (
-              <div>
-                <span className="font-sans opacity-70">boundary:</span> {branchEvidence.boundary}
-              </div>
-            )}
-            <div>
-              <span className="font-sans opacity-70">expected:</span>{' '}
-              <span className="text-success">{branchEvidence.expectedBranch || '(unknown)'}</span>
-            </div>
-            <div>
-              <span className="font-sans opacity-70">observed:</span>{' '}
-              <span className="text-danger">
-                {branchEvidence.observedBranch
-                  ? branchEvidence.observedBranch
-                  : branchEvidence.observedRef
-                    ? `(detached at ${branchEvidence.observedRef})`
-                    : '(unknown)'}
-              </span>
-            </div>
-          </div>
-        )}
-        {isWorkspaceSetupFailure && workspaceEvidence && (
-          <div className="rounded border border-danger-border bg-danger-subtle px-2.5 py-2 text-xs text-danger space-y-0.5 font-mono">
-            <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: workflow infrastructure (not issue work)</div>
-            {workspaceEvidence.workspacePath && (
-              <div>
-                <span className="font-sans opacity-70">workspace:</span> {workspaceEvidence.workspacePath}
-              </div>
-            )}
-          </div>
-        )}
         {capabilityOrFiles && (
           <div className="text-xs text-danger">
             <span className="font-medium">Affected:</span> {capabilityOrFiles}

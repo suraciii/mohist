@@ -1,18 +1,17 @@
 # Action 设计
 
-Action 是 Workflow task 的执行接口。`uses` 选择 Action，`with` 传入输入，Runner 执行后
-报告结果与输出。
+Action 是 Workflow task 的执行接口。`uses` 选择 Action，`with` 传入输入。Action 只产生
+成功 output 或 error；Runner 再把它包装为 Task 的执行结果。
 
 ## 边界
 
-- Action 定义自己的输入与输出。
-- Engine 不维护统一的 Action output schema。
-- Engine 不定义全局 `FailureKind` / `ErrorKind`。
-- Engine 不解释 Action output 的业务语义。
+- Action 定义自己的输入、成功 output 与 error code。
+- Engine 不维护统一的成功 output schema，也不解释 Action code 的业务语义。
+- `error.code` 由 `uses` 所选 Action 约束，不是平台 enum。Runner 自己产生的错误 code
+  也不改变 Engine 的通用性。
 
 Engine 只负责：展开 task input 和由 Workflow 拥有的完成声明，保存 task output，通过
-`setVars` 把 output 投影到 Run Variables，按 `when` 匹配 recovery，
-以及机械地插入 recovery task。
+`setVars` 把 output 投影到 Run Variables，以及机械地插入 Runner 构造的 recovery task。
 
 ## 输入
 
@@ -26,19 +25,39 @@ Engine 只负责：展开 task input 和由 Workflow 拥有的完成声明，保
 
 Workflow 负责展开模板，不解释 `baseBranch`、`remote` 的业务含义。
 
-## 输出
+## 结果
 
-`TaskRun.Output` = `JsonElement?`，完整保存 Action 返回的 JSON output。
+Action 的公开结果是二选一：
 
 ```json
 {
-  "errorCode": "base-moved",
-  "message": "PR not mergeable",
-  "prNumber": 42
+  "output": {
+    "prNumber": 42,
+    "prUrl": "https://github.com/example/repo/pull/42"
+  }
 }
 ```
 
-`errorCode` 等字段属于该 Action 的接口，不是平台 enum。
+```json
+{
+  "error": {
+    "code": "base-moved",
+    "message": "PR #42 is behind its base branch. Rebase the workflow branch and retry."
+  }
+}
+```
+
+- `output` 与 `error` 必须且只能存在一个。
+- `error.code` 是稳定的小写 kebab-case 标识，供 Workflow recovery 匹配。
+- `error.message` 是唯一用户可见的错误文案；Action 不能再同时生成另一份失败 message。
+- error 不携带额外 details。原始命令输出和诊断进入 task log。
+- 原生异常不是 Action 协议的一部分；Runner 在 Action 边界把它规范化为
+  `unexpected-error`。
+
+`TaskRun.Output` 只保存 Action 成功 output。Action 失败时，TaskRun 保存 error；如果
+Action 成功后被 `expect`、工作区约束或其他 Runner 后置检查判定失败，TaskRun 可以同时保存
+原 output 与 Runner 产生的 error。Task status、`addTasks`、exit code 和 Runner-private
+turn facts 都属于 Task 执行协议，不属于 Action 公开结果。
 
 下游 task 可以通过 `${{ tasks.<id>.outputs.* }}` 读取 task output。
 
@@ -87,15 +106,20 @@ Action Output，也不要求 Action 额外声明。
 substring 匹配最终 assistant 文本，请把字面值编码为 `oneOf` 中 promise tag 的内部
 VALUE。`_output` 不读取文件系统，evidence 也不会把它当作可抓取的文件路径。
 
-## 错误字段与 recovery
+## Error 与 recovery
 
-Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。
+Runner 为 recovery 构造 `{ output, error }` 上下文。显式 `when` 使用该上下文的 path：
 
-Recovery `when` 可以匹配任意字段，例如 `errorCode=base-moved`、`promise=FAIL`、
-`errorCode=conflict`。没有 `when` 的最后一个 handler 是失败结果的兜底，不匹配 Action
-output；它可以处理 executor 在 Action 完成后发现的失败，例如工作区不干净。
+```yaml
+handlers:
+  - when: error.code=base-moved
+  - when: output.promise=FAIL
+```
 
-系统没有全局 error enum，Engine 也不理解具体错误含义。Recovery 设计见
+没有 `when` 的最后一个 handler 是存在 error 的兜底。它可以处理 executor 在 Action
+完成后发现的失败，例如工作区不干净。`error.message` 不是机器协议，禁止用于 `when`。
+
+系统没有全局 Action error enum，Engine 也不理解具体错误含义。Recovery 设计见
 [`recovery.md`](recovery.md)。
 
 ## OpenCode Action
@@ -160,7 +184,7 @@ PR 操作失败只重试 PR，merge 恢复只处理 merge 自己的失败。
 
 等待 PR checks 是 merge Action 的内部前置条件，不是 stage-level check。它轮询
 `gh pr view --json statusCheckRollup`。checks 为空时在 120 秒 grace window 内等待；
-checks 失败时返回 `errorCode: pr-checks-failed`。Action 不做隐式自动修复，profile 必须
+checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自动修复，profile 必须
 声明显式 recovery。
 
 完整 task graph 见 [`builtin-workflows.md`](builtin-workflows.md)。
