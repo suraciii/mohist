@@ -1,77 +1,60 @@
 # Self-Review - issue-443 plan
 
 Reviewed `proposal.md`, `specs/action-output/spec.md`, `design.md`, and
-`tasks.json` against issue #443, the corrected task decomposition, and the
-authoritative Action design.
+`tasks.json` against issue #443, the current implementation boundaries, and
+the authoritative Action result contract in `design/workflow/actions.md`.
 
 ## Verdict
 
-The three findings from the previous review are fixed: disconnected declared
-output capture is no longer normative, runner/server/Web now switch in one
-atomic task, and approval-feedback summary behavior has an explicit
-`core/process.output.stdout` adapter with regression coverage. Two remaining
-contract issues must be corrected before build.
+No blocking findings remain. The plan is internally consistent, stays within
+the issue's Action-output scope, and is ready for autonomous implementation.
 
 ## Findings
 
-### 1. Blocking: `invalid-action-output` invents a platform error code outside the authoritative Action contract
+None.
 
-The design says an invalid success output becomes an
-`invalid-action-output` error (`design.md:34`), and the implementation task
-requires that named failure (`tasks.json:11`). The proposal and spec require
-only an actionable output-shape failure; they do not establish a new error
-code.
+## Contract Checks
 
-The authoritative Action design has a closed platform-code list:
-`invalid-input`, `unexpected-error`, and `timeout`
-(`design/workflow/actions.md:48-50`). It also says the engine normalizes an
-Action-boundary implementation failure to `unexpected-error`
-(`design/workflow/actions.md:129-138`). Adding `invalid-action-output` only in
-this OpenSpec would leave the platform error catalog and recovery matching
-contract inconsistent, while updating that catalog would expand this issue's
-protocol surface without a stated requirement.
+- The proposal defines one `action-output` capability and exactly one matching
+  spec file exists.
+- All seven requirements are normative and self-contained; every requirement
+  has at least one four-hash WHEN/THEN scenario and there are no delta headers.
+- Action success output is object-or-null from production through report,
+  persistence, `setVars`, task references, recovery, and task-detail APIs.
+- `core/process` has the exact `{stdout, exitCode}` success contract, including
+  trimmed stdout and numeric exit code.
+- Missing `setVars` paths name the missing source and preserve atomicity.
+- Invalid output uses the existing `unexpected-error` platform code with an
+  actionable shape message, consistent with the authoritative Action design;
+  no new recovery protocol code is introduced.
+- Other built-in Action fields remain unchanged, and the disconnected
+  `capturedOutputs` path is an explicit non-goal rather than a promised
+  capability.
+- Approval feedback has a complete text-adapter contract: process stdout,
+  whitespace trimming, exact feedback-header removal, verification-section
+  removal, empty-result null, and no generic object-to-text coercion.
+- Checks and AgentJobs are isolated at their own shared-envelope/domain
+  boundaries, so the Workflow object-root rule is not applied to unrelated
+  result shapes.
 
-The bounded repair is to use the existing `unexpected-error` platform code
-with an actionable message that says successful Action output must be an
-object or `null`. If a distinct machine-matchable code is genuinely required,
-the proposal, spec, authoritative Action design, and task must all explicitly
-add it and cover recovery behavior.
+## Task And Verification Checks
 
-### 2. Blocking: the approval-feedback extraction requirement is not self-contained
+- `tasks.json` is valid JSON and contains one AFK/WRITE task with no
+  dependencies, making the runner/server/Web wire and API change atomic.
+- Acceptance criteria cover all issue scenarios plus invalid output,
+  check/AgentJob regression, approval feedback, dynamic artifacts, structured
+  API rendering, PR delivery metadata, and the Action-design gap closure.
+- Required verification includes runner typecheck/tests, server tests, and Web
+  typecheck/tests under the repository's no-real-dependency/no-real-time rules.
+- Migration and rollback explicitly require coordinated runner/server/Web
+  versions; no data rewrite or compatibility fallback is implied.
 
-The new requirement says `output.stdout` SHALL receive "the existing
-feedback-resolution section extraction" (`specs/action-output/spec.md:42`),
-but neither the requirement nor its scenarios define that behavior. The only
-scenario uses plain text, so it does not establish what happens to the
-`## Feedback Resolution` header, the `## Verification` section, surrounding
-whitespace, or an empty extracted body. The design and task refer to the
-implementation name `ExtractResolutionSummary`, which explains how to reuse
-today's code but does not make the normative spec self-contained.
+## Residual Risk
 
-Specify the resulting behavior directly and add a scenario containing both
-headers: trim surrounding whitespace, remove a leading
-`## Feedback Resolution` header, discard the `## Verification` section and
-everything after it, and return `null` when no resolution text remains. The
-task's existing "section stripping" test criterion will then have a precise
-contract to verify.
+The implementation has a broad mechanical surface because every built-in
+Action test currently parses string output. The task addresses this with an
+ActionResult type-first migration, production/test parser sweeps, focused
+cross-boundary specs, and full package verification. No additional planning
+change is required.
 
-## Checks That Pass
-
-- Proposal capability `action-output` has exactly one matching spec file.
-- The disconnected `capturedOutputs` path is now an explicit non-goal only;
-  no proposal/spec/task requirement claims it is usable.
-- All seven requirements have at least one four-hash WHEN/THEN scenario and no
-  delta headers.
-- `tasks.json` is valid JSON and contains one complete AFK/WRITE task with no
-  dependencies, so the graph is a valid atomic DAG.
-- The single task includes runner, server, and Web API consumers plus their
-  required typecheck/test commands; no intermediate deliverable drops task
-  output.
-- Approval feedback now has an explicit process-stdout source, rejects generic
-  object-to-text coercion, and has server test coverage in the task.
-- All issue acceptance paths are represented: `core/process` fields,
-  successful `setVars` and task references, missing-path atomic failure,
-  recovery matching, built-in Action/profile regression, persistence, and
-  task-detail display.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
