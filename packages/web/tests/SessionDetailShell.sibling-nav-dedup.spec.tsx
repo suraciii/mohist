@@ -151,6 +151,38 @@ describe('SessionDetailShell — sibling navigation dedup', () => {
     expect(sidebar!.className).toMatch(/\bxl:flex\b/)
   })
 
+  it('omits the sibling nav slot on the first browser render when matchMedia is wide', () => {
+    const matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }))
+    vi.stubGlobal('matchMedia', matchMedia)
+
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+            <SessionDetailShell
+              data={makeDataWithSiblings()}
+              components={makeEmptyShellComponents()}
+            />
+          </ProjectProvider>
+        </MemoryRouter>,
+      )
+
+      expect(container.querySelector('[data-testid="session-sibling-navigation-slot"]')).toBeNull()
+      expect(matchMedia).toHaveBeenCalledWith('(min-width: 1280px)')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders the narrow-viewport fallback slot with data-viewport=narrow and keeps the sidebar CSS-hidden by default', () => {
     const { container } = renderShell('narrow')
 

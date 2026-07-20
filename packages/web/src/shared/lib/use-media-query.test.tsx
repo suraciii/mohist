@@ -25,6 +25,28 @@ describe('useMediaQuery', () => {
     expect(result.current).toBe(false)
   })
 
+  it('reads the initial browser match synchronously when no test seam is set', () => {
+    const matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }))
+    installMatchMediaStub(matchMedia)
+
+    try {
+      const { result } = renderHook(() => useMediaQuery('(min-width: 1280px)'))
+
+      expect(result.current).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('updates when the test seam flips from false to true', async () => {
     const { result } = renderHook(() => useMediaQuery('(min-width: 1280px)'))
 
@@ -102,7 +124,7 @@ describe('useMediaQuery', () => {
       const { result } = renderHook(() => useMediaQuery('(min-width: 1280px)'))
       expect(result.current).toBe(false)
 
-      const mql = matchMedia.mock.results[0]?.value as { matches: boolean } | undefined
+      const mql = matchMedia.mock.results[matchMedia.mock.results.length - 1]?.value as { matches: boolean } | undefined
       if (mql) mql.matches = true
 
       await act(async () => {

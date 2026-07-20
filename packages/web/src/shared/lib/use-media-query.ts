@@ -8,9 +8,18 @@ export function setMatchesForTest(matches: boolean | null): void {
   for (const listener of overrideListeners) listener(matches)
 }
 
+function getLiveMatches(query: string): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+  return window.matchMedia(query).matches
+}
+
 export function useMediaQuery(query: string): boolean {
   const [override, setOverride] = useState<boolean | null>(() => matchesOverride)
-  const [liveMatches, setLiveMatches] = useState<boolean>(false)
+  const [liveMatches, setLiveMatches] = useState<boolean>(() => (
+    matchesOverride === null ? getLiveMatches(query) : false
+  ))
 
   useEffect(() => {
     const listener = (next: boolean | null) => setOverride(next)
@@ -23,10 +32,6 @@ export function useMediaQuery(query: string): boolean {
 
   useEffect(() => {
     if (override !== null) return
-
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return
-    }
 
     const mql = window.matchMedia(query)
     const update = () => setLiveMatches(mql.matches)
