@@ -1,0 +1,101 @@
+{
+  "project": "mohist-local",
+  "description": "Replace hidden Action registration and permissive input parsing with manifest-backed built-ins, authoritative task/check input validation, structured error recovery, removed-Action tombstones, and a Runner-published Action catalog retained by the Server.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Resolve the OpenCode prompt manifest type contract",
+      "spec": "specs/action-manifests/spec.md#Every executable Action has one declarative definition, specs/action-input-validation/spec.md#Input types use exact JSON kinds",
+      "description": "Make the human product-language decision for `mohist/opencode.prompt`, which currently accepts both string prompts and prompt-loader/structured objects while the spec permits one JSON type per input. Update the capability specs and design so the selected representation is explicit, preserves shipped profile behavior, and gives the manifest validator one deterministic rule without a hidden field exemption.",
+      "acceptanceCriteria": [
+        "The approved contract explicitly chooses either a finite `string | object` declaration or a single canonical representation with a complete migration of both existing prompt forms; no implicit validator exemption is allowed",
+        "The action-manifests and action-input-validation specs no longer contradict the shipped `mohist/opencode` prompt behavior or each other",
+        "Normative scenarios cover a literal/resolved string prompt and the existing prompt-loader or structured-object form under the approved contract",
+        "design.md records the approved validator and catalog representation and removes the resolved Open Question",
+        "The workflow's OpenSpec artifact validation accepts the updated proposal/spec/design set before implementation starts"
+      ],
+      "priority": 1,
+      "mode": "HITL",
+      "type": "WRITE",
+      "output": "Updated openspec/changes/issue-444/specs/action-manifests/spec.md, specs/action-input-validation/spec.md, and design.md with one approved OpenCode prompt input contract.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is a real DSL/schema decision, not an implementation convenience. The design recommends an explicit finite union because moving prompt-loader execution into generic validation would create Action-specific engine behavior. All implementation tasks depend on the resolved contract."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate all Runner Actions to the manifest-backed registry",
+      "spec": "specs/action-manifests/spec.md#Every executable Action has one declarative definition, specs/action-manifests/spec.md#The manifest collection is the Action registry authority, specs/action-manifests/spec.md#Removed Actions are represented by catalog tombstones, specs/action-manifests/spec.md#Built-in Actions are fully manifest-backed",
+      "description": "Implement `defineAction`, immutable manifest/tombstone registry construction, deterministic pure-data catalog projection, and typed validated Action contexts. Atomically define all 17 built-in Actions, switch task/check resolution to discriminated executable/tombstone/unknown results, replace the hard-coded `mohist/acp-agent` removal list with a tombstone, migrate test registries to explicit definitions, and preserve valid built-in workflow behavior.",
+      "acceptanceCriteria": [
+        "Registry construction rejects non-canonical names, unsupported input declarations, invalid static defaults, `working-directory` declarations, case-insensitive duplicates, executable/tombstone collisions, and reserved platform codes in business error catalogs",
+        "Case-insensitive `uses` resolution returns a declared executable definition, a tombstone with guidance, or unknown without any bare handler registration path",
+        "All 17 Actions previously returned by `createDefaultRegistry()` are represented by manifests and no production or test caller uses a bare `ActionRegistry.register(name, handler)` path to bypass the contract",
+        "Task and individual-check dispatch of `mohist/acp-agent` use the catalog tombstone's actionable rerun/replacement guidance, while an unknown name remains distinguishable",
+        "The registry's deterministic catalog contains declared inputs, public outputs, business errors, and tombstones but no execution functions or private OpenCode debug output",
+        "Every executable `uses` in shipped stage tasks, checks, approval-feedback tasks, and recovery tasks resolves to a built-in manifest; nested `mohist/openspec-task-prompt` loader references are not misclassified as Actions",
+        "Existing built-in workflow profile regressions pass for inputs valid under the manifests, including OpenCode promise projection, broad ActionContext access, rawWith propagation, and implicit Variable fallbacks",
+        "Focused registry/definition/catalog tests, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner` pass without real process, network, filesystem, or wall-clock dependencies"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Manifest and registry modules under packages/runner/src/actions/, manifest-backed definitions for every built-in Action, executor/check resolution switched to definitions and tombstones, migrated test definitions, and registry/profile regression coverage.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "The built-in switchover is atomic: do not land a default registry containing only a subset of Actions or retain a parallel name-to-handler map. Context-dependent defaults and implicit Variable-backed fields remain Action semantics and optional manifest inputs in this issue. Profile traversal tests must consume embedded, generated, or explicit in-memory profile data; they must not read workflow YAML from the host filesystem."
+    },
+    {
+      "id": "T-003",
+      "title": "Enforce manifest input and error contracts at dispatch",
+      "spec": "specs/action-input-validation/spec.md#Rendered Action input is validated before execution, specs/action-input-validation/spec.md#Unknown input fields fail explicitly, specs/action-input-validation/spec.md#Required inputs are enforced, specs/action-input-validation/spec.md#Input types use exact JSON kinds, specs/action-input-validation/spec.md#Defaults are applied centrally, specs/action-input-validation/spec.md#Input validation failures participate in task recovery, specs/action-manifests/spec.md#Platform and Action error codes have separate ownership",
+      "description": "Add the shared pure validator after template rendering and before work-directory/Action side effects in both task and individual-check execution. Apply exact JSON-kind checks and cloned static defaults, route task `invalid-input` results through recovery, retain row-level check errors, and normalize Action exceptions, malformed results, and undeclared business codes to `unexpected-error` without changing unrelated executor failure semantics.",
+      "acceptanceCriteria": [
+        "Unknown top-level fields, omitted required inputs, explicit nulls, and exact-kind mismatches fail before the Action runs with `invalid-input` messages naming the field and reason",
+        "Objects are not stringified, numeric strings are not parsed, boolean-like strings are not parsed, and object/array validation does not impose an undeclared nested schema",
+        "Omitted static defaults are cloned into validated input, valid explicit values win, and invalid explicit values fail rather than being replaced by defaults",
+        "`working-directory` is accepted as engine input, excluded from Action-owned validated input, and still determines the existing execution-context workDir",
+        "Tasks and individual checks invoke valid Actions exactly once with validated/defaulted input; check rows retain structured `invalid-input` while aggregate check verdicts remain `check-failed`",
+        "A task validation failure matching `error.code=invalid-input` schedules the eligible recovery handler with the original structured failure context; an unmatched failure remains failed",
+        "Declared Action business codes and reserved platform codes remain matchable; undeclared business codes, thrown exceptions, and malformed Action results become `unexpected-error` at the Action boundary and can enter task recovery",
+        "Unrelated workspace setup, branch/worktree, completion, artifact, and setVars failures retain their existing codes and ordering",
+        "Focused validator, task, check, and recovery tests, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner` pass using deterministic fakes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared Action input/result validation, WorkExecutor and check-execution integration, structured recovery behavior, direct validated input reads in built-ins where applicable, and focused runner tests.",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Validation owns top-level manifest rules only. Keep conditional requirements, nested OpenCode option checks, dynamic shell/repository defaults, implicit Variable reads, name-based OpenCode promise projection, and check aggregation in their current owners."
+    },
+    {
+      "id": "T-004",
+      "title": "Publish and retain the Runner Action catalog",
+      "spec": "specs/action-manifests/spec.md#Runner registration publishes the serializable Action catalog",
+      "description": "Extend Runner registration state and the Server Runner published-language DTOs with the typed manifest-derived Action catalog. Make `RunnerHost` publish the catalog from the same registry instance used by `WorkExecutor` on registration and heartbeat repair, and retain the latest catalog through `RunnerInfo`, persistent last-known Runner state, and online registry mirroring without adding Profile validation.",
+      "acceptanceCriteria": [
+        "Initial Runner registration and heartbeat repair send the deterministic catalog from the exact registry instance used for local Action resolution",
+        "The wire catalog contains executable Action names, input/output declarations, business error declarations, and tombstone guidance, and excludes functions and implementation-only values",
+        "Typed TypeScript and C# registration/catalog DTOs serialize and bind the same JSON shape without an opaque JSON parsing layer",
+        "RunnerInfo and RunnerWorksState.LastKnownInfo retain the latest catalog across heartbeat repair, registry re-registration, and grain reactivation; a missing pre-registration catalog remains readable until the Runner reports one",
+        "Server receipt of a catalog does not reject or otherwise validate Workflow Profile saves in this task",
+        "Runner host tests assert register and heartbeat catalog payloads; Server API/grain specs assert binding and persistence using in-memory infrastructure",
+        "`npm run typecheck -w packages/runner`, `npm test -w packages/runner`, and the relevant Server test suite via `npm test` pass without real external dependencies or wall-clock waits"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Action catalog fields in packages/runner registration/host code, typed Server API and Orleans Runner records, retained catalog state, and Runner/Server registration persistence tests.",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Independent of T-003 after the registry/catalog exists, so both priority-3 tasks may run in parallel. Do not add catalog digests, a second catalog endpoint, multi-Runner consensus, or Profile save-time consumption."
+    }
+  ]
+}
