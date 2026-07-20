@@ -1,94 +1,77 @@
 # Self-Review - issue-443 plan
 
 Reviewed `proposal.md`, `specs/action-output/spec.md`, `design.md`, and
-`tasks.json` against issue #443 and the current output call paths.
+`tasks.json` against issue #443, the corrected task decomposition, and the
+authoritative Action design.
 
 ## Verdict
 
-The plan is not ready to build. The core object-or-null direction and the
-runner/server type boundary are sound, but the artifacts contain two direct
-contract/task contradictions and leave one existing Workflow consumer without
-a specified post-change behavior.
+The three findings from the previous review are fixed: disconnected declared
+output capture is no longer normative, runner/server/Web now switch in one
+atomic task, and approval-feedback summary behavior has an explicit
+`core/process.output.stdout` adapter with regression coverage. Two remaining
+contract issues must be corrected before build.
 
 ## Findings
 
-### 1. Blocking: the spec promises declared output capture while the design and tasks deliberately leave it disconnected
+### 1. Blocking: `invalid-action-output` invents a platform error code outside the authoritative Action contract
 
-The proposal includes "declared output capture" in both What Changes and the
-`action-output` capability (`proposal.md:11,17`). The spec makes that a
-normative, user-observable scenario: a task declares a capture from
-`output.prNumber`, and the captured number must result
-(`specs/action-output/spec.md:73-88`).
+The design says an invalid success output becomes an
+`invalid-action-output` error (`design.md:34`), and the implementation task
+requires that named failure (`tasks.json:11`). The proposal and spec require
+only an actionable output-shape failure; they do not establish a new error
+code.
 
-That scenario cannot occur in the current product. `WorkDispatch` has no
-outputs declaration, `ServerConnection.toWorkItem` never populates
-`RenderedWorkItem.outputs`, and `ServerConnection.report` never sends
-`capturedOutputs`. The design acknowledges this and says the path remains
-"non-authoritative" and is not wired (`design.md:61`); `tasks.json` repeats
-"Do not wire the currently disconnected capturedOutputs field into the
-server" (`tasks.json:31`). Merely changing `captureOutputs` to stop parsing a
-string cannot satisfy the spec scenario because no real task can reach it.
+The authoritative Action design has a closed platform-code list:
+`invalid-input`, `unexpected-error`, and `timeout`
+(`design/workflow/actions.md:48-50`). It also says the engine normalizes an
+Action-boundary implementation failure to `unexpected-error`
+(`design/workflow/actions.md:129-138`). Adding `invalid-action-output` only in
+this OpenSpec would leave the platform error catalog and recovery matching
+contract inconsistent, while updating that catalog would expand this issue's
+protocol surface without a stated requirement.
 
-This also conflicts with the issue's explicit non-goal of not introducing
-output declarations/schema. The repair must choose one contract consistently:
-remove declared output capture from the proposal capability, spec requirement,
-design consumer list, and task acceptance criteria, or explicitly expand the
-issue to wire a usable declaration/report path. Given the issue scope, removal
-is the bounded fix.
+The bounded repair is to use the existing `unexpected-error` platform code
+with an actionable message that says successful Action output must be an
+object or `null`. If a distinct machine-matchable code is genuinely required,
+the proposal, spec, authoritative Action design, and task must all explicitly
+add it and cover recovery behavior.
 
-### 2. Blocking: T-001 is not independently deliverable because it breaks the existing Web consumer before T-002
+### 2. Blocking: the approval-feedback extraction requirement is not self-contained
 
-`T-001` changes `TaskStatusView.Output` and the status/timeline API from a JSON
-string to a nested object (`tasks.json:20,28`). `T-002`, which depends on it,
-then updates the Web model and parsers (`tasks.json:34-54`). This violates the
-task-generation requirement that each delivered feature unit be usable and
-that tightly coupled interface/call-site switchovers stay together.
+The new requirement says `output.stdout` SHALL receive "the existing
+feedback-resolution section extraction" (`specs/action-output/spec.md:42`),
+but neither the requirement nor its scenarios define that behavior. The only
+scenario uses plain text, so it does not establish what happens to the
+`## Feedback Resolution` header, the `## Verification` section, surrounding
+whitespace, or an empty extracted body. The design and task refer to the
+implementation name `ExtractResolutionSummary`, which explains how to reuse
+today's code but does not make the normative spec self-contained.
 
-With only T-001 delivered, both current Web paths discard the new object:
-`parseTimelineTaskOutput` and `TaskProgressPanel.parseTaskOutput` return `null`
-for every non-string input. Task output therefore disappears until T-002,
-directly violating the issue acceptance criterion that task-detail behavior
-remain unchanged. The design also says server, runner, and Web must deploy as
-one release (`design.md:7,101-107`), confirming this is an atomic contract
-switch rather than two independently deployable features.
-
-The task graph must either merge T-002 into T-001 or move the task-status API
-change out of T-001 and into a server+Web vertical slice in T-002 while T-001
-preserves the old API shape. The current graph is a valid DAG syntactically,
-but not a valid deliverable decomposition.
-
-### 3. Blocking: approval-feedback resolution loses its summary source without a specified replacement or regression decision
-
-Today `WorkflowRun.ResolveFeedback` accepts the raw string report output and
-uses it as the fallback `ResolutionSummary`; server specs assert that behavior.
-The design changes `TaskReport.Output` to `JsonElement?`, rejects string task
-reports, and states that a new object output supplies no generic summary
-(`design.md:67-71`). Neither the proposal nor the capability spec declares this
-user-visible removal, and `tasks.json` has no approval-feedback regression
-criterion or explicit adaptation rule.
-
-This is not a mechanical type change: feedback still resolves, but its visible
-summary can silently become `null`. The issue says output-field semantics for
-all Actions except `core/process` remain unchanged and asks for existing
-built-in profile flows to regress cleanly. The plan must decide and specify
-the source of `ResolutionSummary` under object output (for example, an
-existing Action-specific field/private fact if one is authoritative), or
-explicitly declare and justify removal of summaries. The implementation task
-then needs focused server coverage for completed feedback tasks with object
-and null output.
+Specify the resulting behavior directly and add a scenario containing both
+headers: trim surrounding whitespace, remove a leading
+`## Feedback Resolution` header, discard the `## Verification` section and
+everything after it, and return `null` when no resolution text remains. The
+task's existing "section stripping" test criterion will then have a precise
+contract to verify.
 
 ## Checks That Pass
 
-- The proposal defines one capability and the matching
-  `specs/action-output/spec.md` exists.
-- Every requirement has at least one four-hash WHEN/THEN scenario and no delta
-  headers.
-- `tasks.json` is valid JSON; IDs are unique; `passes` starts false; its one
-  dependency references an existing lower-priority task, so the graph is a
-  DAG.
-- The issue's primary paths are otherwise represented: `core/process`
-  `{stdout, exitCode}`, object-or-null validation, atomic missing-path
-  `setVars` failure, task-output references, recovery matching, persistence,
-  checks/AgentJob isolation, and task-detail rendering.
+- Proposal capability `action-output` has exactly one matching spec file.
+- The disconnected `capturedOutputs` path is now an explicit non-goal only;
+  no proposal/spec/task requirement claims it is usable.
+- All seven requirements have at least one four-hash WHEN/THEN scenario and no
+  delta headers.
+- `tasks.json` is valid JSON and contains one complete AFK/WRITE task with no
+  dependencies, so the graph is a valid atomic DAG.
+- The single task includes runner, server, and Web API consumers plus their
+  required typecheck/test commands; no intermediate deliverable drops task
+  output.
+- Approval feedback now has an explicit process-stdout source, rejects generic
+  object-to-text coercion, and has server test coverage in the task.
+- All issue acceptance paths are represented: `core/process` fields,
+  successful `setVars` and task references, missing-path atomic failure,
+  recovery matching, built-in Action/profile regression, persistence, and
+  task-detail display.
 
 <promise>FAIL</promise>
