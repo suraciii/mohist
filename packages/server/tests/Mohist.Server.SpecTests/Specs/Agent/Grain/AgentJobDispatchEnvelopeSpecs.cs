@@ -70,13 +70,13 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task SubmitAsync_WithAgentDefinition_NoLongerCarriesAcpAgentUses_OnDispatchEnvelope()
+    public async Task SubmitAsync_WithAgentDefinition_CarriesNoWorkflowActionUses_OnDispatchEnvelope()
     {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-no-acp-uses-runner-{Guid.NewGuid():N}");
-        var jobKey = $"agent-job-no-acp-uses-{Guid.NewGuid():N}";
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-no-action-uses-runner-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-no-action-uses-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
-        await job.SubmitAsync(MakeInput("raw prompt", projectId, "/tmp/agent-job-no-acp-uses"));
+        await job.SubmitAsync(MakeInput("raw prompt", projectId, "/tmp/agent-job-no-action-uses"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));

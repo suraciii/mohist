@@ -456,7 +456,7 @@ describe("mohist/rebase", () => {
         case "rev-parse --git-path rebase-apply":
           return ok("/fake/worktree/.git/rebase-apply\n")
         case "status --porcelain":
-          return ok(" M packages/runner/src/actions/acp-agent.ts\n")
+          return ok(" M packages/runner/src/actions/opencode.ts\n")
         case "rev-parse master":
           return ok("baseSha\n")
         case "add .":

@@ -187,7 +187,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
         expect(target.sessionId).toBe("gen-session-1")
         expect(target.projectId).toBe("proj-1")
       }
-      return { runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }
+      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
     })
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
@@ -198,7 +198,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(reply).toEqual({ state: "cancelled" })
     expect(runtime.cancelCalls).toHaveLength(1)
     expect(runtime.cancelCalls[0]).toEqual({
-      target: { runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" },
+      target: { runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" },
     })
   })
 
@@ -235,7 +235,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
   })
 
   it("NoRuntimeRegistered_RepliesNotCancellable", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: null })
     const builder = lastBuilder()
@@ -248,7 +248,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
   it("RuntimeReadyIsFalse_RepliesUnavailable", async () => {
     const runtime = makeFakeRuntime()
     runtime.setReady(false)
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -270,7 +270,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       },
       diagnostics: [{ severity: "error", code: "turn-failed", message: "transport dropped" }],
     })
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
@@ -295,7 +295,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       },
       diagnostics: [{ severity: "error", code: "missing-session", message: "no physical session" }],
     })
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -316,7 +316,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       },
       diagnostics: [{ severity: "error", code: "unavailable-runtime", message: "runtime down" }],
     })
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -344,7 +344,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
   it("NullOrMissingPayload_RepliesNotCancellable", async () => {
     const runtime = makeFakeRuntime()
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -361,7 +361,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
   it("WorkflowShapedTarget_ResolvesAndCancelsTheWorkflowRuntimeSession", async () => {
     const runtime = makeFakeRuntime()
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -372,12 +372,12 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     expect(reply).toEqual({ state: "cancelled" })
     expect(runtime.cancelCalls).toHaveLength(1)
-    expect(runtime.cancelCalls[0].target.runtimeSessionId).toBe("acp-1")
+    expect(runtime.cancelCalls[0].target.runtimeSessionId).toBe("runtime-1")
   })
 
   it("GenericTargetWithoutSessionId_RepliesNotCancellable", async () => {
     const runtime = makeFakeRuntime()
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()

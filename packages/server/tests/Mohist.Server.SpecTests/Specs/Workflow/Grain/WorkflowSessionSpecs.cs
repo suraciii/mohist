@@ -105,7 +105,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
         {
-            runtimeSessionId = "acp-1",
+            runtimeSessionId = "runtime-1",
             workDir = "/workspace",
             model = "openai/gpt-4o",
             processPid = 123,
@@ -114,7 +114,7 @@ public class WorkflowSessionSpecs
 
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
-            runtimeSessionId = "acp-1",
+            runtimeSessionId = "runtime-1",
             workId = "proposal",
             workType = "task",
             stage = "plan",
@@ -127,7 +127,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
-            runtimeSessionId = "acp-1",
+            runtimeSessionId = "runtime-1",
             runtimeEvents = new object[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -143,11 +143,11 @@ public class WorkflowSessionSpecs
 
         Assert.Equal(workflowRunId, opened.Key.WorkflowRunId);
         Assert.Equal(workflowRunId, fetched.Key.WorkflowRunId);
-        Assert.Equal("acp-1", fetched.RuntimeSessionId);
+        Assert.Equal("runtime-1", fetched.RuntimeSessionId);
         Assert.Equal("opencode", fetched.Runtime);
         Assert.Equal("/workspace", fetched.WorkDir);
         Assert.Equal(sessionName, detail.Session.SessionName);
-        Assert.Equal("acp-1", detail.Session.RuntimeSessionId);
+        Assert.Equal("runtime-1", detail.Session.RuntimeSessionId);
         Assert.Equal("opencode", detail.Session.Runtime);
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("plan", detail.Session.Stage);
@@ -155,7 +155,7 @@ public class WorkflowSessionSpecs
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
-        Assert.Equal("acp-1", listed.RuntimeSessionId);
+        Assert.Equal("runtime-1", listed.RuntimeSessionId);
         Assert.Equal("opencode", listed.Runtime);
         Assert.Equal("completed", listed.Status);
         Assert.Equal("plan", listed.Stage);

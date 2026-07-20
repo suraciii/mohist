@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   it("Followup_FireAndForgetPromptCallsRuntimeFollowupWithoutAwait", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -37,7 +37,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     expect(runtime.followupCalls).toHaveLength(1)
     expect(runtime.followupCalls[0]).toEqual({
-      target: { runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" },
+      target: { runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" },
       prompt: "add a logout button",
     })
   })
@@ -48,12 +48,12 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const followupCalls = runtime.followupCalls
     runtime.runtime.followup = async () => {
       followupCalls.push({
-        target: { runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" },
+        target: { runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" },
         prompt: "ship it",
       })
       return await promise
     }
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -65,14 +65,14 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     await expect(delivery).resolves.toEqual({ accepted: true })
     resolveFollowup({
       ok: true,
-      value: { facts: { runtimeSessionId: "acp-1", workDir: "/work/project" }, diagnostics: [] },
+      value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project" }, diagnostics: [] },
       diagnostics: [],
     })
     await flush()
   })
 
   it("Followup_PromptsEvenWhenRuntimeEventsEmitIsStillPending", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(() => new Promise(() => undefined))
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -91,9 +91,9 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const callOrder: string[] = []
     runtime.runtime.followup = async () => {
       callOrder.push("followup")
-      return { ok: true, value: { facts: { runtimeSessionId: "acp-1", workDir: "/work/project" }, diagnostics: [] }, diagnostics: [] }
+      return { ok: true, value: { facts: { runtimeSessionId: "runtime-1", workDir: "/work/project" }, diagnostics: [] }, diagnostics: [] }
     }
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => {
       callOrder.push("session.input")
     })
@@ -111,7 +111,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_TagsEventWithPromptKindFollowup", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -133,7 +133,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
               kind: "followup",
               text: "tag me",
               role: "user",
-              runtimeSessionId: "acp-1",
+              runtimeSessionId: "runtime-1",
               source: "followup",
             }),
           }),
@@ -177,7 +177,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
   it("Followup_ReturnsUnavailableWhenRuntimeReadyIsFalse", async () => {
     runtime.setReady(false)
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     buildClient({ resolver, openCodeRuntime: runtime.runtime })
 
     await expect(invokeFollowup(lastBuilder(), {
@@ -214,7 +214,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       },
       diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
     })
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
@@ -241,7 +241,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       },
       diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
     })
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const serverConnection: MockServerConnection = {
       workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
       agentSessionRuntimeEvents: vi.fn(async () => undefined),
@@ -261,7 +261,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     expect(outbox.record).toHaveBeenCalledWith(
       expect.objectContaining({
         operationId: "followup-1",
-        runtimeSessionId: "acp-1",
+        runtimeSessionId: "runtime-1",
         target: expect.objectContaining({ kind: "generic", sessionId: "session-1" }),
       }),
       serverConnection,
@@ -270,7 +270,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_FollowupCompletionRecordsTheMatchingOperationForDurableDelivery", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const serverConnection: MockServerConnection = {
       workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
       agentSessionRuntimeEvents: vi.fn(async () => undefined),
@@ -297,7 +297,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_ContinuesToPromptEvenIfRuntimeEventsEmitFails", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => { throw new Error("server unreachable") })
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
@@ -316,7 +316,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DropsPayloadWhenTextIsMissing", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -345,7 +345,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DropsPayloadWhenServerConnectionIsNull", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
     buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -357,7 +357,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DropsPayloadWhenRuntimeIsNull", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 
@@ -371,7 +371,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
   })
 
   it("Followup_DropsNullOrUndefinedPayload", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const runtimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
 

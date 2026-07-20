@@ -99,7 +99,7 @@ function setupRunningIssueMocks() {
       id: 'session-1',
       sessionName: 'session-1',
       workflowRunId: 'wr-1',
-      runtimeSessionId: 'acp-1',
+      runtimeSessionId: 'runtime-1',
       runtime: 'opencode',
       projectId: 'proj-1',
       issueNumber: 123,
@@ -166,7 +166,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
   return {
     id: 'agent-session-1',
     sessionName: 'session-1',
-    runtimeSessionId: 'acp-1',
+    runtimeSessionId: 'runtime-1',
     runtime: 'opencode',
     title: 'Test session',
     status: 'active',
@@ -263,12 +263,12 @@ describe('SessionPage workflow cancel control', () => {
   it('makes a historical runtime view read-only for followup and cancel', async () => {
     _metadataData = baseRunningMetadata({
       runtimeSessionLineage: [
-        { runtimeSessionId: 'acp-old', runtime: 'opencode', boundAt: '2026-06-15T09:00:00.000Z' },
-        { runtimeSessionId: 'acp-1', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'runtime-old', runtime: 'opencode', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'runtime-1', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 
-    const { container } = await renderIssueSessionPage('/issues/123/workflow/sessions/session-1?rt=acp-old')
+    const { container } = await renderIssueSessionPage('/issues/123/workflow/sessions/session-1?rt=runtime-old')
 
     expect(container.querySelector('[data-testid="session-followup-composer"]')).toHaveAttribute('data-disabled', 'true')
     expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()

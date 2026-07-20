@@ -27,7 +27,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   it("GenericFollowup_LocatesSessionByGenericKey_AndCallsRuntimeFollowup", async () => {
     const resolver = vi.fn((target: { kind: string }) => {
       expect(target.kind).toBe("generic")
-      return { runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }
+      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
     })
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)
@@ -44,7 +44,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
 
     expect(runtime.followupCalls).toHaveLength(1)
     expect(runtime.followupCalls[0].prompt).toBe("add a logout route")
-    expect(runtime.followupCalls[0].target).toEqual({ runtime: "opencode", runtimeSessionId: "acp-1", workDir: "/work/project" })
+    expect(runtime.followupCalls[0].target).toEqual({ runtime: "opencode", runtimeSessionId: "runtime-1", workDir: "/work/project" })
     expect(workflowRuntimeEvents).not.toHaveBeenCalled()
     expect(agentSessionRuntimeEvents).toHaveBeenCalledTimes(1)
   })
@@ -117,7 +117,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   })
 
   it("GenericFollowup_EmitsSessionInputViaAgentSessionRuntimeEventsEndpoint", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = {
@@ -142,7 +142,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
               kind: "followup",
               text: "kind tag",
               role: "user",
-              runtimeSessionId: "acp-1",
+              runtimeSessionId: "runtime-1",
               source: "followup",
             }),
           }),
@@ -154,7 +154,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   })
 
   it("GenericFollowup_ContinuesToPromptEvenIfAgentSessionRuntimeEventsEmitFails", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => { throw new Error("server unreachable") })
     const serverConnection: MockServerConnection = {
@@ -197,7 +197,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   })
 
   it("GenericFollowup_DropsWhenTargetSessionIdMissing", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = {
@@ -220,7 +220,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   })
 
   it("GenericFollowup_DropsWhenTextMissing", async () => {
-    const resolver = vi.fn(() => ({ runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }))
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)
     const serverConnection: MockServerConnection = {
@@ -242,7 +242,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   it("WorkflowFollowup_StillUsesWorkflowRuntimeEventsEndpoint_WhenTargetShapeCarriesIt", async () => {
     const resolver = vi.fn((target: { kind: string }) => {
       expect(target.kind).toBe("workflow")
-      return { runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-1" }
+      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
     })
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)
@@ -275,7 +275,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
       expect(target.kind).toBe("workflow")
       expect(target.workflowRunId).toBe("wr-legacy")
       expect(target.sessionName).toBe("work-legacy")
-      return { runtimeSessionId: "acp-1", workDir: "/work/project", projectId: "proj-legacy" }
+      return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-legacy" }
     })
     const workflowRuntimeEvents = vi.fn(async () => undefined)
     const agentSessionRuntimeEvents = vi.fn(async () => undefined)

@@ -62,7 +62,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         var session = BuildSession("agent_txn_ok");
 
         await store.SaveAsync(session.Id, session, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
         ]);
 
@@ -84,7 +84,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => store.SaveAsync(session.Id, session, [
-                new AgentSessionRuntimeBound("acp-1", null),
+                new AgentSessionRuntimeBound("runtime-1", null),
                 new AgentSessionUsageRecorded(new AgentUsageSummary()),
             ]));
         Assert.Contains("event write failed", ex.Message);
@@ -100,7 +100,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
         var session = BuildSession("agent_txn_crash");
 
-        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]);
 
         await using var freshDb = new MohistDbContext(_database.Options);
         var rows = await freshDb.AgentSessionEvents.AsNoTracking()
@@ -124,7 +124,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         var session = BuildSession("agent_txn_identity");
 
         await store.SaveAsync(session.Id, session, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
             new AgentSessionModelChanged("anthropic/claude"),
             new AgentSessionContextCompacted(null, null, null, "summary", "summary text", TestTime.UtcDateTime),
@@ -159,7 +159,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             agentId: "agent_lineage_1"));
 
         await store.SaveAsync(session.Id, session, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
         ]);
 
@@ -187,7 +187,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             issueNumber: 42,
             epicNumber: 7));
 
-        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]);
 
         var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync(session.Id));
         Assert.Equal("42", stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
@@ -220,7 +220,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             stage: "build"));
 
         await store.SaveAsync(session.Id, session, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
         ]);
 
@@ -258,7 +258,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             epicNumber: 7,
             stage: "build"));
 
-        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]);
 
         var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync(session.Id));
         Assert.Equal("7", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
@@ -288,7 +288,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             issueNumber: null,
             stage: "build"));
 
-        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]);
 
         var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync("agent_txn_workflow_no_issue"));
         Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
@@ -316,7 +316,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         var session = BuildSession("agent_txn_no_project", new AgentSessionMetadata());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]));
+            () => store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("runtime-1", null)]));
 
         Assert.Contains("project-id", ex.Message);
     }
@@ -332,7 +332,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             projectId: "proj_conf_agent",
             agentId: "agent_conf"));
         await store.SaveAsync(agentLaunch.Id, agentLaunch, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
             new AgentSessionContextHealthUpdated("green", 40d, 400, 1000, FixedTime),
         ]);
@@ -343,7 +343,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             issueNumber: 7,
             stage: "review"));
         await store.SaveAsync(workflowOrigin.Id, workflowOrigin, [
-            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionRuntimeBound("runtime-1", null),
             new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, FixedTime),
         ]);
 
