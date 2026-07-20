@@ -14,3 +14,19 @@
 - Searches confirm the old startup-discovery clock origin, undefined identifiable-model wording, high-level command-runner seam, and claimed existing Agent editor coverage are absent from the repaired artifacts.
 - `self-review.md` was not edited or staged.
 - `git diff --check` passes. No product code or tests changed in this plan-repair task.
+
+## Codebase Patterns
+
+- T-001 restored `packages/runner/src/runtime/opencode-models.ts` as a standalone boundary. `discoverOpencodeModels(signal, adapter?)` stays async for host integration, while `createOpencodeModelsCommandAdapter(executor)` performs synchronous result handling beneath it.
+- Production constructs the adapter with `spawnSync`; injected `SyncModelsProcessExecutor` fakes intentionally skip the default-test external-process denial, matching the existing `system/process.ts` seam pattern. The adapter owns `models --verbose`, caller signal, 10-second timeout, UTF-8 decoding, and the 16 MiB buffer.
+- The parser accepts only trimmed `^([^/\s]+)/(\S+)$` headers. Balanced-invalid metadata advances past the balanced block; unbalanced metadata searches forward and reprocesses the next independently valid header. Variant-map entries are emitted only for non-empty object keys.
+- `opencodeModelSetsEqual` compares model IDs, variant-map keys, and each variant list as sets. T-002 can use it when replacing the private `coderCatalogsEqual` helper in `runtime/host.ts`.
+- Unit coverage is colocated at `packages/runner/src/runtime/opencode-models.test.ts`; all process calls use the injected synchronous executor. It includes separate >49 KiB parser and command-boundary cases and no process, network, filesystem, timer, or wall-clock dependency.
+
+## T-001 Verification
+
+- Pre-change focused runner regression baseline: 4 files, 47 tests passed.
+- `npm run typecheck -w packages/runner` passed.
+- `npm run typecheck:tests -w packages/runner` passed.
+- `npm run check:test-boundaries -w packages/runner` passed.
+- `npm test -w packages/runner` passed: 98 files, 1193 tests.
