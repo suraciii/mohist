@@ -92,6 +92,8 @@ Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logi
 
 Existing Session commands SHALL NOT be allowed to start idle work on a binding while a Workflow task is preparing, rebinding, between its original and cleanup Prompts, or durably reporting. A guarded bind SHALL reject without mutation when Follow-up, Compact, or Reset command state is pending or active. When the Workflow lease wins first, the owning Runner SHALL reject command admission during preparation; only an existing OpenCode Follow-up MAY steer after the Runtime has synchronously reserved the physical Session for the active Prompt. Compact and Reset SHALL remain idle-only. These admission rules MUST NOT add Pi command routing in this issue.
 
+Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow-origin Compact and Reset command delivery SHALL also carry optional project, WorkflowRun, and session-name identity resolved by the Session authority; generic AgentSession commands SHALL omit it. The owning Runner SHALL use that identity to consult the Workflow coordinator even when no prior Workflow open has populated process-local Session mappings.
+
 #### Scenario: Concurrent tasks on one Session are serialized
 
 - **WHEN** two Workflow tasks concurrently target the same logical Pi AgentSession
@@ -161,7 +163,9 @@ Before a runtime change, the shared logical-Session serialization boundary SHALL
 
 If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, the pre-created manifest SHALL drive reconciliation from the persisted Pi Session messages through the saved projector fingerprints; required missing final facts SHALL be appended and drained before quarantine clears. A corrupt committed manifest SHALL remain preserved, SHALL quarantine only its logical Session with an actionable diagnostic, and MUST NOT block unrelated Sessions or AgentJob work. Failure to initialize/list the outbox root or provide atomic same-directory rename and file/directory sync SHALL instead make global Action reporting not-ready and SHALL prevent Runner registration or new work claiming. Repair MUST NOT replay the Prompt.
 
-The guarded rebind's expected-current state SHALL include the authority-issued stream identity as well as the physical binding. In the same transition that verifies `drainedThroughSequence`, the authority SHALL remove the old stream from current admission and create the replacement binding's fresh stream at cursor `0`; a current stream with no events is valid at sequence `0` and MUST NOT require a synthetic event.
+The guarded rebind's expected-current state SHALL include the authority-issued stream identity as well as the physical binding. In the same transition that verifies `drainedThroughSequence`, the authority SHALL remove the old stream from current admission and create the replacement binding's fresh stream at cursor `0`; a current stream with no events is valid at sequence `0` and MUST NOT require a synthetic event. A missing local manifest MAY be created only when the returned Server cursor is `0`, with next sequence `1`. If the cursor is greater than `0`, the Runner SHALL quarantine only that logical Session as `session-reporting-failed` with `outbox-history-missing`; it MUST NOT admit a Prompt, rebind, stream-drained Reset, or reproject retained facts under new sequences until the original manifest state is restored.
+
+For an existing Workflow-origin OpenCode Reset, command preparation SHALL return or bootstrap current Action stream state. The Runner SHALL fence and drain that stream before completing Reset, and the AgentSession authority SHALL verify expected stream identity plus drained sequence while atomically replacing the physical binding and installing a fresh stream at cursor `0`. Drain failure SHALL leave both current binding and stream unchanged. Generic Reset remains outside the Workflow Action stream. Pi Reset routing remains outside this issue and MUST NOT fall back to OpenCode.
 
 #### Scenario: Session view shows a completed Pi turn
 
@@ -186,6 +190,18 @@ The guarded rebind's expected-current state SHALL include the authority-issued s
 - **WHEN** the owning Runner requests rebind of a current Action stream that has issued no events
 - **THEN** it SHALL attest that stream's identity and drained-through sequence `0`
 - **AND** successful rebind SHALL replace it with a fresh stream identity at cursor `0`
+
+#### Scenario: Missing local history with nonzero cursor is quarantined
+
+- **WHEN** Workflow open returns a nonzero applied cursor but the Runner has no matching local manifest
+- **THEN** the Runner SHALL fail same-Session admission with `session-reporting-failed` and `outbox-history-missing`
+- **AND** it MUST NOT reconstruct the manifest, reproject facts, submit a Prompt, rebind, or claim the stream was drained
+
+#### Scenario: Existing OpenCode Reset replaces its Action stream atomically
+
+- **WHEN** a user resets a Workflow-origin OpenCode Session with a current Action stream
+- **THEN** the owning Runner SHALL fence and drain the stream before Reset completion
+- **AND** the Session authority SHALL replace physical binding and Action stream together only when expected stream identity and drained sequence match
 
 #### Scenario: Cache-write usage remains a distinct dimension
 
