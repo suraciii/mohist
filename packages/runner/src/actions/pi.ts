@@ -84,13 +84,19 @@ export async function piAction(context: ActionContext): Promise<ActionResult> {
   try {
     result = await runtime.runTurn(request, context.signal, { onEvent: (event) => events.push(event) })
   } catch (error) {
+    let terminalReportingFailed = false
     try {
       await reportWithTerminalSignal(report, [
         ...events,
         { id: `session-closed-${context.workId}`, type: "session.closed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed" } },
       ])
-    } catch { /* best effort */ }
-    return fail("turn-failed", actionErrorMessage(error), { exitCode: 1, turnFact: { finalAssistantText: null } })
+    } catch {
+      terminalReportingFailed = true
+    }
+    const message = actionErrorMessage(error)
+    return fail("turn-failed", terminalReportingFailed
+      ? `${message}; Session terminal reporting failed and terminal state was not accepted`
+      : message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
 
   const finalText = result.ok ? result.value.facts.finalAssistantText : null

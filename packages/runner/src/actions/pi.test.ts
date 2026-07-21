@@ -63,6 +63,32 @@ describe("mohist/pi Action", () => {
     expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.closed")
   })
 
+  it("preserves an unexpected turn failure when terminal reporting also fails", async () => {
+    const pi = runtime()
+    const connection = server()
+    pi.runTurn.mockRejectedValueOnce(new Error("SDK turn failed"))
+    connection.workflowAgentSessionRuntimeEvents
+      .mockImplementationOnce(async (_project: string, _run: string, _name: string, body: unknown) => {
+        connection.calls.push(body)
+        return [{ id: "accepted" }]
+      })
+      .mockImplementationOnce(async (_project: string, _run: string, _name: string, body: unknown) => {
+        connection.calls.push(body)
+        throw new Error("terminal report rejected")
+      })
+
+    const result = await piAction(context({ piRuntime: pi as never, serverConnection: connection as never, projectId: "project" }))
+
+    expect(result).toMatchObject({
+      error: {
+        code: "turn-failed",
+        message: "SDK turn failed; Session terminal reporting failed and terminal state was not accepted",
+      },
+    })
+    expect(connection.workflowAgentSessionRuntimeEvents).toHaveBeenCalledTimes(2)
+    expect((connection.calls[1] as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.at(-1)?.type).toBe("session.closed")
+  })
+
   it("keeps unknown options diagnostic-only", async () => {
     const pi = runtime()
     const connection = server()
