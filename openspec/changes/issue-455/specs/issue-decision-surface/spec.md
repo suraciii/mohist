@@ -1,12 +1,12 @@
 ### Requirement: An approval wait presents one review package
 
-When an issue is awaiting an approval decision, the issue decision surface SHALL present the approval context, required review evidence, and every authorized approval action as one review package at the top of the issue detail page. Approve and send back SHALL use the existing authorized workflow actions and SHALL NOT be duplicated elsewhere on the page. An issue that is not awaiting approval SHALL retain its non-approval decision presentation and SHALL NOT show the approval review package.
+When an issue is awaiting an approval decision, the issue decision surface SHALL present the approval context, required review evidence, and every action applicable to the current issue state as one review package at the top of the issue detail page. Approve and send back SHALL use the existing authorized workflow actions and SHALL NOT be duplicated elsewhere on the page. Delegation, transcript, or other secondary actions that apply during approval SHALL remain reachable from the package. An issue that is not awaiting approval SHALL retain its non-approval decision presentation and SHALL NOT show the approval review package.
 
 #### Scenario: Approval wait replaces the generic decision presentation
 
 - **WHEN** an owner opens an issue that is awaiting plan or check approval
 - **THEN** the top decision surface SHALL present the approval review package
-- **AND** the package SHALL include the approval context, required evidence, and every authorized approval action
+- **AND** the package SHALL include the approval context, required evidence, and every action applicable to the current issue state
 - **AND** the page SHALL NOT render a second approve or send-back control
 
 #### Scenario: Non-approval state remains unchanged
@@ -50,7 +50,7 @@ The check approval review package SHALL render the recorded contents of `review.
 
 ### Requirement: The approval package is usable on a phone
 
-At a phone-width viewport, approval artifact content SHALL wrap or otherwise fit within the page without causing horizontal page scrolling, including long JSON values and unbroken text. Approve and send back SHALL be visible as direct, thumb-reachable controls alongside the review package while the owner reads the evidence. Approve SHALL execute from one tap, Send back SHALL reveal its structured inline form from one tap, and neither action SHALL require opening the generic action drawer or another dialog. The controls SHALL account for the viewport edge and safe area.
+At a phone-width viewport, approval artifact content SHALL wrap or otherwise fit within the page without causing horizontal page scrolling, including long JSON values and unbroken text. Approve and send back SHALL be visible as direct, thumb-reachable controls alongside the review package while the owner reads the evidence. Approve SHALL execute from one tap, Send back SHALL reveal its structured inline form from one tap, and neither action SHALL require opening the generic action drawer or another dialog. Every other applicable action SHALL remain reachable through a separate compact, non-modal secondary-action control that does not obscure or interpose itself before Approve or Send back. The controls SHALL account for the viewport edge and safe area.
 
 #### Scenario: Plan approval is reviewed on a phone
 
@@ -75,6 +75,12 @@ At a phone-width viewport, approval artifact content SHALL wrap or otherwise fit
 
 - **WHEN** an owner taps the direct Send back control
 - **THEN** the structured send-back form SHALL become available inline without an action drawer or dialog
+
+#### Scenario: Secondary actions remain reachable on a phone
+
+- **WHEN** Ask Agent, View transcript, or another secondary action applies while an issue awaits approval on a phone
+- **THEN** each applicable secondary action SHALL be reachable through the package's non-modal secondary-action control
+- **AND** opening or using that control SHALL NOT add a disclosure before direct Approve or Send back
 
 ### Requirement: Send-back feedback is guided without changing its workflow contract
 
