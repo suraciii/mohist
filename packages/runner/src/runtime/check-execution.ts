@@ -93,7 +93,7 @@ async function runOneCheck(
         error: validation.error,
       }
     }
-    const workDir = await deps.resolveWorkDir(validation.input)
+    const workDir = await deps.resolveWorkDir(renderedWith)
     let rawResult: unknown
     try {
       rawResult = await definition.run({
@@ -111,6 +111,14 @@ async function runOneCheck(
     }
     const normalized = normalizeActionResult(rawResult, definition.manifest)
     if (normalized.kind === "malformed") {
+      if (normalized.reason === "output") {
+        return {
+          name: check.name,
+          status: "fail",
+          message: normalized.message,
+          invalidOutputReason: normalized.message,
+        }
+      }
       const result = malformedToUnexpectedError(normalized.message)
       return {
         name: check.name,
@@ -127,17 +135,7 @@ async function runOneCheck(
         error: normalized.error,
       }
     }
-    const okResult = normalized
-    if (okResult.output !== null && (typeof okResult.output !== "object" || Array.isArray(okResult.output))) {
-      const invalidReason = `successful Action output must be a JSON object or null`
-      return {
-        name: check.name,
-        status: "fail",
-        message: invalidReason,
-        invalidOutputReason: invalidReason,
-      }
-    }
-    return { name: check.name, status: "pass", output: okResult.output }
+    return { name: check.name, status: "pass", output: normalized.output }
   } catch (error) {
     return {
       name: check.name,

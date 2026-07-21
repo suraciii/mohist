@@ -10,6 +10,7 @@ import type {
   ActionTombstone,
   ResolvedAction,
 } from "./manifest.js"
+import { validateManifest } from "./define-action.js"
 
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -79,6 +80,12 @@ export class ActionRegistry {
     const manifest = definition.manifest
     if (!manifest || typeof manifest !== "object") {
       throw new ActionRegistryConstructionError("Action definition is missing a manifest")
+    }
+    try {
+      validateManifest(manifest)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new ActionRegistryConstructionError(message)
     }
     if (typeof manifest.name !== "string" || !NAME_PATTERN.test(manifest.name)) {
       throw new ActionRegistryConstructionError(

@@ -16,12 +16,18 @@ export interface NormalizedError {
   readonly error: ActionError
 }
 
+export interface MalformedActionResult {
+  readonly kind: "malformed"
+  readonly message: string
+  readonly reason: "result" | "output"
+}
+
 export type NormalizedActionResult = NormalizedOk | NormalizedError
 
 export function normalizeActionResult(
   result: unknown,
   manifest: ActionManifest,
-): NormalizedActionResult | { readonly kind: "malformed"; readonly message: string } {
+): NormalizedActionResult | MalformedActionResult {
   if (!result || typeof result !== "object") {
     return malformed(`Action '${manifest.name}' returned a non-object result`)
   }
@@ -63,11 +69,11 @@ export function normalizeActionResult(
   }
   const output = obj["output"]
   if (output !== null && (typeof output !== "object" || Array.isArray(output))) {
-    return malformed(`Action '${manifest.name}' successful output must be a JSON object or null`)
+    return malformedOutput(`Action '${manifest.name}' successful output must be a JSON object or null`)
   }
   const shapeError = validateActionOutputShape(output as JsonObject | null)
   if (shapeError) {
-    return malformed(`Action '${manifest.name}' successful output is malformed: ${shapeError}`)
+    return malformedOutput(`Action '${manifest.name}' successful output is malformed: ${shapeError}`)
   }
   return { kind: "ok", output: (output as JsonObject | null) ?? null }
 }
@@ -76,8 +82,12 @@ export function malformedToUnexpectedError(message: string): ActionResult {
   return { error: { code: MALFORMED_RESULT_ERROR_CODE, message } }
 }
 
-function malformed(message: string): { readonly kind: "malformed"; readonly message: string } {
-  return { kind: "malformed", message }
+function malformed(message: string): MalformedActionResult {
+  return { kind: "malformed", message, reason: "result" }
+}
+
+function malformedOutput(message: string): MalformedActionResult {
+  return { kind: "malformed", message, reason: "output" }
 }
 
 export function expectedResultCodes(manifest: ActionManifest): ReadonlySet<string> {

@@ -99,8 +99,26 @@ describe("Check verdict validation", () => {
 
     const result = await executor.execute(makeCheckWork([{ name: "cyclic", uses: "test/action" }]), new AbortController().signal)
 
-    expect(result).toMatchObject({ status: "fail", error: { code: "check-failed" } })
+    expect(result).toMatchObject({ status: "fail", error: { code: "unexpected-error" } })
     expect(() => JSON.stringify(result)).not.toThrow()
-    expect(result.output).toEqual([{ name: "cyclic", status: "fail", error: { code: "unexpected-error", message: expect.any(String) }, message: expect.any(String) }])
+    expect(result.output).toEqual([{ name: "cyclic", status: "fail", message: expect.any(String) }])
+  })
+
+  it("resolves a check working directory from the engine-owned input", async () => {
+    let workDir = ""
+    capturedHandler = async (context) => {
+      workDir = (context as { workDir: string }).workDir
+      return { output: null }
+    }
+    const work = makeCheckWork([{
+      name: "subdirectory-check",
+      uses: "core/marker",
+      with: { "working-directory": "subdir", path: "review.md" },
+    }])
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("pass")
+    expect(workDir).toBe("/tmp/test-work/subdir")
   })
 })
