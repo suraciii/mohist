@@ -14,9 +14,12 @@ import { TaskLogCollector } from "./task-log.js"
 import {
   getOpenCodeRuntimeFactory,
   type OpenCodeRuntime,
-  type RuntimeModelCatalog,
-  type RuntimeModelDescriptor,
 } from "./opencode/index.js"
+import {
+  getOpencodeModelDiscovery,
+  opencodeModelSetsEqual,
+  type DiscoveredOpencodeModels,
+} from "./opencode-models.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -193,14 +196,11 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
-      // The OpenCode runtime must be initialized BEFORE we connect to
-      // the server so the first `RunnerRegistration` already carries
-      // the runtime-loaded catalog (`coderModels` /
-      // `coderModelVariants`). Initializing after `connectRunner`
-      // would mean the first registration reports an empty catalog —
-      // the server would then observe a model set flip on the second
-      // heartbeat.
+      // OpenCode execution health and CLI model discovery are independent.
+      // Discovery is best-effort, but it completes before the first
+      // registration so that registration reports one host-owned snapshot.
       await this.initializeSharedConnection(signal)
+      this.replaceCoderModels(await this.discoverModels(signal))
       await this.connectRunner(signal)
       // Startup convergence: pick up any terminal events the runner
       // missed while it was offline (e.g. completed while the previous
@@ -238,14 +238,31 @@ export class RunnerHost {
   }
 
   private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
-    const runtime = this.openCodeRuntime
-    if (runtime === null || !runtime.ready()) return
-    const previous = this.coderCatalogFromRuntime()
-    const refreshed = await runtime.refreshCatalog(signal)
-    if (!refreshed.ok || refreshed.value.models.length === 0) return
-    const current = this.coderCatalogFromRuntime()
-    if (coderCatalogsEqual(previous, current)) return
+    const discovered = await this.discoverModels(signal)
+    if (discovered.models.length === 0) return
+    const previous = {
+      models: this.coderModels,
+      variants: this.coderModelVariants,
+    }
+    if (opencodeModelSetsEqual(previous, discovered)) return
+    this.replaceCoderModels(discovered)
     await this.sendImmediateHeartbeat()
+  }
+
+  private async discoverModels(signal: AbortSignal): Promise<DiscoveredOpencodeModels> {
+    try {
+      return await getOpencodeModelDiscovery()(signal)
+    } catch (error) {
+      console.error("failed to discover opencode models", error)
+      return { models: [], variants: {} }
+    }
+  }
+
+  private replaceCoderModels(discovered: DiscoveredOpencodeModels): void {
+    this.coderModels = [...discovered.models]
+    this.coderModelVariants = Object.fromEntries(
+      Object.entries(discovered.variants).map(([model, variants]) => [model, [...variants]]),
+    )
   }
 
   private async runCleanupOnce(signal: AbortSignal): Promise<void> {
@@ -298,7 +315,7 @@ export class RunnerHost {
     try {
       await this.connection.heartbeat(this.registrationState(), signal)
     } catch (error) {
-      console.error("immediate post-reconnect heartbeat failed:", error)
+      console.error("immediate runner heartbeat failed:", error)
     }
   }
 
@@ -307,9 +324,9 @@ export class RunnerHost {
     // Construct the shared OpenCode runtime. The factory seam returns a
     // real `OpenCodeRuntime` (production) or a fake the test injected
     // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
-    // check + catalog load and only flips `ready()` true after both
-    // pass; until then the host's `pollOnce` gate keeps the runner
-    // from claiming work.
+    // check and establishes the global event subscription before it
+    // flips `ready()` true; until then the host's `pollOnce` gate keeps
+    // the runner from claiming work.
     const factory = getOpenCodeRuntimeFactory()
     this.openCodeRuntime = factory({
       directory: process.cwd(),
@@ -424,8 +441,7 @@ export class RunnerHost {
    * when the runner pauses claiming. The OpenCode runtime's own
    * `diagnostic()` (set on each rebuild and on every startup failure)
    * is the authoritative message — it carries the failure stage
-   * (`server-spawn-failed` / `health-failed` / `catalog-load-failed` /
-   * `server-exit`) plus the recovery suggestion. When the runtime
+   * (`server-spawn-failed` / `health-failed` / `server-exit`) plus the recovery suggestion. When the runtime
    * has not been constructed yet (very early in startup), fall back
    * to a generic message so the log line is still informative.
    */
@@ -719,56 +735,18 @@ export class RunnerHost {
   }
 
   private registrationState(): RunnerRegistration {
-    const { coderModels, coderModelVariants } = this.coderCatalogFromRuntime()
     return {
       capabilities: [],
       projectId: this.options.projectId,
-      coderModels,
-      coderModelVariants,
+      coderModels: this.coderModels,
+      coderModelVariants: this.coderModelVariants,
       connectionId: this.signalR.getConnectionId(),
     }
-  }
-
-  /**
-   * Project the OpenCode runtime catalog into the
-   * `RunnerRegistration` shape the control plane consumes. The catalog
-   * is loaded via the v2 list APIs inside `OpenCodeRuntime.start()`
-   * (see T-002); once `ready()` is true the catalog is populated and
-   * the host re-reports the registration on every heartbeat. When the
-   * runtime is not ready (e.g. before start, during a rebuild), the
-   * previous in-memory snapshot is preserved so a heartbeat does not
-   * regress to an empty list. Both `coderModels` (full
-   * `provider/model-id`) and `coderModelVariants` (per-model variant
-   * ids) are surfaced so the server-side validation has the data it
-   * already used under the CLI-discovery path.
-   */
-  private coderCatalogFromRuntime(): { coderModels: string[]; coderModelVariants: Record<string, string[]> } {
-    const runtime = this.openCodeRuntime
-    const catalog: RuntimeModelCatalog | null = runtime ? runtime.catalog() : null
-    if (catalog === null) {
-      return { coderModels: this.coderModels, coderModelVariants: this.coderModelVariants }
-    }
-    const descriptors: RuntimeModelDescriptor[] = [...catalog.models]
-    const coderModels = descriptors.map((m) => `${m.providerID}/${m.modelID}`)
-    const coderModelVariants: Record<string, string[]> = {}
-    for (const model of descriptors) {
-      if (model.variants.length > 0) {
-        coderModelVariants[`${model.providerID}/${model.modelID}`] = [...model.variants]
-      }
-    }
-    this.coderModels = coderModels
-    this.coderModelVariants = coderModelVariants
-    return { coderModels, coderModelVariants }
   }
 
   private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
-        // The model catalog is sourced from `OpenCodeRuntime.catalog()`
-        // inside `registrationState()`. The runtime loads it during
-        // `initializeSharedConnection`; this connect path no longer
-        // shells out to `opencode models --verbose` — the catalog
-        // arrives via the v2 list APIs on the runtime.
         await this.connection.connect({
           ...this.registrationState(),
           buildGitHash: this.buildGitHash,
@@ -993,22 +971,4 @@ function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortS
       parent.removeEventListener("abort", abortFromParent)
     },
   }
-}
-
-function coderCatalogsEqual(
-  a: { coderModels: string[]; coderModelVariants: Record<string, string[]> },
-  b: { coderModels: string[]; coderModelVariants: Record<string, string[]> },
-): boolean {
-  if (!stringSetsEqual(a.coderModels, b.coderModels)) return false
-  const aVariantKeys = Object.keys(a.coderModelVariants)
-  const bVariantKeys = Object.keys(b.coderModelVariants)
-  if (!stringSetsEqual(aVariantKeys, bVariantKeys)) return false
-  return aVariantKeys.every((key) => stringSetsEqual(a.coderModelVariants[key] ?? [], b.coderModelVariants[key] ?? []))
-}
-
-function stringSetsEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const sortedA = [...a].sort()
-  const sortedB = [...b].sort()
-  return sortedA.every((value, index) => value === sortedB[index])
 }

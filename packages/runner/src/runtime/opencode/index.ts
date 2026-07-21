@@ -17,8 +17,6 @@ export type {
   RuntimeFollowupRequest,
   RuntimeFollowupResult,
   RuntimeHealthCheck,
-  RuntimeModelCatalog,
-  RuntimeModelDescriptor,
   RuntimeProviderErrorPolicy,
   RuntimeReadyState,
   RuntimeResult,

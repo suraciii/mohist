@@ -20,17 +20,6 @@ export interface RuntimeDiagnostic {
   readonly details?: Record<string, unknown>
 }
 
-export interface RuntimeModelDescriptor {
-  readonly providerID: string
-  readonly modelID: string
-  readonly variants: readonly string[]
-}
-
-export interface RuntimeModelCatalog {
-  readonly models: readonly RuntimeModelDescriptor[]
-  readonly fetchedAt: number
-}
-
 export type RuntimeSessionTarget = {
   readonly runtime: "opencode"
   readonly runtimeSessionId: string | null

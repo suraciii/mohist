@@ -14,7 +14,6 @@
 import { OpenCodeRuntime } from "./runtime.js"
 import type { OpenCodeRuntimeDeps } from "./runtime.js"
 import { createSpawnedOpencodeServer } from "./server-process.js"
-import { createCatalogClient } from "./catalog.js"
 import { createEventSubscription } from "./event-subscription.js"
 
 export type OpenCodeRuntimeFactory = (deps: OpenCodeRuntimeDeps) => OpenCodeRuntime
@@ -33,7 +32,6 @@ export function createDefaultOpenCodeRuntime(deps: OpenCodeRuntimeDeps): OpenCod
   return new OpenCodeRuntime({
     ...deps,
     serverFactory: deps.serverFactory ?? createSpawnedOpencodeServer,
-    catalogFactory: deps.catalogFactory ?? createCatalogClient,
     eventSubscriptionFactory: deps.eventSubscriptionFactory ?? createEventSubscription,
   })
 }

@@ -8,7 +8,6 @@ import {
 } from "../src/runtime/opencode/index.js"
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
-import type { CatalogClient } from "../src/runtime/opencode/catalog.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 
@@ -84,10 +83,6 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
   })
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })) },
-    v2: {
-      provider: { list: vi.fn(async () => ({ data: { data: [] } })) },
-      model: { list: vi.fn(async () => ({ data: { data: [] } })) },
-    },
     session: {
       create: vi.fn(async (params: { directory?: string }) => ({
         data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
@@ -108,14 +103,6 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
-    catalogFactory: () => {
-      const c: CatalogClient = {
-        async list() {
-          return { models: [{ providerID: "openai", modelID: "gpt-5", variants: ["low"] }], fetchedAt: 0 }
-        },
-      }
-      return c
-    },
     eventSubscriptionFactory: () => subscription,
   }
   return {

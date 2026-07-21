@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
+import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
 import { deferred } from "./support/deferred.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
@@ -103,6 +104,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   setExecutorGitRunnerForTest(nonGitRunner)
   clearOpenCodeRuntimeFactoryForTest()
+  setOpencodeModelDiscoveryForTest(async () => ({ models: ["openai/gpt-5.5"], variants: {} }))
   blockingAction.mockReset()
   connect.mockReset().mockResolvedValue(undefined)
   heartbeat.mockReset().mockResolvedValue(undefined)
@@ -144,16 +146,12 @@ function workflowVariables(): Record<string, unknown> {
 }
 
 describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
-  it("ready-claim: connectRunner/initializeSharedConnection start the OpenCode server + client and load the catalog via the runtime", async () => {
-    installFakeOpenCodeRuntimeFactory({
-      catalog: {
-        models: [
-          { providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] },
-          { providerID: "anthropic", modelID: "claude-sonnet-4", variants: [] },
-        ],
-        fetchedAt: 0,
-      },
-    })
+  it("ready-claim: starts the OpenCode runtime and registers the independently discovered models", async () => {
+    installFakeOpenCodeRuntimeFactory()
+    setOpencodeModelDiscoveryForTest(async () => ({
+      models: ["openai/gpt-5", "anthropic/claude-sonnet-4"],
+      variants: { "openai/gpt-5": ["low", "high"] },
+    }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -170,13 +168,12 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("RunnerRegistration reports the catalog sourced from the runtime on every heartbeat", async () => {
-    installFakeOpenCodeRuntimeFactory({
-      catalog: {
-        models: [{ providerID: "openai", modelID: "gpt-5", variants: ["low"] }],
-        fetchedAt: 0,
-      },
-    })
+  it("RunnerRegistration reports the host-owned discovered snapshot on every heartbeat", async () => {
+    installFakeOpenCodeRuntimeFactory()
+    setOpencodeModelDiscoveryForTest(async () => ({
+      models: ["openai/gpt-5"],
+      variants: { "openai/gpt-5": ["low"] },
+    }))
     const connected = deferred<void>()
     connect.mockImplementation(async () => { connected.resolve() })
     const controller = new AbortController()
@@ -185,7 +182,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     try {
       await connected.promise
       // Drive a heartbeat tick to confirm the registration body keeps
-      // carrying the runtime-sourced catalog.
+      // carrying the host-owned discovered snapshot.
       await vi.advanceTimersByTimeAsync(QUIET_INTERVAL_MS + 10)
       const heartbeatBodies = heartbeat.mock.calls.map((call) => call[0] as Record<string, unknown>)
       expect(heartbeatBodies.length).toBeGreaterThan(0)
@@ -328,10 +325,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
   })
 
   it("Workflow source receives the OpenCode runtime handle on ActionContext", async () => {
-    installReadyOpenCodeRuntimeFactory({
-      models: [{ providerID: "openai", modelID: "gpt-5", variants: [] }],
-      fetchedAt: 0,
-    })
+    installReadyOpenCodeRuntimeFactory()
     let observed: { openCodeRuntime: unknown } | null = null
     const actionStarted = deferred<void>()
     const actionRelease = deferred<void>()
@@ -369,10 +363,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
   })
 
   it("AgentJob path drives the AgentJobExecutor, not the action registry", async () => {
-    installReadyOpenCodeRuntimeFactory({
-      models: [{ providerID: "openai", modelID: "gpt-5", variants: [] }],
-      fetchedAt: 0,
-    })
+    installReadyOpenCodeRuntimeFactory()
     // Verify the source-keyed dispatch wiring at the executor
     // boundary directly: an AgentJob ownerKind resolves through
     // the AgentJobExecutor entry instead of the action registry.

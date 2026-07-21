@@ -17,16 +17,16 @@ import {
 } from "../src/runtime/opencode/index.js"
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
-import type { CatalogClient } from "../src/runtime/opencode/catalog.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import type { RuntimeModelCatalog } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import * as runtimeModule from "../src/runtime/opencode/index.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
   closed = false
+  subscribeCalls = 0
   subscribe(listener: (event: RuntimeGlobalEvent) => void): () => void {
+    this.subscribeCalls += 1
     if (this.closed) return () => {}
     this.listeners.add(listener)
     return () => {
@@ -46,18 +46,13 @@ class FakeSubscription implements RuntimeEventSubscription {
 
 interface FakeClientHandles {
   health: ReturnType<typeof vi.fn>
-  providerList: ReturnType<typeof vi.fn>
-  modelList: ReturnType<typeof vi.fn>
   sessionCreate: ReturnType<typeof vi.fn>
-  globalEvent: ReturnType<typeof vi.fn>
 }
 
 interface BuildArgs {
   failStart?: boolean
   failHealth?: boolean
-  failCatalog?: boolean
   failSessionCreate?: boolean
-  catalog?: RuntimeModelCatalog
   rebuildDelayMs?: number
 }
 
@@ -71,52 +66,23 @@ interface BuildResult {
 function buildDeps(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
   const closed = { value: false }
-  const catalog: RuntimeModelCatalog = args.catalog ?? {
-    models: [
-      { providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] },
-      { providerID: "anthropic", modelID: "claude-sonnet-4", variants: [] },
-    ],
-    fetchedAt: 0,
-  }
   const health = vi.fn(async () => ({ data: { ok: true } }))
-  const providerList = vi.fn(async () => ({ data: { data: [] } }))
-  const modelList = vi.fn(async () => ({
-    data: {
-      data: catalog.models.map((m) => ({
-        id: m.modelID,
-        providerID: m.providerID,
-        variants: m.variants.map((id) => ({ id })),
-      })),
-    },
-  }))
   const sessionCreate = vi.fn(async (params: { directory?: string; model?: unknown }) => ({
     data: { id: `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}` },
   }))
-  const globalEvent = vi.fn(async () => ({
-    stream: (async function* () {
-      // No events emitted by default; fakes drive the subscription.
-    })(),
-  }))
   if (args.failHealth) {
     health.mockRejectedValueOnce(new Error("health boom"))
-  }
-  if (args.failCatalog) {
-    modelList.mockRejectedValueOnce(new Error("catalog boom"))
   }
   if (args.failSessionCreate) {
     sessionCreate.mockRejectedValueOnce(new Error("session create boom"))
   }
   const clientProxy = {
-    global: { health, event: globalEvent },
-    v2: { provider: { list: providerList }, model: { list: modelList } },
+    global: { health },
     session: { create: sessionCreate },
   }
   const clientHandles: FakeClientHandles = {
     health,
-    providerList,
-    modelList,
     sessionCreate,
-    globalEvent,
   }
   const server: OpencodeServerHandle = {
     url: "http://fake",
@@ -131,15 +97,6 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     serverFactory: async () => {
       if (args.failStart) throw new Error("spawn failed")
       return server
-    },
-    catalogFactory: () => {
-      const c: CatalogClient = {
-        async list() {
-          if (args.failCatalog) throw new Error("catalog boom")
-          return catalog
-        },
-      }
-      return c
     },
     eventSubscriptionFactory: () => subscription,
     ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
@@ -299,17 +256,16 @@ describe("OpenCodeRuntime readiness contract", () => {
     const runtime = new OpenCodeRuntime(deps)
     expect(runtime.ready()).toBe(false)
     expect(runtime.diagnostic()).toBeNull()
-    expect(runtime.catalog()).toBeNull()
   })
 
-  it("ready() becomes true only after health AND catalog both pass", async () => {
-    const { deps } = buildDeps()
+  it("ready() becomes true after server health and event-subscription setup", async () => {
+    const { deps, subscription } = buildDeps()
     const runtime = new OpenCodeRuntime(deps)
     const start = await runtime.start()
     expect(start.ok).toBe(true)
     expect(runtime.ready()).toBe(true)
     expect(runtime.diagnostic()).toBeNull()
-    expect(runtime.catalog()?.models.length).toBe(2)
+    expect(subscription.subscribeCalls).toBe(1)
   })
 
   it("stays not ready when the health check fails and surfaces a diagnostic", async () => {
@@ -320,15 +276,6 @@ describe("OpenCodeRuntime readiness contract", () => {
     expect(runtime.ready()).toBe(false)
     expect(result.error.kind).toBe("unavailable-runtime")
     expect(runtime.diagnostic()?.code).toBe("health-failed")
-  })
-
-  it("stays not ready when the catalog load fails and surfaces a diagnostic", async () => {
-    const { deps } = buildDeps({ failCatalog: true })
-    const runtime = new OpenCodeRuntime(deps)
-    const result = await runtime.start()
-    if (result.ok) throw new Error("expected start to fail")
-    expect(runtime.ready()).toBe(false)
-    expect(runtime.diagnostic()?.code).toBe("catalog-load-failed")
   })
 
   it("emits an actionable diagnostic when the server cannot start", async () => {
@@ -349,6 +296,19 @@ describe("OpenCodeRuntime readiness contract", () => {
     const second = await runtime.start()
     expect(second.ok).toBe(true)
     expect(closed.value).toBe(false)
+  })
+
+  it("shutdown clears readiness and closes the event subscription and server", async () => {
+    const { deps, subscription, closed } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+
+    await runtime.shutdown()
+
+    expect(runtime.ready()).toBe(false)
+    expect(runtime.diagnostic()).toBeNull()
+    expect(subscription.closed).toBe(true)
+    expect(closed.value).toBe(true)
   })
 })
 
@@ -443,7 +403,6 @@ describe("factory seam", () => {
       serverFactory: async () => {
         throw new Error("not used")
       },
-      catalogFactory: () => ({ async list() { return { models: [], fetchedAt: 0 } } }),
       eventSubscriptionFactory: () => ({
         subscribe() { return () => {} },
         async close() {},

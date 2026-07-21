@@ -62,10 +62,9 @@ export const FOLLOWUP_TARGET_UNAVAILABLE: FollowupTargetUnavailable = { unavaila
  * The runner-side resolver turns a discriminated `SessionTarget`
  * (issue-129 T-004) into a `FollowupTarget` constructed from the
  * persisted binding, or `null` when no usable binding is registered.
- * `FOLLOWUP_TARGET_UNAVAILABLE` is returned when the runtime is
- * initializing (the OpenCode runtime is not yet ready / catalog not
- * loaded) so the handler can return the existing `unavailable`
- * taxonomy without consulting a live connection.
+ * `FOLLOWUP_TARGET_UNAVAILABLE` is returned when the runtime is not
+ * ready for execution so the handler can return the existing
+ * `unavailable` taxonomy without consulting a live connection.
  *
  * Both `ReceiveFollowup` and `CancelAgentSession` call into this
  * resolver; a single registration keeps the wire-decoding logic in

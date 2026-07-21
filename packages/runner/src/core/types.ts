@@ -260,7 +260,7 @@ export interface ActionContext {
   /**
    * Shared OpenCode runtime handle for both the Workflow Inline Agent
    * path and the AgentJob path. The runtime owns the shared
-   * Server/Client lifecycle, readiness, and catalog; it is set by
+   * Server/Client lifecycle and execution-health readiness; it is set by
    * the runner host so `mohist/opencode` turns, AgentJob execution,
    * and follow-up commands can route through it. Null when the
    * runtime is not yet ready or has rebuilt (recoverable by waiting
@@ -365,8 +365,8 @@ export interface RunnerOptions {
    * re-discovery that converges the server-registered model set with
    * what opencode currently exposes; the first fire happens one
    * interval after `run()` registers the timer (startup discovery
-   * already runs in `connectRunner`). Used by tests to drive ticks
-   * deterministically.
+   * completes before the first registration). Used by tests to drive
+   * ticks deterministically.
    */
   modelRediscoveryIntervalMs?: number
 }
