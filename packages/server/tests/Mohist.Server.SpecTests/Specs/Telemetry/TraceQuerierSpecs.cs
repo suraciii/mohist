@@ -17,6 +17,10 @@ public class TraceQuerierSpecs : IDisposable
     private readonly FakeTimeProvider _timeProvider;
     private readonly TaskCompletionSource<bool> _readerStarted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _queryInterrupted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _connectionDisposed =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
     private readonly Microsoft.Data.Sqlite.SqliteConnection _keeper;
 
@@ -31,7 +35,9 @@ public class TraceQuerierSpecs : IDisposable
             _status,
             new InMemoryServerFileSystem(),
             _timeProvider,
-            () => _readerStarted.TrySetResult(true));
+            () => _readerStarted.TrySetResult(true),
+            () => _queryInterrupted.TrySetResult(true),
+            () => _connectionDisposed.TrySetResult(true));
     }
 
     public void Dispose()
@@ -361,15 +367,15 @@ public class TraceQuerierSpecs : IDisposable
         await _readerStarted.Task;
         _timeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
 
-        try
-        {
-            var result = await execution;
-            Assert.True(result.Rows.Count < 100000000);
-        }
-        catch (Exception ex) when (ex is SqliteException or OperationCanceledException)
-        {
-            Assert.True(true);
-        }
+        var exception = await Record.ExceptionAsync(() => execution);
+
+        Assert.NotNull(exception);
+        Assert.True(
+            exception is OperationCanceledException
+                || exception is SqliteException { SqliteErrorCode: 9 },
+            $"Expected cancellation or SQLITE_INTERRUPT (9), got {exception}");
+        Assert.True(_queryInterrupted.Task.IsCompletedSuccessfully);
+        Assert.True(_connectionDisposed.Task.IsCompletedSuccessfully);
     }
 
     [Fact]

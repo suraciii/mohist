@@ -38,6 +38,12 @@
 - Integration coverage now asserts the actual UTF-8 response body stays within `MaxQueryResponseBytes` for the large-cell and many-row byte-bound cases.
 - Focused OTel tests: 82 passed.
 
+## Review fix 2: prove SQLite interruption and release
+
+- The production executor now exposes test-only callbacks for the real interrupt registration and post-disposal boundary without changing runtime behavior.
+- The recursive-query test requires an `OperationCanceledException` or SQLite `SQLITE_INTERRUPT` (9), observes the interrupt callback, and verifies the read-only connection has been disposed. It no longer treats arbitrary SQLite failures or normal row-cap completion as success.
+- Focused OTel tests: 82 passed.
+
 ## Verify-check root cause and fix
 
 - After all three task commits landed, `dotnet test` on the SpecTests project surfaced seven regressions in `OtlpRoutesIntegrationSpecs` (`POST /otel/v1/traces` returning `NotFound` instead of `OK`) plus the long-standing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` (still failing with actual `200`), and an ArchTests size-ratchet violation on `OtelQueryRoutesIntegrationSpecs.cs`.

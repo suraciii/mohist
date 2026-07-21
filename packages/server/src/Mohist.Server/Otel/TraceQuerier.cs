@@ -57,13 +57,17 @@ public sealed class TraceQuerier : IOtelQueryExecutor
     private readonly IFileSystem _fileSystem;
     private readonly TimeProvider _timeProvider;
     private readonly Action? _readerStarted;
+    private readonly Action? _queryInterrupted;
+    private readonly Action? _connectionDisposed;
 
     public TraceQuerier(
         OtelDb db,
         OtelCollectorStatus collectorStatus,
         IFileSystem fileSystem,
         TimeProvider timeProvider,
-        Action? readerStarted = null)
+        Action? readerStarted = null,
+        Action? queryInterrupted = null,
+        Action? connectionDisposed = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(collectorStatus);
@@ -74,6 +78,8 @@ public sealed class TraceQuerier : IOtelQueryExecutor
         _fileSystem = fileSystem;
         _timeProvider = timeProvider;
         _readerStarted = readerStarted;
+        _queryInterrupted = queryInterrupted;
+        _connectionDisposed = connectionDisposed;
     }
 
     /// <summary>
@@ -190,71 +196,81 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             Timeout.InfiniteTimeSpan);
         using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCts.Token);
         var executionToken = executionCts.Token;
-        await using var connection = _db.OpenReadOnlyConnection();
-        using var interruptRegistration = executionToken.Register(static state =>
+        var connection = _db.OpenReadOnlyConnection();
+        try
         {
-            var handle = ((SqliteConnection)state!).Handle;
-            if (handle is not null)
-                sqlite3_interrupt(handle);
-        }, connection);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
-
-        await using var reader = await cmd.ExecuteReaderAsync(executionToken);
-        _readerStarted?.Invoke();
-
-        var fieldCount = reader.FieldCount;
-        var fieldNames = new string[fieldCount];
-        for (var i = 0; i < fieldCount; i++)
-        {
-            fieldNames[i] = reader.GetName(i);
-        }
-
-        var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
-        var accumulatedBytes = ResponsePrefixBytes;
-        while (await reader.ReadAsync(executionToken))
-        {
-            if (rows.Count >= MaxQueryResponseRows)
+            using var interruptRegistration = executionToken.Register(static state =>
             {
-                return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
-            }
+                var context = ((TraceQuerier Querier, SqliteConnection Connection))state!;
+                context.Querier._queryInterrupted?.Invoke();
+                var handle = context.Connection.Handle;
+                if (handle is not null)
+                    sqlite3_interrupt(handle);
+            }, (this, connection));
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
 
-            var estimatedRowBytes = ComputeRowBytes(fieldNames);
-            var oversizedCell = false;
+            await using var reader = await cmd.ExecuteReaderAsync(executionToken);
+            _readerStarted?.Invoke();
+
+            var fieldCount = reader.FieldCount;
+            var fieldNames = new string[fieldCount];
             for (var i = 0; i < fieldCount; i++)
             {
-                if (reader.IsDBNull(i))
+                fieldNames[i] = reader.GetName(i);
+            }
+
+            var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
+            var accumulatedBytes = ResponsePrefixBytes;
+            while (await reader.ReadAsync(executionToken))
+            {
+                if (rows.Count >= MaxQueryResponseRows)
                 {
-                    estimatedRowBytes += 4;
-                    continue;
+                    return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
                 }
 
-                var cellBytes = TryPeekCellSerializedBytes(reader, i);
-                if (cellBytes.HasValue && cellBytes.Value > MaxQueryResponseBytes - accumulatedBytes)
+                var estimatedRowBytes = ComputeRowBytes(fieldNames);
+                var oversizedCell = false;
+                for (var i = 0; i < fieldCount; i++)
                 {
-                    oversizedCell = true;
-                    break;
+                    if (reader.IsDBNull(i))
+                    {
+                        estimatedRowBytes += 4;
+                        continue;
+                    }
+
+                    var cellBytes = TryPeekCellSerializedBytes(reader, i);
+                    if (cellBytes.HasValue && cellBytes.Value > MaxQueryResponseBytes - accumulatedBytes)
+                    {
+                        oversizedCell = true;
+                        break;
+                    }
+                    estimatedRowBytes += cellBytes ?? 0;
                 }
-                estimatedRowBytes += cellBytes ?? 0;
-            }
 
-            var separatorBytes = rows.Count == 0 ? 0 : 1;
-            if (oversizedCell
-                || accumulatedBytes + separatorBytes + estimatedRowBytes + MaxResponseSuffixBytes > MaxQueryResponseBytes)
-            {
-                return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
-            }
+                var separatorBytes = rows.Count == 0 ? 0 : 1;
+                if (oversizedCell
+                    || accumulatedBytes + separatorBytes + estimatedRowBytes + MaxResponseSuffixBytes > MaxQueryResponseBytes)
+                {
+                    return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
+                }
 
-            var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
-            for (var i = 0; i < fieldCount; i++)
-            {
-                row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
+                for (var i = 0; i < fieldCount; i++)
+                {
+                    row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
+                rows.Add(row);
+                accumulatedBytes += separatorBytes + estimatedRowBytes;
             }
-            rows.Add(row);
-            accumulatedBytes += separatorBytes + estimatedRowBytes;
+            return new QueryResult(rows, Truncated: false, TruncateReason: null);
         }
-        return new QueryResult(rows, Truncated: false, TruncateReason: null);
+        finally
+        {
+            await connection.DisposeAsync();
+            _connectionDisposed?.Invoke();
+        }
     }
 
     public Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default) =>
