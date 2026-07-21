@@ -33,6 +33,12 @@ Workflow AgentSession open and attach SHALL accept an explicit runtime. A first 
 - **WHEN** attach's expected runtime or physical ID no longer matches the state observed at open
 - **THEN** the grain rejects it before replacing the current binding
 
+#### Scenario: Long physical path survives persistence
+
+- **WHEN** Pi returns a valid normalized absolute session-file path longer than 256 characters
+- **THEN** guarded attach persists the complete path without truncation, hashing, or alternate encoding
+- **AND** runtime-event persistence, transcript read, and grain reactivation return that same path
+
 ### Requirement: Current Pi bindings are reused without model-driven rotation
 
 A current Pi binding SHALL be reused by same-name tasks, checks, retries, cleanup turns, and Runner restarts. Model or variant changes SHALL apply to the bound physical Session without replacing it.
@@ -118,7 +124,7 @@ One process-local coordinator SHALL serialize complete Workflow task and check t
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
-Pi input, assistant text, reasoning, tool lifecycle/results, model observations, status, and usage SHALL be reported through the existing Workflow AgentSession runtime-event route under the current physical binding. Usage SHALL preserve input, output, cache read, cache write, thought when supplied, cost amount, and currency as distinct facts.
+Pi input, assistant text, reasoning, tool lifecycle/results, model observations, status, automatic compaction, provider retries, and usage SHALL be reported through the existing Workflow AgentSession runtime-event route under the current physical binding. Usage SHALL preserve input, output, cache read, cache write, thought when supplied, cost amount, and currency as distinct facts.
 
 #### Scenario: Successful turn is visible in Session views
 
@@ -142,25 +148,59 @@ Pi input, assistant text, reasoning, tool lifecycle/results, model observations,
 - **WHEN** Pi emits the same message or tool identity more than once within a turn
 - **THEN** the Runner projector reports the logical fact once
 
+#### Scenario: Automatic compaction and provider retry remain audit-only
+
+- **WHEN** Pi emits automatic compaction or provider retry lifecycle events
+- **THEN** AgentSession records `compaction_event` or `provider.retry` facts through runtime-neutral transcript/status contracts
+- **AND** neither fact advances Workflow state
+
 #### Scenario: Stale physical binding is rejected
 
 - **WHEN** a runtime-event batch names a physical ID that is no longer current
 - **THEN** AgentSession rejects the entire batch before transcript, model, or usage state changes
+- **AND** the Runner observes an empty or count-mismatched acceptance response and returns `session-reporting-failed`
 
-### Requirement: Required Session reporting completes before work success
+### Requirement: Required Session facts are explicitly accepted before work success
 
-The Runner SHALL complete required input and final-fact writes before returning Action success. Reporting has one completion point and no durable background success mode.
+For every non-empty runtime-event batch, the Runner SHALL parse the existing AgentSession response and require one accepted entry per submitted fact. Acceptance means the AgentSession activation accepted the batch under the current binding; it does not claim that the existing asynchronous Session store flush completed. There is no Runner-owned durable background success mode.
 
 #### Scenario: Input failure blocks prompt admission
 
-- **WHEN** `session.input` cannot be accepted
+- **WHEN** `session.input` receives an HTTP failure, malformed response, or acceptance count mismatch
 - **THEN** the prompt is not submitted and work fails as `session-reporting-failed`
 
-#### Scenario: Final-fact failure blocks completion evaluation
+#### Scenario: Successful final-fact rejection blocks completion evaluation
 
-- **WHEN** the prompt completed but a required assistant, tool, model, usage, or cost write cannot be flushed
+- **WHEN** the prompt completed successfully but the required final facts or `session.closed` are not accepted
 - **THEN** work fails as `session-reporting-failed`
 - **AND** promise, expectation, and artifact evaluation do not run
+
+#### Scenario: AgentSession owns asynchronous persistence
+
+- **WHEN** AgentSession accepts a batch and later retries a state or transcript store flush
+- **THEN** the existing AgentSession persistence loop remains responsible
+- **AND** the earlier Action result is not retroactively changed
+
+### Requirement: Every submitted Pi turn reports a terminal Session fact
+
+After a prompt is submitted, the Runner SHALL attempt reconciled final facts and exactly one `session.closed` for success, timeout, interruption, provider failure, and other runtime failure. Terminal reporting SHALL use a dedicated 30-second fake-timer-compatible signal rather than the already-aborted turn signal.
+
+#### Scenario: Successful turn becomes terminal before completion
+
+- **WHEN** Pi returns success
+- **THEN** final facts and `session.closed` with status `completed` are accepted before Workflow completion evaluation
+
+#### Scenario: Runtime failure remains authoritative
+
+- **WHEN** Pi returns `deadline-exceeded`, `interrupted`, or `turn-failed` and terminal reporting is accepted
+- **THEN** `session.closed` records status `failed` and the stable runtime error code
+- **AND** the original mapped Action error remains the work result
+
+#### Scenario: Terminal reporting also fails
+
+- **WHEN** a runtime failure is already fixed and terminal reporting exhausts its independent reporting signal
+- **THEN** the original runtime error remains primary with a sanitized `session-reporting-failed` diagnostic
+- **AND** Mohist does not claim that AgentSession accepted a terminal state
 
 #### Scenario: No hidden replay protocol exists
 

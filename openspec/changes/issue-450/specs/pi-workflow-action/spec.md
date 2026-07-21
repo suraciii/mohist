@@ -22,7 +22,7 @@ Workflow SHALL register `mohist/pi` as a UserFacing Inline Agent Action. Task an
 
 ### Requirement: Pi Action input is explicit and recursively expanded
 
-The Action SHALL require a resolved non-empty `prompt`, accept optional `session`, and accept optional `options.model` and `options.variant`. It SHALL use normal Workflow input expansion and SHALL NOT read hidden `vars.agent` configuration.
+The Action SHALL require a resolved non-empty `prompt`, accept optional `session`, and consume optional `options.model` and `options.variant`. Other option keys SHALL be ignored with sanitized diagnostics. It SHALL use normal Workflow input expansion and SHALL NOT read hidden `vars.agent` configuration.
 
 #### Scenario: Explicit options reach Pi
 
@@ -67,9 +67,21 @@ For a first logical Session turn, the Action SHALL open the logical AgentSession
 
 #### Scenario: Input reporting failure prevents submission
 
-- **WHEN** the required `session.input` write fails
+- **WHEN** the required `session.input` batch does not receive one explicit AgentSession acceptance per submitted fact
 - **THEN** the Action returns `session-reporting-failed`
 - **AND** it does not submit the prompt
+
+#### Scenario: OpenCode to Pi switch uses Pi context
+
+- **WHEN** the logical Session is currently bound to OpenCode and the next serialized Action uses Pi
+- **THEN** the Pi adapter guarded-attaches a new Pi physical Session before its prompt
+- **AND** logical identity and lineage are preserved without passing the OpenCode physical ID to PiRuntime
+
+#### Scenario: Pi to OpenCode switch uses OpenCode context
+
+- **WHEN** the logical Session is currently bound to Pi and the next serialized Action uses OpenCode
+- **THEN** the migrated OpenCode adapter guarded-attaches a new OpenCode physical Session before its prompt
+- **AND** it does not pass the Pi session-file path to OpenCodeRuntime
 
 ### Requirement: Workflow completion consumes Pi final text only after Action success
 
@@ -123,9 +135,21 @@ The adapter SHALL map runtime and integration failures to stable kebab-case code
 
 #### Scenario: Required final reporting fails
 
-- **WHEN** any required final Session fact cannot be written or flushed before Action return
+- **WHEN** a successful Pi turn's required final facts or `session.closed` do not receive explicit AgentSession acceptance
 - **THEN** the Action returns `session-reporting-failed`
 - **AND** it does not report success in the background
+
+#### Scenario: Failed turn still closes its Session round
+
+- **WHEN** PiRuntime returns timeout, interruption, provider failure, or another runtime failure after prompt submission
+- **THEN** the adapter reports reconciled final facts and `session.closed` with status `failed` through a dedicated bounded signal
+- **AND** the mapped runtime error remains authoritative after terminal acceptance
+
+#### Scenario: Runtime and terminal reporting both fail
+
+- **WHEN** a runtime error is already fixed and the terminal batch is not accepted
+- **THEN** the original runtime error remains primary with a sanitized `session-reporting-failed` diagnostic
+- **AND** the adapter does not claim that the Session became terminal
 
 ### Requirement: Worktree cleanup continues the same Pi conversation
 

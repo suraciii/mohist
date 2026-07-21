@@ -142,7 +142,7 @@ PiRuntime SHALL apply optional model and variant choices to the current physical
 
 ### Requirement: Workflow deadlines and interruption are deterministic
 
-The Workflow host SHALL declare a fixed 60-minute turn duration through Runner-private context. Pi Action input SHALL NOT override it. PiRuntime SHALL use injected time, issue at most one wrap-up steer, fix the failure result before aborting, and never replay an uncertain prompt.
+The Workflow host SHALL declare a fixed 60-minute turn duration through Runner-private context. Pi Action input SHALL NOT override it. PiRuntime SHALL use an injected clock and timer seam, issue exactly one wrap-up steer at minute 55 while the turn remains active, fix the failure result before aborting, and never replay an uncertain prompt.
 
 #### Scenario: Deadline fixes timeout before abort
 
@@ -156,11 +156,18 @@ The Workflow host SHALL declare a fixed 60-minute turn duration through Runner-p
 - **THEN** the result becomes `interrupted` before abort cleanup
 - **AND** inability to confirm stop is exposed as a diagnostic rather than claimed as a safe stop
 
-#### Scenario: Wrap-up uses fake time
+#### Scenario: Workflow wrap-up occurs at minute 55
 
-- **WHEN** the deadline enters its wrap-up window
-- **THEN** one runtime-neutral warning is sent through `steer`
-- **AND** tests advance an injected clock instead of waiting on wall time
+- **WHEN** a Workflow Pi turn remains active for 55 minutes
+- **THEN** one runtime-neutral warning is sent through `steer` at that boundary
+- **AND** no warning is sent before minute 55 or after an earlier completion
+- **AND** fake-clock tests advance the injected clock and timer rather than waiting on wall time
+
+#### Scenario: A short declared duration warns immediately
+
+- **WHEN** another PiRuntime caller declares a duration of five minutes or less
+- **THEN** one wrap-up warning is sent after the turn begins
+- **AND** no second warning is sent before its deadline
 
 #### Scenario: Action input cannot override duration
 
@@ -175,7 +182,7 @@ The Workflow host SHALL declare a fixed 60-minute turn duration through Runner-p
 
 ### Requirement: Provider exhaustion ends a turn promptly
 
-PiRuntime SHALL consume the same runtime-neutral pure provider-failure policy as OpenCode. Its defaults SHALL cover quota, credit, billing, and usage-limit messages with consecutive-retry threshold 5. A host MAY inject a validated policy for composition tests; Action input SHALL NOT configure it.
+PiRuntime SHALL consume the same runtime-neutral pure provider-failure policy as OpenCode. Its defaults SHALL cover quota, credit, billing, and usage-limit messages with consecutive-retry threshold 5. The Runner composition root SHALL parse optional Runner-scoped additional patterns and threshold once at startup, validate them, and pass one frozen policy instance to both runtimes. Tests MAY inject a policy directly; Action input SHALL NOT configure it.
 
 #### Scenario: Exhausted quota fails immediately
 
@@ -193,20 +200,21 @@ PiRuntime SHALL consume the same runtime-neutral pure provider-failure policy as
 - **WHEN** the event-reported attempt reaches the configured threshold before completion
 - **THEN** PiRuntime aborts and returns `turn-failed`
 
-#### Scenario: Non-default injected policy reaches both runtimes
+#### Scenario: Non-default Runner policy reaches both runtimes
 
-- **WHEN** Runner composition supplies a valid non-default threshold or literal failure pattern
+- **WHEN** `MOHIST_PROVIDER_ERROR_PATTERNS` contains a valid JSON array of regex sources or `MOHIST_PROVIDER_RETRY_THRESHOLD` contains a positive integer
 - **THEN** OpenCode and Pi receive the same policy object
-- **AND** provider tests observe the override without a user-facing setting
+- **AND** configured patterns append the defaults while the configured threshold replaces default 5
+- **AND** Action input cannot observe or override the policy
 
-#### Scenario: Invalid injected policy is rejected
+#### Scenario: Invalid Runner policy is rejected
 
-- **WHEN** the host supplies a non-positive threshold or invalid pattern set
-- **THEN** runtime construction/readiness fails with an actionable diagnostic rather than silently changing defaults
+- **WHEN** either Runner setting contains invalid JSON, an invalid regex source, or a non-positive threshold
+- **THEN** Runner startup fails before work claim with an actionable diagnostic rather than silently changing defaults
 
 ### Requirement: Pi event projection is normalized and idempotent
 
-PiRuntime SHALL normalize assistant text, reasoning, tool lifecycle/results, model observations, status, and usage including input, output, cache read, cache write, thought when supplied, cost amount, and currency. Unknown SDK events SHALL affect diagnostics only.
+PiRuntime SHALL normalize assistant text, reasoning, tool lifecycle/results, model observations, status, automatic compaction, provider retry, and usage including input, output, cache read, cache write, thought when supplied, cost amount, and currency. Unknown SDK events SHALL affect diagnostics only.
 
 #### Scenario: Duplicate callback does not duplicate a fact
 
@@ -217,6 +225,18 @@ PiRuntime SHALL normalize assistant text, reasoning, tool lifecycle/results, mod
 
 - **WHEN** prompt completion exposes a final assistant message or completed tool fact absent from earlier callbacks
 - **THEN** the projector emits the missing normalized fact before returning
+
+#### Scenario: Automatic compaction remains an audit fact
+
+- **WHEN** Pi emits `compaction_start` and `compaction_end`
+- **THEN** the projector emits ordered `compaction_event` facts with started/completed phases
+- **AND** those facts do not complete or fail Workflow work
+
+#### Scenario: Provider retries remain audit facts
+
+- **WHEN** Pi emits `auto_retry_start` or `auto_retry_end`
+- **THEN** the projector emits a masked `provider.retry` status fact containing its phase and structured attempt fields
+- **AND** the same source event may inform provider-failure policy without the audit fact becoming a completion signal
 
 ### Requirement: Default tests isolate the Pi SDK and external environment
 
