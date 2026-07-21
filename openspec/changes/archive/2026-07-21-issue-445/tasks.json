@@ -1,0 +1,108 @@
+{
+  "project": "mohist-local",
+  "description": "Make rendered and validated with-input the sole built-in Action input channel, explicitly bind local and GitHub PR delivery profiles, remove issue-backed delivery cross-checks, and enforce a Variable-free Action invocation boundary.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove hidden OpenCode and OpenSpec Variable inputs",
+      "spec": "specs/action-input-sourcing/spec.md#Built-in Action inputs have one source",
+      "description": "Migrate the non-delivery OpenCode and OpenSpec Action paths away from effective Variables while preserving their declared prompt and task behavior. Remove the prompt-loader Variable bag, rely on the profile-declared nested build prompt, and replace archive-name Variables with a versioned atomic checkpoint in Git-private workspace metadata.",
+      "acceptanceCriteria": [
+        "`mohist/opencode` prompt resolution and every registered prompt loader receive declared loader input and host workDir but no effective or Run Variables",
+        "`mohist/openspec-tasks` does not read `variables.prompts.build`; after the rendered top-level `task` object passes manifest validation, it copies only the corresponding declared raw subtree without inspecting or rendering it, and the generated task resolves `${{ prompts.build }}` during its own dispatch",
+        "`mohist/archive-change` neither reads `_actions.archiveChange.destination` or `openspecArchiveName` nor writes archive-name retry state to Run Variables",
+        "Before moving a change, archive-change atomically writes a versioned checkpoint under the Git-private path keyed by SHA-256 of `workflowRunId + NUL + workspace-relative source`; the checkpoint records and validates that run, source, and exact selected destination",
+        "Retry follows only its run/source-bound checkpoint destination: source-only resumes move, destination-only resumes Git completion, both reports `partial-archive`, neither reports `missing-source`, and malformed/mismatched/escaping state fails before mutation",
+        "The checkpoint is cleared only after successful commit or confirmed no-change, so process restart, pre-move failure, post-move failure, and an existing base archive followed by a `-v2` destination all resume the same operation",
+        "Focused OpenCode prompt-loader, OpenSpec task generation, archive first-run/retry/collision/corruption tests use fake filesystem/process boundaries and `vi.useFakeTimers` or an injected clock for midnight rollover; they do not depend on wall-clock time",
+        "`npm run typecheck -w packages/runner` and `npm run test:ci -w packages/runner` pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Variable-independent OpenCode prompt loading and OpenSpec task/archive implementations with focused Runner regressions under packages/runner/.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep rawWith only as an opaque syntax carrier for the already validated top-level task input. It must not affect the generating Action's current behavior or expose Variables. The archive checkpoint is private rebuildable operation state, not an Action input; use no buildPrompt/archiveName compatibility input or old Variable reader."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver explicit local Git Action contracts",
+      "spec": "specs/action-input-sourcing/spec.md#Former implicit inputs are declared and enforced, specs/builtin-profile-input-bindings/spec.md#Bundled profiles bind affected Action inputs explicitly, specs/builtin-profile-input-bindings/spec.md#Local profile behavior is preserved with explicit inputs",
+      "description": "Switch workspace preparation and local Git delivery Actions to manifest-declared branch and remote inputs, removing their Variable fallbacks and issue-backed value checks. Update both bundled profiles wherever they consume these shared Actions, with complete local-profile routing, recovery, documentation, and regression coverage delivered atomically with the stricter manifests.",
+      "acceptanceCriteria": [
+        "`mohist/workspace-prepare` requires `expectedBranch`; every bundled stage passes `${{ workspace.branch }}` and the handler always uses host workDir",
+        "`mohist/rebase` and `mohist/rebase-status` require `baseBranch`; `mohist/merge-ready` requires `baseBranch`, `source`, and `remote`; `mohist/push` requires `source`, `target`, and `remote`, with the duplicate push `baseBranch` alias removed",
+        "Missing required Git inputs fail during manifest validation with field-specific `invalid-input` before any fake Git runner call, even when equivalent values exist in dispatch Variables",
+        "Valid explicit branch and remote inputs are used unchanged and are not rejected or replaced when issue-backed repository/workspace Variables disagree",
+        "`mohist/local` retains plan/build/check/integrate order, approvals, merge-ready recovery, rebase-squash integration, and direct push to the explicitly bound repository base branch",
+        "All workspace-prepare, push, rebase, and merge-ready uses in `mohist/local` and `mohist/github-pr`, including approval feedback and recovery tasks, satisfy the new manifests through visible with-bindings",
+        "Action catalog expectations and Git/workspace Action documentation list the same required/default inputs and no Variable fallback",
+        "Focused Runner Action/manifest/profile tests and Server parsed-profile specs cover the explicit bindings and unchanged local flow",
+        "`npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner`, and `npm test` pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Explicit workspace/rebase/merge-ready/push manifests and handlers, updated bundled Git bindings, local workflow regressions, and matching Action documentation.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This task updates shared Git uses in the GitHub profile so the stricter manifests never leave a shipped profile undispatchable. GitHub PR repository scoping remains for T-003."
+    },
+    {
+      "id": "T-003",
+      "title": "Deliver explicit GitHub PR Action contracts",
+      "spec": "specs/action-input-sourcing/spec.md#Declared delivery inputs are authoritative for the invocation, specs/builtin-profile-input-bindings/spec.md#GitHub PR profile behavior is preserved with explicit inputs",
+      "description": "Make GitHub PR creation, ready transition, merge, and status use explicit repository and PR inputs, then remove delivery-context fallback and cross-check code once no caller needs it. Update the GitHub PR profile, recoveries, catalog, documentation, and full-flow tests in the same feature slice.",
+      "acceptanceCriteria": [
+        "`mohist/create-github-pr` requires `repositoryUrl`, `source`, and `target`; ready requires `repositoryUrl` and `prNumber`; merge requires `repositoryUrl` and `prNumber`; status requires `repositoryUrl` and `prNumber`",
+        "GitHub handlers derive the `gh --repo` selector only from the validated `repositoryUrl`, use host workDir, and never infer repository or PR identity from Variables or current issue repository context",
+        "`merge-github-pr` no longer discovers a PR through source/target fallback, and GitHub Actions do not declare or consume an unused Git remote input",
+        "Declared repository, branch, and PR values execute unchanged when hidden issue/repository Variables disagree; invalid repository URLs and credential/permission failures retain actionable existing error categories",
+        "Issue field selectors for PR text and squash subjects use dispatch project/issue identity only when explicitly selected and do not fall back to Variable-based identity",
+        "The GitHub PR profile binds `${{ repository.gitUrl }}` to every GitHub Action, preserves `${{ vars.github.pr.number }}` bindings for ready/merge/status consumers, and removes the unused create-PR remote field",
+        "Draft creation/output projection, reviewed-branch publication, ready transition, status checks, squash merge, base-moved recovery, and failed-check recovery retain their existing order and behavior",
+        "`delivery-context.ts` and tests that assert authoritative issue cross-check rejection are removed or replaced by explicit-input behavior tests",
+        "Catalog and user documentation describe the final GitHub Action inputs without repository, branch, or PR Variable fallbacks",
+        "Focused Runner GitHub Action tests and Server GitHub profile specs pass without real network access",
+        "`npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner`, and `npm test` pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Explicit GitHub PR manifests/handlers and repository parsing, updated mohist/github-pr profile and recoveries, deleted delivery fallback guard, documentation, and full-flow regressions.",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Credentials remain the authorization boundary. Do not add Server dispatch policy, a new repository expression, or compatibility fallback for old profile snapshots."
+    },
+    {
+      "id": "T-004",
+      "title": "Enforce the Variable-free Action invocation boundary",
+      "spec": "specs/action-input-sourcing/spec.md#Built-in Action inputs have one source, specs/action-input-sourcing/spec.md#Published Action contracts expose every supported input",
+      "description": "Close the input channel structurally after all concrete built-ins have migrated: project a runtime Action context without Variables, narrow the TypeScript invocation types and built-in signatures, and remove unsafe casts that could recover the old context. Audit catalog/docs and run the complete Runner and Server regression suites to prove that engine Variable use remains limited to rendering, workspace resolution, recovery, and setVars.",
+      "acceptanceCriteria": [
+        "The object passed to `ActionDefinition.run` has no `variables` property at runtime, and `ValidatedActionContext` plus built-in handler types do not expose one at compile time",
+        "The executor still renders `${{ vars.* }}` before validation, freezes the rendered value for the invocation, resolves host workDir, evaluates recovery, and applies setVars with unchanged semantics",
+        "A boundary test proves a custom Action cannot observe `variables` while it receives validated with-input and the resolved host workDir",
+        "Production built-ins contain no `context.variables` reads and no cast restores a Variable-bearing Action context; rawWith is exposed only for the top-level-validated generated-task composite, is copied without semantic inspection, and cannot access Variables",
+        "Every runtime-affecting built-in input appears in its manifest-derived catalog entry and user documentation, and documented Variable examples bind through `with`",
+        "No Server policy validation, template namespace/syntax change, or broad Action capability-host redesign is introduced",
+        "Runner typecheck, test-boundary checks, unit/spec tests, and relevant Server profile tests cover tasks and individual checks with no real external dependency or wall-clock timing",
+        "`npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner`, and `npm test` pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Variable-free Action invocation projection and types, migrated built-in signatures, boundary/catalog/documentation audits, and complete Runner/Server verification.",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "This is the enforcement slice, not the full capability-based ActionHost redesign. It depends on every concrete migration so narrowing the runtime context does not require temporary compatibility accessors."
+    }
+  ]
+}

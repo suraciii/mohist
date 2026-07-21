@@ -1,16 +1,17 @@
+import { createHash } from "node:crypto"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
-import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
-import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
+import type { ActionResult, JsonObject, JsonValue } from "../core/types.js"
+import type { ActionInvocationContext, OpenSpecTasksInvocationContext } from "./context.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 import { fail, succeed } from "./action-result.js"
 
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
-const OPENSPEC_ARCHIVE_NAME_VAR_KEY = "openspecArchiveName"
-const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
+const ARCHIVE_CHECKPOINT_VERSION = 1
 
 /**
  * `source` tag recorded against every captured `mohist/openspec`
@@ -20,32 +21,8 @@ const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
  */
 const ACTION_SOURCE = "action:openspec"
 
-function sinkOptions(context: ActionContext): GitOptions | undefined {
+function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
-}
-
-function readLegacyArchiveName(variables: JsonObject, sourceRel: string): string | null {
-  const raw = variables[ARCHIVE_DESTINATION_VAR_KEY]
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
-  const entry = (raw as JsonObject)[sourceRel]
-  return typeof entry === "string" && entry.length > 0 ? entry : null
-}
-
-function resolveEffectiveArchiveName(
-  variables: JsonObject,
-  sourceRel: string,
-  sourceName: string,
-  today: string,
-): { name: string; persistedSource: "new" | "legacy" | null } {
-  const newName = variables[OPENSPEC_ARCHIVE_NAME_VAR_KEY]
-  if (typeof newName === "string" && newName.length > 0) {
-    return { name: newName, persistedSource: "new" }
-  }
-  const legacyName = readLegacyArchiveName(variables, sourceRel)
-  if (legacyName) {
-    return { name: legacyName, persistedSource: "legacy" }
-  }
-  return { name: `${today}-${sourceName}`, persistedSource: null }
 }
 
 export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -62,28 +39,48 @@ export function setOpenSpecGitRunnerForTest(runner: OpenSpecGitRunner | null) {
   openSpecGitRunner = runner ?? defaultGit
 }
 
-type ArchiveRename = (src: string, dst: string) => Promise<void>
-
-let archiveRenameForTest: ArchiveRename | null = null
-
-export function setArchiveRenameForTest(rename: ArchiveRename | null) {
-  archiveRenameForTest = rename
+export interface ArchiveFileSystem {
+  exists(path: string): Promise<boolean>
+  hasFiles(path: string): Promise<boolean>
+  ensureDirectory(path: string): Promise<void>
+  moveDirectory(source: string, destination: string): Promise<void>
+  readText(path: string): Promise<string>
+  writeAtomic(path: string, content: string): Promise<void>
+  remove(path: string): Promise<void>
 }
 
-async function moveChangeDir(src: string, dst: string) {
+const defaultArchiveFileSystem: ArchiveFileSystem = {
+  exists: async (path) => {
+    try {
+      await stat(path)
+      return true
+    } catch {
+      return false
+    }
+  },
+  hasFiles,
+  ensureDirectory: async (path) => {
+    await mkdir(path, { recursive: true })
+  },
+  moveDirectory: moveChangeDir,
+  readText: async (path) => await readFile(path, "utf8"),
+  writeAtomic: writeArchiveCheckpoint,
+  remove: async (path) => await rm(path, { force: true }),
+}
+
+let archiveFileSystem: ArchiveFileSystem = defaultArchiveFileSystem
+
+export function setArchiveFileSystemForTest(fileSystem: ArchiveFileSystem | null) {
+  archiveFileSystem = fileSystem ?? defaultArchiveFileSystem
+}
+
+async function moveChangeDir(source: string, destination: string) {
   try {
-    if (archiveRenameForTest) {
-      await archiveRenameForTest(src, dst)
-    } else {
-      await rename(src, dst)
-    }
+    await rename(source, destination)
   } catch (err) {
-    if (isCrossDeviceError(err)) {
-      await copyDirectory(src, dst)
-      await deleteDirectory(src)
-      return
-    }
-    throw err
+    if (!isCrossDeviceError(err)) throw err
+    await copyDirectory(source, destination)
+    await deleteDirectory(source)
   }
 }
 
@@ -93,7 +90,7 @@ function isCrossDeviceError(err: unknown): boolean {
 
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
-export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
+export async function openspecTasksAction(context: OpenSpecTasksInvocationContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return fail("invalid-input", "OpenSpec task loader requires 'path'")
   if (!exists(path)) return fail("missing-source", `tasks.json not found: ${path}`)
@@ -102,7 +99,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   const sourceTasks = Array.isArray(root.tasks) ? root.tasks.filter(isObject) : []
   if (!Array.isArray(root.tasks)) return fail("invalid-input", "tasks.json must contain a tasks array")
 
-  const taskDefaults = objectInput(context.rawWith ?? context.with, "task")
+  const taskDefaults = context.rawTask ?? objectInput(context.with, "task")
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(context.with, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH
@@ -111,7 +108,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
     if (!id?.trim()) return []
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
-    const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, context.variables)
+    const mergedWith = mergeTaskWith(defaultWith, task, id)
     const expect = mergeTaskExpect(task)
     return [{ id, title, uses, with: mergedWith ?? null, expect }]
   })
@@ -122,7 +119,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   return succeed({ loaded: tasks.length })
 }
 
-export async function openspecArtifactsAction(context: ActionContext): Promise<ActionResult> {
+export async function openspecArtifactsAction(context: ActionInvocationContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
   if (!changeDir) return fail("invalid-input", "OpenSpec artifacts check requires 'changeDir'")
 
@@ -153,134 +150,69 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
   return fail("artifacts-missing", `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`)
 }
 
-export async function archiveChangeAction(context: ActionContext): Promise<ActionResult> {
+export async function archiveChangeAction(context: ActionInvocationContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
   if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
   const archiveDir = join(dirname(changeDir), "archive")
   const sourceName = basename(changeDir) || "change"
   const sourceRel = relativePath(context.workDir, changeDir)
-  const today = new Date().toISOString().slice(0, 10)
+  const sourceValidation = validateWorkspaceRelativePath(sourceRel)
+  if (sourceValidation) return archiveFailure("config-error", sourceValidation, { kind: "archive-change" })
 
-  const { name: archivePrefix, persistedSource } = resolveEffectiveArchiveName(
-    context.variables,
-    sourceRel,
-    sourceName,
-    today,
-  )
-  const invalidArchivePrefix = validateArchivePrefix(archivePrefix)
-  if (invalidArchivePrefix) {
-    return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidArchivePrefix}`, {
-      kind: "archive-change",
-      source: changeDir,
-      archivePrefix,
-      stage: "validate-archive-name",
-    })
-  }
-
-  const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
+  const checkpoint = await resolveArchiveCheckpoint(context, sourceRel)
+  if (checkpoint.kind === "failure") return checkpoint.result
 
   let destination: string
-  if (persistedSource) {
-    const persistedDestination = resolveArchiveDestination(archiveDir, archivePrefix)
-    if (!persistedDestination) {
-      return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, {
-        kind: "archive-change",
-        source: changeDir,
-        archivePrefix,
-        stage: "resolve-destination",
-      })
+  const checkpointPath = checkpoint.path
+  if (checkpoint.value) {
+    const persisted = checkpoint.value
+    const destinationValidation = validateCheckpointDestination(context.workDir, archiveDir, persisted.destination)
+    if (destinationValidation.kind === "failure") return archiveFailure("config-error", destinationValidation.message, { kind: "archive-change" })
+    destination = destinationValidation.path
+    const sourcePresent = await archiveFileSystem.exists(changeDir)
+    const destinationPresent = await archiveFileSystem.exists(destination)
+    if (sourcePresent && destinationPresent) {
+      return archiveFailure("partial-archive", `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${destination}`, { kind: "archive-change" })
     }
-    const persistedArchiveHasFiles = exists(persistedDestination) && (await hasFiles(persistedDestination))
-    if (persistedArchiveHasFiles && sourceHasFiles) {
-      return archiveFailure(
-        "partial-archive",
-        `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${persistedDestination}`,
-        { kind: "archive-change", source: changeDir, archive: persistedDestination },
-      )
+    if (!sourcePresent && !destinationPresent) {
+      return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
     }
-    if (persistedArchiveHasFiles) {
-      if (persistedSource === "legacy") {
-        const persistFailure = await persistArchiveName(context, archivePrefix, changeDir)
-        if (persistFailure) return persistFailure
-      }
-      destination = persistedDestination
-    } else if (!sourceHasFiles) {
-      return archiveFailure(
-        "missing-source",
-        `Change directory not found: ${changeDir}`,
-        { kind: "archive-change", source: changeDir },
-      )
-    } else {
-      await mkdir(archiveDir, { recursive: true })
-      if (exists(persistedDestination)) {
-        return archiveFailure(
-          "partial-archive",
-          `Archive destination already exists; refusing to overwrite: source=${changeDir} archive=${persistedDestination}`,
-          { kind: "archive-change", source: changeDir, archive: persistedDestination },
-        )
-      }
-      const persistFailure = await persistArchiveName(context, archivePrefix, changeDir)
-      if (persistFailure) return persistFailure
-      destination = persistedDestination
+    if (sourcePresent) {
       try {
-        await moveChangeDir(changeDir, destination)
+        await archiveFileSystem.moveDirectory(changeDir, destination)
       } catch (err) {
-        return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, {
-          kind: "archive-change",
-          source: changeDir,
-          destination,
-          stage: "rename",
-        })
+        return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
       }
-    }
-  } else if (!sourceHasFiles) {
-    const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
-    if (existingArchive) {
-      const backfilledName = basename(existingArchive)
-      const invalidBackfilled = validateArchivePrefix(backfilledName)
-      if (invalidBackfilled) {
-        return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidBackfilled}`, {
-          kind: "archive-change",
-          source: changeDir,
-          archivePrefix: backfilledName,
-          stage: "validate-archive-name",
-        })
-      }
-      const backfillFailure = await persistArchiveName(context, backfilledName, changeDir)
-      if (backfillFailure) return backfillFailure
-      destination = existingArchive
-    } else {
-      return archiveFailure(
-        "missing-source",
-        `Change directory not found: ${changeDir}`,
-        { kind: "archive-change", source: changeDir },
-      )
     }
   } else {
-    await mkdir(archiveDir, { recursive: true })
-    const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
-    if (!resolvedDestination) {
-      return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, {
-        kind: "archive-change",
-        source: changeDir,
-        archivePrefix,
-        stage: "resolve-destination",
-      })
+    if (!(await archiveFileSystem.exists(changeDir)) || !(await archiveFileSystem.hasFiles(changeDir))) {
+      return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
     }
-    const resolvedArchiveName = basename(resolvedDestination)
-    const persistFailure = await persistArchiveName(context, resolvedArchiveName, changeDir)
-    if (persistFailure) return persistFailure
+    await archiveFileSystem.ensureDirectory(archiveDir)
+    const today = new Date().toISOString().slice(0, 10)
+    const archivePrefix = `${today}-${sourceName}`
+    const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
+    if (!resolvedDestination) return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, { kind: "archive-change" })
     destination = resolvedDestination
+    const destinationRel = relativePath(context.workDir, destination)
+    const destinationValidation = validateCheckpointDestination(context.workDir, archiveDir, destinationRel)
+    if (destinationValidation.kind === "failure") return archiveFailure("config-error", destinationValidation.message, { kind: "archive-change" })
+    const checkpointValue: ArchiveCheckpoint = {
+      version: ARCHIVE_CHECKPOINT_VERSION,
+      workflowRunId: context.workflowRunId,
+      source: sourceRel,
+      destination: destinationRel,
+    }
     try {
-      await moveChangeDir(changeDir, destination)
+      await archiveFileSystem.writeAtomic(checkpointPath, `${JSON.stringify(checkpointValue)}\n`)
     } catch (err) {
-      return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, {
-        kind: "archive-change",
-        source: changeDir,
-        destination,
-        stage: "rename",
-      })
+      return archiveFailure("retry-safe", `Failed to persist archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
+    }
+    try {
+      await archiveFileSystem.moveDirectory(changeDir, destination)
+    } catch (err) {
+      return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
     }
   }
 
@@ -323,6 +255,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
   if (changedFiles.length === 0) {
+    await archiveFileSystem.remove(checkpointPath)
     return succeed({
         kind: "archive-change",
         source: changeDir,
@@ -343,6 +276,8 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       changedFiles,
     })
   }
+
+  await archiveFileSystem.remove(checkpointPath)
 
   const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
@@ -367,43 +302,15 @@ function archiveFailure(errorCode: ArchiveErrorCode, message: string, output: Re
   return fail(errorCode, message)
 }
 
-async function persistArchiveName(
-  context: ActionContext,
-  archiveName: string,
-  source: string,
-): Promise<ActionResult | null> {
-  try {
-    await context.writeVars({ [OPENSPEC_ARCHIVE_NAME_VAR_KEY]: archiveName })
-    return null
-  } catch (err) {
-    return archiveFailure(
-      "retry-safe",
-      `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
-      {
-        kind: "archive-change",
-        source,
-        archivePrefix: archiveName,
-        stage: "persist-name",
-      },
-    )
-  }
-}
-
 function mergeTaskWith(
   defaultWith: JsonObject | undefined,
   task: JsonObject,
   taskId: string | undefined,
-  loaderConfig: { file: string; items: string },
-  variables?: JsonObject,
 ) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
-  if (merged.prompt === undefined) {
-    merged.prompt = buildOpenSpecTaskPromptSpec(taskId, loaderConfig, variables)
-  } else {
-    merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
-  }
+  if (merged.prompt !== undefined) merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
   return Object.keys(merged).length === 0 ? null : merged
 }
 
@@ -428,67 +335,87 @@ function injectOpenSpecTaskPromptSelector(prompt: JsonValue, taskId: string | un
   return { ...prompt, with: nextWith }
 }
 
-function buildOpenSpecTaskPromptSpec(
-  taskId: string | undefined,
-  loaderConfig: { file: string; items: string },
-  variables?: JsonObject,
-): JsonObject {
-  const loaderWith: JsonObject = {
-    file: loaderConfig.file,
-    items: loaderConfig.items,
+interface ArchiveCheckpoint {
+  version: number
+  workflowRunId: string
+  source: string
+  destination: string
+}
+
+async function resolveArchiveCheckpoint(context: ActionInvocationContext, sourceRel: string): Promise<
+  | { kind: "ok"; path: string; value: ArchiveCheckpoint | null }
+  | { kind: "failure"; result: ActionResult }
+> {
+  const key = createHash("sha256").update(`${context.workflowRunId}\0${sourceRel}`).digest("hex")
+  const result = await openSpecGitRunner(context.workDir, ["rev-parse", "--git-path", `mohist/archive-change/${key}.json`], context.signal, sinkOptions(context))
+  if (!result.success) return { kind: "failure", result: archiveFailure("config-error", `Unable to resolve archive checkpoint path: ${result.combinedOutput || result.stderr}`, { kind: "archive-change" }) }
+  const rawPath = result.stdout.trim()
+  if (!rawPath) return { kind: "failure", result: archiveFailure("config-error", "Git returned an empty archive checkpoint path", { kind: "archive-change" }) }
+  const path = isAbsolute(rawPath) ? resolve(rawPath) : resolve(context.workDir, rawPath)
+  if (!(await archiveFileSystem.exists(path))) return { kind: "ok", path, value: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await archiveFileSystem.readText(path))
+  } catch (err) {
+    return { kind: "failure", result: archiveFailure("config-error", `Malformed archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" }) }
   }
-  const base = resolveBuildPrompt(variables)
-  if (base !== undefined) loaderWith["base"] = base
-  if (taskId?.trim()) loaderWith["taskId"] = taskId
-  return {
-    uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
-    with: loaderWith,
+  if (!isArchiveCheckpoint(parsed) || parsed.workflowRunId !== context.workflowRunId || parsed.source !== sourceRel) {
+    return { kind: "failure", result: archiveFailure("config-error", "Archive checkpoint does not match this workflow run and source", { kind: "archive-change" }) }
+  }
+  return { kind: "ok", path, value: parsed }
+}
+
+async function writeArchiveCheckpoint(path: string, content: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  const temporary = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
+    await rename(temporary, path)
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined)
   }
 }
 
-function resolveBuildPrompt(variables?: JsonObject): string | undefined {
-  if (!variables) return undefined
-  const prompts = variables["prompts"]
-  if (typeof prompts !== "object" || prompts === null || Array.isArray(prompts)) return undefined
-  const build = (prompts as JsonObject)["build"]
-  return typeof build === "string" ? build : undefined
+function isArchiveCheckpoint(value: unknown): value is ArchiveCheckpoint {
+  if (!isObject(value)) return false
+  return value.version === ARCHIVE_CHECKPOINT_VERSION
+    && typeof value.workflowRunId === "string"
+    && typeof value.source === "string"
+    && typeof value.destination === "string"
 }
 
-function resolveChangeDir(context: ActionContext) {
+function validateWorkspaceRelativePath(value: string): string | null {
+  if (!value || isAbsolute(value) || value.startsWith("../") || value.includes("\0")) return `Archive source path escapes workspace: ${value}`
+  return null
+}
+
+function validateCheckpointDestination(workDir: string, archiveDir: string, destinationRel: string): { kind: "ok"; path: string } | { kind: "failure"; message: string } {
+  const path = resolve(workDir, destinationRel)
+  const archiveRoot = resolve(archiveDir)
+  const inside = relative(archiveRoot, path)
+  if (!destinationRel || isAbsolute(destinationRel) || destinationRel.includes("\0") || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+    return { kind: "failure", message: `Archive checkpoint destination escapes archive root: ${destinationRel}` }
+  }
+  if (relative(workDir, path).replace(/\\/g, "/") !== destinationRel.replace(/\\/g, "/")) {
+    return { kind: "failure", message: `Archive checkpoint destination is not canonical: ${destinationRel}` }
+  }
+  return { kind: "ok", path }
+}
+
+function resolveChangeDir(context: ActionInvocationContext) {
   const changeDir = stringInput(context.with, "changeDir")
   if (!changeDir?.trim()) return undefined
   return resolveActionPath(context.workDir, changeDir)
 }
 
-function validateArchivePrefix(prefix: string): string | null {
-  if (!prefix) return "must not be empty"
-  if (prefix.trim() !== prefix) return "must not contain leading or trailing whitespace"
-  if (prefix === "." || prefix === "..") return "must not be a relative path segment"
-  if (prefix.includes("/") || prefix.includes("\\") || prefix.includes("\0")) return "must be a single path segment"
-  if (isAbsolute(prefix) || /^[A-Za-z]:/.test(prefix)) return "must not be an absolute path"
-  return null
-}
-
 async function uniqueDestination(archiveDir: string, baseName: string) {
   let destination = resolveArchiveDestination(archiveDir, baseName)
   if (!destination) return null
-  if (!exists(destination)) return destination
+  if (!(await archiveFileSystem.exists(destination))) return destination
   for (let version = 2; ; version++) {
     destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
     if (!destination) return null
-    if (!exists(destination)) return destination
-  }
-}
-
-async function findExistingArchive(archiveDir: string, baseName: string) {
-  let destination = resolveArchiveDestination(archiveDir, baseName)
-  if (!destination) return null
-  if (exists(destination) && await hasFiles(destination)) return destination
-  for (let version = 2; ; version++) {
-    destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
-    if (!destination) return null
-    if (exists(destination) && await hasFiles(destination)) return destination
-    if (version >= 50) return null
+    if (!(await archiveFileSystem.exists(destination))) return destination
   }
 }
 

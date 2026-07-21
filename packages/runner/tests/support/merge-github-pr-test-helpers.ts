@@ -46,7 +46,7 @@ export function context(withOverrides: JsonObject = {}, variables: JsonObject = 
     stage: "integrate",
     title: "Merge GitHub PR",
     uses: "mohist/merge-github-pr",
-    with: withOverrides,
+     with: { repositoryUrl: "https://github.com/example/repo.git", ...withOverrides },
     variables: {
       project: { id: "proj_1", path: WORKSPACE_PATH },
       issue: { title: "Use GitHub PR workflow", body: "Open, review, and merge a GitHub PR.", number: 248 },
@@ -107,8 +107,9 @@ export function createMergeGhTestHarness(): MergeGhTestHarness {
 
   function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
     setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
-      ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
-      return await respond(cmd, args, cwd)
+      const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
+      ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+      return await respond(cmd, visibleArgs, cwd)
     })
   }
 

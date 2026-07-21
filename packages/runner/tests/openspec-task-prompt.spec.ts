@@ -458,7 +458,6 @@ describe("mohist/openspec-task-prompt loader - integration with default renderer
 function loaderContext(with_: Record<string, unknown>): PromptLoaderContext {
   return {
     with: with_ as PromptLoaderContext["with"],
-    variables: {},
     workDir,
     workId: "work-1",
   }

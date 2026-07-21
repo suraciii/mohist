@@ -25,6 +25,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: proposal
         title: Generate proposal
         uses: mohist/opencode
@@ -122,6 +124,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: load-tasks
         title: Load tasks from plan
         uses: mohist/openspec-tasks
@@ -192,6 +196,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: ai-review
         title: AI review
         uses: mohist/opencode
@@ -246,6 +252,10 @@ stages:
       - id: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
+        with:
+          baseBranch: ${{ repository.baseBranch }}
+          source: ${{ workspace.branch }}
+          remote: origin
         recovery:
           budget: 1
           handlers:
@@ -282,6 +292,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: integrate:archive-change
         title: Archive change
         uses: mohist/archive-change

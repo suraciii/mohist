@@ -1,8 +1,8 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
-import { resolveDeliveryRemote, resolvePushSource, resolvePushTarget } from "./delivery-context.js"
 import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -30,21 +30,22 @@ export function setPushGitRunnerForTest(runner: GitRunner | null) {
  */
 const ACTION_SOURCE = "action:push"
 
-function sinkOptions(context: ActionContext): GitOptions | undefined {
+function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
-function networkOptions(context: ActionContext): GitOptions | undefined {
+function networkOptions(context: ActionInvocationContext): GitOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
-export async function pushAction(context: ActionContext): Promise<ActionResult> {
-  const target = resolvePushTarget(context)
-  const source = target ? resolvePushSource(context, target) : null
-  const remote = resolveDeliveryRemote(context)
-  if (!target) return fail("invalid-input", "Push requires the authoritative repository base branch or workflow branch")
-  if (!source || !remote) return fail("invalid-input", "Push requires the authoritative workspace branch and repository origin")
+export async function pushAction(context: ActionInvocationContext): Promise<ActionResult> {
+  const source = stringInput(context.with, "source")
+  const target = stringInput(context.with, "target")
+  const remote = stringInput(context.with, "remote")
+  if (!source) return fail("invalid-input", "Push requires input 'source'")
+  if (!target) return fail("invalid-input", "Push requires input 'target'")
+  if (!remote) return fail("invalid-input", "Push requires input 'remote'")
   const force = booleanInput(context.with, "force") === true
   const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true
   const refspec = `${source}:${target}`

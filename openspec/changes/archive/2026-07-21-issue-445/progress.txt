@@ -1,0 +1,44 @@
+## Codebase Patterns
+
+- Runner action handlers still receive `ActionContext.variables` until T-004; T-001 removes only the OpenCode prompt-loader and OpenSpec/archive-owned Variable channels.
+- `rawWith` is the server-expanded, nested-template-preserving form. `mohist/openspec-tasks` reads its declared `task` subtree from `rawWith` and leaves nested expressions for the generated task dispatch.
+- Git-private operation state is resolved through the action's fakeable Git runner with `git rev-parse --git-path`; filesystem writes use a temporary file plus rename.
+
+## T-001
+
+- Removed `variables` from `PromptLoaderContext`; `buildPromptLoaderContext` now passes only declared loader `with` and host prompt metadata.
+- OpenSpec task generation no longer synthesizes a prompt from `variables.prompts.build`. A declared nested prompt, including `${{ prompts.build }}`, is copied from the raw task subtree and resolves when the generated task is dispatched.
+- Archive retry state is a version-1 JSON checkpoint keyed by SHA-256 of `workflowRunId + NUL + workspace-relative source`. It records and validates the exact selected destination, survives move/stage failures, and clears after commit or confirmed no-change.
+- Replaced legacy Variable-based archive tests with focused checkpoint first-run, retry, collision, corruption, path-safety, partial, and missing-source coverage.
+
+## Verification
+
+- `npm run typecheck -w packages/runner`
+- `npm run test:ci -w packages/runner` (102 files, 1,204 tests)
+
+## Review Follow-up
+
+- Restored Runner test typecheck after narrowing the Action invocation context. The base Variable-free view remains structurally compatible with dispatch-shaped test fixtures, while `ValidatedActionContext` keeps a required validated `with` payload and production handler types still omit `variables`.
+- Verification: `npm run typecheck:tests -w packages/runner`.
+- Removed `rawWith` from the general Action invocation context. Only `mohist/openspec-tasks` receives its opaque raw `task` subtree after validation; custom Actions receive neither raw syntax nor Variables.
+- Verification: `npm run typecheck -w packages/runner` and `npm run typecheck:tests -w packages/runner`.
+- Replaced archive-change's test filesystem access with a narrow injected archive filesystem. Checkpoint creation, retry, collision, corruption, partial archive, and missing source coverage now uses an in-memory implementation.
+- Verification: Runner production and test typechecks, `npm run check:test-boundaries -w packages/runner`, and focused archive/action-boundary tests (32 tests).
+- Final verification: `npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner` (103 files, 1,212 tests), and `npm test` (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, and 1,212 Runner tests) all pass.
+
+## T-002
+
+- Workspace preparation now consumes required `with.expectedBranch` and always uses the executor-provided host `workDir`.
+- Local Git Actions consume explicit validated `baseBranch`, `source`, `target`, and `remote` fields; the push `baseBranch` alias and delivery fallback use were removed from these handlers.
+- Both bundled profiles bind every workspace-prepare task explicitly. Local merge-ready now binds base, source, and remote; shared Git recovery and publish tasks retain explicit bindings.
+- Added manifest, handler, profile, and Server parsed-profile regressions for missing inputs, Variable disagreement, host workDir, and local flow routing. Added `docs/actions/git.md` for the final Git Action contracts.
+- Verification: `npm run test:ci -w packages/runner` passed (103 files, 1,212 tests); `npm test` passed (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, and 1,212 Runner tests).
+- Re-verified on the per-run branch: `npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner` (103 files, 1,212 tests), and `npm test` (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, 1,212 Runner) all green against the existing T-002 commit. No new code or spec changes were required.
+
+## T-003
+
+- GitHub PR Actions now require explicit `repositoryUrl` plus source/target or `prNumber` inputs. The parsed repository selector is derived only from that URL; all `gh` operations use the host `workDir`.
+- Deleted `delivery-context.ts`; merge no longer discovers PRs by source/target, status no longer reads `vars.github.pr.number`, and issue field selectors use only dispatch `projectId`/`issueNumber`.
+- Updated the GitHub PR profile, manifest catalog, action documentation, workflow examples, and explicit-input regressions. The profile passes `${{ repository.gitUrl }}` to every GitHub Action and keeps `${{ vars.github.pr.number }}` as an explicit binding.
+- Focused GitHub tests pass (72 tests), Runner CI passes (103 files, 1,212 tests), and the full Server/CLI/Web/Runner test command passes after keeping the ratcheted profile spec file within its byte allowance.
+- Re-verified on the per-run branch: `npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner` (103 files, 1,212 tests), and `npm test` (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, 1,212 Runner) all green against the existing T-003 commit. No new code or spec changes were required.

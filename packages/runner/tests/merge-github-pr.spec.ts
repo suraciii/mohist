@@ -5,7 +5,6 @@ import {
   PR_CHECKS_COMMAND,
   PROJECT_PATH,
   WORKSPACE_PATH,
-  authoritativeRepository,
   checksRollup,
   context,
   createMergeGhTestHarness,
@@ -40,15 +39,15 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr view 42 --json statusCheckRollup":
+         case "gh pr view 42 --json statusCheckRollup":
           return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
-        case "gh pr view 42 --json mergeStateStatus":
+         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
-        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
           return ghOk("Merged pull request #42\n")
-        case "gh pr view 42 --json state,mergeCommit,url":
+         case "gh pr view 42 --json state,mergeCommit,url":
           return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
         default:
           return ghFail(`unexpected gh call: ${full}`)
@@ -86,29 +85,29 @@ describe("mohist/merge-github-pr action", () => {
     })
   })
 
-  it("scopes merge delivery to the authoritative Issue repository", async () => {
+  it("uses the explicitly declared repository despite different Variables", async () => {
     const commands: string[] = []
     installGit(() => { throw new Error("git should not be called") })
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       commands.push(full)
       if (full === "gh --version" || full === "gh auth status") return ghOk("ok\n")
-      if (full === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/acme/repo") {
+       if (full === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus") {
         return ghOk(JSON.stringify({ state: "MERGED", number: 42, url: "https://github.com/acme/repo/pull/42", mergeCommit: { oid: "merge-sha" } }))
       }
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository()))
+    const result = await mergeGitHubPrAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42, method: "squash", subject: "Issue title" }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
-    expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/acme/repo")
+     expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")
   })
 
-  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
-    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository("not a Git URL")))
+  it("rejects an invalid explicit repository URL", async () => {
+    const result = await mergeGitHubPrAction(context({ repositoryUrl: "not a Git URL", prNumber: 42, method: "squash", subject: "Issue title" }))
     expect(result.error).toMatchObject({ code: "config-error" })
-    expect(result.error?.message).toContain("authoritative GitHub repository URL")
+    expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {
@@ -122,15 +121,15 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/example/repo":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr view 42 --json statusCheckRollup":
+         case "gh pr view 42 --json statusCheckRollup --repo github.com/example/repo":
           return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
-        case "gh pr view 42 --json mergeStateStatus":
+         case "gh pr view 42 --json mergeStateStatus --repo github.com/example/repo":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
-        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body  --repo github.com/example/repo":
           return ghOk("Merged pull request #42\n")
-        case "gh pr view 42 --json state,mergeCommit,url":
+         case "gh pr view 42 --json state,mergeCommit,url --repo github.com/example/repo":
           return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
         default:
           return ghFail(`unexpected gh call: ${full}`)
@@ -143,7 +142,7 @@ describe("mohist/merge-github-pr action", () => {
     expect(writes.some((write) => write.source === "action:merge-github-pr" && write.text.includes("gh pr merge 42"))).toBe(true)
   })
 
-  it("resolves an open PR from source/target when prNumber is omitted", async () => {
+  it("requires an explicit PR number instead of discovering one from source/target", async () => {
     installMoIssueShow()
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
@@ -167,9 +166,9 @@ describe("mohist/merge-github-pr action", () => {
     }))
     const output = result.output as Record<string, unknown>
 
-    expect(result.error).toBeUndefined()
-    expect(output.prNumber).toBe(9)
-    expect(output.mergeCommitSha).toBe("merge-sha-9")
+    expect(result.error).toMatchObject({ code: "invalid-input" })
+    expect(result.error?.message).toContain("prNumber")
+    expect(ghCalls).toEqual([])
   })
 
   it("fails with errorCode base-moved and includes prNumber/prUrl/message when gh pr merge rejects the merge", async () => {

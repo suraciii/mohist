@@ -1,9 +1,9 @@
 import { stringInput } from "../core/json.js"
-import type { ActionContext } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { errorMessage } from "./github-pr-parse.js"
 import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
 
-export async function resolveCreatePrText(context: ActionContext): Promise<
+export async function resolveCreatePrText(context: ActionInvocationContext): Promise<
   | { kind: "ok"; title: string; body: string }
   | { kind: "failure"; message: string }
 > {
@@ -29,7 +29,7 @@ export async function resolveCreatePrText(context: ActionContext): Promise<
   }
 }
 
-export async function resolveMergeSubject(context: ActionContext): Promise<
+export async function resolveMergeSubject(context: ActionInvocationContext): Promise<
   | { kind: "ok"; subject: string }
   | { kind: "failure"; message: string }
 > {
@@ -50,7 +50,7 @@ export function validateIssueFieldSource(name: string, source: string | undefine
   return `Unsupported ${name} source '${source}'. Supported sources: issue.title, issue.body.`
 }
 
-export async function loadIssueFields(context: ActionContext): Promise<
+export async function loadIssueFields(context: ActionInvocationContext): Promise<
   | { kind: "ok"; issueFields: IssueFields }
   | { kind: "failure"; message: string }
 > {

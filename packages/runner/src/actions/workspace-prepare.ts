@@ -1,6 +1,7 @@
 import { join } from "node:path"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { stringAt } from "../core/json-path.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
+import { stringInput } from "../core/json.js"
 import { exists } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import { fail, succeed } from "./action-result.js"
@@ -79,18 +80,18 @@ interface HeadProbe {
 
 const DETACHED_REF = "(detached)"
 
-function sinkOptions(context: ActionContext): GitOptions | undefined {
+function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
-export async function workspacePrepareAction(context: ActionContext): Promise<ActionResult> {
-  const expectedBranch = stringAt(context.variables, ["workspace", "branch"])
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+export async function workspacePrepareAction(context: ActionInvocationContext): Promise<ActionResult> {
+  const expectedBranch = stringInput(context.with, "expectedBranch")
+  const workDir = context.workDir
   const opts = sinkOptions(context)
 
   if (!expectedBranch) {
     const snapshot = await captureSnapshot(workDir, context.signal, opts)
-    return failureOutput(workDir, "(none)", snapshot, "resolve", "Workspace branch is not defined in context.variables.workspace.branch", 1)
+    return failureOutput(workDir, "(none)", snapshot, "resolve", "Workspace branch is not defined in with.expectedBranch", 1)
   }
 
   const initial = await captureSnapshot(workDir, context.signal, opts)

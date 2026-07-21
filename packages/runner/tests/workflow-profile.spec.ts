@@ -85,6 +85,7 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
         const yaml = await readFile(path, "utf8")
         const stage = sliceStage(yaml, stageName)
         expect(firstStageTaskId(stage)).toBe("workspace-prepare")
+        expect(stage).toContain("expectedBranch: ${{ workspace.branch }}")
       })
 
       it(`workspace-prepare appears exactly once in ${stageName} stage task list`, async () => {
@@ -127,5 +128,15 @@ describe("mohist local workflow profile", () => {
     expect(integrate).not.toContain("mohist/publish")
     expect(integrate.indexOf("id: integrate:rebase")).toBeLessThan(integrate.indexOf("id: integrate:push"))
     expect(integrate.indexOf("id: integrate:push")).toBeLessThan(integrate.indexOf("id: integrate:health"))
+  })
+
+  it("CheckStage_MergeReadyBindsAllGitInputs", async () => {
+    const yaml = await readFile(profileFiles["mohist/local"], "utf8")
+    const check = sliceStage(yaml, "check")
+
+    expect(check).toContain("uses: mohist/merge-ready")
+    expect(check).toContain("baseBranch: ${{ repository.baseBranch }}")
+    expect(check).toContain("source: ${{ workspace.branch }}")
+    expect(check).toContain("remote: origin")
   })
 })

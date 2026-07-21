@@ -139,7 +139,6 @@ describe("mohist/openspec-artifacts", () => {
       title: "Verify plan artifacts",
       uses: "mohist/openspec-artifacts",
       with: {} as never,
-      variables: {} as never,
       workDir,
       signal: new AbortController().signal,
       writeVars: vi.fn(),

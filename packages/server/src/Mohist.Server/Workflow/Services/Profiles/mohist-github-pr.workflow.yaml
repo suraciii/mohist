@@ -35,6 +35,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: proposal
         title: Generate proposal
         uses: mohist/opencode
@@ -132,9 +134,9 @@ stages:
         title: Open draft GitHub PR
         uses: mohist/create-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
-          remote: origin
           draft: true
           titleFrom: issue.title
           bodyFrom: issue.body
@@ -154,6 +156,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: load-tasks
         title: Load tasks from plan
         uses: mohist/openspec-tasks
@@ -203,6 +207,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: ai-review
         title: AI review
         uses: mohist/opencode
@@ -247,12 +253,14 @@ stages:
         title: Mark GitHub PR ready
         uses: mohist/mark-github-pr-ready
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
 
       - id: verify-pr-checks
         title: Verify GitHub PR checks
         uses: mohist/github-pr-checks
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
         recovery:
           budget: 2
@@ -281,6 +289,7 @@ stages:
         title: GitHub PR status
         uses: mohist/github-pr-status
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
 
   - stage: integrate
@@ -291,6 +300,8 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
+        with:
+          expectedBranch: ${{ workspace.branch }}
       - id: archive-change
         title: Archive change
         uses: mohist/archive-change
@@ -315,6 +326,7 @@ stages:
         title: Merge GitHub PR
         uses: mohist/merge-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           method: squash
         recovery:
@@ -376,5 +388,6 @@ stages:
         title: Merge verified
         uses: mohist/github-pr-status
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           expect: merged

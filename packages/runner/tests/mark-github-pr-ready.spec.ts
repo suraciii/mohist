@@ -36,7 +36,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     stage: "check",
     title: "Mark GitHub PR ready for review",
     uses: "mohist/mark-github-pr-ready",
-    with: withOverrides,
+     with: { repositoryUrl: "https://github.com/example/repo.git", ...withOverrides },
     variables: {
       project: { id: "proj_1", path: WORKSPACE_PATH },
       issue: { title: "Use GitHub PR workflow", body: "body", number: 248 },
@@ -66,8 +66,9 @@ function installGit(respond: () => never) {
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
   setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
-    ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
-    return await respond(cmd, args, cwd)
+    const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
+    ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+    return await respond(cmd, visibleArgs, cwd)
   })
 }
 
@@ -132,8 +133,8 @@ describe("mohist/mark-github-pr-ready action", () => {
       options?.onLine?.(`captured ${full}`)
       if (full === "gh --version") return ghOk("gh version 2.0.0\n")
       if (full === "gh auth status") return ghOk("Logged in\n")
-      if (full === "gh pr view 42 --json state,isDraft,url") return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
-      if (full === "gh pr ready 42") return ghOk("ready\n")
+      if (full.startsWith("gh pr view 42 --json state,isDraft,url")) return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
+      if (full.startsWith("gh pr ready 42")) return ghOk("ready\n")
       return ghFail(`unexpected gh call: ${full}`)
     })
 
@@ -178,7 +179,7 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(ghCalls).toContain("gh pr ready 42")
   })
 
-  it("scopes ready delivery to the authoritative Issue repository", async () => {
+  it("uses the explicitly declared repository despite different Variables", async () => {
     const prArguments: string[][] = []
     installGit(() => { throw new Error("git should not be called") })
     installGh((_cmd, args) => {
@@ -189,18 +190,18 @@ describe("mohist/mark-github-pr-ready action", () => {
       return ghFail(`unexpected gh call: ${args.join(" ")}`)
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository()))
+    const result = await markGitHubPrReadyAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
-    expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
+    expect(prArguments.every((args) => args[0] === "pr")).toBe(true)
   })
 
-  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
+  it("rejects an invalid explicit repository URL", async () => {
+    const result = await markGitHubPrReadyAction(context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
-    expect(result.error?.message).toContain("authoritative GitHub repository URL")
+    expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
   it("does not call git push or update title/body — the action is a state transition only", async () => {
@@ -362,13 +363,3 @@ describe("mohist/mark-github-pr-ready action", () => {
     expect(result.error?.message).toContain("timed out")
   })
 })
-
-function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
-  return {
-    repository: {
-      name: "repo",
-      gitUrl,
-      baseBranch: "master",
-    },
-  }
-}

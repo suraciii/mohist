@@ -95,7 +95,6 @@ describe("execution context runtime wiring", () => {
         workType: "task",
         ownerKind: "agent-job",
       },
-      {},
       new AbortController().signal,
       {} as never,
       null,

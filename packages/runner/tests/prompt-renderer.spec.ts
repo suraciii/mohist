@@ -262,7 +262,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
     ].join("\n"))
   })
 
-  it("LoaderInvocation_ReceivesSpecWithMergedIntoBaseContextFields", async () => {
+  it("LoaderInvocation_ReceivesDeclaredInputAndHostContextOnly", async () => {
     const registry = new PromptLoaderRegistry()
     const loader = vi.fn<PromptLoader>(async () => "ok")
     registry.register("fake/echo-loader", loader)
@@ -270,7 +270,6 @@ describe("resolvePrompt - loader-backed prompts", () => {
 
     const ctx: PromptLoaderContext = {
       with: {},
-      variables: { workflow: { name: "build" } },
       workDir: "/tmp/run",
       workId: "work-7",
       title: "Build task",
@@ -285,7 +284,6 @@ describe("resolvePrompt - loader-backed prompts", () => {
     expect(loader).toHaveBeenCalledTimes(1)
     expect(loader.mock.calls[0][0]).toEqual({
       with: { file: "tasks.json", taskId: "T-001" },
-      variables: { workflow: { name: "build" } },
       workDir: "/tmp/run",
       workId: "work-7",
       title: "Build task",
@@ -444,7 +442,6 @@ describe("PromptLoaderRegistry and test hook", () => {
 function baseLoaderContext(): PromptLoaderContext {
   return {
     with: {},
-    variables: {},
     workDir: "/tmp/test",
     workId: "work-1",
   }
