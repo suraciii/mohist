@@ -1,102 +1,77 @@
-# Self-Review — Issue 469 (OTel HTTP query cost bounds), pass 2
+# Self-Review — Issue 469 (OTel HTTP query cost bounds), pass 3
 
-Second reviewer pass over `proposal.md`, `specs/`, `design.md`, `tasks.json`
-against the issue body and the live codebase, after the pass-1 fixes were
-applied.
+Third reviewer pass over `proposal.md`, `specs/`, `design.md`, `tasks.json`
+against the issue body and the live codebase, after the pass-1 and pass-2 fixes.
 
 ## Verdict
 
-Every finding from pass 1 (P1–P6) has been genuinely resolved in the artifacts.
-The plan is materially stronger: the test seam is specified, safety constants
-are non-weakenable, paths are accurate, the misleading admission scenario is
-fixed, and the SQLitePCLRaw/`Handle` risks are addressed. One NEW must-fix gap
-fell out of the fix itself: the design leaves the fate of the now-superseded
-`ExecuteRawQuery` ambiguous, and neither the design nor the tasks address its
-three existing unit tests — which will collide with the repo's
-"禁止新旧并存" (no old/new coexistence) testing convention once the route is
-switched to the new seam.
+All pass-1 (P1–P6) and pass-2 (F1, N1, N2) findings are verified resolved in the
+artifacts. The plan is internally coherent, every acceptance criterion is
+covered, the technical thesis is correct and well-evidenced, the testability
+seam makes the hardest requirement (no-wall-clock interruption) deterministically
+verifiable, the safety constants cannot be weakened by config, and the task
+graph is a valid DAG with test-bearing acceptance criteria on every task. Only
+cosmetic staleness remains, none of which blocks the build.
 
-**Promise: FAIL** (single must-fix, small scope)
+**Promise: PASS**
 
-## Pass-1 findings — verification of resolution
+## Prior findings — resolution confirmed
 
-- **P1 (interruption test seam):** RESOLVED. New Decision 6 specifies a
-  server-side `IOtelQueryExecutor` seam + `FakeOtelQueryExecutor` for the
-  route contract, and a deterministic real-wiring test (recursive CTE +
-  `FakeTimeProvider` advance → `sqlite3_interrupt`, asserting outcome not
+- **P1 (interruption test seam):** Decision 6 specifies `IOtelQueryExecutor` +
+  `FakeOtelQueryExecutor` for the route contract, and a deterministic
+  real-wiring test (recursive CTE + `FakeTimeProvider` → `sqlite3_interrupt`,
+  asserting reader-terminated-early + connection-disposed by outcome, not
   duration). The recipe is sound: `sqlite3_interrupt` is checked per
-  `sqlite3_step`, and a large bounded CTE guarantees the query is still stepping
-  when the fake clock fires, so no `Stopwatch`/`Thread.Sleep` is needed.
-- **P2 (paths):** RESOLVED. `proposal.md` Impact now uses `Otel/`; verified no
-  `src/.../Telemetry/` source paths remain in any plan artifact. (The
-  `tests/.../Specs/Telemetry/` directory reference is the real test folder, not
-  the bug.)
-- **P3 (admission scenario):** RESOLVED. The scenario is reframed as the
-  defense-in-depth read-only backstop; the misleading "ATTACH bypasses the
-  keyword layer" premise is gone.
-- **P4 (safety-constant placement):** RESOLVED. Decision 2 mandates `public
-  const` on `TraceQuerier` (mirroring `MaxListLimit`), explicitly NOT
-  `OtelOptions` properties; the deferred "knobs vs constants" open question is
-  removed. Tasks updated accordingly.
-- **P5 (`query_cancelled`):** RESOLVED. Migration step 3 states client
-  disconnect returns no response body.
-- **P6 (SQLitePCLRaw):** RESOLVED. Decision 1 + T-002 require confirming
-  `SQLitePCL.raw` resolves and add a `Handle`-visibility guard test.
+  `sqlite3_step` and its pending-flag persists, so advancing the fake clock
+  before or during the read loop deterministically stops the reader without any
+  `Stopwatch`/`Thread.Sleep`.
+- **P2 (paths):** Source paths use `Otel/`; verified no `src/.../Telemetry/`
+  references remain.
+- **P3 (admission scenario):** Reframed as the defense-in-depth read-only
+  backstop; the misleading ATTACH-bypass premise is gone.
+- **P4 (safety-constant placement):** `public const` on `TraceQuerier`, never
+  `OtelOptions`; the deferred knobs-vs-constants question is removed.
+- **P5 / P6:** Client-disconnect returns no body; `SQLitePCLRaw.raw` resolution
+  + a `Handle`-visibility guard test are required.
+- **F1 (ExecuteRawQuery fate):** Decision 4 now states `ExecuteBoundedQuery`
+  **replaces** (not overloads) `ExecuteRawQuery`; the three `ExecuteRawQuery_*`
+  unit tests migrate; T-002 carries an acceptance criterion mandating this with
+  no old/new coexistence.
+- **N1 / N2:** Proposal Web-UI line tightened; T-001 acceptance added to rename
+  the misnamed `PostQuery_InsertBypassingKeywordCheck…` test.
 
-Issue AC coverage remains complete (body cap AC1; row/byte + reason AC2;
-interrupt + release AC3; read-only + SELECT/WITH + no multi-statement AC4;
-large-rows / single-big-value / recursive-CTE / cancel / normal-aggregate with
-no wall-clock AC5), and the non-goals (no workbench/queue, no writes, CLI
-untouched) are honored. `tasks.json` is valid JSON with a sound DAG and every
-task carries test-bearing acceptance criteria.
+## Coverage (unchanged, re-verified)
 
-## Must-fix finding
+- **AC1** (body cap before buffering) → admission spec + Decision 3 + T-001.
+- **AC2** (≤1000 rows, ≤4 MiB, caller knows truncation + reason) → response-bound
+  spec + Decision 4 + T-003.
+- **AC3** (long query + client cancel interrupt SQLite + release connection) →
+  execution-budget spec + Decisions 1/2/6 + T-002.
+- **AC4** (read-only + single SELECT/WITH, no multi-statement bypass) →
+  admission spec + Decision 5 + T-001 (preserved behavior).
+- **AC5** (large rows / single big value / recursive CTE / cancel / normal
+  aggregate, no wall-clock) → distributed across T-001/T-002/T-003 acceptance;
+  normal-aggregate coverage preserved via the migrated `AggregateCount` test.
+- **Non-goals** (no workbench/queue, no writes, `mo otel query` untouched) →
+  honored; CLI isolation asserted in T-003.
 
-### F1 — `ExecuteRawQuery` fate is ambiguous and its 3 unit tests are unaccounted for (no-coexistence violation)
+Spec/header integrity: 3 spec files, 11 requirements, 23 `#### Scenario:`
+blocks, no malformed headings. `tasks.json`: valid JSON, 3-task DAG
+(T-001 → T-002 → T-003), every task acceptance-bearing with `passes=false`.
 
-`TraceQuerier.ExecuteRawQuery` has exactly one production caller — the
-`/query` route handler — and three unit tests in `TraceQuerierSpecs.cs`
-(`ExecuteRawQuery_SelectAllRows_ReturnsDictionaries`,
-`ExecuteRawQuery_AggregateCount_ReturnsSingleRow`,
-`ExecuteRawQuery_NullCell_BecomesNullInDictionary`). After T-002 switches the
-route to `IOtelQueryExecutor.Execute → ExecuteBoundedQuery`, that sole caller
-is gone.
+## Non-blocking observations (cosmetic; safe to defer)
 
-The design (Decision 4, line 76) says `ExecuteRawQuery` "gains an overload (or
-a new `ExecuteBoundedQuery`)" — the "(or …)" hedge is the defect:
+- **O1:** `design.md` Risk line 123 still says "update Web UI caller and
+  integration specs in the same change," but no Web UI caller exists (the
+  proposal/migration correctly say so). The mitigation text could drop the Web
+  UI reference. Build agent will not be misled — migration step 4 is
+  authoritative.
+- **O2:** `proposal.md` line 26 says the response change is "additive or a
+  contract change … decided in design"; the design has since decided it is a
+  contract change (`data` → `{rows, truncated, truncate_reason}`). Phrasing is
+  mildly stale but points the reader to the design, where the answer lives.
 
-- If the build reads "overload" and keeps both methods, that is old/new
-  coexistence, directly violating `AGENTS.md`'s testing principle
-  ("迁移/回归完成后删旧文件，禁止新旧并存").
-- If the build reads "replace" and removes `ExecuteRawQuery`, the three unit
-  tests stop compiling and their migration is nowhere specified.
+Neither observation affects build correctness, testability, or safety, and a
+build agent following the design + tasks will implement correctly.
 
-Neither the design nor any task names `ExecuteRawQuery` or its three tests, so
-the build agent has no instruction on either branch.
-
-**Fix (small):** in the design, change Decision 4 to state unambiguously that
-`ExecuteBoundedQuery` **replaces** `ExecuteRawQuery` (not an overload), and add
-a T-002 acceptance criterion (or note) that the three
-`ExecuteRawQuery_*` unit tests are migrated onto `ExecuteBoundedQuery`
-(returning `QueryResult`, asserting `Rows`/non-truncated) so no dead method and
-no orphaned test remain.
-
-## Non-blocking notes (for the build agent / a future polish pass)
-
-- **N1 (minor staleness):** `proposal.md` Impact line 24 still lists "Web UI:
-  any consumer … must surface truncation … concrete placement decided in
-  design." The design correctly resolved that no current consumer exists, so
-  this is conditional-only and not wrong, but it reads as outstanding work.
-  Optional: tighten to note no consumer exists today.
-- **N2 (minor test naming):** the existing test
-  `PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode` is misnamed
-  (its own comment admits `ATTACH` is caught at the keyword layer, not the
-  engine). T-001's test-hardening (asserting stable codes) is the natural place
-  to rename/clarify it to match the reframed admission scenario, but this is
-  cosmetic and the build agent can handle it without plan changes.
-- **N3 (non-issue, confirmed):** `QueryResult` always emits `truncated: false`
-  for non-truncated responses; the response-bound spec's "SHALL NOT carry a
-  truncation indicator" is satisfied by `truncated: false` (it does not present
-  the result as truncated). No action needed.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
