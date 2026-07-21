@@ -429,7 +429,8 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/github-pr-checks",
       description: "Wait for every GitHub pull request check to pass",
       inputs: {
-        prNumber: { types: ["number"], description: "Pull request number; falls back to variables.github.pr.number" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -447,7 +448,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "aborted", description: "Polling was cancelled" },
       ],
     },
-    run: async (context) => githubPrChecksAction(context as ActionContext),
+    run: async (context) => githubPrChecksAction(context),
   }),
   defineAction({
     manifest: {

@@ -1,6 +1,6 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { numberInput } from "../core/json.js"
-import { stringAt } from "../core/json-path.js"
 import type { CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import {
@@ -9,7 +9,7 @@ import {
 } from "./github-pr-checks-wait.js"
 import { timeoutStepMetadata } from "./github-pr-types.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
-import { resolveGitHubRepository } from "./delivery-context.js"
+import { parseGitHubRepository } from "./github-pr-repository.js"
 import { fail, succeed } from "./action-result.js"
 
 const ACTION_SOURCE = "action:github-pr-checks"
@@ -33,12 +33,16 @@ export interface GitHubPrChecksOutput {
   steps: GitHubPrChecksStep[]
 }
 
-export async function githubPrChecksAction(context: ActionContext): Promise<ActionResult> {
-  const prNumber = numberInput(context.with, "prNumber") ?? numberFromVariables(context.variables)
-  if (prNumber === null || !Number.isFinite(prNumber)) {
-    return fail("invalid-input", "GitHub PR checks requires 'prNumber' (or vars.github.pr.number)")
+export async function githubPrChecksAction(context: ActionInvocationContext): Promise<ActionResult> {
+  const prNumber = numberInput(context.with, "prNumber")
+  if (prNumber === undefined || !Number.isFinite(prNumber)) {
+    return fail("invalid-input", "GitHub PR checks requires 'prNumber'")
   }
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+  if (!repositoryUrl) return fail("invalid-input", "GitHub PR checks requires 'repositoryUrl'")
+  const githubRepository = parseGitHubRepository(repositoryUrl)
+  if (!githubRepository) return fail("config-error", "github-pr-checks requires a valid GitHub repository URL")
+  const workDir = context.workDir
 
   const gh = getGitHubPrGh()
   const ghOpts = ghLineOptions(context)
@@ -46,11 +50,6 @@ export async function githubPrChecksAction(context: ActionContext): Promise<Acti
   const steps: GitHubPrChecksStep[] = []
   const record = (name: string, command: string, exitCode: number, output: string, metadata?: Pick<GitHubPrChecksStep, "status" | "timeoutMs">) => {
     steps.push({ name, command, exitCode, output, ...metadata })
-  }
-
-  const githubRepository = resolveGitHubRepository(context)
-  if (githubRepository === null) {
-    return fail("config-error", "github-pr-checks requires an authoritative GitHub repository URL")
   }
 
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
@@ -106,23 +105,7 @@ function toJsonOutput(output: GitHubPrChecksOutput): JsonObject {
   }
 }
 
-function numberFromVariables(variables: unknown): number | null {
-  if (!variables || typeof variables !== "object") return null
-  const root = variables as Record<string, unknown>
-  const github = root["github"]
-  if (!github || typeof github !== "object") return null
-  const pr = (github as Record<string, unknown>)["pr"]
-  if (!pr || typeof pr !== "object") return null
-  const number = (pr as Record<string, unknown>)["number"]
-  if (typeof number === "number" && Number.isFinite(number)) return number
-  if (typeof number === "string" && number.trim()) {
-    const parsed = Number(number)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }

@@ -260,6 +260,7 @@ stages:
         title: Verify GitHub PR checks
         uses: mohist/github-pr-checks
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
         recovery:
           budget: 2

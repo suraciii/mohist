@@ -120,7 +120,10 @@ describe("mohist/create-github-pr registry", () => {
     expect(resolved.kind).toBe("definition")
     if (resolved.kind === "definition") {
       expect(resolved.definition.manifest.name).toBe("mohist/create-github-pr")
-      expect(resolved.definition.manifest.inputs["remote"]).toMatchObject({ types: ["string"] })
+      expect(resolved.definition.manifest.inputs["repositoryUrl"]).toMatchObject({ types: ["string"], required: true })
+      expect(resolved.definition.manifest.inputs["source"]).toMatchObject({ types: ["string"], required: true })
+      expect(resolved.definition.manifest.inputs["target"]).toMatchObject({ types: ["string"], required: true })
+      expect(resolved.definition.manifest.inputs["remote"]).toBeUndefined()
     }
     expect(registry.resolve("mohist/create-pull-request").kind).toBe("unknown")
     expect(registry.resolve("mohist/publish-via-pr").kind).toBe("unknown")
