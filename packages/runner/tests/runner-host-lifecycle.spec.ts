@@ -485,7 +485,7 @@ describe("RunnerHost", () => {
     })
   })
 
-  it("GenericFollowupResolver_StartupBeforeRuntimeReady_IsTemporarilyUnavailable", () => {
+  it("GenericFollowupResolver_StartupBeforeRuntimeReady_ResolvesBindingOnly", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -507,7 +507,14 @@ describe("RunnerHost", () => {
       },
     })
 
-    expect(resolved).toEqual({ unavailable: true })
+    // Issue-461 D1: the resolver is binding-only. The caller (follow-up handler
+    // or worker claim) gates admission on runtime readiness; the resolver
+    // never inspects runtime or outbox state.
+    expect(resolved).toEqual({
+      runtimeSessionId: "runtime-1",
+      workDir: "/tmp/work",
+      projectId: "project-1",
+    })
   })
 
   it("GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget", () => {

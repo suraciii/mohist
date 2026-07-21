@@ -6,10 +6,11 @@ import type { OpencodeServerHandle } from "../src/runtime/opencode/server-proces
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionContext } from "../src/core/types.js"
-import type { ServerConnection } from "../src/server/connection.js"
 import { WorkflowAgentSessionReporter } from "../src/actions/workflow-agent-session-reporter.js"
+import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
 import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
+import { makeRecordingOutbox, type OutboxHandles } from "./support/outbox-test-helpers.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -28,15 +29,6 @@ class FakeSubscription implements RuntimeEventSubscription {
   }
 }
 
-interface FakeClient {
-  sessionCreate: ReturnType<typeof vi.fn>
-  sessionPrompt: ReturnType<typeof vi.fn>
-  sessionPromptAsync: ReturnType<typeof vi.fn>
-  sessionAbort: ReturnType<typeof vi.fn>
-  sessionGet: ReturnType<typeof vi.fn>
-  sessionStatus: ReturnType<typeof vi.fn>
-}
-
 interface BuildArgs {
   promptResult?: unknown
   failCreate?: boolean
@@ -48,16 +40,20 @@ interface BuildArgs {
 interface BuildResult {
   deps: OpenCodeRuntimeDeps
   runtime: OpenCodeRuntime
-  client: FakeClient
+  client: {
+    sessionCreate: ReturnType<typeof vi.fn>
+    sessionPrompt: ReturnType<typeof vi.fn>
+    sessionPromptAsync: ReturnType<typeof vi.fn>
+    sessionAbort: ReturnType<typeof vi.fn>
+    sessionGet: ReturnType<typeof vi.fn>
+    sessionStatus: ReturnType<typeof vi.fn>
+  }
   subscription: FakeSubscription
 }
 
 function buildRuntime(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
-  const sessionCreate = vi.fn(async (_params: { directory?: string; model?: unknown }) => {
-    if (args.failCreate) throw new Error("create boom")
-    return { data: { id: "ses_default" } }
-  })
+  const sessionCreate = vi.fn(async () => ({ data: { id: "ses_bound" } }))
   const sessionPrompt = vi.fn(async (params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.emitDuringPrompt) {
       await args.emitDuringPrompt(subscription, params.sessionID)
@@ -71,31 +67,40 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
           sessionID: "ses_bound",
           role: "assistant",
           providerID: "openai",
-          modelID: "gpt-5",
-          tokens: { input: 5, output: 7, total: 12, reasoning: 0, cache: { read: 0 } },
-          cost: 0.0001,
+          modelID: "gpt-5.6",
+          tokens: { input: 0, output: 0, total: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0,
         },
-        parts: [{ type: "text", text: "final answer" }],
+        parts: [],
       },
     }
   })
-  const sessionAbort = vi.fn(async (_params: { sessionID: string; directory?: string }) => ({ data: true }))
-  const sessionPromptAsync = vi.fn(async (_params: { sessionID: string; directory?: string; parts?: unknown }) => ({ data: true }))
-  const sessionGet = vi.fn(async (params: { sessionID: string; directory?: string }) => ({ data: { id: params.sessionID } }))
+  const sessionPromptAsync = vi.fn(async () => undefined)
+  const sessionAbort = vi.fn(async () => undefined)
+  const sessionGet = vi.fn(async () => ({ data: { id: "ses_bound" } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
-  const clientProxy = {
+  const client: OpencodeClient = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
-    session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, messages: vi.fn(), get: sessionGet, status: sessionStatus },
-  }
-  const server: OpencodeServerHandle = {
+    session: {
+      create: sessionCreate,
+      prompt: sessionPrompt,
+      promptAsync: sessionPromptAsync,
+      abort: sessionAbort,
+      get: sessionGet,
+      status: sessionStatus,
+    },
+  } as unknown as OpencodeClient
+  const serverHandle: OpencodeServerHandle = {
     url: "http://fake",
     directory: "/tmp/work",
-    client: clientProxy as unknown as OpencodeClient,
-    async close() {},
+    client,
+    async close() {
+      subscription.closed = true
+    },
   }
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
-    serverFactory: async () => server,
+    serverFactory: async () => serverHandle,
     eventSubscriptionFactory: () => subscription,
   }
   const runtime = new OpenCodeRuntime(deps)
@@ -110,59 +115,6 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
 
 async function ensureReady(runtime: OpenCodeRuntime): Promise<void> {
   await runtime.start()
-}
-
-interface FakeConnectionHandles {
-  connection: ServerConnection
-  openCalls: Array<{ projectId: string; workflowRunId: string; sessionName: string; body: unknown }>
-  attachCalls: Array<{ projectId: string; workflowRunId: string; sessionName: string; body: unknown }>
-  eventCalls: Array<{ projectId: string; workflowRunId: string; sessionName: string; body: unknown }>
-  setEventBehavior: (writer: (body: unknown) => Promise<void> | void) => void
-  setEventRejection: (types: ReadonlySet<string>) => void
-  setInputAccepted: (accepted: boolean) => void
-}
-
-function makeFakeConnection(): FakeConnectionHandles {
-  const openCalls: FakeConnectionHandles["openCalls"] = []
-  const attachCalls: FakeConnectionHandles["attachCalls"] = []
-  const eventCalls: FakeConnectionHandles["eventCalls"] = []
-  let writer: (body: unknown) => Promise<void> | void = async () => {}
-  let rejectTypes: ReadonlySet<string> = new Set()
-  let inputAccepted = true
-  const connection = {
-    async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown) {
-      openCalls.push({ projectId, workflowRunId, sessionName, body })
-      return { runtimeSessionId: "ses_bound", workDir: "/tmp/work" }
-    },
-    async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown) {
-      attachCalls.push({ projectId, workflowRunId, sessionName, body })
-    },
-    async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown) {
-      eventCalls.push({ projectId, workflowRunId, sessionName, body })
-      const runtimeEvents = (body as { runtimeEvents: Array<{ type: string; payload: unknown }> }).runtimeEvents ?? []
-      if (runtimeEvents.some((e) => rejectTypes.has(e.type))) {
-        throw new Error(`rejected: ${runtimeEvents[0]?.type ?? "?"}`)
-      }
-      await writer(body)
-      if (!inputAccepted && runtimeEvents.some((event) => event.type === "session.input")) return []
-      return runtimeEvents.map((event) => ({ type: event.type }))
-    },
-  } as unknown as ServerConnection
-  return {
-    connection,
-    openCalls,
-    attachCalls,
-    eventCalls,
-    setEventBehavior(next) {
-      writer = next
-    },
-    setEventRejection(next) {
-      rejectTypes = next
-    },
-    setInputAccepted(accepted) {
-      inputAccepted = accepted
-    },
-  }
 }
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
@@ -232,24 +184,47 @@ async function emitStandardSequence(subscription: FakeSubscription, sessionId: s
   await new Promise((resolve) => setImmediate(resolve))
 }
 
+function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
+  return {
+    ready: () => true,
+    load: async () => {},
+    async enqueueBeforeExecution() { throw new Error("disk full (input)") },
+    async enqueueProducedFact() { throw new Error("disk full (produced)") },
+    kick: async () => {},
+    stop: async () => {},
+    snapshot() { return [] },
+  }
+}
+
+function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
+  return {
+    ready: () => true,
+    load: async () => {},
+    async enqueueBeforeExecution() {},
+    async enqueueProducedFact() { throw new Error("disk full (produced)") },
+    kick: async () => {},
+    stop: async () => {},
+    snapshot() { return [] },
+  }
+}
+
 describe("opencodeAction — Workflow AgentSession transcript reporting", () => {
-  it("sends the composed prompt as session.input and forwards projected events in production order", async () => {
+  it("enqueues the composed prompt as session.input and forwards projected events in production order", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: emitStandardSequence,
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
+    const handles = makeRecordingOutbox()
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
+    })
 
     const result = await opencodeAction(context)
 
     expect(result.error).toBeUndefined()
-    expect(connection.openCalls).toHaveLength(1)
-    expect(connection.eventCalls.length).toBeGreaterThan(0)
-    const types = connection.eventCalls.map((call) => {
-      const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      return events[0]?.type ?? "?"
-    })
+    const types = handles.eventTypeList()
     expect(types[0]).toBe("session.input")
     expect(types).toEqual(expect.arrayContaining([
       "model.resolved",
@@ -260,23 +235,20 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       "tool_call.completed",
       "message.delta",
     ]))
-    const sessionInput = connection.eventCalls[0]?.body as {
-      runtimeEvents: Array<{ type: string; payload: Record<string, unknown> }>
-    }
-    expect(sessionInput.runtimeEvents[0]?.type).toBe("session.input")
-    expect(sessionInput.runtimeEvents[0]?.payload).toMatchObject({
-      text: "do the work",
-      kind: "task",
-      source: "workflow",
-      role: "user",
-      runtimeSessionId: "ses_bound",
+    expect(handles.eventsByType("session.input")[0]).toMatchObject({
+      event: {
+        type: "session.input",
+        payload: expect.objectContaining({
+          text: "do the work",
+          kind: "task",
+          source: "workflow",
+          role: "user",
+          runtimeSessionId: "ses_bound",
+        }),
+      },
     })
-    expect(sessionInput).toMatchObject({
-      workId: "work-1",
-      workType: "task",
-      stage: "plan",
-      runtimeSessionId: "ses_bound",
-    })
+    const closeEvent = handles.eventsByType("session.closed")[0]
+    expect(closeEvent?.event.payload).toMatchObject({ status: "completed", exitCode: 0 })
   })
 
   it("does not reproject SDK payloads; reporter receives runtime event payloads as-is", async () => {
@@ -296,22 +268,22 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
+    const handles = makeRecordingOutbox()
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
+    })
     await opencodeAction(context)
 
-    const events = connection.eventCalls.flatMap((call) => {
-      const body = call.body as { runtimeEvents: Array<{ type: string; payload: Record<string, unknown> }> }
-      return body.runtimeEvents.map((e) => ({ type: e.type, payload: e.payload }))
-    })
-    const started = events.find((e) => e.type === "tool_call.started")
-    const failed = events.find((e) => e.type === "tool_call.completed")
-    expect(started?.payload).toMatchObject({
+    const started = handles.eventsByType("tool_call.started")[0]
+    const failed = handles.eventsByType("tool_call.completed")[0]
+    expect(started?.event.payload).toMatchObject({
       toolCallId: "tool_2",
       toolName: "bash",
       rawInput: { cmd: "ls" },
     })
-    expect(failed?.payload).toMatchObject({
+    expect(failed?.event.payload).toMatchObject({
       toolCallId: "tool_2",
       toolName: "bash",
       status: "failed",
@@ -319,7 +291,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     })
   })
 
-  it("serializes input and projected event uploads in observation order", async () => {
+  it("serializes input and projected event enqueues in observation order", async () => {
     const { runtime } = buildRuntime({
       promptResult: {
         data: {
@@ -342,18 +314,15 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    const order: string[] = []
-    connection.setEventBehavior(async (body) => {
-      const events = (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      const type = events[0]?.type ?? "?"
-      order.push(type)
-      await new Promise((resolve) => setImmediate(resolve))
+    const handles = makeRecordingOutbox()
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
     })
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
     await opencodeAction(context)
 
-    expect(order).toEqual([
+    expect(handles.eventTypeList()).toEqual([
       "session.input",
       "message.delta",
       "message.delta",
@@ -361,8 +330,8 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     ])
   })
 
-  it("suppresses activity and close reports when session.input upload is rejected", async () => {
-    const { runtime } = buildRuntime({
+  it("rejected input persistence returns execution-unavailable and never invokes OpenCodeRuntime.runTurn", async () => {
+    const { runtime, client } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
           type: "message.part.updated",
@@ -373,230 +342,110 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["session.input"]))
+    const outbox = makeFailureOutbox()
+    const handles = makeRecordingOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: outbox,
+    })
 
     try {
       const result = await opencodeAction(context)
-      expect(result.error).toBeUndefined()
-      const types = connection.eventCalls.map((call) => {
-        const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-        return events[0]?.type ?? "?"
-      })
-      expect(types).toEqual(["session.input"])
+      expect(result.error?.code).toBe("execution-unavailable")
+      expect(client.sessionPrompt).not.toHaveBeenCalled()
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("suppresses activity and close reports when the server returns no accepted session.input receipt", async () => {
+  it("does not replace a successful Action result when a projected event enqueue fails after input accepted", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "message.part.updated",
+          type: "session.next.text.delta",
           sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
+          payload: { textID: "txt_a", assistantMessageID: "msg_1", delta: "alpha" },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setInputAccepted(false)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
-    try {
-      const result = await opencodeAction(baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection }))
-      expect(result.error).toBeUndefined()
-      expect(connection.eventCalls.map((call) => {
-        const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-        return events[0]?.type ?? "?"
-      })).toEqual(["session.input"])
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("type=session.input"))
-    } finally {
-      errorSpy.mockRestore()
+    let firstCall = true
+    const outbox: AgentSessionRuntimeEventOutbox = {
+      ready: () => true,
+      load: async () => {},
+      async enqueueBeforeExecution(record) {
+        handles.records.push(record as RuntimeEventRecord)
+      },
+      async enqueueProducedFact() {
+        if (firstCall) {
+          firstCall = false
+          throw new Error("disk full (produced)")
+        }
+      },
+      kick: async () => {},
+      stop: async () => {},
+      snapshot() { return [] },
     }
-  })
-
-  it("does not change a successful Action result when a projected event upload fails after input accepted", async () => {
-    const { runtime } = buildRuntime({
-      emitDuringPrompt: async (subscription, sessionId) => {
-        subscription.emit({
-          type: "message.part.updated",
-          sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
-        })
-        subscription.emit({
-          type: "message.part.updated",
-          sessionID: sessionId,
-          payload: { part: { id: "txt_b", messageID: "msg_1", type: "text", text: "beta" } },
-        })
-        await new Promise((resolve) => setImmediate(resolve))
-      },
-    })
-    await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["message.delta"]))
+    const handles = makeRecordingOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
-
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: outbox,
+    })
     try {
       const result = await opencodeAction(context)
       expect(result.error).toBeUndefined()
-      expect(result.turnFact?.finalAssistantText).toBe("final answer")
-      const types = connection.eventCalls.map((call) => {
-        const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-        return events[0]?.type ?? "?"
-      })
-      expect(types[0]).toBe("session.input")
-      expect(types).toContain("message.delta")
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("workflow agent-session event upload failed"))
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("does not replace a runtime failure when a projected event upload also fails", async () => {
+  it("does not replace a runtime failure when produced-fact enqueue also fails", async () => {
     const { runtime } = buildRuntime({
       failPrompt: true,
-      failPromptMessage: "opencode-runtime-explosion",
+      failPromptMessage: "opencode crashed",
       emitDuringPrompt: async (subscription, sessionId) => {
         subscription.emit({
-          type: "message.part.updated",
+          type: "session.next.text.delta",
           sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
+          payload: { textID: "txt_a", assistantMessageID: "msg_1", delta: "alpha" },
         })
         await new Promise((resolve) => setImmediate(resolve))
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["session.input", "message.delta"]))
+    const outbox = makeProducedFactFailureOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
-    try {
-      const context = baseContext({
-        openCodeRuntime: runtime,
-        serverConnection: connection.connection,
-        with: { prompt: "opencode will fail", session: "plan" } as never,
-      })
-
-      const result = await opencodeAction(context)
-
-      expect(result.error).toBeDefined()
-      // The Action error must come from the OpenCode runtime, not
-      // from the upload rejections.
-      expect(result.error?.code).toBe("turn-failed")
-      expect(result.error?.message).toBe("opencode-runtime-explosion")
-      const diagnostics = (result as unknown as { output?: unknown }).output
-      expect(diagnostics).toBeUndefined()
-      const exitCode = (result as unknown as { exitCode?: number | null }).exitCode
-      expect(exitCode).toBe(1)
-    } finally {
-      errorSpy.mockRestore()
-    }
-  })
-
-  it("logs upload failures with workflow / work / session / event identity and never logs prompt or payload content", async () => {
-    const { runtime } = buildRuntime({
-      emitDuringPrompt: async (subscription, sessionId) => {
-        subscription.emit({
-          type: "message.part.updated",
-          sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "PRIVATE-PROMPT-CONTENT" } },
-        })
-        await new Promise((resolve) => setImmediate(resolve))
-      },
-    })
-    await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["message.delta"]))
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const handles = makeRecordingOutbox()
     const context = baseContext({
       openCodeRuntime: runtime,
-      serverConnection: connection.connection,
-      with: { prompt: "secret-prompt-text-should-not-leak", session: "plan" } as never,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: outbox,
     })
-
     try {
-      await opencodeAction(context)
-      const logged = errorSpy.mock.calls.map((call) => String(call[0])).join("\n")
-      expect(logged).toMatch(/workflow=wf-1/)
-      expect(logged).toMatch(/work=work-1/)
-      expect(logged).toMatch(/session=plan/)
-      expect(logged).toMatch(/type=message\.delta/)
-      expect(logged).not.toContain("secret-prompt-text-should-not-leak")
-      expect(logged).not.toContain("PRIVATE-PROMPT-CONTENT")
+      const result = await opencodeAction(context)
+      expect(result.error?.code).toBe("turn-failed")
+      expect(result.error?.message).toBe("opencode crashed")
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("two turns reusing one logical and physical session record two input + event sequences in order", async () => {
+  it("does not wire a reporter when no outbox is provided", async () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
-    let boundId: string | null = null
-    const eventCalls: unknown[] = []
-    const connection = {
-      async openWorkflowAgentSession(_projectId: string, _workflowRunId: string, _sessionName: string, _body: unknown) {
-        return { runtimeSessionId: boundId ?? "ses_first", workDir: "/tmp/work" }
-      },
-      async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
-        boundId = (body as { runtimeSessionId: string }).runtimeSessionId
-      },
-      async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
-        eventCalls.push(body)
-        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
-      },
-    } as unknown as ServerConnection
-
-    const first = await opencodeAction(baseContext({
-      openCodeRuntime: runtime,
-      serverConnection: connection,
-      workId: "work-a",
-      with: { prompt: "first prompt", session: "plan" } as never,
-    }))
-    const second = await opencodeAction(baseContext({
-      openCodeRuntime: runtime,
-      serverConnection: connection,
-      workId: "work-b",
-      with: { prompt: "second prompt", session: "plan" } as never,
-    }))
-
-    expect(first.error).toBeUndefined()
-    expect(second.error).toBeUndefined()
-    const inputCalls = eventCalls.filter((entry) => {
-      const events = (entry as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      return events[0]?.type === "session.input"
-    })
-    expect(inputCalls).toHaveLength(2)
-    const firstInput = (inputCalls[0] as { runtimeEvents: Array<{ payload: Record<string, unknown> }> }).runtimeEvents[0]?.payload
-    const secondInput = (inputCalls[1] as { runtimeEvents: Array<{ payload: Record<string, unknown> }> }).runtimeEvents[0]?.payload
-    expect(firstInput?.text).toBe("first prompt")
-    expect(secondInput?.text).toBe("second prompt")
-  })
-
-  it("does not wire a reporter when no serverConnection is provided", async () => {
-    const { runtime } = buildRuntime({
-      emitDuringPrompt: async (subscription, sessionId) => {
-        subscription.emit({
-          type: "message.part.updated",
-          sessionID: sessionId,
-          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
-        })
-        await new Promise((resolve) => setImmediate(resolve))
-      },
-    })
-    await ensureReady(runtime)
+    const handles = makeRecordingOutbox()
     const context = baseContext({
       openCodeRuntime: runtime,
-      with: { prompt: "no connection", session: "plan" } as never,
+      serverConnection: handles.connection,
     })
-
     const result = await opencodeAction(context)
     expect(result.error).toBeUndefined()
+    expect(handles.records).toHaveLength(0)
   })
 
   it("the observer passes events to the reporter synchronously without awaiting", () => {
@@ -615,99 +464,82 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
   })
 })
 
-describe("WorkflowAgentSessionReporter — independent failure semantics", () => {
-  function buildReporter(eventWriter: (body: unknown) => Promise<void> | void, options?: { timeoutMs?: number }) {
-    const eventCalls: unknown[] = []
-    const connection = {
-      async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
-        eventCalls.push(body)
-        await eventWriter(body)
-        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
+describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () => {
+  function buildReporter(failEnqueueBeforeExecution = false, failEnqueueProducedFact = false) {
+    const records: RuntimeEventRecord[] = []
+    const beforeExecutionCalls: RuntimeEventRecord[] = []
+    const producedFactCalls: RuntimeEventRecord[] = []
+    const outbox: AgentSessionRuntimeEventOutbox = {
+      ready: () => true,
+      load: async () => {},
+      async enqueueBeforeExecution(record) {
+        beforeExecutionCalls.push(record as RuntimeEventRecord)
+        if (failEnqueueBeforeExecution) throw new Error("input snapshot failed")
+        records.push(record as RuntimeEventRecord)
       },
-    } as unknown as ServerConnection
+      async enqueueProducedFact(record) {
+        producedFactCalls.push(record as RuntimeEventRecord)
+        if (failEnqueueProducedFact) throw new Error("produced-fact snapshot failed")
+        records.push(record as RuntimeEventRecord)
+      },
+      kick: async () => {},
+      stop: async () => {},
+      snapshot() {
+        return records
+      },
+    }
     const reporter = new WorkflowAgentSessionReporter({
-      connection,
+      outbox,
       projectId: "proj-1",
       workflowRunId: "wf-1",
       sessionName: "plan",
       workMetadata: { workId: "work-1", workType: "task", stage: "plan" },
-      signal: new AbortController().signal,
-      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      randomId: (() => {
+        let counter = 0
+        return () => `id_${++counter}`
+      })(),
     })
-    return { reporter, eventCalls }
+    return { reporter, outbox, records, beforeExecutionCalls, producedFactCalls }
   }
 
-  it("settles after all queued uploads, including rejected input", async () => {
+  it("settles after all queued produced-fact enqueues, including a rejected input", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const { reporter } = buildReporter(async () => { throw new Error("input rejected") })
-      reporter.enqueueInput("p", "ses_1")
-      await reporter.settle()
+      const { reporter } = buildReporter(true)
+      await expect(reporter.awaitInput("p", "ses_1")).rejects.toThrow(/input snapshot failed/)
       expect(reporter.inputWasAccepted()).toBe(false)
+      expect(reporter.inputWasRejected()).toBe(true)
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("input rejection suppresses later close reports without skipping the runtime observation chain", async () => {
+  it("rejected input suppresses later close reports", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const { reporter, eventCalls } = buildReporter(async () => { throw new Error("input rejected") })
-      reporter.enqueueInput("p", "ses_1")
-      reporter.enqueueEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
-      reporter.enqueueClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+      const { reporter, producedFactCalls } = buildReporter(true)
+      await expect(reporter.awaitInput("p", "ses_1")).rejects.toThrow()
+      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
+      reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
       await reporter.settle()
-      const types = eventCalls.map((entry) => {
-        const events = (entry as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-        return events[0]?.type ?? "?"
-      })
-      expect(types).toEqual(["session.input"])
+      expect(producedFactCalls).toHaveLength(0)
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("continues after a later event rejection when input was accepted", async () => {
-    const eventWrites: string[] = []
-    const { reporter } = buildReporter(async (body) => {
-      const events = (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      const type = events[0]?.type ?? "?"
-      eventWrites.push(type)
-      if (type === "message.delta") throw new Error("delta rejected")
-    })
+  it("continues after a later produced-fact rejection when input was accepted", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      reporter.enqueueInput("p", "ses_1")
-      reporter.enqueueEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
-      reporter.enqueueEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "y" } })
-      await reporter.settle()
-      expect(eventWrites).toEqual(["session.input", "message.delta", "message.delta"])
+      const { reporter, producedFactCalls } = buildReporter(false, true)
+      await reporter.awaitInput("p", "ses_1")
+      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "x" } })
+      reporter.registerEvent({ type: "message.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "y" } })
+      await expect(reporter.settle()).resolves.toBeUndefined()
+      expect(producedFactCalls.map((r) => r.event.type)).toEqual(["message.delta", "message.delta"])
       expect(reporter.inputWasAccepted()).toBe(true)
     } finally {
       errorSpy.mockRestore()
     }
-  })
-
-  it("does not block settle when the reporter signal is already aborted", async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const connection = {
-      async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown, signal: AbortSignal) {
-        expect(signal.aborted).toBe(false)
-        void body
-        return [{ type: "session.input" }]
-      },
-    } as unknown as ServerConnection
-    const reporter = new WorkflowAgentSessionReporter({
-      connection,
-      projectId: "proj-1",
-      workflowRunId: "wf-1",
-      sessionName: "plan",
-      workMetadata: { workId: "work-1", workType: "task", stage: "plan" },
-      signal: controller.signal,
-    })
-    reporter.enqueueInput("p", "ses_1")
-    await reporter.settle()
-    expect(reporter.inputWasAccepted()).toBe(true)
   })
 })

@@ -6,9 +6,10 @@ import type { OpencodeServerHandle } from "../src/runtime/opencode/server-proces
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionContext } from "../src/core/types.js"
-import type { ServerConnection } from "../src/server/connection.js"
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
 import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
+import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
+import type { RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -62,14 +63,14 @@ function buildRuntime(args: BuildArgs = {}) {
   const sessionPromptAsync = vi.fn(async () => ({ data: true }))
   const sessionGet = vi.fn(async (params: { sessionID: string }) => ({ data: { id: params.sessionID } }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
-  const clientProxy = {
+  const clientProxy: OpencodeClient = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
     session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, messages: vi.fn(), get: sessionGet, status: sessionStatus },
-  }
+  } as unknown as OpencodeClient
   const server: OpencodeServerHandle = {
     url: "http://fake",
     directory: "/tmp/work",
-    client: clientProxy as unknown as OpencodeClient,
+    client: clientProxy,
     async close() {},
   }
   const deps: OpenCodeRuntimeDeps = {
@@ -84,42 +85,6 @@ function buildRuntime(args: BuildArgs = {}) {
 
 async function ensureReady(runtime: OpenCodeRuntime): Promise<void> {
   await runtime.start()
-}
-
-interface FakeConnectionHandles {
-  connection: ServerConnection
-  eventCalls: Array<{ body: unknown }>
-  setEventBehavior: (writer: (body: unknown) => Promise<void> | void) => void
-  setEventRejection: (types: ReadonlySet<string>) => void
-}
-
-function makeFakeConnection(): FakeConnectionHandles {
-  const eventCalls: FakeConnectionHandles["eventCalls"] = []
-  let writer: (body: unknown) => Promise<void> | void = async () => {}
-  let rejectTypes: ReadonlySet<string> = new Set()
-  const connection = {
-    async openWorkflowAgentSession() {
-      return { runtimeSessionId: "ses_bound", workDir: "/tmp/work" }
-    },
-    async attachWorkflowAgentSession() {
-      void 0
-    },
-    async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
-      eventCalls.push({ body })
-      const runtimeEvents = (body as { runtimeEvents: Array<{ type: string; payload: unknown }> }).runtimeEvents ?? []
-      if (runtimeEvents.some((e) => rejectTypes.has(e.type))) {
-        throw new Error(`rejected: ${runtimeEvents[0]?.type ?? "?"}`)
-      }
-      await writer(body)
-      return runtimeEvents.map((event) => ({ type: event.type }))
-    },
-  } as unknown as ServerConnection
-  return {
-    connection,
-    eventCalls,
-    setEventBehavior(next) { writer = next },
-    setEventRejection(next) { rejectTypes = next },
-  }
 }
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
@@ -140,65 +105,53 @@ function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
   }
 }
 
-function eventTypeList(eventCalls: Array<{ body: unknown }>): string[] {
-  return eventCalls.map((call) => {
-    const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-    return events[0]?.type ?? "?"
-  })
-}
-
-function readCloseBody(eventCalls: Array<{ body: unknown }>) {
-  for (const call of eventCalls) {
-    const events = (call.body as { runtimeEvents: Array<{ type: string; payload: Record<string, unknown> }> }).runtimeEvents ?? []
-    const close = events.find((e) => e.type === "session.closed")
-    if (close) return close.payload
-  }
-  return undefined
-}
-
-function closeIndex(eventCalls: Array<{ body: unknown }>): number {
-  return eventCalls.findIndex((entry) => {
-    const events = (entry.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-    return events[0]?.type === "session.closed"
-  })
-}
-
 afterEach(() => {
   setPromptLoaderRegistryForTest(null)
   clearOpenCodeRuntimeFactoryForTest()
   vi.useRealTimers()
 })
 
-describe("opencodeAction — Workflow AgentSession terminal-state close reporting", () => {
+describe("opencodeAction — Workflow AgentSession terminal-state close", () => {
   it("enqueues exactly one completed session.closed after all observed and reconciled runtime events", async () => {
     const { runtime } = buildRuntime({})
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
+    const handles = makeRecordingOutbox()
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
+    })
 
     const result = await opencodeAction(context)
     expect(result.error).toBeUndefined()
-    const types = eventTypeList(connection.eventCalls)
-    const closeAt = closeIndex(connection.eventCalls)
-    expect(types.filter((t) => t === "session.closed")).toHaveLength(1)
-    expect(closeAt).toBe(types.length - 1)
-    const closeBody = readCloseBody(connection.eventCalls)
-    expect(closeBody).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" })
-    expect(closeBody).not.toHaveProperty("failureReason")
+
+    const closed = handles.eventsByType("session.closed")
+    expect(closed).toHaveLength(1)
+    expect(closed[0]).toMatchObject({
+      event: {
+        type: "session.closed",
+        payload: expect.objectContaining({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" }),
+      },
+    })
+    const types = handles.eventTypeList()
+    expect(types[types.length - 1]).toBe("session.closed")
   })
 
   it("enqueues exactly one failed session.closed when runTurn fails and the failure reason is the runtime error message", async () => {
     const { runtime } = buildRuntime({ failPrompt: true, failPromptMessage: "opencode-runtime-explosion" })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
+    const handles = makeRecordingOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const result = await opencodeAction(baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection }))
+      const result = await opencodeAction(baseContext({
+        openCodeRuntime: runtime,
+        serverConnection: handles.connection,
+        agentSessionRuntimeEventOutbox: handles.outbox,
+      }))
       expect(result.error).toBeDefined()
-      const closeBody = readCloseBody(connection.eventCalls)
-      expect(closeBody).toMatchObject({ status: "failed", exitCode: 1, runtimeSessionId: "ses_bound" })
-      expect(closeBody?.failureReason).toBe(result.error?.message)
-      expect(closeIndex(connection.eventCalls)).toBe(eventTypeList(connection.eventCalls).length - 1)
+      const closed = handles.eventsByType("session.closed")[0]
+      expect(closed?.event.payload).toMatchObject({ status: "failed", exitCode: 1, runtimeSessionId: "ses_bound" })
+      expect((closed?.event.payload as Record<string, unknown>).failureReason).toBe(result.error?.message)
     } finally {
       errorSpy.mockRestore()
     }
@@ -207,23 +160,24 @@ describe("opencodeAction — Workflow AgentSession terminal-state close reportin
   it("enqueues exactly one failed session.closed when runTurn is interrupted by an aborted signal", async () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
+    const handles = makeRecordingOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const abortController = new AbortController()
     abortController.abort()
     try {
       const context = baseContext({
         openCodeRuntime: runtime,
-        serverConnection: connection.connection,
+        serverConnection: handles.connection,
+        agentSessionRuntimeEventOutbox: handles.outbox,
         signal: abortController.signal,
       })
       const result = await opencodeAction(context)
       expect(result.error).toBeDefined()
-      const closeBody = readCloseBody(connection.eventCalls)
-      expect(closeBody).toMatchObject({ status: "failed", exitCode: 1 })
-      expect(closeBody?.failureReason).toBe(result.error?.message)
-      expect(closeBody?.failureReason).not.toMatch(/rejected/)
-      expect(closeBody?.failureReason).not.toMatch(/upload/)
+      const closed = handles.eventsByType("session.closed")[0]
+      const reason = (closed?.event.payload as Record<string, unknown>).failureReason as string
+      expect(reason).toBe(result.error?.message)
+      expect(reason).not.toMatch(/rejected/)
+      expect(reason).not.toMatch(/upload/)
     } finally {
       errorSpy.mockRestore()
     }
@@ -241,61 +195,80 @@ describe("opencodeAction — Workflow AgentSession terminal-state close reportin
       },
     })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    const order: string[] = []
-    connection.setEventBehavior(async (body) => {
-      const events = (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      order.push(events[0]?.type ?? "?")
-      await new Promise((resolve) => setImmediate(resolve))
+    const handles = makeRecordingOutbox()
+    const context = baseContext({
+      openCodeRuntime: runtime,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
     })
-    const context = baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection })
 
     const result = await opencodeAction(context)
     expect(result.error).toBeUndefined()
-    const closedIdx = order.lastIndexOf("session.closed")
+    const types = handles.eventTypeList()
+    const closedIdx = types.lastIndexOf("session.closed")
     expect(closedIdx).toBeGreaterThan(0)
-    expect(closedIdx).toBe(order.length - 1)
-    const closeBody = readCloseBody(connection.eventCalls)
-    expect(closeBody).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" })
+    expect(closedIdx).toBe(types.length - 1)
+    const closed = handles.eventsByType("session.closed")[0]
+    expect(closed?.event.payload).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_bound" })
   })
 
-  it("does not change a successful Action result when the close upload is rejected", async () => {
+  it("does not change a successful Action result when the close enqueue is rejected", async () => {
     const { runtime } = buildRuntime({})
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["session.closed"]))
+    const handles = makeRecordingOutbox()
+    const failingOutbox = {
+      ...handles.outbox,
+      async enqueueProducedFact(record: RuntimeEventRecord) {
+        if (record.event.type === "session.closed") throw new Error("disk full (closed)")
+        return handles.outbox.enqueueProducedFact(record)
+      },
+    }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const result = await opencodeAction(baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection }))
+      const result = await opencodeAction(baseContext({
+        openCodeRuntime: runtime,
+        serverConnection: handles.connection,
+        agentSessionRuntimeEventOutbox: failingOutbox,
+      }))
       expect(result.error).toBeUndefined()
       expect(result.turnFact?.finalAssistantText).toBe("final answer")
-      const types = eventTypeList(connection.eventCalls)
-      expect(types.filter((t) => t === "session.closed")).toHaveLength(1)
+      const closed = handles.eventsByType("session.closed")
+      // Close enqueue failed locally, so the record is tracked in the
+      // reporter's pending promises for autonomous recovery rather than
+      // appearing in the durable snapshot.
+      expect(closed).toHaveLength(0)
       const logged = errorSpy.mock.calls.map((call) => String(call[0])).join("\n")
-      expect(logged).toMatch(/type=session\.closed/)
+      expect(logged).toMatch(/type=session\.closed|close enqueue failed/)
       expect(logged).not.toContain("final answer")
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it("does not replace the runtime failure when a failed-turn's close upload is also rejected", async () => {
+  it("does not replace the runtime failure when a failed-turn's close enqueue is also rejected", async () => {
     const { runtime } = buildRuntime({ failPrompt: true, failPromptMessage: "opencode-runtime-explosion" })
     await ensureReady(runtime)
-    const connection = makeFakeConnection()
-    connection.setEventRejection(new Set(["session.closed"]))
+    const handles = makeRecordingOutbox()
+    const failingOutbox = {
+      ...handles.outbox,
+      async enqueueProducedFact(record: RuntimeEventRecord) {
+        if (record.event.type === "session.closed") throw new Error("disk full (closed)")
+        return handles.outbox.enqueueProducedFact(record)
+      },
+    }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
       const context = baseContext({
         openCodeRuntime: runtime,
-        serverConnection: connection.connection,
+        serverConnection: handles.connection,
+        agentSessionRuntimeEventOutbox: failingOutbox,
         with: { prompt: "opencode will fail", session: "plan" } as never,
       })
       const result = await opencodeAction(context)
       expect(result.error?.code).toBe("turn-failed")
       expect(result.error?.message).toBe("opencode-runtime-explosion")
-      const types = eventTypeList(connection.eventCalls)
-      expect(types.filter((t) => t === "session.closed")).toHaveLength(1)
+      const closed = handles.eventsByType("session.closed")
+      expect(closed).toHaveLength(0)
     } finally {
       errorSpy.mockRestore()
     }
@@ -305,51 +278,45 @@ describe("opencodeAction — Workflow AgentSession terminal-state close reportin
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
     let boundId: string | null = null
-    const events: unknown[] = []
-    const connection = {
+    const handles = makeRecordingOutbox()
+    handles.connection = {
       async openWorkflowAgentSession() {
         return { runtimeSessionId: boundId ?? "ses_first", workDir: "/tmp/work" }
       },
       async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
         boundId = (body as { runtimeSessionId: string }).runtimeSessionId
       },
-      async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
-        events.push(body)
-        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
+      async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, _body: unknown) {
+        return []
       },
-    } as unknown as ServerConnection
+    } as unknown as typeof handles.connection
 
     await opencodeAction(baseContext({
       openCodeRuntime: runtime,
-      serverConnection: connection,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
       workId: "work-a",
       with: { prompt: "first prompt", session: "plan" } as never,
     }))
     await opencodeAction(baseContext({
       openCodeRuntime: runtime,
-      serverConnection: connection,
+      serverConnection: handles.connection,
+      agentSessionRuntimeEventOutbox: handles.outbox,
       workId: "work-b",
       with: { prompt: "second prompt", session: "plan" } as never,
     }))
 
-    const types = events.map((entry) => {
-      const ev = (entry as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
-      return ev[0]?.type ?? "?"
-    })
+    const types = handles.eventTypeList()
     const inputIndexes = types.flatMap((t, i) => (t === "session.input" ? [i] : []))
     expect(inputIndexes.length).toBe(2)
-    const splits = [0, inputIndexes[1]!, types.length]
-    const firstTurn = types.slice(splits[0], splits[1])
-    const secondTurn = types.slice(splits[1], splits[2])
+    const firstTurn = types.slice(0, inputIndexes[1])
+    const secondTurn = types.slice(inputIndexes[1])
     expect(firstTurn[0]).toBe("session.input")
     expect(firstTurn[firstTurn.length - 1]).toBe("session.closed")
     expect(secondTurn[0]).toBe("session.input")
     expect(secondTurn[secondTurn.length - 1]).toBe("session.closed")
 
-    const allCloses = events
-      .map((entry) => (entry as { runtimeEvents: Array<{ type: string; payload: Record<string, unknown> }> }).runtimeEvents[0])
-      .filter((event) => event?.type === "session.closed")
-      .map((event) => event!.payload)
+    const allCloses = handles.eventsByType("session.closed").map((r) => r.event.payload)
     expect(allCloses).toHaveLength(2)
     expect(allCloses[0]).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_first" })
     expect(allCloses[1]).toMatchObject({ status: "completed", exitCode: 0, runtimeSessionId: "ses_first" })

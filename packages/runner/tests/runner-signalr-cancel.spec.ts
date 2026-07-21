@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/server/session-target.js"
-import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
+import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -100,11 +100,6 @@ function lastBuilder(): CapturedBuilder {
 
 type AnyFn = (...args: any[]) => any
 
-interface MockServerConnection {
-  workflowAgentSessionRuntimeEvents: AnyFn
-  agentSessionRuntimeEvents?: AnyFn
-}
-
 interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
   cancelCalls: RuntimeCancelRequest[]
@@ -141,15 +136,10 @@ function makeFakeRuntime(): FakeRuntimeHandles {
 
 function buildClient(opts: {
   resolver?: AnyFn | null
-  serverConnection?: MockServerConnection | null
-  openCodeRuntime?: OpenCodeRuntime | null
+  outbox?: AgentSessionRuntimeEventOutbox | null
+  openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
 }) {
   builders.length = 0
-  const defaultServerConnection: MockServerConnection = {
-    workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-    agentSessionRuntimeEvents: vi.fn(async () => undefined),
-  }
-  const serverConnection = opts.serverConnection === undefined ? defaultServerConnection : opts.serverConnection
   const resolver = opts.resolver === undefined ? null : opts.resolver
   const openCodeRuntime = opts.openCodeRuntime === undefined ? makeFakeRuntime().runtime : opts.openCodeRuntime
   const client = new RunnerSignalRClient(
@@ -158,8 +148,8 @@ function buildClient(opts: {
     "/tmp/mohist/projects",
     null,
     {
-      serverConnection: serverConnection as never,
       followupTargetResolver: resolver as never,
+      agentSessionRuntimeEventOutbox: opts.outbox ?? null,
       openCodeRuntime: openCodeRuntime as never,
     },
   )
@@ -190,7 +180,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       return { runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }
     })
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -206,7 +196,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => null)
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("unknown"))) as { state: string }
@@ -215,17 +205,32 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(runtime.cancelCalls).toHaveLength(0)
   })
 
-  it("RuntimeInitializing_ResolverReturnsUnavailable_RepliesUnavailable", async () => {
-    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE, serverConnection: null, openCodeRuntime: makeFakeRuntime().runtime })
+  it("CancelRemainsAvailable_WhenOutboxUnhealthy", async () => {
+    const runtime = makeFakeRuntime()
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const outbox: AgentSessionRuntimeEventOutbox = {
+      ready: () => false,
+      load: async () => {},
+      enqueueBeforeExecution: async () => {},
+      enqueueProducedFact: async () => {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot() { return [] },
+    }
 
-    await expect(emitCancel(lastBuilder(), genericCancelPayload("gen-session-1")))
-      .resolves.toEqual({ state: "unavailable" })
+    buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(runtime.cancelCalls).toHaveLength(1)
   })
 
   it("NoResolverRegistered_RepliesNotCancellableAndDoesNotCallCancel", async () => {
     const runtime = makeFakeRuntime()
 
-    buildClient({ resolver: null, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver: null, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -237,7 +242,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
   it("NoRuntimeRegistered_RepliesNotCancellable", async () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: null })
+    buildClient({ resolver, openCodeRuntime: null })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -250,7 +255,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     runtime.setReady(false)
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -273,7 +278,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -297,7 +302,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     })
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -318,7 +323,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     })
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -331,7 +336,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const resolver = vi.fn(() => { throw new Error("resolver boom") })
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
@@ -346,7 +351,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const replyFromNull = (await emitCancel(builder, null)) as { state: string }
@@ -363,7 +368,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, {
@@ -379,7 +384,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
 
-    buildClient({ resolver, serverConnection: null, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
     const reply = (await emitCancel(builder, {
@@ -388,5 +393,22 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     expect(reply).toEqual({ state: "not-cancellable" })
     expect(runtime.cancelCalls).toHaveLength(0)
+  })
+
+  it("Cancel_ResolvesRuntimeViaInvocationTimeAccessor", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    const initialRuntime: OpenCodeRuntime | null = null
+    const replacement = makeFakeRuntime().runtime
+
+    const accessor = () => replacement
+    // First verify the accessor returns the initial null
+    expect(accessor()).toBe(replacement)
+
+    buildClient({ resolver, openCodeRuntime: accessor as never })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(initialRuntime).toBeNull()
   })
 })

@@ -1,15 +1,26 @@
 /**
  * Shared test fixture for the runner-side Follow-up / Cancel SignalR
- * handler tests. Issue-410 T-003 keeps the runner push handlers on the
- * `RunnerSignalRClient` boundary but routes them at the
- * `OpenCodeRuntime`; the wire-level scenarios (handler registration,
- * resolver / runtime plumbing, event-channel fan-out) need a single
- * fake-injection seam so multiple spec files can exercise them
- * without re-implementing the `@microsoft/signalr` mock.
+ * handler tests. Issue-461 T-001 routes both input and operation-
+ * correlated terminal outcomes through a host-owned
+ * `AgentSessionRuntimeEventOutbox`. The fixture therefore provides:
+ *   - a recording in-memory outbox implementation that lets tests
+ *     inspect enqueued records without booting a Node filesystem
+ *     adapter
+ *   - a SignalR client builder that wires the outbox (no longer
+ *     the `serverConnection` / `FollowupFailureOutbox` pair)
+ *   - a fake OpenCodeRuntime with `followupCalls` / `cancelCalls`
+ *     observation surfaces
  */
 import { vi } from "vitest"
 import { HubConnectionState, type HubConnection } from "@microsoft/signalr"
 import { RunnerSignalRClient, type ReceiveFollowupPayload } from "../../src/server/runner-signalr.js"
+import type {
+  AgentSessionRuntimeEventOutbox,
+  RuntimeEventOutboxFileSystem,
+  RuntimeEventRecord,
+  RuntimeEventDelivery,
+} from "../../src/server/runtime-event-outbox.js"
+import type { AgentSessionRuntimeEventReceipt } from "../../src/server/connection.js"
 import type {
   OpenCodeRuntime,
   RuntimeCancelRequest,
@@ -67,16 +78,28 @@ export interface FakeConnection {
   _reconnectHandler?: (connectionId?: string) => void
 }
 
-export interface MockServerConnection {
-  workflowAgentSessionRuntimeEvents: AnyFn
-  agentSessionRuntimeEvents?: AnyFn
-}
-
 export interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
   followupCalls: RuntimeFollowupRequest[]
   setFollowupResult: (result: RuntimeResult<RuntimeFollowupResult>) => void
   setReady: (ready: boolean) => void
+}
+
+export interface RecordingOutbox {
+  outbox: AgentSessionRuntimeEventOutbox
+  records: RuntimeEventRecord[]
+  /** Raw `enqueueBeforeExecution` records — used to assert the input guard. */
+  beforeExecutionCalls: RuntimeEventRecord[]
+  /** Raw `enqueueProducedFact` records — used to assert the produced-fact guard. */
+  producedFactCalls: RuntimeEventRecord[]
+  /** Pending snapshots kept by the recording filesystem. */
+  files: string[]
+  /** Bodies written by the recording filesystem (path → JSON). */
+  bodies: Map<string, string>
+  /** Receipts observed by the recording delivery mock, in order. */
+  deliveryReceipts: AgentSessionRuntimeEventReceipt[][]
+  /** Trigger next kick once the outbox asks the host to drain. */
+  flush: () => Promise<void>
 }
 
 const builders: CapturedBuilder[] = []
@@ -151,19 +174,161 @@ export function makeFakeRuntime(): FakeRuntimeHandles {
   }
 }
 
+/**
+ * Recording in-memory filesystem used by outbox tests. It stores the
+ * latest snapshot body per path and exposes a small journal so tests
+ * can drive crash / restart scenarios without touching the Node
+ * filesystem adapter.
+ */
+export class RecordingOutboxFileSystem implements RuntimeEventOutboxFileSystem {
+  private readonly textStore = new Map<string, string>()
+  private readonly journal: Array<{ kind: "write" | "migrate"; path: string }> = []
+  /** Set to a thunk to make the next write fail; cleared after firing. */
+  public failNextWrite: ((error: Error) => void) | null = null
+
+  async readText(path: string): Promise<string | null> {
+    return this.textStore.get(path) ?? null
+  }
+
+  async writeAtomicText(path: string, body: string): Promise<void> {
+    if (this.failNextWrite) {
+      const fail = this.failNextWrite
+      this.failNextWrite = null
+      fail(new Error("injected write failure"))
+    }
+    this.textStore.set(path, body)
+    this.journal.push({ kind: "write", path })
+  }
+
+  async markMigrated(path: string): Promise<void> {
+    this.textStore.set(`${path}.migrated`, this.textStore.get(path) ?? "")
+    this.textStore.delete(path)
+    this.journal.push({ kind: "migrate", path })
+  }
+
+  body(path: string): string | null {
+    return this.textStore.get(path) ?? null
+  }
+
+  getJournal(): ReadonlyArray<{ kind: "write" | "migrate"; path: string }> {
+    return this.journal
+  }
+}
+
+export interface BuildOutboxOptions {
+  fileSystem?: RuntimeEventOutboxFileSystem
+  deliver?: RuntimeEventDelivery
+  deliveryDelayMs?: number
+  filePath?: string
+  legacyFilePath?: string | null
+}
+
+export function buildRecordingOutbox(options: BuildOutboxOptions = {}): RecordingOutbox {
+  const beforeExecutionCalls: RuntimeEventRecord[] = []
+  const producedFactCalls: RuntimeEventRecord[] = []
+  const records: RuntimeEventRecord[] = []
+  const deliveryReceipts: AgentSessionRuntimeEventReceipt[][] = []
+  const files: string[] = []
+  const bodies = new Map<string, string>()
+  const deliveryDelayMs = options.deliveryDelayMs ?? 0
+  const filePath = options.filePath ?? ".mohist/runner-state/runtime-events.json"
+  const legacyFilePath = options.legacyFilePath ?? ".mohist/runner-state/followup-failures.json"
+  const fileSystem = options.fileSystem ?? new RecordingOutboxFileSystem()
+  const customDeliver = options.deliver
+  let idCounter = 0
+  const deliver: RuntimeEventDelivery = customDeliver ?? {
+    async send(record, signal) {
+      if (deliveryDelayMs > 0) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => resolve(), deliveryDelayMs)
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              clearTimeout(timer)
+              reject(new Error("aborted"))
+            }, { once: true })
+          }
+        })
+      }
+      return [{ type: record.event.type }]
+    },
+  }
+  const outbox: AgentSessionRuntimeEventOutbox = {
+    ready: () => true,
+    async load() {
+      // Recording outbox: nothing to load — health is always true.
+    },
+    async enqueueBeforeExecution(record) {
+      const internal: RuntimeEventRecord = { ...record }
+      beforeExecutionCalls.push(internal)
+      records.push(internal)
+      const body = JSON.stringify({ version: 1, entries: records.map(serialize) }, null, 2)
+      await fileSystem.writeAtomicText(filePath, body)
+      files.push(filePath)
+      bodies.set(filePath, body)
+    },
+    async enqueueProducedFact(record) {
+      const internal: RuntimeEventRecord = { ...record }
+      producedFactCalls.push(internal)
+      records.push(internal)
+      const body = JSON.stringify({ version: 1, entries: records.map(serialize) }, null, 2)
+      await fileSystem.writeAtomicText(filePath, body)
+      files.push(filePath)
+      bodies.set(filePath, body)
+    },
+    async kick() {
+      // Drain one head per call (sequential) using `deliver`.
+      while (records.length > 0) {
+        const head = records[0]
+        const receipts = await deliver.send(head, new AbortController().signal)
+        deliveryReceipts.push(receipts)
+        if (head.acknowledgementPolicy === "successful-response" || receipts.some((r) => r.type === head.event.type)) {
+          records.shift()
+          continue
+        }
+        break
+      }
+    },
+    async stop() {},
+    snapshot() {
+      return [...records]
+    },
+  }
+  void legacyFilePath
+  return {
+    outbox,
+    records: recordsProxy(records),
+    beforeExecutionCalls,
+    producedFactCalls,
+    files,
+    bodies,
+    deliveryReceipts,
+    async flush() {
+      await outbox.kick()
+    },
+  }
+  function serialize(record: RuntimeEventRecord) {
+    return { ...record, sequence: idCounter++, enqueuedAt: new Date().toISOString() }
+  }
+}
+
+function recordsProxy(records: RuntimeEventRecord[]): RuntimeEventRecord[] {
+  return new Proxy(records, {
+    get(target, property) {
+      if (property === "length") return records.length
+      const value = (target as unknown as Record<PropertyKey, unknown>)[property as number | string]
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(records) : value
+    },
+  })
+}
+
 export function buildClient(opts: {
   resolver?: AnyFn | null
-  serverConnection?: MockServerConnection | null
-  followupFailureOutbox?: { record: AnyFn } | null
-  openCodeRuntime?: OpenCodeRuntime | null
+  outbox?: AgentSessionRuntimeEventOutbox | null
+  openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
 }): RunnerSignalRClient {
   builders.length = 0
-  const defaultServerConnection: MockServerConnection = {
-    workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
-    agentSessionRuntimeEvents: vi.fn(async () => undefined),
-  }
-  const serverConnection = opts.serverConnection === undefined ? defaultServerConnection : opts.serverConnection
   const resolver = opts.resolver === undefined ? null : opts.resolver
+  const outbox = opts.outbox === undefined ? null : opts.outbox
   const openCodeRuntime = opts.openCodeRuntime === undefined ? makeFakeRuntime().runtime : opts.openCodeRuntime
   return new RunnerSignalRClient(
     "http://localhost:3456",
@@ -171,9 +336,8 @@ export function buildClient(opts: {
     "/tmp/mohist/projects",
     null,
     {
-      serverConnection: serverConnection as never,
       followupTargetResolver: resolver as never,
-      followupFailureOutbox: opts.followupFailureOutbox as never,
+      agentSessionRuntimeEventOutbox: outbox,
       openCodeRuntime: openCodeRuntime as never,
     },
   )
@@ -201,3 +365,5 @@ export function genericPayload(text: string): ReceiveFollowupPayload {
     text,
   }
 }
+
+export type { AgentSessionRuntimeEventReceipt }

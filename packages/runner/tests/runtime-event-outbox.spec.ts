@@ -1,0 +1,475 @@
+/**
+ * Focused unit coverage for `AgentSessionRuntimeEventOutbox`. These
+ * specs drive the snapshot/import store through the injected
+ * `RuntimeEventOutboxFileSystem` port — no Node filesystem adapter is
+ * instantiated, no temporary directory is touched. Fake timers drive
+ * the local-persistence retry timer; concurrent kicks are observed
+ * through a recording delivery mock.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  createAgentSessionRuntimeEventOutbox,
+  LEGACY_FOLLOWUP_FAILURE_FILE,
+  RUNTIME_EVENT_OUTBOX_FILE,
+  type AgentSessionRuntimeEventOutbox,
+  type RuntimeEventRecord,
+  type RuntimeEventOutboxFileSystem,
+  type RuntimeEventDelivery,
+} from "../src/server/runtime-event-outbox.js"
+import type { AgentSessionRuntimeEventReceipt } from "../src/server/connection.js"
+
+class RecordingFileSystem implements RuntimeEventOutboxFileSystem {
+  readonly textStore = new Map<string, string>()
+  readonly journal: Array<{ kind: "write" | "migrate"; path: string }> = []
+  failNextWrite: (() => Error) | null = null
+  failNextRead: (() => Error) | null = null
+
+  async readText(path: string): Promise<string | null> {
+    if (this.failNextRead) {
+      const fail = this.failNextRead
+      this.failNextRead = null
+      throw fail()
+    }
+    return this.textStore.get(path) ?? null
+  }
+
+  async writeAtomicText(path: string, body: string): Promise<void> {
+    if (this.failNextWrite) {
+      const fail = this.failNextWrite
+      this.failNextWrite = null
+      throw fail()
+    }
+    this.textStore.set(path, body)
+    this.journal.push({ kind: "write", path })
+  }
+
+  async markMigrated(path: string): Promise<void> {
+    this.textStore.set(`${path}.migrated`, this.textStore.get(path) ?? "")
+    this.textStore.delete(path)
+    this.journal.push({ kind: "migrate", path })
+  }
+
+  body(path: string): string | null {
+    return this.textStore.get(path) ?? null
+  }
+}
+
+function makeOutbox(options: {
+  fileSystem?: RecordingFileSystem
+  deliver?: RuntimeEventDelivery
+  filePath?: string
+  legacyFilePath?: string | null
+  randomId?: () => string
+  deliveryTimeoutMs?: number
+  retryDelayMs?: number
+  localRetryDelayMs?: number
+  boundedConcurrency?: number
+}) {
+  const fileSystem = options.fileSystem ?? new RecordingFileSystem()
+  const randomId = options.randomId ?? (() => `evt_${Math.random().toString(36).slice(2, 10)}`)
+  const outbox: AgentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
+    fileSystem,
+    deliver: options.deliver,
+    filePath: options.filePath ?? RUNTIME_EVENT_OUTBOX_FILE,
+    legacyFilePath: options.legacyFilePath ?? null,
+    randomId,
+    deliveryTimeoutMs: options.deliveryTimeoutMs ?? 100,
+    retryDelayMs: options.retryDelayMs ?? 100,
+    localRetryDelayMs: options.localRetryDelayMs ?? 100,
+    boundedConcurrency: options.boundedConcurrency ?? 2,
+  })
+  return { outbox, fileSystem }
+}
+
+function inputRecord(overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventRecord {
+  return {
+    id: overrides.id ?? "evt_input",
+    producerFamily: "workflow-session",
+    target: {
+      kind: "workflow",
+      projectId: "proj-1",
+      workflowRunId: "wf-1",
+      sessionName: "plan",
+    },
+    runtimeSessionId: "ses_1",
+    work: null,
+    event: { type: "session.input", payload: { text: "do work" } },
+    acknowledgementPolicy: "matching-receipt",
+    ...overrides,
+  }
+}
+
+function followupTerminal(overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventRecord {
+  return {
+    id: overrides.id ?? "evt_term",
+    producerFamily: "generic-followup",
+    target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
+    runtimeSessionId: "ses_1",
+    work: null,
+    event: { type: "session.followup_completed", payload: { status: "completed", operationId: "op-1" } },
+    acknowledgementPolicy: "successful-response",
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+async function flushMicrotasks(count = 4) {
+  for (let i = 0; i < count; i += 1) {
+    await Promise.resolve()
+  }
+}
+
+describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
+  it("persists one-event entries with a local record ID, binding-free target, runtime session id, payload, acknowledgement policy, and sequence position", async () => {
+    const { outbox, fileSystem } = makeOutbox({})
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: "evt_1" }))
+    await outbox.enqueueProducedFact(inputRecord({ id: "evt_2", event: { type: "message.delta", payload: { text: "x" } } }))
+
+    const body = fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE)
+    expect(body).not.toBeNull()
+    const parsed = JSON.parse(body ?? "{}") as { version: number; entries: Array<Record<string, unknown>> }
+    expect(parsed.version).toBe(1)
+    expect(parsed.entries).toHaveLength(2)
+    const [first, second] = parsed.entries
+    expect(first?.["id"]).toBe("evt_1")
+    expect(second?.["id"]).toBe("evt_2")
+    expect(first?.["target"]).toEqual({
+      kind: "workflow",
+      projectId: "proj-1",
+      workflowRunId: "wf-1",
+      sessionName: "plan",
+    })
+    expect(first?.["runtimeSessionId"]).toBe("ses_1")
+    expect(first?.["acknowledgementPolicy"]).toBe("matching-receipt")
+    expect(typeof first?.["sequence"]).toBe("number")
+    expect((first?.["sequence"] as number) < (second?.["sequence"] as number)).toBe(true)
+  })
+
+  it("uses atomic replacement and owner-only permissions", async () => {
+    const { outbox } = makeOutbox({})
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord())
+    expect(outbox.snapshot()).toHaveLength(1)
+  })
+
+  it("two real outbox instances sharing one recording filesystem restart with durable records", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const first = makeOutbox({ fileSystem, randomId: () => "evt_a" })
+    await first.outbox.load()
+    await first.outbox.enqueueBeforeExecution(inputRecord({ id: "evt_a" }))
+    await first.outbox.stop()
+
+    const second = makeOutbox({ fileSystem, randomId: () => "evt_b" })
+    await second.outbox.load()
+    expect(second.outbox.snapshot().map((r) => r.id)).toEqual(["evt_a"])
+  })
+
+  it("serialization refuses malformed snapshot JSON and never replaces it with empty state", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, "{ not json")
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    expect(outbox.ready()).toBe(false)
+    expect(fileSystem.textStore.has(RUNTIME_EVENT_OUTBOX_FILE)).toBe(true)
+    expect(fileSystem.textStore.get(RUNTIME_EVENT_OUTBOX_FILE)).toBe("{ not json")
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — acknowledgement policies", () => {
+  it("matching-receipt removes the head only when the response carries the submitted type", async () => {
+    let responses: AgentSessionRuntimeEventReceipt[][] = [[], [{ type: "session.input" }]]
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send() {
+          return responses.shift() ?? [{ type: "session.input" }]
+        },
+      },
+    })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord())
+
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(1)
+
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(0)
+  })
+
+  it("matching-receipt retains the head on timeout, transport failure, non-2xx, malformed, empty, or receipt without the submitted type", async () => {
+    const cases: Array<{ name: string; response?: () => AgentSessionRuntimeEventReceipt[] | Promise<AgentSessionRuntimeEventReceipt[]>; error?: unknown }> = [
+      { name: "timeout", error: Object.assign(new Error("runtime-event delivery timeout"), {}) },
+      { name: "transport failure", error: new Error("server unreachable") },
+      { name: "non-2xx", error: Object.assign(new Error("400 Bad Request"), {}) },
+      { name: "malformed JSON", response: () => Promise.reject(new SyntaxError("Unexpected token")) },
+      { name: "empty receipt", response: () => [] },
+      { name: "receipt without type", response: () => [{ type: "message.delta" }] },
+    ]
+    for (const testCase of cases) {
+      const fileSystem = new RecordingFileSystem()
+      const { outbox } = makeOutbox({
+        fileSystem,
+        deliver: {
+          async send() {
+            if (testCase.error) throw testCase.error
+            return await testCase.response!()
+          },
+        },
+      })
+      await outbox.load()
+      await outbox.enqueueBeforeExecution(inputRecord())
+      await outbox.kick()
+      expect(outbox.snapshot(), testCase.name).toHaveLength(1)
+    }
+  })
+
+  it("successful-response settles any 2xx receipt array including []", async () => {
+    const cases: AgentSessionRuntimeEventReceipt[][] = [[], [{ type: "session.followup_completed" }], [{ type: "stale-binding" }]]
+    for (const receipts of cases) {
+      const { outbox } = makeOutbox({
+        deliver: { async send() { return receipts } },
+      })
+      await outbox.load()
+      await outbox.enqueueProducedFact(followupTerminal())
+      await outbox.kick()
+      expect(outbox.snapshot()).toHaveLength(0)
+    }
+  })
+
+  it("successful-response retains the head on timeout, transport failure, non-2xx, or malformed response", async () => {
+    const cases: Array<{ name: string; response: () => AgentSessionRuntimeEventReceipt[] | Promise<AgentSessionRuntimeEventReceipt[]> }> = [
+      { name: "timeout", response: () => Promise.reject(Object.assign(new Error("runtime-event delivery timeout"), {})) },
+      { name: "transport failure", response: () => Promise.reject(new Error("server unreachable")) },
+      { name: "non-2xx", response: () => Promise.reject(Object.assign(new Error("500"), {})) },
+      { name: "malformed JSON", response: () => Promise.reject(new SyntaxError("Unexpected token")) },
+    ]
+    for (const testCase of cases) {
+      const { outbox } = makeOutbox({
+        deliver: { async send() { return await testCase.response() } },
+      })
+      await outbox.load()
+      await outbox.enqueueProducedFact(followupTerminal())
+      await outbox.kick()
+      expect(outbox.snapshot(), testCase.name).toHaveLength(1)
+    }
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
+  it("drains one head per managed producer sequence key", async () => {
+    const order: string[] = []
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send(record) {
+          order.push(record.id)
+          return [{ type: record.event.type }]
+        },
+      },
+    })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: "wf-1" }))
+    await outbox.kick()
+    expect(outbox.snapshot().map((r) => r.id)).toEqual([])
+    await outbox.enqueueBeforeExecution(inputRecord({ id: "wf-2", event: { type: "message.delta", payload: {} } }))
+    await outbox.kick()
+    expect(outbox.snapshot().map((r) => r.id)).toEqual([])
+    await outbox.enqueueBeforeExecution(followupTerminal({ id: "ff-1" }))
+    await outbox.kick()
+    await outbox.enqueueBeforeExecution(followupTerminal({ id: "ff-2", event: { type: "session.followup_failed", payload: { status: "failed" } } }))
+    await outbox.kick()
+
+    expect(order).toEqual(["wf-1", "wf-2", "ff-1", "ff-2"])
+  })
+
+  it("stale matching-receipt records are never retargeted to a different runtime session id", async () => {
+    const seen: string[] = []
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send(record) {
+          seen.push(record.runtimeSessionId)
+          return [] // empty receipt — matches the stale-binding case
+        },
+      },
+    })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ runtimeSessionId: "ses_stale" }))
+
+    await outbox.kick()
+    expect(seen).toEqual(["ses_stale"])
+    expect(outbox.snapshot()).toHaveLength(1)
+  })
+
+  it("successful-response consumes the operation lease; replay legitimately settles with []", async () => {
+    let responses: AgentSessionRuntimeEventReceipt[][] = [[], []]
+    const { outbox } = makeOutbox({
+      deliver: { async send() { return responses.shift() ?? [] } },
+    })
+    await outbox.load()
+    await outbox.enqueueProducedFact(followupTerminal())
+    await outbox.kick()
+    expect(outbox.snapshot()).toHaveLength(0)
+  })
+
+  it("concurrent kicks are idempotent — duplicate kicks share one in-flight sequence", async () => {
+    const sendCalls: string[] = []
+    let release!: () => void
+    const releaseGate = new Promise<void>((resolve) => { release = resolve })
+    const { outbox } = makeOutbox({
+      deliver: {
+        async send(record) {
+          sendCalls.push(record.id)
+          await releaseGate
+          return [{ type: record.event.type }]
+        },
+      },
+    })
+    await outbox.load()
+    for (let i = 0; i < 4; i += 1) {
+      await outbox.enqueueBeforeExecution(inputRecord({ id: `rec_${i}`, event: { type: `event_${i}`, payload: {} } }))
+    }
+
+    const promises = [outbox.kick(), outbox.kick(), outbox.kick()]
+    // Yield so the kicks enter drainAll before we release the gate.
+    await flushMicrotasks()
+    release()
+    await Promise.all(promises)
+    // Snapshot is empty: every record was acknowledged by the deliver mock.
+    expect(outbox.snapshot()).toHaveLength(0)
+    expect(sendCalls).toEqual(["rec_0", "rec_1", "rec_2", "rec_3"])
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — enqueue semantics", () => {
+  it("enqueueBeforeExecution rolls back an input that fails local persistence", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.failNextWrite = () => new Error("disk full")
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+
+    await expect(outbox.enqueueBeforeExecution(inputRecord())).rejects.toThrow(/disk full/)
+    expect(outbox.snapshot()).toHaveLength(0)
+    expect(outbox.ready()).toBe(false)
+  })
+
+  it("enqueueProducedFact retains a produced fact in memory when the snapshot fails and marks the outbox unhealthy", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    fileSystem.failNextWrite = () => new Error("disk full")
+
+    await expect(outbox.enqueueProducedFact(followupTerminal())).rejects.toThrow(/disk full/)
+    expect(outbox.snapshot()).toHaveLength(1)
+    expect(outbox.ready()).toBe(false)
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — autonomous health recovery", () => {
+  it("autonomously retries an atomic snapshot under fake time without a new enqueue", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const { outbox } = makeOutbox({ fileSystem, localRetryDelayMs: 100 })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: "evt_recover" }))
+    expect(outbox.snapshot()).toHaveLength(1)
+
+    fileSystem.failNextWrite = () => new Error("disk full")
+    await expect(outbox.enqueueBeforeExecution(inputRecord({ id: "evt_2" }))).rejects.toThrow(/disk full/)
+    expect(outbox.ready()).toBe(false)
+
+    fileSystem.failNextWrite = null
+    await vi.advanceTimersByTimeAsync(150)
+    expect(outbox.ready()).toBe(true)
+    expect(outbox.snapshot()).toHaveLength(1)
+  })
+
+  it("unreadable startup snapshot is never replaced with empty state; load retries idempotently", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, "{ not json")
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    expect(outbox.ready()).toBe(false)
+    expect(fileSystem.textStore.get(RUNTIME_EVENT_OUTBOX_FILE)).toBe("{ not json")
+
+    // Heal the file and trigger load() again — without an explicit enqueue.
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({ version: 1, entries: [] }))
+    await outbox.load()
+    expect(outbox.ready()).toBe(true)
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — legacy migration", () => {
+  it("imports every valid v1 followup-failure entry as a successful-response terminal record", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(LEGACY_FOLLOWUP_FAILURE_FILE, JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          operationId: "op-1",
+          target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
+          runtimeSessionId: "ses_1",
+          status: "failed",
+          error: "prompt rejected",
+          completedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          operationId: "op-2",
+          target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+          runtimeSessionId: "ses_2",
+          status: "completed",
+          error: null,
+          completedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ],
+    }))
+
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    const records = outbox.snapshot()
+    expect(records).toHaveLength(2)
+    const op1 = records.find((r) => r.id === "legacy-followup-terminal:op-1")
+    const op2 = records.find((r) => r.id === "legacy-followup-terminal:op-2")
+    expect(op1?.event.type).toBe("session.followup_failed")
+    expect(op1?.acknowledgementPolicy).toBe("successful-response")
+    expect(op2?.event.type).toBe("session.followup_completed")
+    expect(op2?.target).toMatchObject({ kind: "workflow" })
+  })
+
+  it("import failure after snapshot write retries the load without losing the imported record", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(LEGACY_FOLLOWUP_FAILURE_FILE, JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          operationId: "op-3",
+          target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
+          runtimeSessionId: "ses_1",
+          status: "failed",
+          error: "boom",
+          completedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }))
+
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    expect(outbox.snapshot()).toHaveLength(1)
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — stop", () => {
+  it("stop cancels retry timers and HTTP attempts without deleting durable records", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+    await outbox.enqueueBeforeExecution(inputRecord({ id: "evt_keep" }))
+    await outbox.stop()
+    expect(fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE)).not.toBeNull()
+    expect(outbox.snapshot()).toHaveLength(1)
+  })
+})

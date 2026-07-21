@@ -1,7 +1,14 @@
+// Issue-461 T-001 / design D1 + D7: the runner SignalR client owns
+// connection-lifecycle hooks (start, stop, reconnect) and exposes the
+// host-owned runtime accessor + outbox to the follow-up and cancel
+// handlers. The client does NOT resolve the runtime during
+// registration; handlers resolve the runtime per command so a runtime
+// initialized or replaced after client construction is visible to
+// later commands.
+
 import * as signalR from "@microsoft/signalr"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
-import type { ServerConnection } from "./connection.js"
 import {
   isUnderRunnerRoot,
   resolveWorkspaceQuery,
@@ -24,10 +31,10 @@ import {
 } from "./workspace-git-handlers.js"
 import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
-import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
 import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
+import type { AgentSessionRuntimeEventOutbox } from "./runtime-event-outbox.js"
 
 export {
   isUnderRunnerRoot,
@@ -49,16 +56,16 @@ export type {
 export interface RunnerSignalRClientOptions {
   probeTimeoutMs?: number
   onReconnected?: (connectionId: string) => void
-  serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
-  followupFailureOutbox?: FollowupFailureOutboxStore | null
+  agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   registry?: WorkspaceRegistry | null
   /**
    * Late-binding runtime accessor used by the Follow-up / Cancel
-   * handlers (issue-410 T-003 / design D3). The host wires this so
+   * handlers (issue-461 T-001 / design D1). The host wires this so
    * the handler always consults the current runtime handle (which
-   * is rebuilt on Server exit). Tests pass a static fake instead of
-   * a getter.
+   * is rebuilt on Server exit). Tests can pass either a static fake
+   * or a getter to drive the timing used by acceptance criteria
+   * such as "Runtime becomes ready after handler registration".
    */
   openCodeRuntime?: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   allowUnverifiedWorkspaceQueriesForTest?: boolean
@@ -70,9 +77,8 @@ export class RunnerSignalRClient {
   private readonly registry: WorkspaceRegistry | null
   private readonly probeTimeoutMs: number
   private readonly onReconnected: ((connectionId: string) => void) | undefined
-  private readonly serverConnection: ServerConnection | null
   private readonly followupTargetResolver: FollowupTargetResolver | null
-  private readonly followupFailureOutbox: FollowupFailureOutboxStore | null
+  private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null
   private readonly openCodeRuntime: OpenCodeRuntime | (() => OpenCodeRuntime | null) | null
   private readonly allowUnverifiedWorkspaceQueriesForTest: boolean
 
@@ -95,9 +101,8 @@ export class RunnerSignalRClient {
       .build()
     this.registry = options.registry ?? null
     this.workspaceManager = new WorkspaceManager(runnerRoot, this.registry)
-    this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
-    this.followupFailureOutbox = options.followupFailureOutbox ?? null
+    this.agentSessionRuntimeEventOutbox = options.agentSessionRuntimeEventOutbox ?? null
     this.openCodeRuntime = options.openCodeRuntime ?? null
     this.allowUnverifiedWorkspaceQueriesForTest = options.allowUnverifiedWorkspaceQueriesForTest === true
 
@@ -106,13 +111,17 @@ export class RunnerSignalRClient {
   }
 
   async start(): Promise<void> {
-    if (this.followupFailureOutbox) await this.followupFailureOutbox.load()
+    if (this.agentSessionRuntimeEventOutbox) {
+      await this.agentSessionRuntimeEventOutbox.load()
+      void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
+    }
     await this.connection.start()
-    if (this.followupFailureOutbox && this.serverConnection)
-      await this.followupFailureOutbox.drain(this.serverConnection)
   }
 
   async stop(): Promise<void> {
+    if (this.agentSessionRuntimeEventOutbox) {
+      await this.agentSessionRuntimeEventOutbox.stop()
+    }
     await this.connection.stop()
   }
 
@@ -131,8 +140,9 @@ export class RunnerSignalRClient {
   private registerLifecycleCallbacks(): void {
     this.connection.onreconnected((connectionId) => {
       notifyReconnected(this.connection, this.onReconnected, connectionId)
-      if (this.followupFailureOutbox && this.serverConnection)
-        void this.followupFailureOutbox.drain(this.serverConnection).catch(() => {})
+      if (this.agentSessionRuntimeEventOutbox) {
+        void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
+      }
     })
   }
 
@@ -149,25 +159,18 @@ export class RunnerSignalRClient {
     })
 
     registerFollowupHandler(this.connection, {
-      serverConnection: this.serverConnection,
       followupTargetResolver: this.followupTargetResolver,
-      followupFailureOutbox: this.followupFailureOutbox,
-      openCodeRuntime: this.resolveOpenCodeRuntime(),
+      agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
+      openCodeRuntime: this.openCodeRuntime,
     })
 
     registerCancelHandler(this.connection, {
       followupTargetResolver: this.followupTargetResolver,
-      openCodeRuntime: this.resolveOpenCodeRuntime(),
+      openCodeRuntime: this.openCodeRuntime,
     })
 
     registerWorkflowRunStatusHandler(this.connection, {
       registry: this.registry,
     })
-  }
-
-  private resolveOpenCodeRuntime(): OpenCodeRuntime | null {
-    if (this.openCodeRuntime === null) return null
-    if (typeof this.openCodeRuntime === "function") return this.openCodeRuntime()
-    return this.openCodeRuntime
   }
 }
