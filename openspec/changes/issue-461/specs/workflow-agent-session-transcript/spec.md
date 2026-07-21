@@ -43,7 +43,7 @@ A Workflow turn's `session.input` MUST be positively accepted before any depende
 
 ### Requirement: Transcript delivery failure is independent of the Workflow result
 
-A Workflow transcript Server-upload failure MUST be observable for diagnosis, but MUST NOT prevent the OpenCode prompt from running after its input is locally durable, change a successful runtime result to failed, replace or obscure the original runtime failure, or delay returning the Workflow result until Server delivery succeeds. The locally committed transcript events SHALL remain pending for later delivery. The reporter MUST settle local persistence of all observed events before returning the Workflow result.
+A Workflow transcript Server-upload failure MUST be observable for diagnosis, but MUST NOT prevent the OpenCode prompt from running after its input is locally durable, change a successful runtime result to failed, replace or obscure the original runtime failure, or delay returning the Workflow result until Server delivery succeeds. The locally committed transcript events SHALL remain pending for later delivery. The reporter MUST wait for every observed event's local enqueue attempt to settle before returning the Workflow result; failed produced-fact writes SHALL remain in memory for autonomous snapshot recovery without replacing that result.
 
 #### Scenario: Initial input upload fails while the turn succeeds
 

@@ -48,7 +48,7 @@ The runner MUST NOT deliver a Workflow turn's terminal event before that turn's 
 
 ### Requirement: Terminal delivery failure does not control Workflow completion
 
-Failure, timeout, or retry of a `session.closed` Server upload MUST NOT change, suppress, replace, or delay the Workflow turn result until terminal delivery succeeds. The reporter MUST complete local persistence of the terminal event before returning that result, and the terminal event SHALL remain pending independently of Server delivery.
+Failure, timeout, or retry of a `session.closed` Server upload MUST NOT change, suppress, replace, or delay the Workflow turn result until terminal delivery succeeds. The reporter MUST wait for the terminal event's local enqueue attempt to settle before returning that result. A successful write SHALL remain durably pending independently of Server delivery; a failed write SHALL retain the terminal fact in memory for autonomous snapshot recovery without replacing the runtime result, and process loss before that recovery commit is outside restart guarantees.
 
 #### Scenario: Successful turn's terminal upload fails
 
