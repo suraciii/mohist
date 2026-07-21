@@ -136,8 +136,9 @@ recovery:
 |---|---|
 | `workflow.runId` | 本次运行的标识 |
 | `stage.name` | 当前阶段名 |
-| `work.id` | 本次任务执行的工作标识 |
-| `issue.number` | Issue 编号 |
+| `work.*` | 当前工作信息，如 `work.id`、`work.type`、`work.title`、`work.attempt` |
+| `work.approvalFeedback.*` | 仅审批反馈任务可用：触发本次工作的反馈信息，如 `id`、`stage`、`createdAt`、`summary` |
+| `issue.*` | Issue 信息，如 `issue.projectId`、`issue.number`、`issue.title`、`issue.body` |
 | `repository.*` | 目标仓库信息，如 `repository.baseBranch` |
 | `workspace.*` | 工作区信息，如 `workspace.branch` |
 | `vars.*` | 合并后的 Variables（[合并规则](workflow-profiles.md#vars-references)） |
@@ -148,11 +149,32 @@ recovery:
 | `failure.error.message` | 仅恢复任务可用：触发恢复的 error message |
 
 - 模板在任务开始执行前展开；已开始任务的输入固定，不随之后的 Variables 修改变化。
-- `${{ prompts.<key> }}` 例外：执行时才读取 Prompt 正文。
-- `${{ vars.x }}` 单独占据整个值时，替换结果保留原始类型（对象、数组、数字）。
+- `${{ prompts.<key> }}` 例外：执行时才读取 Prompt 正文；Prompt 正文中的表达式遵守同一套
+  命名空间、缺值和插值规则。
+- 任一表达式解析不出值时任务失败；这也包括不存在的
+  `${{ tasks.<id>.outputs.* }}` 路径。
+- 表达式单独占据整个值时，替换结果保留原始类型（对象、数组、数字）。
 - 表达式可以嵌在字符串里拼接，如 `openspec/changes/issue-${{ issue.number }}`：值转为
   文本拼入。嵌入的表达式解析不出值、或值是对象/数组时，任务失败。
 - 需要字面 `${{` 时写 `\${{`。
+- Effective Variables 只通过 `${{ vars.* }}` 暴露；变量 key 不会同时成为顶层裸名。
+  `workflow`、`stage`、`work`、`issue`、`repository`、`workspace`、`tasks`、`prompts` 和
+  `failure` 也不会复制进 `vars`。
+- `workspace` 只表示工作区事实，不提供 OpenSpec 路径约定；OpenSpec 路径由 Profile 或
+  Prompt 用 `openspec/changes/issue-${{ issue.number }}` 明文表达。
+
+## 校验 Definition
+
+保存 Profile 时，Mohist 校验 Definition 的结构、字段类型和模板表达式，并一次返回全部
+问题。写文件时也可以纯本地校验，不需要 Server 正在运行：
+
+```bash
+mo workflow validate --file workflow.yaml
+mo workflow validate --file -
+```
+
+本地命令只判断 Workflow Definition 语言是否合法。某个 `uses` 是否可用、`with` 是否满足
+所选 Action 的输入契约，需要保存 Profile 时结合当前 Runner 提供的 Action 契约判断。
 
 ## 完整示例
 
@@ -161,13 +183,13 @@ recovery:
 ```yaml
 approval:
   feedback:
-    task:
-      id: apply-feedback
-      uses: mohist/opencode
-      with:
-        session: ${{ stage.name }}
-        prompt: ${{ prompts.apply-feedback }}
-        options: ${{ vars.agent }}
+    tasks:
+      - id: apply-feedback
+        uses: mohist/opencode
+        with:
+          session: ${{ stage.name }}
+          prompt: ${{ prompts.apply-feedback }}
+          options: ${{ vars.agent }}
 
 stages:
   - stage: plan
@@ -270,13 +292,10 @@ stages:
 
 ## 实装差距
 
-- 部分内置 profile 仍把 `expect` 写在 `with` 内；目标位置是任务顶层。
-- 部分内置任务仍使用旧的 Agent Action 输入；目标接口以 [Action 契约](actions/README.md)
-  为准。
-- 内置 profile 仍直接使用 `${{ openspecChangeDir }}`；目标写法是字面模板
-  `openspec/changes/issue-${{ issue.number }}`。
-- 字符串内嵌入的表达式解析不出值时，当前保留原文而非让任务失败。
+- 内置 Profile 与 Prompt 仍直接使用 `${{ openspecChangeDir }}`，部分运行上下文与
+  Variables 也仍以表外裸名暴露；目标是只保留上表命名空间，并把 OpenSpec 路径改为
+  字面模板 `openspec/changes/issue-${{ issue.number }}`。
+- task 与 Prompt 字符串中的表达式解析不出值时，当前仍可能保留原文而非让任务失败。
 - check 当前用 `name` 声明标识；目标是 `id`。
-- 本地校验（写完 definition 不经服务器即可验证并得到领域语言的错误提示）尚未提供。
-- `with` 尚未按 Action 声明校验：当前未知输入字段被静默忽略，缺失必填字段到任务运行
-  时才报错；目标是保存 Profile 时即拒绝。
+- 未知 Definition 字段、错误字段类型、表外模板根和本地校验命令尚未按本篇目标统一实现。
+- `with` 已在任务派发时按 Action 契约最终校验；保存 Profile 时的提前校验尚未提供。

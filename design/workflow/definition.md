@@ -28,8 +28,9 @@ Recovery(Budget = 0, Handlers[]: Handler(When, Tasks[], RetrySelf = false))
 Check(Id, Uses, Title?, With?)
 ```
 
-- 语言的每个构造都有类型对应。`With` 是唯一的无类型部分：它是 Action 的自由输入
-  （JSON blob），内部结构由各 Action 契约定义，definition 层不校验。
+- 语言的每个构造都有类型对应。`With` 是唯一的开放结构：Definition 层只要求它是 JSON
+  object，并递归校验其中的模板表达式；内部 key、required 与值类型由所选 Action 的
+  manifest 裁决。
 - `Expect` 是一等构造，位于 task 顶层，不进入 `With`。执行分工（executor 验证、合成
   promise output）见 [`actions.md`](actions.md) 与 [`task-dispatch.md`](task-dispatch.md)。
 - 审批反馈任务就是有序的 `Task[]`，不设独立类型。全部完成后，当前 stage 的 checks
@@ -81,15 +82,22 @@ stages[1].tasks[0].recovery.handlers[0]: handler 需要声明 tasks 或 retrySel
 | check | `id` 非空且在 stage 内唯一；`uses` 必填 |
 | 模板 | 所有 `${{ }}` 可解析；根命名空间必须在产品参考的表内；`failure.*` 只允许出现在 recovery handler 的 tasks 内 |
 | 模板 | `tasks.<id>` 引用的 id 必须是 definition 中声明的任务 |
+| with | 缺省或 JSON object；Definition 校验器不解释内部 key，只递归校验值中的模板表达式 |
 
 ### 校验入口
 
 同一实现暴露三处，规则只有上表一份：
 
 - Profile 保存 API：非法 definition 拒绝保存，返回错误列表。
-- `mo workflow-profile validate <file>`：本地校验，不经服务器。
+- `mo workflow validate --file <path>`：本地校验，不解析 Project、不经服务器；`--file -`
+  从 stdin 读取。
 - CI：内置 profile 与 `docs/workflow-definition.md` 中的完整示例作为黄金用例，必须通过
   校验——语法参考与校验器由此互相锁定。含 `<...>` 占位符的骨架片段不进用例。
+
+Profile 保存入口组合两种互不重叠的判断：本篇校验器拥有 Definition 结构、字段类型与
+模板语言；Action catalog 拥有 `uses` 是否存在以及 `with` 的 key、required 与类型。
+两类错误使用同一 YAML path 规则并标明来源，但不能互相复制规则。纯本地命令只运行前者；
+保存入口把通过解析得到的语义模型交给 Action catalog 校验。
 
 ### 运行时任务
 
@@ -141,8 +149,9 @@ stages[1]: lockBehavior 需要同时声明非空 resources
 stages[0].tasks[0].with.prompt: 未知命名空间 openspecChangeDir
 ```
 
-`with` 内部的 key 不校验：`with` 是 Action 的自由输入，键名由各 Action 契约定义管理。
-校验器只检查 `with` 值里的模板表达式。
+Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管理，只检查值里的模板
+表达式。Profile 保存入口随后可以把同一任务交给 Action catalog，因此“Definition 合法”
+不等于“所选 Action 及其输入在当前 Project 可用”。
 
 ## 实现侧语义索引
 
@@ -159,21 +168,20 @@ stages[0].tasks[0].with.prompt: 未知命名空间 openspecChangeDir
 
 实装差距：
 
-- `Expect` 未建模：expect 作为 JSON blob 藏在 `TaskDefinition.With` 里穿透全程，runner
-  在 Action 内部验证（`acp-agent` 调 `verifyExpectations`），而非 executor。现行
-  `ValidateTaskExpectations` 对 PASS / FAIL marker 的拒绝一并删除——marker 文本归作者，
-  语言层不管。
-- 解析器 `IgnoreUnmatchedProperties`：未知 key 被静默丢弃；`budget` 解析失败静默取 0。
+- 现行解析器尚未完整实现上表的错误收集：未知 key 仍可能被忽略，部分类型错误仍可能
+  降级为默认值。
 - `title` 现被强制必填（目标可选）；`uses` 现可空（目标必填）；check 现用 `name`
   （目标 `id`）。
 - 模型仍持有 workflow 级 `Variables` / `Defaults` / `Artifacts` 与 stage 级
   `Variables` 字段（目标移除：Variables 是独立资源）。
-- 审批反馈任务在代码中是独立形状 `FeedbackTaskConfig`（目标复用 `Task`）。
 - 现行注入裸根名 `mohist`、`project`、`openspecChangeName`、`openspecChangeDir` 与
-  `workspace.changeDir`（见 `IssueVariableBuilder`），内置 profile 直接使用
-  `${{ openspecChangeDir }}`。目标：删除这些注入，内置 profile 改写字面模板
+  `workspace.changeDir`，并把 Effective Variables 的 key 复制成顶层裸名；审批反馈还使用
+  表外 `approvalFeedback` 根。目标：Runtime context 与 Variables 分离，审批反馈移到
+  `work.approvalFeedback.*`，内置 Profile 与 Prompt 改写字面模板
   `openspec/changes/issue-${{ issue.number }}`，server 不再计算 openspec 路径公式；
   命名空间白名单即产品参考表内的十个根。
-- 字符串内嵌入的表达式解析不出值时，runner 现保留原文（`template.ts`）；目标是任务
-  失败。
-- 共享类库、`mo workflow-profile validate`、docs 示例进 CI 均未实现。
+- task 或 live-read Prompt 字符串内的表达式解析不出值时，现行路径仍可能保留原文；目标
+  是统一失败。
+- 独立类库、`mo workflow validate --file`、docs 示例进 CI 均未实现。
+- Runner 已按 Action manifest 在 dispatch 时校验 `uses` / `with`；catalog 上报与 Profile
+  保存期 Action 校验仍未实现，且不属于 Definition 校验器。

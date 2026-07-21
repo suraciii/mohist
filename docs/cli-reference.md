@@ -95,7 +95,7 @@ task-command     = mo <task> [target] [flags]
 | `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset` |
 | `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`view`、`create`、`edit`、`delete` |
-| `workflow` | `list`、`view`、`create`、`edit`、`delete`、`set-default`；`view --yaml` 读取原始 Workflow Definition |
+| `workflow` | `list`、`view`、`create`、`edit`、`delete`、`set-default`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`logs`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；只读 `variable list/get` |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
@@ -134,6 +134,9 @@ Definition 会用于进行中 Run 后续进入的 Stage；已进入的 Stage 和
 追溯改变，Variables 在每个 task 开始前重新解析。
 
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
+
+`mo workflow validate --file <path>` 纯本地校验 Workflow Definition；`--file -` 从 stdin
+读取。该命令不解析 Project，也不连接 Server。
 
 ## WorkflowRun
 
@@ -252,6 +255,9 @@ mo session transcript session_abc123
 
 # 从 stdin 提交长内容
 mo issue comment add 42 --body-file -
+
+# 不连接 Server，校验本地 Workflow Definition
+mo workflow validate --file workflow.yaml
 ```
 
 ## Skill 的角色

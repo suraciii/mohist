@@ -7,10 +7,11 @@
 引用，由 Runner 在执行时解析。
 
 ```text
-${{ vars.path }} 占据整个值 -> 替换为变量值并保留 JSON 类型
-其他可解析表达式          -> 替换为对应 dispatch context
+${{ path }} 占据整个值      -> 替换为对应值并保留 JSON 类型
+其他可解析表达式           -> 替换为对应 dispatch context
 ${{ prompts.<key> }}       -> 保留 Prompt key 引用
 字符串内嵌入的表达式       -> 值转文本拼入；解析不出值或值为对象/数组 -> 任务失败
+任一完整表达式解析不出值   -> 任务失败
 普通值                    -> 原样保留
 ```
 
@@ -18,7 +19,7 @@ ${{ prompts.<key> }}       -> 保留 Prompt key 引用
 [docs 的模板表达式节](../../docs/workflow-definition.md#模板表达式) 为权威。
 
 Prompt body 不属于持久化的 task input。Runner 每次实际执行 task 时按 key 读取最新 body；
-redelivery 和 retry 都会重新读取。
+redelivery 和 retry 都会重新读取，并以相同命名空间、缺值、插值与 `\${{` 转义规则渲染。
 
 `${{ failure.* }}` 例外：runner 构造恢复任务时就地展开——触发恢复的任务输出只在 runner
 手上。插入引擎的恢复任务不再含该表达式，其余表达式与普通任务相同，dispatch 前展开。
@@ -48,8 +49,9 @@ WorkflowRun 将该 TaskRun 记为 Failed；只有普通渲染故障继续通过 
 |---|---|
 | `workflow.runId` | dispatch |
 | `stage.name` | dispatch |
-| `work.id` | dispatch |
-| `issue.number` | dispatch |
+| `work.*` | dispatch；包括 `id`、`type`、`title`、`attempt` |
+| `work.approvalFeedback.*` | 仅由 ApprovalFeedback 产生的 task；包括 `id`、`stage`、`createdAt`、`summary` |
+| `issue.*` | Issue context；包括 `projectId`、`number`、`title`、`body` |
 | `repository.*` | Issue 的目标仓库引用；dispatch 时从 Project Repository resource 解析 |
 | `workspace.*` | Runner 执行时解析的 workspace |
 | `vars.*` | Effective Stage Variables |
@@ -61,6 +63,11 @@ WorkflowRun 将该 TaskRun 记为 Failed；只有普通渲染故障继续通过 
 
 Runtime context、Workflow Variables 与 Project Prompts 是三个独立命名空间。完整的
 dispatch/report 流程见 [`../runner.md`](../runner.md)。
+
+Effective Variables 只放在 `vars` 下，不把变量 key 复制成顶层裸名；Runtime context 也不
+写回或合并进 Variables。`work.approvalFeedback` 只随由该反馈产生的 task 存在，普通 task
+不携带。OpenSpec 目录不是 runtime context，由 Profile 与 Prompt 使用
+`openspec/changes/issue-${{ issue.number }}` 明文表达。
 
 ### 子 Issue Plan 的父背景
 
