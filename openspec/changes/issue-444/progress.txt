@@ -11,4 +11,5 @@
 - A missing catalog is the current Runner state: re-registration or heartbeat repair from an older Runner clears a previously retained catalog rather than publishing stale capabilities.
 - Check dispatch resolves the engine-owned `working-directory` from rendered input while Actions receive only validated Action-owned input. Invalid successful check output remains an aggregate `unexpected-error`; other malformed check results remain row-level `unexpected-error` with aggregate `check-failed`.
 - ActionRegistry validates every supplied manifest during construction so malformed definitions cannot bypass `defineAction`.
+- defineAction deep-freezes cloned array and object defaults, including nested JSON values, so callers cannot alter the manifest-derived execution or catalog contract after construction.
 - Verification passed with `npm test`, `npm run typecheck -w packages/runner`, and `npm run test:ci -w packages/runner`.

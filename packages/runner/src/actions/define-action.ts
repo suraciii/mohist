@@ -212,10 +212,10 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
 
 function cloneJsonValue(value: JsonValue): JsonValue {
   if (value === null || typeof value !== "object") return value
-  if (Array.isArray(value)) return value.map((entry) => cloneJsonValue(entry))
+  if (Array.isArray(value)) return Object.freeze(value.map((entry) => cloneJsonValue(entry))) as JsonValue
   const result: Record<string, JsonValue> = {}
   for (const [key, child] of Object.entries(value as Record<string, JsonValue>)) {
     result[key] = cloneJsonValue(child)
   }
-  return result
+  return Object.freeze(result) as JsonValue
 }
