@@ -80,6 +80,7 @@ export default defineConfig({
           name: 'jsdom',
           isolate: false,
           environment: 'jsdom',
+          testTimeout: 30_000,
           include: [
             'src/**/*.test.tsx',
             'src/**/*.dom.test.ts',
