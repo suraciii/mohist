@@ -459,7 +459,7 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(page.getByTestId('mobile-action-sheet-launcher')).not.toBeVisible()
   })
 
-  test('desktop approval shortcuts and Command+Enter use the visible action paths', async ({ page }) => {
+  test('desktop send-back keyboard flow keeps approval shortcuts out of the feedback field', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     const issue = makeIssue({
       number: 411,
@@ -492,21 +492,51 @@ test.describe('Issue decision surface browser layout', () => {
 
     await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
     await expect(page.getByTestId('decision-action-send-back-shortcut')).toHaveText('m')
-    await page.keyboard.press('a')
-    await expect.poll(() => approveRequests).toBe(1)
-
     await page.keyboard.press('m')
     const feedback = page.getByTestId('send-back-feedback-textarea')
     await expect(feedback).toBeFocused()
     await page.getByRole('radio', { name: 'Scope' }).click()
     await feedback.fill('Keep the plan focused.')
     await page.keyboard.press('a')
-    await expect.poll(() => approveRequests).toBe(1)
+    await expect.poll(() => approveRequests).toBe(0)
     await page.keyboard.press('Meta+Enter')
     await expect.poll(() => feedbackRequests).toBe(1)
   })
 
-  test('phone plan approval renders recorded artifacts without overflow and sends direct actions once', async ({ page }) => {
+  test('desktop approval shortcut uses the visible approve action', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const issue = makeIssue({
+      number: 411,
+      status: 'in_progress',
+      workflowStage: 'plan',
+      workflowStatus: 'paused',
+      workflowRunId: 'wr-approval',
+      health: 'paused',
+      approvalState: {
+        status: 'awaiting',
+        stage: 'plan',
+        requestedAt: '2026-07-01T03:00:00Z',
+      },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'awaiting-approval',
+        workflowSummaryState: 'approval-required',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    await mockIssueDetailApi(page, issue, [])
+    let approveRequests = 0
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)) approveRequests += 1
+    })
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+
+    await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
+    await page.keyboard.press('a')
+    await expect.poll(() => approveRequests).toBe(1)
+  })
+
+  test('phone plan approval renders recorded artifacts without overflow and submits send-back once', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 412,
@@ -530,10 +560,6 @@ test.describe('Issue decision surface browser layout', () => {
         'tasks.json': `{ "token": "${longToken}" }`,
       },
     })
-    let approveRequests = 0
-    page.on('request', (request) => {
-      if (request.method() === 'POST' && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)) approveRequests += 1
-    })
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
     await expect(page.getByTestId('approval-artifact-proposal.md')).toContainText('Plan evidence')
@@ -553,8 +579,6 @@ test.describe('Issue decision surface browser layout', () => {
       expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(viewport!.height)
     }
 
-    await approve.click()
-    await expect.poll(() => approveRequests).toBe(1)
     await sendBack.click()
     const feedback = page.getByTestId('send-back-feedback-textarea')
     await expect(feedback).toBeFocused()
