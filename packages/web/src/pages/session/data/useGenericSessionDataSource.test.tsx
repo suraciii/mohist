@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -9,6 +9,8 @@ let _summaryData: unknown = null
 let _summaryLoading = false
 let _summaryError = false
 let _transcriptData: unknown = null
+let _unfilteredTranscriptData: unknown = null
+const unfilteredTranscriptCalls: string[] = []
 
 const capturedTranscriptOptions: Array<{
   sessionId: string
@@ -20,6 +22,7 @@ const capturedTranscriptOptions: Array<{
 
 function resetCapturedOptions() {
   capturedTranscriptOptions.length = 0
+  unfilteredTranscriptCalls.length = 0
 }
 
 function baseSummary(overrides: Record<string, unknown> = {}) {
@@ -66,6 +69,11 @@ function makeDeps(): GenericSessionPageDependencies {
         isError: _summaryError,
       }) as never,
       useGenericSessionTranscript: () => ({ data: _transcriptData }) as never,
+      getGenericSessionTranscript: async (_projectId: string, sessionId: string, runtimeSessionId?: string | null) => {
+        if (runtimeSessionId) return _transcriptData as never
+        unfilteredTranscriptCalls.push(sessionId)
+        return (_unfilteredTranscriptData ?? _transcriptData) as never
+      },
       useGenericFollowup: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
       useCancelGenericSession: () => ({ mutate: vi.fn(), isPending: false }) as never,
     },
@@ -115,6 +123,7 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
     _summaryLoading = false
     _summaryError = false
     _transcriptData = null
+    _unfilteredTranscriptData = null
     resetCapturedOptions()
   })
 
@@ -192,5 +201,58 @@ describe('useGenericSessionDataSource — transcript identity wiring', () => {
 
     const last = capturedTranscriptOptions[capturedTranscriptOptions.length - 1]
     expect(last.runtime).toBe('claude')
+  })
+
+  it('diagnoses an empty runtime view from visible content in the first eligible lineage runtime', async () => {
+    _summaryData = baseSummary({
+      runtimeSessionLineage: [
+        { runtimeSessionId: 'rt-oldest', boundAt: '2026-06-15T08:00:00.000Z' },
+        { runtimeSessionId: 'rt-middle', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'rt-current', boundAt: '2026-06-15T10:00:00.000Z' },
+      ],
+    })
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = {
+      turns: [
+        { id: 'middle-turn', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'middle', kind: 'task', sentAt: '2026-06-15T09:00:00.000Z', runtimeSessionId: 'rt-middle' }, assistant: [{ id: 'middle-text', type: 'text', text: 'middle content', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null }] },
+        { id: 'oldest-turn', startedAt: '2026-06-15T08:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'oldest', kind: 'task', sentAt: '2026-06-15T08:00:00.000Z', runtimeSessionId: 'rt-oldest' }, assistant: [{ id: 'oldest-text', type: 'text', text: 'oldest content', startedAt: '2026-06-15T08:00:00.000Z', completedAt: null }] },
+      ],
+    }
+
+    renderPage('/agent-sessions/sess-abc?rt=rt-current')
+
+    const emptyState = await screen.findByTestId('session-empty-state')
+    await waitFor(() => expect(emptyState).toHaveAttribute('data-state-kind', 'runtime-filtered'))
+    expect(screen.getByTestId('session-empty-state-history-link')).toHaveAttribute('href', expect.stringContaining('rt=rt-oldest'))
+    expect(unfilteredTranscriptCalls).toEqual(['sess-abc'])
+  })
+
+  it('does not issue an unfiltered read for an unfiltered empty view', async () => {
+    _summaryData = baseSummary()
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderPage('/agent-sessions/sess-abc')
+
+    await screen.findByTestId('session-empty-state')
+    expect(unfilteredTranscriptCalls).toEqual([])
+  })
+
+  it('does not diagnose a runtime mismatch for hidden-only historical content', async () => {
+    _summaryData = baseSummary({
+      runtimeSessionLineage: [
+        { runtimeSessionId: 'rt-current', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-old', boundAt: '2026-06-15T09:00:00.000Z' },
+      ],
+    })
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = {
+      turns: [{ id: 'hidden-turn', startedAt: '2026-06-15T09:00:00.000Z', completedAt: null, user: { role: 'mohist', text: 'hidden', kind: 'task', sentAt: '2026-06-15T09:00:00.000Z', runtimeSessionId: 'rt-old' }, assistant: [{ id: 'hidden-tool', type: 'tool', hidden: true, tool: { toolCallId: 'tool-1', toolName: 'internal', status: 'completed', startedAt: '2026-06-15T09:00:00.000Z' } }] }],
+    }
+
+    renderPage('/agent-sessions/sess-abc?rt=rt-current')
+
+    const emptyState = await screen.findByTestId('session-empty-state')
+    expect(emptyState).toHaveAttribute('data-state-kind', 'running-no-content')
+    expect(screen.queryByTestId('session-empty-state-history-link')).toBeNull()
   })
 })

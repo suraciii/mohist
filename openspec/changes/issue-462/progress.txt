@@ -34,3 +34,11 @@
 - `useSessionTranscript.test.tsx`: Added 8 new tests covering unanchored fallback, conflicting session, ambiguous identity, historical view acceptance/rejection, and strict runtime matching.
 - `useIssueSessionDataSource.test.tsx`: 6 tests covering canonical ID wiring, sessionName exclusion, isRunning tentatively-true during loading, and isHistoricalRuntimeView flag.
 - `useGenericSessionDataSource.test.tsx`: 6 tests covering canonical ID, summary-loading subscription, isHistoricalRuntimeView, and runtime passthrough.
+
+## T-002 Decisions & Gotchas
+
+- Both data sources issue the existing unfiltered transcript read only after an explicit `?rt=` view has loaded an empty filtered response. The generic source injects the existing client fetcher so this condition is directly testable without network access.
+- Historical evidence is restricted to assistant parts that are visible in the transcript; hidden tools, empty text/reasoning, and empty errors do not qualify.
+- Candidate history is selected in runtime-lineage order, not transcript turn order, and the target path keeps the existing logical session route plus `rt` selector.
+- Empty-state presentation is owned by `SessionDetailShell`; running and terminal no-content states do not expose a history action, while filtered states only link when lineage and visible-content evidence agree.
+- Focused T-002 coverage now includes issue running/terminal/filtered/no-evidence cases and generic filtered navigation, conditional read gating, lineage ordering, and hidden-only negative evidence.

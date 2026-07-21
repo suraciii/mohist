@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -9,6 +9,7 @@ let _issueData: unknown = null
 let _coderSessionsData: unknown[] = []
 let _metadataData: unknown = null
 let _transcriptData: unknown = null
+let _unfilteredTranscriptData: unknown = null
 
 const capturedTranscriptOptions: Array<{
   sessionId: string
@@ -112,7 +113,10 @@ function makeDeps(): SessionPageDependencies {
         hasNext: false,
       }),
       getAgentSessionMetadata: async () => _metadataData as never,
-      getAgentSessionTranscript: async () => _transcriptData as never,
+      getAgentSessionTranscript: async (_number: any, _name: any, _projectId: any, runtimeSessionId: any) => {
+        if (runtimeSessionId) return _transcriptData as never
+        return (_unfilteredTranscriptData ?? _transcriptData) as never
+      },
       useFollowupMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
       useCancelSessionMutation: () => ({ mutate: vi.fn(), isPending: false }) as never,
     },
@@ -163,6 +167,7 @@ describe('useIssueSessionDataSource — canonical session ID wiring', () => {
     _coderSessionsData = [baseSession()]
     _metadataData = baseMetadata()
     _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = null
     resetCapturedOptions()
   })
 
@@ -242,5 +247,137 @@ describe('useIssueSessionDataSource — canonical session ID wiring', () => {
 
     const last = capturedTranscriptOptions[capturedTranscriptOptions.length - 1]
     expect(last.isHistoricalRuntimeView).toBe(false)
+  })
+})
+
+describe('useIssueSessionDataSource — empty state diagnostics', () => {
+  beforeEach(() => {
+    _issueData = baseIssue()
+    _coderSessionsData = [baseSession()]
+    _metadataData = baseMetadata()
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = null
+    resetCapturedOptions()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('shows running-no-content state when session is running and has no turns', async () => {
+    _metadataData = baseMetadata({ status: 'active', statusKind: 'live' })
+
+    renderPage('/issues/84/session/canonical-session-id')
+
+    const emptyState = await screen.findByTestId('session-empty-state')
+    expect(emptyState).toHaveAttribute('data-state-kind', 'running-no-content')
+    expect(emptyState).toHaveTextContent(/started but no content has been received/i)
+  })
+
+  it('shows terminal-no-content state when session is completed and has no turns', async () => {
+    _metadataData = baseMetadata({ status: 'completed', statusKind: 'completed' })
+
+    renderPage('/issues/84/session/canonical-session-id')
+
+    const emptyState = await screen.findByTestId('session-empty-state')
+    expect(emptyState).toHaveAttribute('data-state-kind', 'terminal-no-content')
+    expect(emptyState).toHaveTextContent(/No content was received for this session/i)
+  })
+
+  it('shows runtime-filtered state when explicit runtime view is empty but unfiltered has content', async () => {
+    _metadataData = baseMetadata({
+      runtimeSessionLineage: [
+        { runtimeSessionId: 'rt-current', boundAt: '2026-01-01T00:00:00Z' },
+        { runtimeSessionId: 'rt-old', boundAt: '2026-01-02T00:00:00Z' },
+      ],
+    })
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = {
+      turns: [
+        {
+          id: 'turn-1',
+          startedAt: '2026-01-01T00:00:00Z',
+          completedAt: '2026-01-01T00:01:00Z',
+          user: {
+            role: 'mohist',
+            text: 'do something',
+            kind: 'task',
+            sentAt: '2026-01-01T00:00:00Z',
+            runtimeSessionId: 'rt-old',
+          },
+          assistant: [
+            {
+              id: 'part-1',
+              type: 'text',
+              text: 'done',
+              startedAt: '2026-01-01T00:00:30Z',
+              completedAt: '2026-01-01T00:01:00Z',
+            },
+          ],
+        },
+      ],
+      partCount: 1,
+      lastActivityAt: '2026-01-01T00:01:00Z',
+    }
+
+    renderPage('/issues/84/session/canonical-session-id?rt=rt-current')
+
+    await waitFor(() => {
+      const emptyState = screen.getByTestId('session-empty-state')
+      expect(emptyState).toHaveAttribute('data-state-kind', 'runtime-filtered')
+    })
+    const emptyState = screen.getByTestId('session-empty-state')
+    expect(emptyState).toHaveTextContent(/current runtime has no content/i)
+
+    const historyLink = screen.getByTestId('session-empty-state-history-link')
+    expect(historyLink).toHaveTextContent(/View historical runtime/i)
+    expect(historyLink).toHaveAttribute('href', expect.stringContaining('rt=rt-old'))
+    expect(historyLink).toHaveAttribute('href', expect.stringContaining('/issues/84/workflow/sessions/session-name-abc'))
+  })
+
+  it('falls back to running-no-content when runtime-filtered view is empty but unfiltered has no content', async () => {
+    _metadataData = baseMetadata({
+      runtimeSessionLineage: [
+        { runtimeSessionId: 'rt-current', boundAt: '2026-01-01T00:00:00Z' },
+        { runtimeSessionId: 'rt-old', boundAt: '2026-01-02T00:00:00Z' },
+      ],
+    })
+    _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+    _unfilteredTranscriptData = { turns: [], partCount: 0, lastActivityAt: null }
+
+    renderPage('/issues/84/session/canonical-session-id?rt=rt-current')
+
+    const emptyState = await screen.findByTestId('session-empty-state')
+    expect(emptyState).toHaveAttribute('data-state-kind', 'running-no-content')
+    expect(emptyState).not.toHaveTextContent(/current runtime has no content/i)
+  })
+
+  it('does not render empty state when turns are present', async () => {
+    _transcriptData = {
+      turns: [
+        {
+          id: 'turn-1',
+          startedAt: '2026-01-01T00:00:00Z',
+          completedAt: '2026-01-01T00:01:00Z',
+          user: {
+            role: 'mohist',
+            text: 'hello',
+            kind: 'task',
+            sentAt: '2026-01-01T00:00:00Z',
+            runtimeSessionId: 'rt-current',
+          },
+          assistant: [],
+        },
+      ],
+      partCount: 1,
+      lastActivityAt: '2026-01-01T00:01:00Z',
+    }
+
+    renderPage('/issues/84/session/canonical-session-id')
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('session-empty-state')).toBeNull()
+    })
   })
 })
