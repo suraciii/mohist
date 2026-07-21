@@ -170,11 +170,24 @@ public static class RunnerRoutes
         // from awaitingAck on Accepted or Stale (both are acks).
         group.MapPost("/report", async (
             string runnerId,
-            RunnerReportRequest req,
+            HttpRequest request,
             IGrainFactory grains,
             Mohist.Server.Runner.Services.WorkflowReportService workflowReport,
             CancellationToken ct) =>
         {
+            RunnerReportRequest? req;
+            try
+            {
+                req = await request.ReadFromJsonAsync<RunnerReportRequest>(JSON.Options, ct);
+            }
+            catch (JsonException)
+            {
+                return ApiResults.BadRequest("Invalid report body");
+            }
+
+            if (req is null)
+                return ApiResults.BadRequest("request body is required");
+
             var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
                 ? WorkDispatchOwnerKinds.Workflow
                 : req.OwnerKind.Trim().ToLowerInvariant();

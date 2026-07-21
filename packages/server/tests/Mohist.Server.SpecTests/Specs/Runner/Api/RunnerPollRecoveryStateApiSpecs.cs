@@ -85,6 +85,20 @@ public sealed class RunnerPollRecoveryStateApiSpecs
     }
 
     [Fact]
+    public async Task Report_AcceptsStructuredActionOutput()
+    {
+        using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/report-output-{Guid.NewGuid():N}/report", new
+        {
+            workflowRunId = $"missing-report-output-{Guid.NewGuid():N}",
+            workId = "task-1",
+            status = "completed",
+            output = new { kind = "action-result", status = "completed" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+    }
+
+    [Fact]
     public async Task Report_MalformedRecoveryFollowUpAcksAndFailsTheRunTerminally()
     {
         var projectId = $"runner-recovery-malformed-{Guid.NewGuid():N}";
