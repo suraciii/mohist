@@ -1,54 +1,44 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Session and Runner boundaries, repository architecture, and testing rules. This review modifies no other file.
+Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Session/Runner command protocols, repository architecture, and testing rules. This review modifies no other file.
 
 ## Findings
 
-### F-1 High: Workflow admission and runtime rebind can race existing Session commands
+### F-1 High: Completed command receipts have no defined acknowledgement and retention protocol
 
-The plan serializes only Workflow Inline Agent tasks in a Runner-local coordinator (`design.md:115-123`; `tasks.json:65-76`). It explicitly leaves the existing Follow-up/generic command routes outside the Action stream and says the guarded bind does not create a Session-command reservation (`design.md:90,98`). In the current Server, `BeginFollowupAsync` persists a lease against the current physical binding, while Compact/Reset persist a separate reservation; neither the planned open nor bind transition is required to reject those reservations, and Session commands do not enter `WorkflowSessionTurnCoordinator` (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:245-304,372-407`).
+The revised command flow persists Compact/Reset completion before the Runner releases its command lease, then lets the original public route read the completed outcome (`design.md:129`; `specs/pi-workflow-session/spec.md:95`). Workflow open may proceed past that terminal reservation but must preserve it until the route "reads and acknowledges" it or command-owned cleanup removes it (`design.md:100`; `specs/pi-workflow-session/spec.md:99,148-152`). T-003 requires duplicate completion to return the persisted outcome and the public route to read without repeating the transition, but it defines no receipt-acknowledgement command, consumed state, or retention rule (`tasks.json:68-71,82`).
 
-Consequently, an idle Follow-up can reserve and start a Prompt on the old binding after a Workflow Action opens the logical Session but before that Action rebinds or submits its own Prompt. The guarded bind can still succeed because the expected physical binding has not changed, allowing the old command turn and the new Workflow turn to overlap or letting the rebind detach an active command. This violates the shared AgentSession single-work-Prompt invariant and the claim that Session-command users are unaffected, even though implementing Pi command routing remains out of scope. Define one AgentSession-authoritative admission/fence interaction for Workflow work versus pending/active Follow-up, Compact, and Reset, and assign both race directions to Server/Runner tests.
+The current idempotency contract relies on retaining `PendingReset.Outcome` so the same idempotency key can replay the completed result (`AgentSessionGrain.cs:233-241`; `AgentSessionRecoveryRoutes.cs:79-80,122-123`). Clearing when the first route reads it loses that replay if the HTTP response is lost; retaining it indefinitely does not implement the specified acknowledgement/cleanup lifecycle, and the scenario's "read ... exactly once" conflicts with duplicate idempotent reads. Define one durable model: either a separate bounded operation receipt/tombstone with explicit retention and replay semantics, or an acknowledgement protocol that remains safe when the public response is lost. Assign persistence/reactivation and callback -> Workflow open -> public readback -> response-loss tests.
 
-### F-2 High: The sequenced Action stream has no defined bootstrap lifecycle
+### F-2 Medium: Production command-lease wiring is owned by both T-003 and T-006
 
-D5's bind command establishes runtime, physical ID, work directory, model, Runner, expected-current fields, and a drained sequence, but no Action stream identity (`design.md:92-98`). D8 creates the Runner manifest only after binding, while the Server is expected to store a stream identity/cursor for the current binding, accept only `lastApplied + 1`, and atomically seal that stream during rebind (`design.md:154-158`). Existing OpenCode bindings have neither a manifest nor a persisted Action cursor. T-003 owns the Server route/cursor/seal before T-004 owns manifest creation and OpenCode outbox migration (`tasks.json:67-75,93-106`).
+T-003 says existing Workflow-origin OpenCode Follow-up/Compact/Reset handlers acquire and retain coordinator leases, and owns their completion callback protocol (`tasks.json:64,67-69`). T-006 again says it will "compose command leases" into those production handlers and repeats that they acquire leases (`tasks.json:156,163`). Because T-006 depends on T-003, either T-003 cannot meet its acceptance criteria when complete, or T-006 reimplements already-delivered production wiring.
 
-The plan never states the canonical stream identity derivation, initial cursor value, transition that authorizes the first identity, or bootstrap behavior for an existing OpenCode binding with zero Action events. Builders therefore must invent whether bind derives/records the stream, the first event claims it, or the Server recomputes it; those choices produce different stale-event and zero-event-rebind behavior. Specify the stream identity and cursor lifecycle from first bind through legacy OpenCode bootstrap, first event, empty-stream drain, seal, and replacement, then assign the protocol to one task with persistence/reactivation tests.
+Give one task sole production ownership. A clean split is for T-003 to deliver the coordinator, command wire/Server transitions, and fake handler contracts, while T-006 wires existing production handlers together with T-004's outbox drains; alternatively, T-003 can own all lease wiring and T-006 can add only outbox fencing.
 
-### F-3 High: Logical quarantine can be entered but has no owned release path
+### F-3 Medium: Distinct cache-write values lack an explicit Server API projection regression
 
-The Session spec requires later work to become admissible after stop is observed or the Runner restarts (`specs/pi-workflow-session/spec.md:89-120`), and the design says a later stop observation clears both physical and coordinator quarantines (`design.md:121`). T-002 requires the runtime to clear only its physical quarantine and emit the signal used to quarantine the logical key (`tasks.json:43-45`). T-006 requires every unconfirmed interruption to quarantine the logical key before release, but does not require wiring or testing removal of that key (`tasks.json:158-162`).
+The Session spec requires distinct `cachedReadTokens` and `cachedWriteTokens` in AgentSession state and API before Web rendering (`specs/pi-workflow-session/spec.md:242-246`). T-003 requires the Server DTO/read-model/mappers to gain the field and tests accumulation plus old-state deserialization (`tasks.json:79,81`), while T-007 tests Web adapters/rendering (`tasks.json:196,200`). No criterion explicitly sends different cache-read/cache-write values through a Server read API and asserts both JSON fields remain distinct.
 
-A conforming build of the listed criteria can permanently reject a logical Session after the physical Pi turn has stopped. Assign the runtime-to-coordinator stop notification, logical-key cleanup on observed stop, process-restart initialization semantics, and tests proving admission resumes without replay.
+Add one Server API/read-model regression at the lowest existing API spec surface. This catches an omitted mapper argument or accidental cache-write/cache-read alias that domain accumulation and Web fixtures cannot detect.
 
-### F-4 Medium: Outbox and host ownership overlap across tasks
+### F-4 Medium: The Pi Session-command non-goal is not protected for all four commands
 
-T-004's description owns host startup/background drain and its acceptance criteria migrate existing OpenCode bindings to the outbox (`tasks.json:93-107`). T-006 again owns RunnerHost initialization, periodic storage startup retry, global outbox readiness gating, and host-level readiness tests (`tasks.json:147-164`). T-003 also requires the task lease to span final reporter persistence and tests drained-stream rebind before the reporter/outbox exists (`tasks.json:65-76`).
+The issue excludes Pi Follow-up, Compact, Reset, and Cancel routing. The design states the non-goal and explicitly prevents only Pi Reset from falling back to OpenCode (`design.md:26-29,104,127`). T-003's notes repeat the four-command boundary, but no acceptance criterion requires route/handler tests proving each Pi-bound command returns unavailable/not-started and never invokes OpenCode (`tasks.json:95`). This matters because T-003 registers runtime `pi` and rewires existing command delivery, while T-006 changes the same production handlers.
 
-The dependency graph is acyclic, but these completion contracts overlap the same host, Action, and lifecycle seams, so T-003/T-004 cannot have a stable definition of done without implementing pieces assigned to later tasks or leaving temporary integration that T-006 replaces. Repartition ownership so T-003 delivers coordinator and Server protocol against explicit fakes, T-004 owns the complete outbox plus its host lifecycle (or only the standalone outbox), and T-006 owns integration exactly once.
-
-### F-5 Medium: Omitted model/variant preservation lacks task acceptance
-
-The runtime and Action specs require omitted selections to preserve the current Session choice, or use Pi defaults for a new Session (`specs/pi-runtime/spec.md:83-97`; `specs/pi-workflow-action/spec.md:27-31`). T-002 tests applying supplied selections, and T-006 tests input shape, hidden-variable rejection, and model changes without binding rotation, but neither requires omitted values to avoid resetting an existing Session selection (`tasks.json:41,151-154`).
-
-Add explicit runtime and Workflow reuse tests for omitted model, omitted variant, and both omitted on new versus restored Sessions. Otherwise an implementation can satisfy the listed task criteria while calling setters with absent values and losing the conversation's current selection.
-
-### F-6 Medium: Global outbox failure does not own its required diagnostic
-
-The Session spec requires outbox root/capability failure to expose a credential-redacted actionable storage diagnostic as well as block registration and claiming (`specs/pi-workflow-session/spec.md:178-182`). T-004 requires the readiness gate but not the diagnostic, while T-006's credential test covers Pi auth/provider values rather than a storage diagnostic (`tasks.json:104,149-163`). Add the diagnostic shape, masking assertion, and recovery assertion to the task that owns outbox readiness.
+Add regressions for Pi-bound Follow-up, Compact, Reset, and Cancel. They should pin the existing unavailable/not-started result, no OpenCode invocation, no binding mutation, and no accidental command lease/outbox side effect.
 
 ## Structural Checks
 
 - `tasks.json` parses as valid JSON.
-- All seven task IDs and dependencies resolve; the graph is acyclic and every implementation task reaches T-001.
-- All task spec paths and requirement anchors resolve.
-- All three proposal capabilities have matching spec files; their normative scenarios have task coverage except for the gaps above.
-- The fixed 60-minute Workflow Prompt budget and distinct `cachedWriteTokens` persistence/API/Web projection reported by the previous review are now explicitly modeled and assigned.
-- The issue's direct-Workflow boundary remains intact: Pi AgentJob routing, Pi Session-command routing, and runtime-aware catalog/UI work are not assigned for implementation here.
+- All seven task IDs and dependencies resolve; the graph is acyclic, priorities are ordered, and every implementation task reaches T-001.
+- All referenced spec files and requirement anchors resolve. Comma-separated multi-anchor references are already used by archived plans, so T-003's `spec` string is not treated as a defect.
+- All three proposal capabilities have matching spec files and the issue's seven acceptance criteria are represented.
+- The prior deadline, cache-write schema, Session admission, stream bootstrap, quarantine release, outbox ownership, omitted-selection, storage-diagnostic, Reset/rebind, and lost-manifest findings are now modeled.
+- Pi AgentJob execution, Pi Session-command routing, catalog/UI selection, ACP/RPC, and a generic `AgentRuntime` remain outside implementation scope.
 
 ## Verdict
 
-The issue behavior is represented, but builders still have to invent concurrency and stream-bootstrap semantics, and the task graph does not own logical quarantine release. These are correctness gaps at shared Session boundaries, not implementation details.
+The Pi Workflow path is comprehensively specified, but builders still need to invent command-receipt response-loss semantics, and three boundary regressions/ownership assignments remain incomplete. Resolve these before build.
 
 <promise>FAIL</promise>
