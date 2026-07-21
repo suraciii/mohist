@@ -116,14 +116,15 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
 
         var (sessionId, jobKey) = triggerIdentity.Value;
         var jobGrain = services.GetRequiredService<IGrainFactory>().GetGrain<IAgentJobGrain>(jobKey);
+        var (issueNumber, epicNumber) = PreflightLineage(evt, resolution);
         var preflightPlan = new RoutedAgentLaunchPlan(
             ProjectId: CloudEventLineage.TryReadProjectId(evt.Extensions, out var pid) ? pid : string.Empty,
             EventId: evt.Id,
             RuleId: outcome.Rule.Id,
             SessionId: sessionId,
             JobKey: jobKey,
-            IssueNumber: CloudEventLineage.TryReadPositiveNumber(evt.Extensions, EventCatalog.Lineage.Issue, out var issue) ? issue : null,
-            EpicNumber: CloudEventLineage.TryReadPositiveNumber(evt.Extensions, EventCatalog.Lineage.Epic, out var epic) ? epic : null,
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber,
             WorkspacePath: null,
             Disposition: RoutedLaunchDisposition.PreflightFailed,
             PreflightReason: reason,
@@ -138,6 +139,21 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Prompt: outcome.RenderedPromptPreview);
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
+    }
+
+    internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(
+        CloudEvent evt,
+        RoutedExecutionContextResolution resolution)
+    {
+        var issueNumber = CloudEventLineage.TryReadPositiveNumber(
+            evt.Extensions, EventCatalog.Lineage.Issue, out var issue)
+            ? issue
+            : resolution.IssueNumber;
+        var epicNumber = CloudEventLineage.TryReadPositiveNumber(
+            evt.Extensions, EventCatalog.Lineage.Epic, out var epic)
+            ? epic
+            : resolution.EpicNumber;
+        return (issueNumber, epicNumber);
     }
 
     private static (string SessionId, string JobKey)? ResolvePreflightTriggerIdentity(

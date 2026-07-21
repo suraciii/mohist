@@ -114,6 +114,12 @@
 - Review-fix verification passed: `npm test` completed with 1366 CLI, 1261
   server unit, 30 architecture, 2900 server spec, 4993 web, and 1159 runner
   tests.
+- Empty-workspace resolutions now preserve trusted WorkflowRun issue/epic
+  lineage for the preflight plan, so an explicit-run event that omits those
+  envelope extensions still produces an issue-feed-correlated failure.
+- Lineage-carry-forward verification passed: `npm test` completed with 1366
+  CLI, 1262 server unit, 30 architecture, 2900 server spec, 4993 web, and
+  1159 runner tests.
 
 ## T-002 Implementation Discoveries
 

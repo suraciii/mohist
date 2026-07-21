@@ -125,7 +125,9 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
             {
                 return RoutedExecutionContextResolution.Unresolved(
                     RoutedResolutionFailure.WorkspaceEmpty,
-                    $"workflow run '{envelopeWorkflowRunId}' has no persisted workspace path");
+                    $"workflow run '{envelopeWorkflowRunId}' has no persisted workspace path",
+                    issueNumber ?? routingContext.IssueNumber,
+                    envelopeEpic ?? routingContext.EpicNumber);
             }
 
             return RoutedExecutionContextResolution.Ready(
@@ -166,7 +168,9 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.IssueRunTerminal,
-                $"issue {issueNumber.Value}'s bound workflow run '{boundRun.Id}' is in a terminal status ({boundRun.Status})");
+                $"issue {issueNumber.Value}'s bound workflow run '{boundRun.Id}' is in a terminal status ({boundRun.Status})",
+                issueNumber,
+                envelopeEpic ?? boundContext.EpicNumber);
         }
 
         if (!string.Equals(boundContext.ProjectId, projectId, StringComparison.Ordinal))
@@ -194,7 +198,9 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.WorkspaceEmpty,
-                $"issue-bound workflow run '{boundRun.Id}' has no persisted workspace path");
+                $"issue-bound workflow run '{boundRun.Id}' has no persisted workspace path",
+                issueNumber,
+                envelopeEpic ?? boundContext.EpicNumber);
         }
 
         return RoutedExecutionContextResolution.Ready(
@@ -246,15 +252,19 @@ public enum RoutedResolutionFailure
 public sealed record RoutedExecutionContextResolution(
     RoutedExecutionContext? Context,
     RoutedResolutionFailure? Failure,
-    string? FailureMessage)
+    string? FailureMessage,
+    int? IssueNumber = null,
+    int? EpicNumber = null)
 {
     public bool IsReady => Context is not null;
 
     public static RoutedExecutionContextResolution Ready(RoutedExecutionContext context) =>
-        new(context, null, null);
+        new(context, null, null, context.IssueNumber, context.EpicNumber);
 
     public static RoutedExecutionContextResolution Unresolved(
         RoutedResolutionFailure failure,
-        string message) =>
-        new(null, failure, message);
+        string message,
+        int? issueNumber = null,
+        int? epicNumber = null) =>
+        new(null, failure, message, issueNumber, epicNumber);
 }
