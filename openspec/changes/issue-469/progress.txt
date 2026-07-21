@@ -38,6 +38,11 @@
 - Integration coverage now asserts the actual UTF-8 response body stays within `MaxQueryResponseBytes` for the large-cell and many-row byte-bound cases.
 - Focused OTel tests: 82 passed.
 
+## Review fix 3: CLI isolation regression
+
+- Added a CLI command spec with 1001 local rows. It verifies the direct executor renders every row, emits no HTTP truncation metadata, makes no server request, and remains successful.
+- Focused CLI OTel tests: 18 passed.
+
 ## Review fix 2: prove SQLite interruption and release
 
 - The production executor now exposes test-only callbacks for the real interrupt registration and post-disposal boundary without changing runtime behavior.
