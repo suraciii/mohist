@@ -153,7 +153,9 @@ Every Workflow runtime binding SHALL have a durable Action event-stream manifest
 
 Each active-turn checkpoint SHALL record its Runtime and required-fact policy. Pi checkpoints SHALL require canonical retained-fact reconciliation. OpenCode checkpoints SHALL be input-only because this issue does not connect OpenCode's full Runtime observer. On restart, an admitted OpenCode checkpoint SHALL drain its durable input records and atomically close as execution-outcome-unknown before Runner registration/polling, without invoking or querying either Runtime. Closure SHALL permit later same-Session Workflow admission and rebind; a separately redelivered work item MAY execute a duplicate turn under the accepted crash-window limitation.
 
-The Session authority SHALL acknowledge an accepted Action sequence only after one durable AgentSession state/event transaction commits the applied cursor, Session state/domain effects, and idempotent pending transcript evidence for every transcript fact in that sequence. Transcript projection MAY complete after acknowledgement, but failed projection MUST leave that evidence durable for retry after timer execution or grain reactivation. A duplicate sequence MUST NOT delete pending evidence or reapply state. Aggregate commit failure MUST NOT acknowledge the sequence.
+The Runner SHALL derive one deterministic `actionTurnId` from the authority-issued stream identity and the `session.input` sequence, persist it in the active checkpoint, and carry it on every later fact for that turn. Transcript storage SHALL address Action turns by a nullable stable key unique within the logical Session; it MUST NOT attach delayed Action evidence to the latest turn.
+
+The Session authority SHALL acknowledge an accepted Action sequence only after one durable AgentSession state/event transaction commits the applied cursor, Session state/domain effects, and ordered idempotent pending transcript evidence for every transcript fact in that sequence. Evidence SHALL persist the Action turn ID and exact projection operation: start-turn includes runtime binding, prompt text/kind, and start time; append-part includes part type, correlation/event identity, text delta, payload, and first/last timestamps. Projection SHALL process stream order, idempotently create/select the stable turn, and upsert parts only into that turn. Failed projection MUST leave evidence durable for timer or reactivation retry. A duplicate sequence MUST NOT delete pending evidence or reapply state. A crash after transcript save but before evidence removal MUST replay idempotently into the same turn. Aggregate commit failure MUST NOT acknowledge the sequence.
 
 Before a runtime change, the shared logical-Session serialization boundary SHALL fence new work while the current owning Runner drains all locally issued events. The guarded bind SHALL carry that stream's final issued sequence; in the same Session transition, the authority SHALL require its applied cursor to equal that sequence, seal the old stream, and replace the binding, or SHALL reject without either mutation. A Runner MUST NOT attest another Runner's local stream. Pi message IDs and tool-call IDs SHALL suppress duplicate SDK projections before enqueue and SHALL be persisted with the stream manifest so restart reconciliation can append only missing required facts. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
 
@@ -271,6 +273,13 @@ Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL comple
 - **THEN** the applied cursor, Session state, domain effects, and idempotent pending transcript evidence SHALL survive grain reactivation
 - **AND** retrying the same sequence SHALL NOT duplicate state or discard the evidence
 - **AND** later evidence projection SHALL restore the transcript fact exactly once
+
+#### Scenario: Delayed evidence remains attached to its original Action turn
+
+- **WHEN** transcript projection for one Action turn fails, a later turn is admitted, and the grain reactivates before or after the first turn's transcript save
+- **THEN** each start-turn and append-part evidence item SHALL select its deterministic Action turn rather than the latest turn
+- **AND** text, reasoning, tools, and prompt metadata SHALL appear exactly once on the correct turn
+- **AND** a crash after transcript save but before evidence removal SHALL NOT duplicate the turn or part
 
 #### Scenario: Event sequence gaps are rejected
 
