@@ -9,7 +9,7 @@ import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import type { RuntimeModelCatalog, RuntimeProviderErrorPolicy } from "../src/runtime/opencode/types.js"
+import type { RuntimeProviderErrorPolicy } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionContext } from "../src/core/types.js"
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
@@ -58,10 +58,6 @@ interface BuildResult {
 function buildRuntime(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
   const closed = { value: false }
-  const catalog: RuntimeModelCatalog = {
-    models: [{ providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] }],
-    fetchedAt: 0,
-  }
   const sessionCreate = vi.fn(async (_params: { directory?: string; model?: unknown }) => {
     if (args.failCreate) throw new Error("create boom")
     return { data: { id: `ses_${(closed.value ? "new" : "default").replace(/[^a-z0-9]+/gi, "_")}` } }
@@ -84,7 +80,6 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   })
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
-    v2: { provider: { list: vi.fn(async () => ({ data: { data: [] } })) }, model: { list: vi.fn(async () => ({ data: { data: catalog.models.map((m) => ({ id: m.modelID, providerID: m.providerID, variants: m.variants.map((id) => ({ id })) })) } })) } },
     session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, get: sessionGet, messages: vi.fn(), status: vi.fn(async () => ({ data: {} })) },
   }
   const server: OpencodeServerHandle = {
@@ -96,7 +91,6 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
-    catalogFactory: () => ({ async list() { return catalog } }),
     eventSubscriptionFactory: () => subscription,
     ...(args.policy ? { providerErrorPolicy: args.policy } : {}),
   }

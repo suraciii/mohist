@@ -217,6 +217,7 @@ export function AgentProfileEditor({
                 placeholder="Select a model"
                 models={allModels}
                 onChange={(m) => setModel(m)}
+                onChangeVariant={setVariant}
                 onClear={() => { setModel(null); setVariant(null) }}
                 allowClear={!!model}
                 modelVariants={modelVariantsMap}

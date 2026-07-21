@@ -126,15 +126,11 @@ function installStubRuntimeFactory(_options: StubRuntimeOptions = {}): OpenCodeR
   const stub: OpenCodeRuntime = {
     ready: () => ready,
     diagnostic: () => null,
-    catalog: () => ({ models: [], fetchedAt: 0 }),
     async start() {
       return { ok: true, value: { ready: true, diagnostic: null }, diagnostics: [] }
     },
     async shutdown() {
       // noop
-    },
-    async refreshCatalog() {
-      return { ok: true, value: { models: [], fetchedAt: 0 }, diagnostics: [] }
     },
     async followup(request: RuntimeFollowupRequest) {
       return followupImpl(request)

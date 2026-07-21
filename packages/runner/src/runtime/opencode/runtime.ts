@@ -6,8 +6,7 @@
  *     `createOpencodeClient()` (no direct spawn, no `--pure`, no
  *     `.opencode` lockfile cleanup);
  *   - the single `client.global.event()` subscription;
- *   - the readiness check (health plus model catalog load via
- *     `client.v2.provider.list()` + `client.v2.model.list()`);
+ *   - the readiness check (server health plus global event subscription);
  *   - error normalization to a small Mohist result set;
  *   - permission authorization (no auto-approve, no Workflow Approval);
  *   - Workflow Inline Agent turn execution (T-004) over the native
@@ -27,7 +26,6 @@ import type {
   RuntimeFollowupFacts,
   RuntimeFollowupRequest,
   RuntimeFollowupResult,
-  RuntimeModelCatalog,
   RuntimeProviderErrorPolicy,
   RuntimeReadyState,
   RuntimeResult,
@@ -40,14 +38,12 @@ import type {
 } from "./types.js"
 import { errorKindFor, normalizeInvalidInput, normalizeMissingSession, normalizeTurnFailed, normalizeUnavailableRuntime } from "./errors.js"
 import type { OpencodeServerHandle } from "./server-process.js"
-import type { CatalogClient } from "./catalog.js"
 import type { RuntimeEventSubscription } from "./event-subscription.js"
 import { runTurn, bindTurnInFlightTracker, type TurnExecutionDeps } from "./turn.js"
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
   readonly serverFactory?: (directory: string, signal: AbortSignal) => Promise<OpencodeServerHandle>
-  readonly catalogFactory?: (client: OpencodeClient) => CatalogClient
   readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
   /**
@@ -62,9 +58,7 @@ export interface OpenCodeRuntimeDeps {
 interface InternalState {
   ready: boolean
   diagnostic: RuntimeDiagnostic | null
-  catalog: RuntimeModelCatalog | null
   server: OpencodeServerHandle | null
-  catalogClient: CatalogClient | null
   events: RuntimeEventSubscription | null
   exitWatcher: Promise<void> | null
   rebuildTriggered: boolean
@@ -81,9 +75,7 @@ export class OpenCodeRuntime {
     this.state = {
       ready: false,
       diagnostic: null,
-      catalog: null,
       server: null,
-      catalogClient: null,
       events: null,
       exitWatcher: null,
       rebuildTriggered: false,
@@ -117,29 +109,6 @@ export class OpenCodeRuntime {
 
   diagnostic(): RuntimeDiagnostic | null {
     return this.state.diagnostic
-  }
-
-  catalog(): RuntimeModelCatalog | null {
-    return this.state.catalog
-  }
-
-  async refreshCatalog(
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<RuntimeResult<RuntimeModelCatalog>> {
-    const catalogClient = this.state.catalogClient
-    if (!this.state.ready || catalogClient === null || signal.aborted) {
-      const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
-    try {
-      const catalog = await catalogClient.list()
-      this.state.catalog = catalog
-      return { ok: true, value: catalog, diagnostics: [] }
-    } catch (cause) {
-      const diagnostic = toDiagnostic(cause, "catalog-refresh-failed", "Failed to refresh OpenCode model catalog")
-      const error = normalizeUnavailableRuntime([diagnostic])
-      return { ok: false, error, diagnostics: [diagnostic] }
-    }
   }
 
   /**
@@ -400,8 +369,6 @@ export class OpenCodeRuntime {
     const { events, server } = this.state
     this.state.events = null
     this.state.server = null
-    this.state.catalogClient = null
-    this.state.catalog = null
     this.state.ready = false
     if (options.clearDiagnostic ?? true) {
       this.state.diagnostic = null
@@ -425,18 +392,6 @@ export class OpenCodeRuntime {
         severity: "error",
         code: "server-spawn-failed",
         message: "OpenCode server factory was not provided",
-      }
-      this.state.diagnostic = diagnostic
-      diagnostics.push(diagnostic)
-      const error = normalizeUnavailableRuntime(diagnostics)
-      return { ok: false, error, diagnostics }
-    }
-    const catalogFactory = this.deps.catalogFactory
-    if (!catalogFactory) {
-      const diagnostic: RuntimeDiagnostic = {
-        severity: "error",
-        code: "catalog-load-failed",
-        message: "OpenCode catalog factory was not provided",
       }
       this.state.diagnostic = diagnostic
       diagnostics.push(diagnostic)
@@ -489,23 +444,6 @@ export class OpenCodeRuntime {
       const error = normalizeUnavailableRuntime(diagnostics)
       return { ok: false, error, diagnostics }
     }
-
-    const catalogClient = catalogFactory(server.client)
-    this.state.catalogClient = catalogClient
-    let catalog: RuntimeModelCatalog
-    try {
-      catalog = await catalogClient.list()
-    } catch (cause) {
-      const diagnostic = toDiagnostic(cause, "catalog-load-failed", "Failed to load OpenCode model catalog")
-      this.state.diagnostic = diagnostic
-      diagnostics.push(diagnostic)
-      await server.close().catch(() => {})
-      this.state.server = null
-      this.state.catalogClient = null
-      const error = normalizeUnavailableRuntime(diagnostics)
-      return { ok: false, error, diagnostics }
-    }
-    this.state.catalog = catalog
 
     const events = eventSubscriptionFactory(server.client)
     this.state.events = events

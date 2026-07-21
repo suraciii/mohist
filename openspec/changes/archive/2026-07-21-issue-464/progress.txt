@@ -1,0 +1,49 @@
+# issue-464 plan repair progress
+
+## Review fixes
+
+- [x] Aligned periodic rediscovery timing to one interval after the existing post-connection, post-convergence timer registration point across spec, design, and T-002.
+- [x] Defined the model-header grammar, flat-list support, ignored-line behavior, metadata boundaries, and balanced/unbalanced malformed-block recovery across spec, design, and T-001.
+- [x] Required direct AgentProfileEditor variant-path regression coverage instead of claiming existing coverage.
+- [x] Added a deterministic synchronous-executor seam and command-boundary test contract beneath the production stdout-capture adapter, separate from large-payload parser coverage.
+
+## Verification
+
+- `tasks.json` parses as valid JSON; both task IDs are complete, `passes` is false, T-002 depends only on lower-priority T-001, and all three capability specs are referenced.
+- Every spec requirement has at least one four-hash scenario with WHEN and THEN clauses.
+- Searches confirm the old startup-discovery clock origin, undefined identifiable-model wording, high-level command-runner seam, and claimed existing Agent editor coverage are absent from the repaired artifacts.
+- `self-review.md` was not edited or staged.
+- `git diff --check` passes. No product code or tests changed in this plan-repair task.
+
+## Codebase Patterns
+
+- T-001 restored `packages/runner/src/runtime/opencode-models.ts` as a standalone boundary. `discoverOpencodeModels(signal, adapter?)` stays async for host integration, while `createOpencodeModelsCommandAdapter(executor)` performs synchronous result handling beneath it.
+- Production constructs the adapter with `spawnSync`; injected `SyncModelsProcessExecutor` fakes intentionally skip the default-test external-process denial, matching the existing `system/process.ts` seam pattern. The adapter owns `models --verbose`, caller signal, 10-second timeout, UTF-8 decoding, and the 16 MiB buffer.
+- The parser accepts only trimmed `^([^/\s]+)/(\S+)$` headers. Balanced-invalid metadata advances past the balanced block; unbalanced metadata searches forward and reprocesses the next independently valid header. Variant-map entries are emitted only for non-empty object keys.
+- `opencodeModelSetsEqual` compares model IDs, variant-map keys, and each variant list as sets. T-002 can use it when replacing the private `coderCatalogsEqual` helper in `runtime/host.ts`.
+- Unit coverage is colocated at `packages/runner/src/runtime/opencode-models.test.ts`; all process calls use the injected synchronous executor. It includes separate >49 KiB parser and command-boundary cases and no process, network, filesystem, timer, or wall-clock dependency.
+
+## T-001 Verification
+
+- Pre-change focused runner regression baseline: 4 files, 47 tests passed.
+- `npm run typecheck -w packages/runner` passed.
+- `npm run typecheck:tests -w packages/runner` passed.
+- `npm run check:test-boundaries -w packages/runner` passed.
+- `npm test -w packages/runner` passed: 98 files, 1193 tests.
+
+## T-002 Codebase Patterns
+
+- `RunnerHost.run()` now starts the shared runtime, performs one host-owned discovery, registers, completes startup convergence, and only then registers the rediscovery timer. `registrationState()` reads the host snapshot directly.
+- `getOpencodeModelDiscovery()` / `setOpencodeModelDiscoveryForTest()` follows the existing runtime-factory seam pattern. Default runner tests install an empty fake, while the focused host spec injects queued discoveries and fake timers; no host test reaches the real process adapter.
+- Periodic empty or thrown discoveries leave the snapshot unchanged. Non-empty results use `opencodeModelSetsEqual`; a real model or variant change replaces both host fields before the existing immediate-heartbeat channel is attempted.
+- `OpenCodeRuntime` now owns only server/client/event execution lifecycle. SDK catalog types, factory wiring, state, APIs, diagnostics, fixtures, and `runtime/opencode/catalog.ts` were removed together.
+- `AgentProfileEditor` needed `onChangeVariant={setVariant}` because shared `ModelSelect` already emits `null` for a model-body click. Its populated-variant tests now cover create/update payloads, reopened active state, model-only selection, and full clear.
+
+## T-002 Verification
+
+- Pre-change focused regression baseline passed: runner 13 files / 167 tests; Web 8 files / 128 tests.
+- `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm run check:test-boundaries -w packages/runner` passed.
+- `npm test -w packages/runner` passed: 98 files, 1196 tests.
+- `npm run typecheck -w packages/web` passed.
+- `npm run test:run -w packages/web` passed: 369 files, 4999 tests.
+- Searches confirm runner source and shared test support contain no SDK catalog types, factories, calls, APIs, or catalog-only diagnostics. `git diff --check` passed after the full verification runs.

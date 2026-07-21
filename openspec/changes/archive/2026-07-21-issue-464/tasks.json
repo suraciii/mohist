@@ -1,0 +1,57 @@
+{
+  "project": "mohist-local",
+  "description": "Restore OpenCode CLI-backed model and reasoning-variant discovery, move catalog ownership to RunnerHost, and make OpenCode runtime readiness independent of best-effort model discovery without changing runner-to-server or Web contracts.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement the OpenCode CLI model-catalog adapter",
+      "spec": "specs/opencode-model-catalog/spec.md#the-opencode-cli-is-the-model-catalog-authority",
+      "description": "Restore a standalone runner model-discovery module that selects the configured OpenCode executable, synchronously captures complete `opencode models --verbose` stdout, and returns model IDs plus exact `variants` object keys. Keep the adapter always-executing and best-effort, with tolerant block parsing, empty failure normalization, order-insensitive catalog equality, and an injected synchronous process executor beneath the real command adapter for deterministic tests.",
+      "acceptanceCriteria": [
+        "`packages/runner/src/runtime/opencode-models.ts` exposes a Mohist-owned `{ models: string[], variants: Record<string, string[]> }` result, parser, discovery function, order-insensitive equality helper, and a `SyncModelsProcessExecutor` seam beneath the command adapter.",
+        "Discovery selects `MOHIST_AGENT_MODELS_COMMAND`, then `MOHIST_AGENT_COMMAND`, then `opencode`, and invokes the selected executable with `models --verbose` on every call; tests prove consecutive calls execute independently and no time-based cache exists.",
+        "The production adapter is constructed with `spawnSync`, checks the external-process policy, and passes the caller signal with `timeout: 10_000`, `encoding: \"utf8\"`, and `maxBuffer: 16 * 1024 * 1024`; it handles `error`, non-zero `status`, and complete `stdout` before parsing.",
+        "A command-boundary unit test invokes the real adapter with a fake `SyncModelsProcessExecutor`, asserts the exact executable, `models --verbose` arguments, signal/timeout/encoding/maxBuffer options, and returns a payload larger than 49 KB whose trailing model and variants appear in the discovery result. A separate pure-parser test covers the same large payload; neither test starts a process.",
+        "Parser tests use the explicit `^([^/\\s]+)/(\\S+)$` header grammar and cover additional slashes, flat valid-header lists, ignored warning/diagnostic lines, single-line and multiline JSON metadata, braces and escapes inside strings, exact provider-defined variant keys, and missing/empty/non-object variants.",
+        "Concrete malformed-output tests prove balanced-invalid metadata resumes after its block, unbalanced metadata resumes at the next valid header without consuming it, and output with no valid header returns empty models and variants; missing executable, abort, and non-zero exit are likewise logged and normalized without throwing, and a later invocation can succeed.",
+        "Equality tests prove model order and per-model variant order are ignored while added/removed models, variant-map keys, or variant values are detected as changes.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass with no real OpenCode process, network, filesystem, or wall-clock wait in the new tests."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A tested `packages/runner/src/runtime/opencode-models.ts` CLI catalog adapter that returns complete model and reasoning-variant data without caching.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the independently usable discovery component from design D1/D2. Do not wire RunnerHost or retain an SDK fallback in this task. The test seam must wrap the synchronous executor below the production adapter; a seam that returns an already-complete stdout string above the adapter does not verify the truncation fix."
+    },
+    {
+      "id": "T-002",
+      "title": "Switch runner discovery and readiness to the new ownership model",
+      "spec": "specs/runner-model-discovery/spec.md#the-runner-discovers-models-at-startup, specs/opencode-runtime/spec.md#runtime-readiness-reflects-opencode-execution-health",
+      "description": "Atomically switch RunnerHost to own startup and periodic CLI discovery while preserving registration, refresh, failure-retention, and immediate-heartbeat behavior. In the same task, remove all catalog state and APIs from OpenCodeRuntime so readiness reflects only the shared server lifecycle and health, migrate affected fakes/tests, and align the authoritative OpenCode runtime design document.",
+      "acceptanceCriteria": [
+        "`design/runtimes/opencode.md` removes SDK catalog operations and catalog-gated readiness, assigns best-effort CLI discovery to RunnerHost, and no longer lists CLI model parsing as retired behavior; adjacent source comments express the same ownership.",
+        "`OpenCodeRuntimeDeps` has no `catalogFactory`; `OpenCodeRuntime` has no catalog state, `catalog()`, or `refreshCatalog()`; `RuntimeModelCatalog`, `RuntimeModelDescriptor`, `catalog.ts`, factory wiring, exports, and catalog-only diagnostics are removed without compatibility aliases.",
+        "Runtime tests prove `ready()` becomes true after server startup, health, and event-subscription setup without catalog discovery; spawn and health failures still gate work with actionable diagnostics, and server loss still flips readiness false, fails affected work without replay, rebuilds, and recovers after health alone.",
+        "RunnerHost performs one best-effort CLI discovery before its first registration and reads registration state directly from host-owned `coderModels` and `coderModelVariants`; a failed initial discovery registers empty fields but a healthy runtime continues polling and claiming work.",
+        "Periodic discovery runs independently of `runtime.ready()` at the configured cadence with a 30-minute default and 60-second floor; the timer is registered after startup discovery, first registration, and startup convergence, first fires one interval after that registration, and is cleared when the run loop terminates. Fake-timer specs cover the registration clock origin and prove connection/convergence delay is excluded from the interval.",
+        "An empty or failed rediscovery preserves the last non-empty snapshot and sends no clearing heartbeat; non-empty catalogs compare order-insensitively, unchanged catalogs send no extra heartbeat, and model-only or variant-only changes update both host fields and attempt one immediate heartbeat through the existing channel.",
+        "Registration and heartbeat continue to use only the existing `coderModels` and `coderModelVariants` fields; no Server, CLI, or Web production contract or persistence schema changes are introduced.",
+        "Shared runtime and host test support contains no catalog fixtures or SDK catalog calls, and all discovery/process/time behavior is driven by injected fakes and fake timers rather than real process, network, filesystem, or wall-clock dependencies.",
+        "Existing Web selector tests for Issue defaults/stages, AI settings defaults/stages, shared model chips, and create-dialog model selection remain green, proving those existing consumers still accept populated variant maps.",
+        "`AgentProfileEditor.test.tsx` is added to or updated with a populated `modelVariants` API response and verifies editor-surface chip rendering, model-plus-variant persistence through create/update, active state when reopened from stored `agentConfig`, model-body selection clearing only the variant, and clear selection clearing both model and variant.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass; `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass with the new AgentProfileEditor regression coverage."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerHost-backed CLI model discovery with health-only OpenCodeRuntime readiness, unchanged registration contracts, aligned architecture documentation, and passing runner plus selector regression tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Host switchover and runtime catalog removal are one task because each consumes the other's boundary change; splitting them would leave an uncompilable or compatibility-only intermediate state. Key areas: `runtime/host.ts`, `runtime/opencode/`, `core/types.ts`, runner test support, and `design/runtimes/opencode.md`. Do not modify Server/Web production code or add a second discovery source."
+    }
+  ]
+}
