@@ -192,8 +192,8 @@ AgentSession SHALL persist at most 128 immutable recovery receipts. A receipt SH
 #### Scenario: Pi Session commands remain outside this issue
 
 - **WHEN** Follow-up, Compact, Reset, or Cancel targets a Pi-bound AgentSession before Pi Session-command routing ships
-- **THEN** the command SHALL return the existing unavailable or not-started result and MUST NOT invoke OpenCode
-- **AND** it MUST NOT mutate the binding, acquire a lasting command lease, or append/fence an Action outbox stream
+- **THEN** the Server SHALL return unavailable before creating a Follow-up/Compact/Reset reservation or dispatching to the Runner, and MUST NOT invoke OpenCode
+- **AND** it MUST NOT mutate the binding, acquire a command lease, or append/fence an Action outbox stream
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
