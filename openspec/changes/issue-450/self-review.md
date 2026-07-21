@@ -1,44 +1,38 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner/Server persistence and dispatch behavior, repository architecture, and testing rules. This review modifies no other file.
+Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner/Server execution and transcript persistence behavior, repository architecture, and testing rules. This review modifies no other file.
 
 ## Findings
 
-### F-1 High: Action-event acknowledgement is not specified as a durable commit
+### F-1 High: Check-stage `mohist/pi` execution has no lease acquisition path
 
-The plan requires `session.input` acknowledgement before Prompt admission and says the Action-event cursor advances atomically with transcript/usage/model facts (`design.md:164-166`; `tasks.json:73-74,103`). The current `AgentSessionGrain.AppendRuntimeEventsAsync` path only mutates activation state and an in-memory transcript accumulator, schedules a persistence timer, fans out, and returns (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:742-856`). State/domain events and transcript rows are then persisted in separate phases (`AgentSessionGrain.cs:1158-1222`).
+The plan registers `mohist/pi` in the shared Action registry and requires check contexts to carry an already-held `WorkflowSessionTurnLease` (`design.md:66-76`; `tasks.json:156`). D6 defines acquisition only around an Inline Agent task lifecycle owned by `WorkExecutor` (`design.md:121-125`). Current check execution resolves arbitrary registered Actions and runs checks concurrently (`packages/runner/src/runtime/check-execution.ts:39-68`), while Server check parsing does not exclude `mohist/pi`.
 
-T-003 assigns a new route and cursor transition but never requires acknowledgement to wait for durable state, nor defines durable pending transcript evidence when transcript persistence follows cursor persistence. A crash after HTTP acknowledgement can therefore lose `session.input`; a cursor commit followed by transcript failure can also make retry look duplicate while the audit fact is absent. Define and assign the durable Action-event commit protocol: persist cursor, state/domain facts, and idempotent pending transcript evidence before acknowledgement, then project/retry transcript separately (or use one transaction). Add crash-after-ack, transcript-failure-after-cursor, duplicate retry, and reactivation tests.
+No task defines a logical Session identity, lease acquisition/release, cleanup ownership, or same-session serialization for checks. Registering the Action therefore makes a path callable without the held token its type requires and can overlap Prompts for one logical Session. Either reject `mohist/pi` in check definitions before dispatch and remove it from check contexts, or explicitly specify check work ownership/session naming and assign per-check lease coordination plus concurrent same-session tests.
 
-### F-2 High: Workflow lease ownership is split between T-003 and T-006
+### F-2 High: Admitted OpenCode checkpoints have no restart transition
 
-D6 says `WorkExecutor` acquires the complete task lease and passes an already-held lease token to the Action; the Action cannot acquire or release the coordinator (`design.md:121`). T-003 nevertheless owns migrating the production OpenCode Action into the coordinator (`tasks.json:64,67`), while T-006 separately owns `WorkExecutor` integration and says Action contexts carry `WorkflowSessionTurnCoordinator` itself (`tasks.json:153,156`). These contracts permit two incompatible implementations: Action-owned acquisition in T-003 or executor-owned acquisition in T-006.
+Every Workflow OpenCode/Pi binding owns the same manifest and active-turn checkpoint, even though this issue connects only Pi's full runtime observer (`design.md:9,156-162`; `tasks.json:102-105,160`). T-004 defines restart handling for prepared-but-not-admitted checkpoints and admitted Pi checkpoints only (`tasks.json:109`). A Runner crash after the OpenCode Action marks admission but before checkpoint closure leaves no specified transition.
 
-Assign production lease acquisition and the OpenCode migration to one task, and make the Action-facing type explicit. If D6 remains authoritative, T-003 should implement/test the coordinator as an injected boundary only, while T-006 atomically migrates `WorkExecutor`, OpenCode, and Pi so Actions receive only the held lease token needed for open/rebind/quarantine operations.
+Builders must currently choose between quarantining the stream forever, incorrectly invoking Pi repair, discarding the checkpoint, or expanding into OpenCode transcript reconciliation. Define the admitted-OpenCode rule consistent with the accepted crash-redelivery limitation: drain its durable pre-admission facts, record/retain an execution-outcome-unknown diagnostic if required, close the checkpoint without invoking either Runtime, and allow separately redelivered Workflow work to follow normal at-least-once behavior. Add crash-after-OpenCode-admission, startup drain, later same-session admission, and OpenCode-to-Pi rebind tests.
 
-### F-3 High: The universal pre-dispatch Pi command guard is not race-safe for Cancel
+### F-3 High: Pending transcript evidence cannot identify or reconstruct the exact Action turn
 
-The revised plan promises every Pi Follow-up/Compact/Reset/Cancel rejects before reservation or Runner dispatch (`proposal.md:25`; `design.md:98,125`; `specs/pi-workflow-session/spec.md:93,134-137`; `tasks.json:76,161`). Reset can enforce this inside the grain before creating `PendingReset`, but Cancel currently resolves a binding snapshot, separately checks the grain, and later dispatches that stale target (`packages/server/src/Mohist.Server/Api/AgentSessionCancelRoutes.cs:69-129`). A Workflow rebind can commit between the check and dispatch; the Runner Cancel handler then invokes OpenCode for the stale wire binding.
+The revised durable acknowledgement protocol commits pending evidence before responding (`design.md:168`; `specs/pi-workflow-session/spec.md:154`; `tasks.json:74`), but its key `{ actionStreamId, sequence, factIndex }` identifies an Action fact, not the transcript turn that must receive it. Current `session.input` opens a turn with prompt metadata, text/reasoning facts need text delta/correlation/timestamps, and transcript idempotency is scoped to the selected turn (`packages/server/src/Mohist.Server/Sessions/Services/TranscriptAccumulator.cs:59-99,194-230`; `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionTranscriptStore.cs:45-87`). Existing `AgentSessionTranscriptEvidence` lacks the operation shape and stable turn target, and its retry path always uses `StartNewTurn: false` with `TextDelta: null` (`AgentSession.cs:324-330`; `AgentSessionGrain.cs:657-707`).
 
-Because the plan explicitly excludes command admission fences and coordination, its universal guarantee cannot be implemented for concurrent Cancel. Either add a narrow durable Cancel admission fence respected by Workflow bind, or narrow the contract to reject commands whose linearized grain admission observes a Pi binding and explicitly permit an already-admitted OpenCode Cancel to finish against its old physical target. Add controlled cancel-check/rebind/dispatch race tests. T-003 must also explicitly remove Reset's current unregistered-runtime OpenCode fallback before creating its reservation (`AgentSessionGrain.cs:284-304`).
-
-### F-4 Medium: Crash redelivery's accepted duplicate-turn limitation is omitted
-
-The canonical Pi design explicitly accepts that Workflow redelivery in the Runner crash window can duplicate a turn (`design/runtimes/pi.md:195-199`). The change artifacts repeatedly say restart repair and "no replay" without distinguishing Runtime/outbox retries from Server redelivery (`proposal.md:9-11`; `design.md:162,168`; `tasks.json:106,109,112,170`). Current Runner ownership is process-local, and the Server redelivers Running work absent from the restarted Runner's report (`packages/runner/src/runtime/host.ts:342-399,455-459`; `packages/server/src/Mohist.Server/Runner/Services/DispatchService.cs:98-114`). The repaired Action checkpoint does not own TaskRun completion, so redelivery can submit the prompt again.
-
-Do not invent durable TaskRun recovery in this issue. Instead, state the canonical accepted limitation explicitly and scope every no-replay assertion to Runtime/outbox behavior within one delivered execution. Add a restart/redelivery test that documents the possible duplicate turn while proving the Runtime and outbox themselves never resubmit an uncertain Prompt.
+"Extend the evidence model" does not select a safe addressing protocol. Persist a deterministic Action-turn key from `session.input` through all facts and the exact projection operation (`start-turn` or `append-part`), prompt metadata, text delta, correlation identity, payload, and timestamps. Transcript storage must enforce idempotency against that stable turn key so a crash after transcript save but before evidence removal cannot attach/duplicate evidence on a later turn. Add a two-successive-turn test with transcript failure/reactivation between turns and a crash between transcript save and evidence-removal commit.
 
 ## Structural Checks
 
 - `tasks.json` parses as valid JSON; all seven task IDs and dependencies resolve and the graph is acyclic.
 - All referenced spec files and requirement anchors resolve.
 - All three proposal capabilities and the issue's seven acceptance criteria are represented.
-- The previous Session-command implementation, Runtime slot callback, Compact reconciliation, and Follow-up terminal-observer findings are removed from the plan.
-- Catalog loading is used only for Runtime readiness; catalog reporting and Web selection remain out of scope.
-- Pi AgentJob execution, Pi Session-command implementation, ACP/RPC, and a generic `AgentRuntime` remain outside implementation scope.
+- WorkExecutor-only lease ownership, command admission linearization, Reset fallback removal, and crash-redelivery semantics are now coherent.
+- Runtime/outbox no-resubmission is correctly distinguished from accepted at-least-once Workflow redelivery duplication.
+- Catalog reporting/UI, Pi AgentJob and Session-command implementation, ACP/RPC, and a generic `AgentRuntime` remain outside scope.
 
 ## Verdict
 
-The product surface is covered, but builders would still have to choose persistence, lease-ownership, and Cancel linearization protocols, and the restart contract currently overstates the canonical no-replay guarantee.
+The primary task path is covered, but builders still lack executable contracts for check dispatch, OpenCode checkpoint recovery, and durable transcript turn reconstruction.
 
 <promise>FAIL</promise>
