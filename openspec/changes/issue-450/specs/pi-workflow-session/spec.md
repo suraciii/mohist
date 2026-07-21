@@ -153,6 +153,8 @@ Every Workflow runtime binding SHALL have a durable Action event-stream manifest
 
 The Session authority SHALL durably persist and return the current stream's applied cursor, projector checkpoint, and latest Action-turn metadata. Every accepted Action sequence SHALL atomically update that state with its Session facts. Runner-local manifests are rebuildable crash buffers: loss or corruption at any cursor SHALL rebuild from Server stream state. Pi rebuild SHALL reconcile retained canonical facts against the Server checkpoint; OpenCode rebuild SHALL restore input-only latest-turn metadata without Runtime projection. Required facts MUST NOT depend on restoring original Runner workspace state.
 
+Before registration or polling, the Runner SHALL retrieve a Server-authenticated inventory of current Workflow Action streams it owns and reconcile every returned item against local storage. The inventory SHALL include logical source identity, current physical binding/work directory, stream ID/cursor, projector checkpoint, and latest turn lifecycle. It SHALL include no stream owned by another Runner and no sealed/history/generic/AgentJob binding. Empty local storage or selective manifest loss SHALL therefore still recover every current owned prepared/admitted checkpoint before work claiming begins.
+
 Each active-turn checkpoint and Server latest-turn record SHALL include Runtime, required-fact policy, and lifecycle `prepared | admitted | closed`. Accepted `session.input` SHALL establish prepared. Before SDK Prompt invocation, the Runner SHALL append and receive Server acknowledgement for a transcript-free `turn.admitted` Action sequence; admitted means the Prompt may have been called. Required-fact completion SHALL append `turn.reporting-complete` and durably install closed plus optional recovery status. On restart, prepared SHALL close without Runtime repair; admitted Pi SHALL reconcile retained canonical facts; admitted OpenCode SHALL drain input and close as execution-outcome-unknown without invoking/querying either Runtime; closed SHALL need only pending drain. Lifecycle recovery SHALL finish before registration/polling and permit later same-Session admission/rebind. A separately redelivered work item MAY execute a duplicate turn under the accepted crash-window limitation.
 
 The Runner SHALL derive one deterministic `actionTurnId` from the authority-issued stream identity and the `session.input` sequence, persist it in the active checkpoint, and carry it on every later fact for that turn. Transcript storage SHALL address Action turns by a nullable stable key unique within the logical Session; it MUST NOT attach delayed Action evidence to the latest turn.
@@ -197,6 +199,12 @@ Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL comple
 - **THEN** the Runner SHALL reconstruct next sequence, projector state, and latest-turn metadata from the authority response
 - **AND** Pi SHALL reconcile retained canonical facts against that checkpoint while OpenCode SHALL restore input-only state without Runtime projection
 - **AND** admission/rebind SHALL resume only after required reconciliation and drain complete
+
+#### Scenario: Empty local storage discovers owned streams before polling
+
+- **WHEN** a Runner restarts with an empty local outbox root while the Server has nonzero current Workflow Action streams owned by that Runner
+- **THEN** the Runner SHALL obtain every owned current stream from the authenticated inventory and rebuild/recover each before registration or polling
+- **AND** streams owned by another Runner or not originating from a Workflow Action SHALL not appear in the response
 
 #### Scenario: Cache-write usage remains a distinct dimension
 
