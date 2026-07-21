@@ -30,3 +30,20 @@
 - `npm run typecheck:tests -w packages/runner` passed.
 - `npm run check:test-boundaries -w packages/runner` passed.
 - `npm test -w packages/runner` passed: 98 files, 1193 tests.
+
+## T-002 Codebase Patterns
+
+- `RunnerHost.run()` now starts the shared runtime, performs one host-owned discovery, registers, completes startup convergence, and only then registers the rediscovery timer. `registrationState()` reads the host snapshot directly.
+- `getOpencodeModelDiscovery()` / `setOpencodeModelDiscoveryForTest()` follows the existing runtime-factory seam pattern. Default runner tests install an empty fake, while the focused host spec injects queued discoveries and fake timers; no host test reaches the real process adapter.
+- Periodic empty or thrown discoveries leave the snapshot unchanged. Non-empty results use `opencodeModelSetsEqual`; a real model or variant change replaces both host fields before the existing immediate-heartbeat channel is attempted.
+- `OpenCodeRuntime` now owns only server/client/event execution lifecycle. SDK catalog types, factory wiring, state, APIs, diagnostics, fixtures, and `runtime/opencode/catalog.ts` were removed together.
+- `AgentProfileEditor` needed `onChangeVariant={setVariant}` because shared `ModelSelect` already emits `null` for a model-body click. Its populated-variant tests now cover create/update payloads, reopened active state, model-only selection, and full clear.
+
+## T-002 Verification
+
+- Pre-change focused regression baseline passed: runner 13 files / 167 tests; Web 8 files / 128 tests.
+- `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm run check:test-boundaries -w packages/runner` passed.
+- `npm test -w packages/runner` passed: 98 files, 1196 tests.
+- `npm run typecheck -w packages/web` passed.
+- `npm run test:run -w packages/web` passed: 369 files, 4999 tests.
+- Searches confirm runner source and shared test support contain no SDK catalog types, factories, calls, APIs, or catalog-only diagnostics. `git diff --check` passed after the full verification runs.

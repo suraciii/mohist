@@ -10,7 +10,6 @@ import {
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import type { RuntimeModelCatalog } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 
 class FakeSubscription implements RuntimeEventSubscription {
@@ -58,12 +57,6 @@ interface BuildResult {
 function buildRuntime(args: BuildArgs = {}): BuildResult {
   const subscription = new FakeSubscription()
   const closed = { value: false }
-  const catalog: RuntimeModelCatalog = {
-    models: [
-      { providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] },
-    ],
-    fetchedAt: 0,
-  }
   const sessionCreate = vi.fn(async (params: { directory?: string; model?: unknown }) => {
     const id = args.createId ? args.createId(params) : `ses_${(params.directory ?? "default").replace(/[^a-z0-9]+/gi, "_")}`
     return { data: { id } }
@@ -91,7 +84,6 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
 
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
-    v2: { provider: { list: vi.fn(async () => ({ data: { data: [] } })) }, model: { list: vi.fn(async () => ({ data: { data: catalog.models.map((m) => ({ id: m.modelID, providerID: m.providerID, variants: m.variants.map((id) => ({ id })) })) } })) } },
     session: {
       create: sessionCreate,
       prompt: sessionPrompt,
@@ -120,7 +112,6 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
-    catalogFactory: () => ({ async list() { return catalog } }),
     eventSubscriptionFactory: () => subscription,
     ...(args.policy ? { providerErrorPolicy: args.policy } : {}),
   }

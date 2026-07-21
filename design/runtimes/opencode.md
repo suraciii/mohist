@@ -83,7 +83,6 @@ OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
 | 读取 Session 状态 | `client.session.get()`、`client.session.messages()`、`client.session.status()` |
 | 接收实时事件 | `client.global.event()` |
 | 回应一次性权限 | `client.permission.reply()` |
-| 读取 model catalog | `client.v2.model.list()`、`client.v2.provider.list()` |
 
 依赖仍然是 `@opencode-ai/sdk/v2`。选择成熟 Session namespace 是隐藏在
 `OpenCodeRuntime` 内部的实现决策，不构成另一套产品契约。在新 V2 Session 执行接口
@@ -95,7 +94,7 @@ OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
 `OpenCodeRuntime` 是 Runner 内部的深模块，负责：
 
 - OpenCode Server 与 Client 生命周期；
-- 就绪状态与 model catalog；
+- 就绪状态；
 - 物理 Session 创建、查询、复用与中断；
 - Prompt 执行、Follow-up、Compact 与 Reset；
 - event subscription、message snapshot 核对和事件规范化；
@@ -124,15 +123,16 @@ Runner 注册或领取工作前必须：
 
 1. 启动共享 OpenCode Server；
 2. 通过 OpenCode health check；
-3. 成功加载 model catalog。
+3. 建立全局 event subscription。
 
 OpenCode Server 退出后，Runner 停止领取新工作，并重建 Server、Client 与全局事件
-订阅。受影响的执行中回合直接失败，不能自动 replay。只有 health 与 catalog
-检查重新通过后，Runner 才恢复 ready。
+订阅。受影响的执行中回合直接失败，不能自动 replay。替换 Server 重新通过 health
+并建立事件订阅后，Runner 即恢复 ready，不等待模型发现。
 
 Mohist 固定 SDK package 版本，OpenCode CLI 由安装者提供。Mohist 不安装、升级或强制
-CLI 精确匹配 SDK 版本；不兼容行为必须形成可操作的 readiness error。原生 workspace
-配置和 plugins 正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。
+CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 readiness error，CLI
+模型发现不兼容只记录诊断并保留 best-effort 语义。原生 workspace 配置和 plugins
+正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。
 
 ## Session 绑定
 
@@ -364,21 +364,33 @@ directory 时还必须与当前 workDir 一致。相同 request ID 在同一 tur
 
 ## 模型目录
 
-通过 `client.v2.model.list()` 与 `client.v2.provider.list()` 加载结构化 model / provider
-catalog；OpenCode TUI 也使用这组 read-only API。Runner registration 报告 model /
-variant catalog，Server 与 Web 将它用于配置辅助，但它不是最终权威。省略 model 时使用
-当前 OpenCode 选择或默认值；选定 model 是否有效仍由 OpenCode 最终校验。
+模型目录属于 `RunnerHost`，不属于 `OpenCodeRuntime`。Host 在首次注册前 best-effort 执行
+`opencode models --verbose`，由 `runtime/opencode-models.ts` 一次解析模型与 provider 定义的
+variant key，并直接保存到 host 的 `coderModels` / `coderModelVariants` 字段。发现失败或结果
+为空时，首次注册上报空字段，但健康 Runtime 仍继续领取工作。
+
+首次注册与启动 convergence 完成后，Host 注册独立的周期发现 timer；默认周期 30 分钟、
+最小 60 秒，首次触发从 timer 注册时刻起算。周期发现不检查 Runtime readiness。空结果或
+失败保留最后一次非空快照；非空结果按集合比较模型与每个模型的 variants，只有内容变化时
+替换两个字段并尝试一次即时 heartbeat。run loop 终止时由 Host 清理 timer。
+
+目录只用于 Server 与 Web 的配置辅助，不是执行合法性的最终权威。省略 model 时使用当前
+OpenCode 选择或默认值；选定 model / variant 是否有效仍由 OpenCode 在回合执行时校验。
+`OpenCodeRuntime` 不加载、存储或刷新目录，也不调用 SDK model / provider list API 或 CLI
+发现命令，模型发现状态不参与 Runtime readiness。
 
 ## 测试
 
 默认测试不能启动真实 OpenCode，也不能使用真实 process、network、filesystem config
-或 clock。注入 fake `OpenCodeRuntime` 或 fake generated Client / Server factory，确定性
-驱动事件、snapshot、完成状态、process loss 与 error。
+或 clock。Runtime 测试注入 fake generated Client / Server factory；Host 模型发现测试注入
+fake discovery 并使用 fake timer，确定性驱动事件、snapshot、完成状态、process loss 与
+error。
 
 覆盖至少包括：
 
 - Action Input expansion，并确认不存在隐藏 `vars.agent` fallback；
 - model string 内含多层 `/`，variant 保持独立；
+- CLI 模型发现的完整 stdout、variant key、失败恢复、周期 cadence 与变更 heartbeat；
 - Workflow 与 AgentJob 拥有的回合共享 Runtime code，但不共享工作 / Session 身份；
 - 物理 Session reuse 与 rotation 不变量；
 - model / variant 变化不触发 rotation；
@@ -398,7 +410,7 @@ variant catalog，Server 与 Web 将它用于配置辅助，但它不是最终�
 - `mohist/acp-agent` 与 ACP Action tree；
 - 共享 ACP connection / session management；
 - ACP liveness probes 及其配置；
-- OpenCode log scanning 与 CLI model parsing；
+- OpenCode log scanning；
 - ACP private compaction metadata 与 synthetic Session rebinding；
 - `.opencode` lockfile cleanup；
 - 所有 `acpSessionId` wire、Server 与 Web 术语。
@@ -429,9 +441,8 @@ compatibility alias 或 ACP fallback。
 
 决策时使用的依赖是 `@opencode-ai/sdk/v2` 1.17.18，但其中两个 namespace 的成熟度不同。
 OpenCode Web UI 与 TUI 使用 `client.session.*` 完成 create、Prompt、abort、summarize 与
-Session synchronization；TUI 正在逐步使用 `client.v2.*` 读取 catalog 与其他数据。新的
-V2 Session execution core 仍把 `wait` 和 `compact` 报告为 unavailable，完成与恢复能力
-也尚未完整。
+Session synchronization；新的 V2 Session execution core 仍把 `wait` 和 `compact` 报告为
+unavailable，完成与恢复能力也尚未完整。
 
 Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 方法都可用。SDK access
 封装在 `OpenCodeRuntime` 内；以后迁移到完整 V2 Session 执行接口时，只改变
@@ -441,9 +452,9 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 一次冒烟验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3
 服务器上对上表每个调用做了一次冒烟验证（详见
 [`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)）：
-表内 `client.session.*`、`client.global.event()`、`client.v2.model.list()`、
-`client.v2.provider.list()` 全部可用；`client.v2.session.wait()` 与
-`client.v2.session.compact()` 仍返回 `ServiceUnavailableError`，确认不进入执行链。
+表内 `client.session.*` 与 `client.global.event()` 调用可用；
+`client.v2.session.wait()` 与 `client.v2.session.compact()` 仍返回
+`ServiceUnavailableError`，确认不进入执行链。
 实际锁定的 SDK 版本见实装差距小节。
 
 ## 实装差距

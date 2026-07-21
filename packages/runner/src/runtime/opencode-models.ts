@@ -7,6 +7,10 @@ export interface DiscoveredOpencodeModels {
   variants: Record<string, string[]>
 }
 
+export type OpencodeModelDiscovery = (
+  signal: AbortSignal,
+) => Promise<DiscoveredOpencodeModels>
+
 export type SyncModelsProcessExecutor = (
   command: string,
   args: readonly string[],
@@ -61,6 +65,16 @@ export async function discoverOpencodeModels(
     console.error("failed to discover opencode models", error)
     return { models: [], variants: {} }
   }
+}
+
+let opencodeModelDiscovery: OpencodeModelDiscovery = discoverOpencodeModels
+
+export function getOpencodeModelDiscovery(): OpencodeModelDiscovery {
+  return opencodeModelDiscovery
+}
+
+export function setOpencodeModelDiscoveryForTest(discovery: OpencodeModelDiscovery | null): void {
+  opencodeModelDiscovery = discovery ?? discoverOpencodeModels
 }
 
 export function parseOpencodeModelsVerbose(stdout: string): DiscoveredOpencodeModels {

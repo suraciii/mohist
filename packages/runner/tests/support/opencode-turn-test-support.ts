@@ -4,7 +4,6 @@ import type { RuntimeProviderErrorPolicy } from "../../src/runtime/opencode/inde
 import type { OpenCodeRuntimeDeps } from "../../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../../src/runtime/opencode/event-subscription.js"
-import type { RuntimeModelCatalog } from "../../src/runtime/opencode/types.js"
 
 export const DEFAULT_SESSION_ID = "ses_/tmp/projA"
 
@@ -62,13 +61,6 @@ export interface BuildRuntimeResult {
 
 export function buildRuntime(args: BuildRuntimeArgs = {}): BuildRuntimeResult {
   const subscription = new FakeSubscription()
-  const catalog: RuntimeModelCatalog = {
-    models: [
-      { providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] },
-      { providerID: "anthropic", modelID: "claude-sonnet-4", variants: [] },
-    ],
-    fetchedAt: 0,
-  }
   const health = vi.fn(async () => ({ data: { ok: true } }))
   if (args.failHealth) health.mockRejectedValueOnce(new Error("health boom"))
 
@@ -98,7 +90,6 @@ export function buildRuntime(args: BuildRuntimeArgs = {}): BuildRuntimeResult {
   const sessionStatus = vi.fn(async () => ({ data: {} }))
   const clientProxy = {
     global: { health, event: vi.fn(async () => ({ stream: (async function* () { void subscription })() })) },
-    v2: { provider: { list: vi.fn(async () => ({ data: { data: [] } })) }, model: { list: vi.fn(async () => ({ data: { data: catalog.models.map((m) => ({ id: m.modelID, providerID: m.providerID, variants: m.variants.map((id) => ({ id })) })) } })) } },
     session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, messages: sessionMessages, get: sessionGet, status: sessionStatus },
   }
   const server: OpencodeServerHandle = {
@@ -111,7 +102,6 @@ export function buildRuntime(args: BuildRuntimeArgs = {}): BuildRuntimeResult {
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
-    catalogFactory: () => ({ async list() { return catalog } }),
     eventSubscriptionFactory: () => subscription,
     ...(args.policy ? { providerErrorPolicy: args.policy } : {}),
     ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),

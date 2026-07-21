@@ -32,7 +32,13 @@ useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({
       success: true,
-      data: { models: ['gpt-4', 'gpt-4o', 'claude-3'], modelVariants: {} },
+      data: {
+        models: ['openai/gpt-4', 'anthropic/claude'],
+        modelVariants: {
+          'openai/gpt-4': ['standard'],
+          'anthropic/claude': ['low', 'medium', 'high'],
+        },
+      },
     }),
   ),
 )
@@ -78,6 +84,18 @@ function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0
       </ProjectProvider>
     </QueryClientProvider>,
   )
+}
+
+async function openAgentModelSelect() {
+  fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
+  await waitFor(() => {
+    expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toBeInTheDocument()
+  })
+}
+
+function fillRequiredFields() {
+  fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Variant Agent' } })
+  fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Use the selected model' } })
 }
 
 describe('AgentProfileEditor', () => {
@@ -127,6 +145,24 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.instructions).toBe('Be helpful')
     })
 
+    it('renders model variant chips and persists model plus variant on create', async () => {
+      renderEditor()
+      fillRequiredFields()
+      await openAgentModelSelect()
+
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-low')).toHaveTextContent('low')
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveTextContent('medium')
+      fireEvent.click(screen.getByTestId('agent-model-row-anthropic/claude-variant-high'))
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentConfig: { model: 'anthropic/claude', variant: 'high' },
+        }),
+        expect.any(Object),
+      )
+    })
+
     it('navigates to the new agent detail page on success', async () => {
       const onClose = vi.fn()
       renderEditor({ onClose })
@@ -157,7 +193,7 @@ describe('AgentProfileEditor', () => {
       name: 'Existing Agent',
       description: '',
       instructions: 'Original instructions',
-      agentConfig: { model: 'gpt-4', variant: 'high' },
+      agentConfig: { model: 'anthropic/claude', variant: 'high' },
       skills: ['code'],
       maxConcurrentRuns: null,
       status: 'active',
@@ -195,6 +231,44 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.data.skills).toEqual(['code', 'debug'])
     })
 
+    it('persists an updated variant and restores its active state from stored agentConfig', async () => {
+      renderEditor({ agent: existingAgent })
+      await waitFor(() => {
+        expect(document.querySelector('#agent-model')).toHaveTextContent('claude · high')
+      })
+      await openAgentModelSelect()
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-high')).toHaveAttribute('data-variant-active', 'true')
+      fireEvent.click(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium'))
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium' })
+
+      cleanup()
+      renderEditor({ agent: { ...existingAgent, agentConfig: updateCall.data.agentConfig } })
+      await openAgentModelSelect()
+      expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-medium')).toHaveAttribute('data-variant-active', 'true')
+    })
+
+    it('selecting the model body clears only the stored variant', async () => {
+      renderEditor({ agent: existingAgent })
+      await openAgentModelSelect()
+      fireEvent.click(document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude' })
+    })
+
+    it('clear selection clears both model and variant', async () => {
+      renderEditor({ agent: existingAgent })
+      fireEvent.click(screen.getByTitle('Clear'))
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(updateCall.data.agentConfig).toBeNull()
+    })
+
     it('shows inline API error on update failure', async () => {
       renderEditor({ agent: existingAgent })
       await act(async () => {
@@ -222,7 +296,7 @@ describe('AgentProfileEditor', () => {
           type: 'opencode',
           livenessQuietThresholdMs: 1200000,
           probeTimeoutMs: 30000,
-          model: 'gpt-4',
+          model: 'anthropic/claude',
           variant: 'high',
         } as AgentInfo['agentConfig'],
       }

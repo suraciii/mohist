@@ -365,8 +365,8 @@ export interface RunnerOptions {
    * re-discovery that converges the server-registered model set with
    * what opencode currently exposes; the first fire happens one
    * interval after `run()` registers the timer (startup discovery
-   * already runs in `connectRunner`). Used by tests to drive ticks
-   * deterministically.
+   * completes before the first registration). Used by tests to drive
+   * ticks deterministically.
    */
   modelRediscoveryIntervalMs?: number
 }
