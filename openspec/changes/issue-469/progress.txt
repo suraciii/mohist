@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- OTel HTTP routes return `ApiResults` through the shared `ApiResponse<T>` envelope.
+- `TraceQuerier` owns immutable query safety bounds as public constants; `OtelOptions` is configuration-bound and must not contain safety limits.
+- The server spec test fixture uses `TestServer`, so route behavior is verified without binding a real socket.
+
+## T-001
+
+- Added `TraceQuerier.MaxQueryRequestBodyBytes` as a fixed 64 KiB limit.
+- `/otel/api/query` checks `Content-Length` before reading or parsing, and carries endpoint-specific Kestrel request-size metadata for bodies without a trustworthy length.
+- Oversize responses use `ApiResults.PayloadTooLarge` and stable code `query_request_too_large`.
+- Admission tests now assert envelope codes for malformed, missing, non-SELECT, SQLite, and ATTACH cases; the ATTACH test name now reflects keyword-layer rejection.
+- Focused OTel route tests: 28 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains an unrelated failure (actual 200).

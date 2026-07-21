@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,12 +70,26 @@ public static class OtelQueryRoutes
         {
             var logger = loggerFactory.CreateLogger("Mohist.Server.Api.OtelQueryRoutes");
 
+            if (request.ContentLength > TraceQuerier.MaxQueryRequestBodyBytes)
+            {
+                return ApiResults.PayloadTooLarge(
+                    "Query request body is too large.",
+                    "query_request_too_large");
+            }
+
             string body;
             using (var reader = new StreamReader(request.Body))
             {
                 try
                 {
                     body = await reader.ReadToEndAsync(ct);
+                }
+                catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+                {
+                    logger.LogDebug(ex, "The /otel/api/query request body is too large.");
+                    return ApiResults.PayloadTooLarge(
+                        "Query request body is too large.",
+                        "query_request_too_large");
                 }
                 catch (IOException ex)
                 {
@@ -137,7 +152,7 @@ public static class OtelQueryRoutes
             }
 
             return ApiResults.Ok(rows);
-        });
+        }).WithMetadata(new RequestSizeLimitAttribute(TraceQuerier.MaxQueryRequestBodyBytes));
 
         return app;
     }

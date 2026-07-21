@@ -28,6 +28,9 @@ public sealed class TraceQuerier
     /// <summary>Hard upper bound on <see cref="ListAsync"/> results.</summary>
     public const int MaxListLimit = 1000;
 
+    /// <summary>Hard upper bound for the <c>POST /otel/api/query</c> body.</summary>
+    public const int MaxQueryRequestBodyBytes = 64 * 1024;
+
     /// <summary>5-second per-query timeout for the free-SQL endpoint.</summary>
     public static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(5);
 

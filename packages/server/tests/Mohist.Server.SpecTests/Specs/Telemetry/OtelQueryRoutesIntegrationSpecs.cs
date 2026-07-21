@@ -197,7 +197,54 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PostQuery_NonSelectStatement_Returns400()
+    public async Task PostQuery_BodyAtLimit_ProceedsToJsonAndAdmission()
+    {
+        using var client = _factory.CreateMainApiClient();
+        var prefix = "{\"sql\":\"SELECT 1\",\"padding\":\"";
+        var suffix = "\"}";
+        var paddingLength = TraceQuerier.MaxQueryRequestBodyBytes -
+            Encoding.UTF8.GetByteCount(prefix) - Encoding.UTF8.GetByteCount(suffix);
+        var body = prefix + new string('x', paddingLength) + suffix;
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.NotEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostQuery_OversizedBody_Returns413WithStableCodeBeforeParsing()
+    {
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            new string('x', TraceQuerier.MaxQueryRequestBodyBytes + 1),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal("query_request_too_large", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task PostQuery_MultiStatementWithNonSelectTail_Returns400WithStableCode()
+    {
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1; DROP TABLE traces\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task PostQuery_NonSelectStatement_Returns400WithStableCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -208,8 +255,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SELECT", body);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
     }
 
     [Theory]
@@ -219,7 +265,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     [InlineData("ALTER TABLE traces ADD COLUMN x TEXT")]
     [InlineData("ATTACH DATABASE 'x.db' AS x")]
     [InlineData("PRAGMA writable_schema = 1")]
-    public async Task PostQuery_VariousNonSelectStatements_Returns400(string sql)
+    public async Task PostQuery_VariousNonSelectStatements_Returns400WithStableCode(string sql)
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -230,8 +276,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SELECT", body);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -243,8 +288,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("sql", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_missing_sql", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -256,8 +300,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("sql", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_missing_sql", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -268,10 +311,11 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_malformed", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_SqlSyntaxError_Returns400WithSqliteMessage()
+    public async Task PostQuery_SqlSyntaxError_Returns400WithSqliteErrorCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -282,12 +326,11 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SQLite error", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_sqlite_error", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_NoSuchTable_Returns400WithNoSuchTableMessage()
+    public async Task PostQuery_NoSuchTable_Returns400WithSqliteErrorCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -298,20 +341,12 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("no such table", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_sqlite_error", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode()
+    public async Task PostQuery_AttachStatement_RejectedByKeywordLayer()
     {
-        // The keyword check rejects "INSERT" at the HTTP layer (400),
-        // but the read-only mode is the physical backstop. This test
-        // proves the latter: even an artificial SELECT-statement that
-        // tries to write through ATTACH/INSERT inside a CTE-style
-        // construct fails because the connection itself refuses.
-        // SQLite rejects ATTACH on a read-only connection at the
-        // engine level before the keyword filter even fires.
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
             "{\"sql\":\"ATTACH DATABASE ':memory:' AS attached\"}",
@@ -320,6 +355,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -442,5 +478,11 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         cmd.Parameters.AddWithValue("$start_time", startTime);
         cmd.Parameters.AddWithValue("$end_time", endTime);
         cmd.ExecuteNonQuery();
+    }
+
+    private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
+    {
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("code").GetString();
     }
 }
