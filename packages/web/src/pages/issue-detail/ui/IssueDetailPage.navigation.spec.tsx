@@ -121,17 +121,17 @@ describe('IssueDetailPage fragment navigation', () => {
 
   it('waits for asynchronous issue content before revealing the requested target', async () => {
     const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
-    let resolveIssue: ((response: Response) => void) | undefined
-    server.use(http.get('*/api/projects/:projectId/issues/:number', () => new Promise<Response>((resolve) => {
+    let resolveIssue!: (response: Response) => void
+    const issueResponse = new Promise<Response>((resolve) => {
       resolveIssue = resolve
-    })))
+    })
+    server.use(http.get('*/api/projects/:projectId/issues/:number', () => issueResponse))
 
     renderPage('/project-scope/issues/14#comments')
     expect(screen.getByText('Loading...')).toBeInTheDocument()
     expect(scrollIntoView).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(resolveIssue).toBeTypeOf('function'))
-    resolveIssue?.(HttpResponse.json({ success: true, data: makeIssue() }))
+    resolveIssue(HttpResponse.json({ success: true, data: makeIssue() }))
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
     expect(scrollIntoView.mock.instances[0]).toHaveAttribute('id', 'comments')
   })
