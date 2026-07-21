@@ -22,6 +22,8 @@
 - Verification: `npm run typecheck:tests -w packages/runner`.
 - Removed `rawWith` from the general Action invocation context. Only `mohist/openspec-tasks` receives its opaque raw `task` subtree after validation; custom Actions receive neither raw syntax nor Variables.
 - Verification: `npm run typecheck -w packages/runner` and `npm run typecheck:tests -w packages/runner`.
+- Replaced archive-change's test filesystem access with a narrow injected archive filesystem. Checkpoint creation, retry, collision, corruption, partial archive, and missing source coverage now uses an in-memory implementation.
+- Verification: Runner production and test typechecks, `npm run check:test-boundaries -w packages/runner`, and focused archive/action-boundary tests (32 tests).
 
 ## T-002
 

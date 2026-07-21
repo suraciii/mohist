@@ -39,28 +39,48 @@ export function setOpenSpecGitRunnerForTest(runner: OpenSpecGitRunner | null) {
   openSpecGitRunner = runner ?? defaultGit
 }
 
-type ArchiveRename = (src: string, dst: string) => Promise<void>
-
-let archiveRenameForTest: ArchiveRename | null = null
-
-export function setArchiveRenameForTest(rename: ArchiveRename | null) {
-  archiveRenameForTest = rename
+export interface ArchiveFileSystem {
+  exists(path: string): Promise<boolean>
+  hasFiles(path: string): Promise<boolean>
+  ensureDirectory(path: string): Promise<void>
+  moveDirectory(source: string, destination: string): Promise<void>
+  readText(path: string): Promise<string>
+  writeAtomic(path: string, content: string): Promise<void>
+  remove(path: string): Promise<void>
 }
 
-async function moveChangeDir(src: string, dst: string) {
+const defaultArchiveFileSystem: ArchiveFileSystem = {
+  exists: async (path) => {
+    try {
+      await stat(path)
+      return true
+    } catch {
+      return false
+    }
+  },
+  hasFiles,
+  ensureDirectory: async (path) => {
+    await mkdir(path, { recursive: true })
+  },
+  moveDirectory: moveChangeDir,
+  readText: async (path) => await readFile(path, "utf8"),
+  writeAtomic: writeArchiveCheckpoint,
+  remove: async (path) => await rm(path, { force: true }),
+}
+
+let archiveFileSystem: ArchiveFileSystem = defaultArchiveFileSystem
+
+export function setArchiveFileSystemForTest(fileSystem: ArchiveFileSystem | null) {
+  archiveFileSystem = fileSystem ?? defaultArchiveFileSystem
+}
+
+async function moveChangeDir(source: string, destination: string) {
   try {
-    if (archiveRenameForTest) {
-      await archiveRenameForTest(src, dst)
-    } else {
-      await rename(src, dst)
-    }
+    await rename(source, destination)
   } catch (err) {
-    if (isCrossDeviceError(err)) {
-      await copyDirectory(src, dst)
-      await deleteDirectory(src)
-      return
-    }
-    throw err
+    if (!isCrossDeviceError(err)) throw err
+    await copyDirectory(source, destination)
+    await deleteDirectory(source)
   }
 }
 
@@ -150,8 +170,8 @@ export async function archiveChangeAction(context: ActionInvocationContext): Pro
     const destinationValidation = validateCheckpointDestination(context.workDir, archiveDir, persisted.destination)
     if (destinationValidation.kind === "failure") return archiveFailure("config-error", destinationValidation.message, { kind: "archive-change" })
     destination = destinationValidation.path
-    const sourcePresent = exists(changeDir)
-    const destinationPresent = exists(destination)
+    const sourcePresent = await archiveFileSystem.exists(changeDir)
+    const destinationPresent = await archiveFileSystem.exists(destination)
     if (sourcePresent && destinationPresent) {
       return archiveFailure("partial-archive", `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${destination}`, { kind: "archive-change" })
     }
@@ -160,16 +180,16 @@ export async function archiveChangeAction(context: ActionInvocationContext): Pro
     }
     if (sourcePresent) {
       try {
-        await moveChangeDir(changeDir, destination)
+        await archiveFileSystem.moveDirectory(changeDir, destination)
       } catch (err) {
         return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
       }
     }
   } else {
-    if (!(exists(changeDir) && await hasFiles(changeDir))) {
+    if (!(await archiveFileSystem.exists(changeDir)) || !(await archiveFileSystem.hasFiles(changeDir))) {
       return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
     }
-    await mkdir(archiveDir, { recursive: true })
+    await archiveFileSystem.ensureDirectory(archiveDir)
     const today = new Date().toISOString().slice(0, 10)
     const archivePrefix = `${today}-${sourceName}`
     const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
@@ -185,12 +205,12 @@ export async function archiveChangeAction(context: ActionInvocationContext): Pro
       destination: destinationRel,
     }
     try {
-      await writeArchiveCheckpoint(checkpointPath, checkpointValue)
+      await archiveFileSystem.writeAtomic(checkpointPath, `${JSON.stringify(checkpointValue)}\n`)
     } catch (err) {
       return archiveFailure("retry-safe", `Failed to persist archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
     }
     try {
-      await moveChangeDir(changeDir, destination)
+      await archiveFileSystem.moveDirectory(changeDir, destination)
     } catch (err) {
       return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
     }
@@ -235,7 +255,7 @@ export async function archiveChangeAction(context: ActionInvocationContext): Pro
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
   if (changedFiles.length === 0) {
-    await clearArchiveCheckpoint(checkpointPath)
+    await archiveFileSystem.remove(checkpointPath)
     return succeed({
         kind: "archive-change",
         source: changeDir,
@@ -257,7 +277,7 @@ export async function archiveChangeAction(context: ActionInvocationContext): Pro
     })
   }
 
-  await clearArchiveCheckpoint(checkpointPath)
+  await archiveFileSystem.remove(checkpointPath)
 
   const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
@@ -332,10 +352,10 @@ async function resolveArchiveCheckpoint(context: ActionInvocationContext, source
   const rawPath = result.stdout.trim()
   if (!rawPath) return { kind: "failure", result: archiveFailure("config-error", "Git returned an empty archive checkpoint path", { kind: "archive-change" }) }
   const path = isAbsolute(rawPath) ? resolve(rawPath) : resolve(context.workDir, rawPath)
-  if (!exists(path)) return { kind: "ok", path, value: null }
+  if (!(await archiveFileSystem.exists(path))) return { kind: "ok", path, value: null }
   let parsed: unknown
   try {
-    parsed = JSON.parse(await readFile(path, "utf8"))
+    parsed = JSON.parse(await archiveFileSystem.readText(path))
   } catch (err) {
     return { kind: "failure", result: archiveFailure("config-error", `Malformed archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" }) }
   }
@@ -345,19 +365,15 @@ async function resolveArchiveCheckpoint(context: ActionInvocationContext, source
   return { kind: "ok", path, value: parsed }
 }
 
-async function writeArchiveCheckpoint(path: string, value: ArchiveCheckpoint): Promise<void> {
+async function writeArchiveCheckpoint(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
   try {
-    await writeFile(temporary, `${JSON.stringify(value)}\n`, { encoding: "utf8", flag: "wx" })
+    await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
     await rename(temporary, path)
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined)
   }
-}
-
-async function clearArchiveCheckpoint(path: string): Promise<void> {
-  await rm(path, { force: true })
 }
 
 function isArchiveCheckpoint(value: unknown): value is ArchiveCheckpoint {
@@ -395,11 +411,11 @@ function resolveChangeDir(context: ActionInvocationContext) {
 async function uniqueDestination(archiveDir: string, baseName: string) {
   let destination = resolveArchiveDestination(archiveDir, baseName)
   if (!destination) return null
-  if (!exists(destination)) return destination
+  if (!(await archiveFileSystem.exists(destination))) return destination
   for (let version = 2; ; version++) {
     destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
     if (!destination) return null
-    if (!exists(destination)) return destination
+    if (!(await archiveFileSystem.exists(destination))) return destination
   }
 }
 
