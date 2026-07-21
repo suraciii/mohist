@@ -3,13 +3,14 @@ import { FileIcon, FolderIcon, ArrowLeftIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { ArtifactTextContent } from './ArtifactTextContent'
-import { useIssueWorkflowArtifactContent, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
+import { useIssueWorkflowArtifactContent, type WorkflowArtifact, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
 
 export interface ArtifactContentViewerProps {
   issueNumber: number
   artifactId: string
   path?: string
   size?: number | null
+  artifactKind?: WorkflowArtifact['kind']
   open: boolean
   onOpenChange: (open: boolean) => void
   contentHook?: ArtifactContentHook
@@ -58,6 +59,7 @@ export function ArtifactContentViewer({
   artifactId,
   path,
   size,
+  artifactKind,
   open,
   onOpenChange,
   contentHook = useIssueWorkflowArtifactContent,
@@ -69,7 +71,7 @@ export function ArtifactContentViewer({
   const { data, isLoading, error } = contentHook(
     issueNumber,
     artifactId,
-    { file: selectedEntry?.relativePath },
+    { file: selectedEntry?.relativePath, artifactKind },
     open,
   )
 

@@ -28,3 +28,5 @@
 - JSON file artifacts now retain their raw recorded text; only JSON payloads shaped as directory listings are treated as directories. Focused client tests cover both response types.
 - Verification completed: focused issue API client Vitest file, Web typecheck, and focused issue decision-surface Playwright suite (14 tests).
 - Final verification completed: Web typecheck, full Web Vitest suite (4984 tests), and focused issue decision-surface Playwright suite (14 tests).
+- Artifact content parsing now uses the list response's authoritative file/directory kind instead of inferring directories from JSON fields, so recorded `tasks.json` files with `entries` and `totalSize` remain raw text. Focused client coverage exercises the colliding JSON shape.
+- Verification completed: Web typecheck and focused issue artifact, approval-package, and workflow-artifact Vitest files (24 tests).

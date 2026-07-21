@@ -205,16 +205,15 @@ export type WorkflowArtifactContentResult =
   | { kind: 'text'; content: string; contentType: string | null }
   | { kind: 'directory'; entries: WorkflowArtifactDirectoryEntry[]; totalSize: number }
 
-function isWorkflowArtifactDirectory(value: unknown): value is WorkflowArtifactDirectory {
-  if (!value || typeof value !== 'object') return false
-  const directory = value as Partial<WorkflowArtifactDirectory>
-  return Array.isArray(directory.entries) && typeof directory.totalSize === 'number'
+export interface IssueWorkflowArtifactContentOptions {
+  file?: string
+  artifactKind?: WorkflowArtifact['kind']
 }
 
 export async function getIssueWorkflowArtifactContent(
   number: number,
   artifactId: string,
-  options: { file?: string } = {},
+  options: IssueWorkflowArtifactContentOptions = {},
   projectId?: string | null,
 ): Promise<WorkflowArtifactContentResult> {
   const path = issueWorkflowArtifactContentPath(number, artifactId, projectId)
@@ -229,15 +228,9 @@ export async function getIssueWorkflowArtifactContent(
 
   const contentType = res.headers.get('content-type')
   const content = await res.text()
-  if (!options.file && contentType?.includes('application/json')) {
-    try {
-      const directory = JSON.parse(content) as unknown
-      if (isWorkflowArtifactDirectory(directory)) {
-        return { kind: 'directory', entries: directory.entries!, totalSize: directory.totalSize! }
-      }
-    } catch {
-      return { kind: 'text', content, contentType }
-    }
+  if (!options.file && options.artifactKind === 'directory') {
+    const directory = JSON.parse(content) as WorkflowArtifactDirectory
+    return { kind: 'directory', entries: directory.entries ?? [], totalSize: directory.totalSize ?? 0 }
   }
 
   return { kind: 'text', content, contentType }

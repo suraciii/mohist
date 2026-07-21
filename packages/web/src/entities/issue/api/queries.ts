@@ -3,7 +3,7 @@ import { ApiError } from '../../../shared/api/client'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse, TaskLogPage } from '../model/types'
-import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams, IssueWorkflowTaskLogParams } from './client'
+import type { CreateFeedbackRequest, IssueWorkflowArtifactContentOptions, IssueWorkflowArtifactListParams, IssueWorkflowTaskLogParams } from './client'
 import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
 import { invalidateApprovalWait } from './approval-wait'
 
@@ -74,7 +74,7 @@ export function useIssueWorkflowArtifacts(
   return useQuery(issueWorkflowArtifactsQueryOptions(projectId, issueNumber, params, enabled, workflowRunId))
 }
 
-export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId: string | null, options: { file?: string } = {}, enabled: boolean = true) {
+export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId: string | null, options: IssueWorkflowArtifactContentOptions = {}, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', artifactId, 'content', options],

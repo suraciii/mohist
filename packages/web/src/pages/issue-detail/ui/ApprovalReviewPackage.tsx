@@ -132,7 +132,7 @@ function ArtifactEvidence({
   artifact: ArtifactValue | null
   contentHook?: ArtifactContentHook
 }) {
-  const content = contentHook(issueNumber, artifact?.artifactId ?? null, {}, !!artifact)
+  const content = contentHook(issueNumber, artifact?.artifactId ?? null, { artifactKind: artifact?.kind }, !!artifact)
 
   if (!artifact) return <div className="text-xs text-muted-foreground">Artifact is missing from this workflow run.</div>
   if (artifact.kind === 'directory') return <div className="text-xs text-warning">Unexpected directory artifact; expected a file.</div>

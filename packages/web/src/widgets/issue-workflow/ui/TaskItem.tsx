@@ -335,6 +335,7 @@ export function TaskItem({
           artifactId={selectedArtifact.artifactId}
           path={selectedArtifact.path}
           size={selectedArtifact.size}
+          artifactKind={selectedArtifact.kind}
           open={selectedArtifact !== null}
           contentHook={artifactContentHook}
           onOpenChange={(open) => {

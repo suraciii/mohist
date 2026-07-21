@@ -82,15 +82,15 @@ describe('getIssueEvents', () => {
 })
 
 describe('getIssueWorkflowArtifactContent', () => {
-  it('preserves recorded JSON file content instead of treating it as a directory listing', async () => {
-    const body = '{\n  "task": "review"\n}'
+  it('preserves a JSON file that has directory-like fields', async () => {
+    const body = '{\n  "entries": [],\n  "totalSize": 0\n}'
     server.use(
       http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () => new HttpResponse(body, {
         headers: { 'content-type': 'application/json' },
       })),
     )
 
-    await expect(getIssueWorkflowArtifactContent(455, 'artifact-tasks', {}, 'proj-1')).resolves.toEqual({
+    await expect(getIssueWorkflowArtifactContent(455, 'artifact-tasks', { artifactKind: 'file' }, 'proj-1')).resolves.toEqual({
       kind: 'text',
       content: body,
       contentType: 'application/json',
@@ -105,7 +105,7 @@ describe('getIssueWorkflowArtifactContent', () => {
       })),
     )
 
-    await expect(getIssueWorkflowArtifactContent(455, 'artifact-directory', {}, 'proj-1')).resolves.toEqual({
+    await expect(getIssueWorkflowArtifactContent(455, 'artifact-directory', { artifactKind: 'directory' }, 'proj-1')).resolves.toEqual({
       kind: 'directory',
       entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
       totalSize: 42,
