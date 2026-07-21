@@ -13,9 +13,9 @@ const projects: Project[] = [
   {
     id: 'proj-1',
     name: 'Project 1',
+    repositories: [],
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
-    repositories: [],
   },
 ]
 
@@ -76,12 +76,12 @@ afterEach(() => {
   cleanup()
 })
 
-describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
+describe('IssueDetailPage narrow-viewport decision surface reachability', () => {
   beforeEach(() => {
     mockMatchMedia(true)
   })
 
-  it('running surfaces Stop in the bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
+  it('running surfaces the decision sheet launcher with the primary label and opens the full action list', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -99,18 +99,17 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
 
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
-    expect(headerTier.querySelector('[data-testid="runtime-action-stop"]')).toBeNull()
-    expect(headerTier.querySelector('[data-testid="runtime-stop-confirmation-copy"]')).toBeNull()
+    const launcher = await waitFor(() => screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(launcher).toHaveTextContent(/Stop/i)
+    expect(launcher).toHaveAttribute('data-action-kind', 'stop')
 
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.actionKind).toBe('stop')
-    expect(bar.dataset.summary).toBe('running')
-    expect(within(bar).getByTestId('mobile-action-stop')).toBeInTheDocument()
+    fireEvent.click(launcher)
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-sheet-action-stop')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-sheet-action-ask-agent')).toBeInTheDocument()
   })
 
-  it('approval-required surfaces Approve in the bottom bar', async () => {
+  it('approval-required surfaces both approve and send-back in the mobile sheet', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'check',
@@ -131,16 +130,13 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.actionKind).toBe('approve')
-    expect(within(bar).getByTestId('mobile-action-approve')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-sheet-action-approve')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-sheet-action-send-back')).toBeInTheDocument()
   })
 
-  it('failed surfaces a primary action (Retry) in the bottom bar', async () => {
+  it('failed state exposes retry, resume, rerun, and ask agent in the mobile sheet', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -157,42 +153,15 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.summary).toBe('failed')
-    expect(bar.dataset.actionKind).toBe('retry')
-    expect(within(bar).getByTestId('mobile-action-retry')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-sheet-action-retry')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-sheet-action-resume')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-sheet-action-rerun')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-sheet-action-ask-agent')).toBeInTheDocument()
   })
 
-  it('blocked surfaces a primary action (Retry) in the bottom bar', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: 'blocked',
-      blockedReason: 'Runner lost while work was active.',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'waiting-for-recovery',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    renderPage()
-
-    await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.summary).toBe('failed')
-    expect(bar.dataset.actionKind).toBe('retry')
-    expect(within(bar).getByTestId('mobile-action-retry')).toBeInTheDocument()
-  })
-
-  it('queued backlog (ready to start) surfaces Start in the bottom bar', async () => {
+  it('queued backlog (ready to start) exposes Start in the mobile sheet', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
       workflowStage: null,
@@ -205,13 +174,12 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.actionKind).toBe('start')
-    expect(within(bar).getByTestId('mobile-action-start')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-sheet-action-start')).toBeInTheDocument()
   })
 
-  it('draft backlog surfaces disabled Start with the draft blocker reason', async () => {
+  it('draft backlog surfaces disabled Start with the draft blocker reason and keeps the launcher enabled', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
       workflowStage: null,
@@ -225,15 +193,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
+    const launcher = await waitFor(() => screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(launcher).not.toBeDisabled()
 
-    const start = screen.getByTestId('mobile-action-start')
+    fireEvent.click(launcher)
+    const start = await screen.getByTestId('mobile-sheet-action-start')
     expect(start).toBeDisabled()
     expect(start).toHaveTextContent('Start')
-    expect(start).toHaveAttribute('title', 'Issue is still a draft. Mark it ready before starting.')
+    const reason = await screen.getByTestId('mobile-sheet-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/draft|mark it ready|mark the issue ready/i)
   })
 
-  it('prerequisite-blocked backlog surfaces disabled Start with the prerequisite reason', async () => {
+  it('prerequisite-blocked backlog exposes a visible Start reason with the prerequisite name', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
       workflowStage: null,
@@ -249,14 +220,14 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
-
-    const start = screen.getByTestId('mobile-action-start')
+    fireEvent.click(await screen.findByTestId('mobile-action-sheet-launcher'))
+    const start = await screen.findByTestId('mobile-sheet-action-start')
     expect(start).toBeDisabled()
-    expect(start).toHaveAttribute('title', 'Waiting for #9 Prepare spec')
+    const reason = await screen.findByTestId('mobile-sheet-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/Waiting for #9 Prepare spec/)
   })
 
-  it('runner-unavailable backlog still surfaces the runner gating message in Start', async () => {
+  it('runner-unavailable backlog shows the runner gating reason in Start', async () => {
     mockAgentStatus({
       activeAgents: [],
       capacity: { max: 1 },
@@ -274,38 +245,14 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
-
-    const start = screen.getByTestId('mobile-action-start')
+    fireEvent.click(await screen.findByTestId('mobile-action-sheet-launcher'))
+    const start = await screen.findByTestId('mobile-sheet-action-start')
     expect(start).toBeDisabled()
-    expect(start.getAttribute('title')).toMatch(/runner is not available|no runner is connected/i)
+    const reason = await screen.findByTestId('mobile-sheet-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/runner is not available|no runner is connected/i)
   })
 
-  it('failed state preserves the Start new workflow primary label', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: 'active',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'failed',
-        allowedActions: ['start'],
-      },
-    }))
-
-    renderPage()
-
-    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.summary).toBe('failed')
-    expect(bar.dataset.actionKind).toBe('start')
-    expect(within(bar).getByTestId('mobile-action-start')).toHaveTextContent('Start new workflow')
-  })
-
-  it('done state renders no bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
+  it('done state renders no mobile bar', async () => {
     mockIssue(baseIssue({
       status: 'done',
       workflowStage: 'done',
@@ -322,13 +269,10 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
     expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
   })
 
-  it('archived state renders no bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
+  it('archived state renders no mobile bar', async () => {
     mockIssue(baseIssue({
       status: 'done',
       workflowStage: 'done',
@@ -346,37 +290,10 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
     expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
   })
 
-  it('narrow viewport reserves bottom padding only when a primary action exists (no-padding when no bar)', async () => {
-    mockIssue(baseIssue({
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'done',
-      health: 'done',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'completed',
-        workflowSummaryState: 'completed',
-        allowedActions: [],
-      },
-    }))
-
-    renderPage()
-
-    await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-
-    const column = screen.getByTestId('issue-detail-content-column')
-    expect(column.dataset.barReserved).toBe('false')
-    expect(column.className).not.toContain('pb-[calc(8rem')
-    expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
-  })
-
-  it('narrow viewport reserves extra bottom padding when a primary action bar is present', async () => {
+  it('narrow viewport reserves bottom padding only when a decision surface exists', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -399,7 +316,7 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     expect(column.className).toContain('pb-[calc(8rem')
   })
 
-  it('stop on narrow opens the bottom-sliding drawer and the sticky StatusHeadline remains visible', async () => {
+  it('stop on narrow opens the bottom-sliding sheet with confirmation and the sticky StatusHeadline remains visible', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -417,22 +334,23 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 
     await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
 
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    fireEvent.click(await screen.findByTestId('mobile-sheet-action-stop'))
 
-    const drawer = await waitFor(() => screen.getByTestId('confirmation-drawer'))
-    expect(drawer).toHaveAttribute('role', 'dialog')
-    expect(drawer).toHaveAttribute('aria-modal', 'true')
-    expect(drawer.className).toMatch(/bottom-0/)
+    const sheet = await screen.findByTestId('mobile-action-sheet')
+    expect(sheet).toHaveAttribute('role', 'dialog')
+    expect(sheet).toHaveAttribute('aria-modal', 'true')
+    expect(sheet.className).toMatch(/bottom-0/)
     expect(screen.getByTestId('mobile-stop-confirmation')).toBeInTheDocument()
-    expect(screen.getByTestId('mobile-confirmation-body')).toHaveTextContent('preserve progress')
+    expect(screen.getByTestId('mobile-stop-confirmation-body')).toHaveTextContent(/preserve progress/)
 
     const headline = screen.getByTestId('status-headline')
     expect(headline).toHaveAttribute('data-sticky', 'true')
     expect(headline.className).toMatch(/\bz-20\b/)
-    expect(drawer.className).toMatch(/\bz-50\b/)
+    expect(sheet.className).toMatch(/\bz-50\b/)
 
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByTestId('confirmation-drawer')).toBeNull())
+    await waitFor(() => expect(screen.queryByTestId('mobile-action-sheet')).toBeNull())
   })
 })
 
@@ -496,12 +414,12 @@ describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', (
   })
 })
 
-describe('IssueDetailPage desktop viewport restores RuntimeDecisionSurface and no mobile-only elements', () => {
+describe('IssueDetailPage desktop viewport restores IssueDecisionSurface and no mobile-only elements', () => {
   beforeEach(() => {
     mockMatchMedia(false)
   })
 
-  it('desktop renders RuntimeDecisionSurface in the header tier and neither MobileActionBar nor ConfirmationDrawer in the DOM', async () => {
+  it('desktop renders IssueDecisionSurface in the header tier and neither MobileActionBar nor ConfirmationDrawer in the DOM', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -517,18 +435,16 @@ describe('IssueDetailPage desktop viewport restores RuntimeDecisionSurface and n
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
-
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(headerTier.contains(screen.getByTestId('runtime-decision-surface'))).toBe(true)
-    expect(headerTier.contains(screen.getByTestId('runtime-action-stop'))).toBe(true)
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
+    expect(surface).toBeInTheDocument()
+    expect(screen.getByTestId('decision-action-stop')).toBeInTheDocument()
 
     expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
     expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
 
-    fireEvent.click(screen.getByTestId('runtime-action-stop'))
+    fireEvent.click(screen.getByTestId('decision-action-stop'))
 
-    await waitFor(() => expect(screen.getByTestId('runtime-stop-confirmation-copy')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('decision-stop-confirmation')).toBeTruthy())
     expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
   })
 
@@ -548,7 +464,7 @@ describe('IssueDetailPage desktop viewport restores RuntimeDecisionSurface and n
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
 
     const column = screen.getByTestId('issue-detail-content-column')
     expect(column.dataset.barReserved).toBe('false')

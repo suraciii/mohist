@@ -95,9 +95,9 @@ describe('IssueDetailPage status uniqueness — running summary', () => {
     expect(page.querySelectorAll('[data-testid="runtime-status-pill"]')).toHaveLength(0)
     expect(page.querySelector('[data-testid="status-badges-runtime"]')).toBeNull()
 
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(within(surface).queryByTestId('runtime-current-task')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-summary-running')).toBeNull()
+    const surface = screen.getByTestId('issue-decision-surface')
+    expect(within(surface).queryByTestId('status-headline-current-task')).toBeNull()
+    expect(within(surface).queryByTestId('status-headline-summary')).toBeNull()
   })
 
   it('embeds the current task into the headline text and never renders a separate current-task pill', async () => {
@@ -178,7 +178,7 @@ describe('IssueDetailPage status uniqueness — approval-required summary', () =
 
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('approval-required')
-    const rationale = screen.getByTestId('runtime-rationale').textContent ?? ''
+    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
     expect(rationale).toMatch(/approval.*pending|pending.*approval/i)
     expect(rationale).not.toMatch(/your review|review and approve/i)
 
@@ -223,10 +223,10 @@ describe('IssueDetailPage status uniqueness — blocked summary', () => {
 
     renderPage()
 
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
+    await waitFor(() => screen.getByTestId('issue-decision-surface'))
     const headline = screen.getByTestId('status-headline')
     expect(headline.dataset.summary).toBe('blocked')
-    const rationale = screen.getByTestId('runtime-rationale').textContent ?? ''
+    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
     expect(rationale).toMatch(/stopped manually|resume or rerun/i)
     expect(rationale).not.toMatch(/awaiting approval|pending review|your review/i)
   })
@@ -310,7 +310,6 @@ describe('IssueDetailPage composite parent issue-only status', () => {
     expect(headline.textContent ?? '').toMatch(/1 of 2 child issues done|1 of 2.*done/i)
 
     const page = screen.getByTestId('issue-detail-page-container')
-    expect(page.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
     expect(page.querySelectorAll('[data-testid="runtime-status-pill"]')).toHaveLength(0)
   })
 
@@ -340,7 +339,6 @@ describe('IssueDetailPage composite parent issue-only status', () => {
 
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('issue-only')
-    expect(container.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
     expect(container.querySelector('[data-testid="workflow-view-frame"]')).toBeNull()
   })
 })
@@ -421,8 +419,8 @@ describe('IssueDetailPage two paused meanings are distinguishable', () => {
 
     renderPage()
 
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    const rationale = screen.getByTestId('runtime-rationale').textContent ?? ''
+    await waitFor(() => screen.getByTestId('issue-decision-surface'))
+    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
     expect(rationale).toMatch(/approval.*pending|pending.*approval/i)
     expect(rationale).not.toMatch(/stopped manually|interrupted/i)
   })
@@ -443,8 +441,8 @@ describe('IssueDetailPage two paused meanings are distinguishable', () => {
 
     renderPage()
 
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    const rationale = screen.getByTestId('runtime-rationale').textContent ?? ''
+    await waitFor(() => screen.getByTestId('issue-decision-surface'))
+    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
     expect(rationale).toMatch(/stopped manually|resume or rerun/i)
     expect(rationale).not.toMatch(/approval.*pending|awaiting.*review/i)
   })

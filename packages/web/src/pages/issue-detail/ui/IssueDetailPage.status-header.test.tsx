@@ -64,7 +64,7 @@ describe('IssueDetailPage status-header — three-tier anchors', () => {
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
 
     expect(headerTier.contains(screen.getByTestId('status-headline'))).toBe(true)
-    expect(headerTier.contains(screen.getByTestId('runtime-decision-surface'))).toBe(true)
+    expect(headerTier.contains(screen.getByTestId('issue-decision-surface'))).toBe(true)
 
     expect(referenceRail.className).toContain('space-y-6')
     expect(readingFlow.className).toContain('space-y-8')
@@ -125,7 +125,7 @@ describe('IssueDetailPage status-header — stickiness of StatusHeadline', () =>
 
     renderPage()
 
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     expect(surface.dataset.sticky ?? 'false').toBe('false')
     expect(surface.className).not.toContain('sticky')
   })
@@ -205,14 +205,13 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
     expect(headline.dataset.summary).toBe('done')
     expect(headline.textContent ?? '').toMatch(/Done/i)
 
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(surface.dataset.summary).toBe('done')
-    expect(within(surface).queryByTestId('runtime-action-start')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-stop')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-approve')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-retry')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-resume')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-rerun')).toBeNull()
+    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.queryByTestId('decision-action-start')).toBeNull()
+    expect(screen.queryByTestId('decision-action-stop')).toBeNull()
+    expect(screen.queryByTestId('decision-action-approve')).toBeNull()
+    expect(screen.queryByTestId('decision-action-retry')).toBeNull()
+    expect(screen.queryByTestId('decision-action-resume')).toBeNull()
+    expect(screen.queryByTestId('decision-action-rerun')).toBeNull()
   })
 })
 
@@ -321,7 +320,7 @@ describe('IssueDetailPage status-header — single-badge invariant', () => {
 
     renderPage()
 
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     expect(within(surface).queryByTestId('runtime-summary-label')).toBeNull()
     expect(within(surface).queryByTestId('runtime-summary-running')).toBeNull()
     expect(within(surface).queryByTestId('runtime-current-task')).toBeNull()
@@ -350,8 +349,8 @@ describe('IssueDetailPage status-header — action surface anchoring', () => {
 
     renderPage()
 
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    expect(surface.contains(screen.getByTestId('runtime-actions'))).toBe(true)
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
+    expect(surface.contains(screen.getByTestId('decision-actions'))).toBe(true)
 
     const headerTier = screen.getByTestId('status-header-tier')
     expect(headerTier.contains(surface)).toBe(true)
@@ -363,7 +362,7 @@ describe('IssueDetailPage status-header — action surface anchoring', () => {
     expect(referenceRail.contains(surface)).toBe(false)
 
     for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start']) {
-      const actionIds = Array.from(screen.getByTestId('issue-detail-page-container').querySelectorAll(`[data-testid="runtime-action-${kind}"]`))
+      const actionIds = Array.from(screen.getByTestId('issue-detail-page-container').querySelectorAll(`[data-testid="decision-action-${kind}"]`))
       expect(actionIds.length).toBeLessThanOrEqual(1)
       for (const node of actionIds) {
         expect(headerTier.contains(node)).toBe(true)

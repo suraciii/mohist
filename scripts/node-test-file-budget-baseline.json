@@ -15,7 +15,6 @@
   "packages/web/src/pages/insights/panels/ThroughputChart.test.tsx": 540,
   "packages/web/src/pages/insights/ui/InsightsCharts.test.tsx": 544,
   "packages/web/src/pages/issue-detail/ui/IssueDetailPage.cross-tier.test.tsx": 614,
-  "packages/web/src/pages/issue-detail/ui/IssueDetailPage.narrow-action-bar.test.tsx": 558,
   "packages/web/src/pages/issue-detail/ui/IssueDetailPage.reading-flow.test.tsx": 633,
   "packages/web/src/pages/issue-detail/ui/IssueDetailPage.test.tsx": 904,
   "packages/web/src/pages/settings/ui/AgentSettingsSection.test.tsx": 511,

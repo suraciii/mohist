@@ -1,123 +1,121 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { AlertCircleIcon, BotIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import { getStopConsequenceCopy, invokeAction } from '../../../widgets/issue-workflow'
 import type {
-  RuntimeAvailableAction,
-  RuntimeDecision,
-  RuntimeDecisionSurfaceMutations,
-} from '../../../widgets/issue-workflow'
+  IssueDecisionAction,
+  IssueDecisionActionKind,
+} from '../model/issueDecisionActions'
+import type { IssueDecisionActionController } from '../model/useIssueDecisionActions'
 import { ConfirmationDrawer } from './ConfirmationDrawer'
 
-type ConfirmKind = 'stop' | 'send-back'
-
-export interface MobileActionBarProps {
-  decision: RuntimeDecision
-  mutations: RuntimeDecisionSurfaceMutations
-}
-
-const PENDING_LABEL_BY_KIND: Record<string, string> = {
+const PENDING_BUSY_LABEL: Partial<Record<IssueDecisionActionKind, string>> = {
   approve: 'Approving...',
   'send-back': 'Sending back...',
   retry: 'Retrying...',
   resume: 'Resuming...',
-  rerun: 'Rerunning...',
+  rerun: 'Rerunning stage...',
   stop: 'Stopping...',
   start: 'Starting...',
+  'mark-ready': 'Marking ready...',
+  close: 'Closing...',
+  'mark-as-done': 'Marking done...',
+  'ask-agent': 'Opening...',
+  'view-transcript': 'Opening...',
 }
 
-function isDestructiveKind(kind: RuntimeAvailableAction['kind']): kind is 'stop' | 'send-back' {
-  return kind === 'stop' || kind === 'send-back'
+const PENDING_BUSY_MESSAGE = 'Another request is in progress. Wait for it to finish before trying again.'
+
+function describeIdFor(kind: IssueDecisionActionKind) {
+  return `mobile-sheet-action-${kind}-reason`
 }
 
-function isPending(decision: RuntimeDecision, mutations: RuntimeDecisionSurfaceMutations): boolean {
-  const kind = decision.primary?.kind
-  if (!kind) return false
-  if (kind === 'approve') return mutations.approveMutation.isPending
-  if (kind === 'send-back') return mutations.sendBackMutation.isPending
-  if (kind === 'retry') return mutations.retryMutation.isPending
-  if (kind === 'resume') return mutations.resumeMutation.isPending
-  if (kind === 'rerun') return mutations.rerunMutation.isPending
-  if (kind === 'stop') {
-    return mutations.stopMutation.isPending || mutations.forceStopMutation.isPending
-  }
-  if (kind === 'start') return mutations.startMutation.isPending
-  return false
+function isNavAction(action: IssueDecisionAction): boolean {
+  return action.kind === 'ask-agent' || action.kind === 'view-transcript'
 }
 
-function getActionError(mutations: RuntimeDecisionSurfaceMutations): Error | null {
-  return mutations.approveMutation.error
-    || mutations.sendBackMutation.error
-    || mutations.retryMutation.error
-    || mutations.resumeMutation.error
-    || mutations.rerunMutation.error
-    || mutations.forceStopMutation.error
-    || mutations.stopMutation.error
-    || mutations.startMutation.error
+function describeReason(action: IssueDecisionAction): string | null {
+  if (action.enabled) return null
+  if (action.reason) return action.reason
+  if (action.kind === 'start') return 'Mark the issue ready before starting.'
+  if (action.kind === 'approve') return 'Approval is not available right now.'
+  if (action.kind === 'send-back') return 'Send-back is not available right now.'
+  if (action.kind === 'stop') return 'Stop becomes available between tasks.'
+  if (action.kind === 'retry') return 'Retry is not available right now.'
+  if (action.kind === 'resume') return 'Resume is not available right now.'
+  if (action.kind === 'rerun') return 'Rerun is not available right now.'
+  return null
 }
 
-export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
-  const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null)
+export interface MobileActionBarProps {
+  actions: ReadonlyArray<IssueDecisionAction>
+  primary: IssueDecisionAction | null
+  rationale: string
+  nextAction: string
+  controller: IssueDecisionActionController
+  summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'done-no-action' | 'terminal-no-action'
+}
+
+export function MobileActionBar({
+  actions,
+  primary,
+  rationale,
+  nextAction,
+  controller,
+  summary,
+}: MobileActionBarProps) {
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [sendBackOpen, setSendBackOpen] = useState(false)
   const [sendBackText, setSendBackText] = useState('')
 
-  const primary = decision.primary
-  if (!primary) return null
+  if (!primary && actions.length === 0) return null
+
+  const pendingKind = controller.pendingKind
+  const error = controller.error
 
   const handlePrimaryClick = () => {
-    if (!primary.enabled || pending) return
-    if (isDestructiveKind(primary.kind)) {
-      setConfirmKind(primary.kind)
-      setSendBackText('')
-      return
-    }
-    invokeAction(primary.kind, { decision, mutations })
+    setSheetOpen(true)
   }
 
-  const closeDrawer = () => {
-    if (primary.kind === 'send-back' && mutations.sendBackMutation.isPending) return
-    if (primary.kind === 'stop' && (mutations.stopMutation.isPending || mutations.forceStopMutation.isPending)) {
-      return
-    }
-    setConfirmKind(null)
+  const handleSheetClose = () => {
+    if (pendingKind === 'stop' || pendingKind === 'send-back') return
+    setSheetOpen(false)
+    setSendBackOpen(false)
     setSendBackText('')
   }
 
-  const confirmStop = () => {
-    invokeAction('stop', { decision, mutations })
-    setConfirmKind(null)
+  const openStopConfirm = () => {
+    controller.openStopConfirm()
+  }
+
+  const closeStopConfirm = () => {
+    controller.closeStopConfirm()
   }
 
   const submitSendBack = () => {
-    invokeAction('send-back', {
-      decision,
-      mutations,
-      sendBackBody: sendBackText,
-      callbacks: {
-        onSendBackSuccess: () => {
-          setConfirmKind(null)
-          setSendBackText('')
-        },
-      },
-    })
+    const sendBackAction = actions.find((a) => a.kind === 'send-back')
+    if (!sendBackAction) return
+    controller.runAction(sendBackAction, { sendBackBody: sendBackText })
+    setSendBackOpen(false)
+    setSendBackText('')
+    setSheetOpen(false)
   }
 
-  const pending = isPending(decision, mutations)
-  const actionError = getActionError(mutations)
-  const disabledReason = primary.reason
-  const disabledDescriptionId = disabledReason ? `mobile-action-${primary.kind}-reason` : undefined
-  const label = pending ? PENDING_LABEL_BY_KIND[primary.kind] ?? primary.label : primary.label
-  const buttonVariant = primary.kind === 'stop' || primary.kind === 'send-back' ? 'destructive' : 'default'
-
-  const drawerTitleId = 'mobile-confirmation-drawer-title'
-  const drawerDescriptionId = 'mobile-confirmation-drawer-description'
+  const launcherLabel = primary
+    ? primary.label
+    : actions[0]?.label ?? 'Open actions'
+  const launcherPendingLabel = primary && pendingKind === primary.kind
+    ? (PENDING_BUSY_LABEL[primary.kind] ?? primary.pendingLabel)
+    : null
+  const launcherLabelText = launcherPendingLabel ?? launcherLabel
 
   return (
     <>
       <div
         data-testid="mobile-action-bar"
-        data-action-kind={primary.kind}
-        data-summary={decision.summary}
+        data-summary={summary}
         className={cn(
           'fixed inset-x-0 z-30 isolate px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))]',
           'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0',
@@ -126,57 +124,205 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
         <div className="mx-auto w-full max-w-md rounded-xl border border-border bg-popover/95 backdrop-blur p-2 shadow-lg ring-1 ring-foreground/5 space-y-2">
           <Button
             type="button"
-            variant={buttonVariant}
-            data-testid={`mobile-action-${primary.kind}`}
-            data-primary="true"
-            disabled={!primary.enabled || pending}
-            title={disabledReason ?? undefined}
-            aria-describedby={disabledDescriptionId}
+            variant="default"
+            data-testid="mobile-action-sheet-launcher"
+            data-action-kind={primary?.kind ?? 'none'}
             onClick={handlePrimaryClick}
             className="w-full min-h-[44px] text-sm font-semibold"
           >
-            {label}
+            {launcherLabelText}
           </Button>
-          {disabledReason && (
-            <p id={disabledDescriptionId} className="sr-only">
-              {disabledReason}
-            </p>
-          )}
-          {actionError && !confirmKind && (
-            <div
-              role="alert"
-              aria-live="polite"
-              data-testid="mobile-action-error"
-              className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
-            >
-              {actionError.message}
-            </div>
-          )}
         </div>
       </div>
 
       <ConfirmationDrawer
-        open={confirmKind !== null}
-        onClose={closeDrawer}
-        titleId={drawerTitleId}
-        descriptionId={drawerDescriptionId}
+        open={sheetOpen}
+        onClose={handleSheetClose}
+        testId="mobile-action-sheet"
+        titleId="mobile-action-sheet-title"
+        descriptionId="mobile-action-sheet-description"
       >
-        {confirmKind === 'stop' && (
-          <div className="p-4 space-y-3" data-testid="mobile-stop-confirmation">
+        <div className="p-4 space-y-4" data-testid="mobile-action-sheet-body">
+          <div className="space-y-1">
+            <h3
+              id="mobile-action-sheet-title"
+              data-testid="mobile-action-sheet-title-text"
+              className="text-base font-semibold text-popover-foreground"
+            >
+              Issue actions
+            </h3>
+            <p
+              id="mobile-action-sheet-description"
+              data-testid="mobile-action-sheet-rationale"
+              className="text-sm text-muted-foreground"
+            >
+              {rationale}
+            </p>
+            <p
+              data-testid="mobile-action-sheet-next-action"
+              className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+            >
+              Next action: <span className="text-popover-foreground normal-case font-normal">{nextAction}</span>
+            </p>
+          </div>
+
+          <div className="space-y-2" data-testid="mobile-action-sheet-actions">
+            {actions.map((action) => {
+              const isPending = pendingKind === action.kind
+              const reason = describeReason(action)
+              const isDisabled = !action.enabled || isPending
+              const descriptionId = isDisabled ? describeIdFor(action.kind) : undefined
+              const label = isPending
+                ? (PENDING_BUSY_LABEL[action.kind] ?? action.pendingLabel)
+                : action.label
+
+              if (isNavAction(action) && action.to) {
+                return (
+                  <div key={action.kind} className="flex flex-col items-stretch gap-1">
+                    <Link
+                      to={isDisabled ? '#' : action.to}
+                      aria-disabled={isDisabled}
+                      aria-describedby={descriptionId}
+                      tabIndex={isDisabled ? -1 : 0}
+                      onClick={(event) => {
+                        if (isDisabled) {
+                          event.preventDefault()
+                          return
+                        }
+                        handleSheetClose()
+                      }}
+                      data-testid={`mobile-sheet-action-${action.kind}`}
+                      className={cn(
+                        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-3 h-10 text-sm font-medium transition-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+                        action.primary
+                          ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/80'
+                          : 'border-border bg-background text-foreground hover:bg-muted hover:text-foreground',
+                        isDisabled && 'pointer-events-none opacity-50',
+                      )}
+                    >
+                      {action.kind === 'ask-agent' && !isPending ? <BotIcon className="size-4" aria-hidden="true" /> : null}
+                      {label}
+                    </Link>
+                    {isDisabled && reason && (
+                      <p
+                        id={descriptionId}
+                        data-testid={`mobile-sheet-action-${action.kind}-reason`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {reason}
+                      </p>
+                    )}
+                  </div>
+                )
+              }
+
+              const handleActionClick = () => {
+                if (action.kind === 'stop' && action.enabled) {
+                  openStopConfirm()
+                  return
+                }
+                if (action.kind === 'send-back' && action.enabled) {
+                  setSendBackOpen(true)
+                  return
+                }
+                controller.runAction(action)
+                handleSheetClose()
+              }
+
+              return (
+                <div key={action.kind} className="flex flex-col items-stretch gap-1">
+                  <Button
+                    type="button"
+                    variant={action.primary ? 'default' : action.kind === 'send-back' || action.kind === 'stop' ? 'destructive' : 'outline'}
+                    size="default"
+                    data-testid={`mobile-sheet-action-${action.kind}`}
+                    data-primary={action.primary ? 'true' : 'false'}
+                    data-destructive={action.kind === 'stop' || action.kind === 'send-back' ? 'true' : 'false'}
+                    disabled={isDisabled}
+                    aria-describedby={descriptionId}
+                    onClick={handleActionClick}
+                    className={cn(
+                      'min-h-[40px] justify-center text-sm font-semibold',
+                      (action.kind === 'stop' || action.kind === 'send-back') && isDisabled && 'border-border bg-muted text-muted-foreground hover:bg-muted',
+                    )}
+                  >
+                    {label}
+                  </Button>
+                  {isDisabled && reason && (
+                    <p
+                      id={descriptionId}
+                      data-testid={`mobile-sheet-action-${action.kind}-reason`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {reason}
+                    </p>
+                  )}
+                  {isPending && (
+                    <p
+                      data-testid={`mobile-sheet-action-${action.kind}-pending`}
+                      className="sr-only"
+                      aria-live="polite"
+                    >
+                      {`${PENDING_BUSY_LABEL[action.kind] ?? action.pendingLabel}. ${PENDING_BUSY_MESSAGE}`}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+
+            {actions.length === 0 && (
+              <div
+                data-testid="mobile-sheet-no-action"
+                className="flex items-start gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+              >
+                <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span>No action is currently available. The next transition will appear here when conditions change.</span>
+              </div>
+            )}
+          </div>
+
+          {error && !pendingKind && (
+            <div
+              data-testid="mobile-action-error"
+              role="alert"
+              aria-live="polite"
+              className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+            >
+              {error.message}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="mobile-action-sheet-close"
+              onClick={handleSheetClose}
+              disabled={pendingKind === 'stop' || pendingKind === 'send-back'}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+
+        {controller.stopConfirming && (
+          <div
+            data-testid="mobile-stop-confirmation"
+            className="px-4 pb-4 space-y-3"
+          >
             <div className="space-y-1">
               <h3
-                id={drawerTitleId}
-                data-testid="mobile-confirmation-title"
+                data-testid="mobile-stop-confirmation-title"
                 className="text-base font-semibold text-popover-foreground"
               >
-                {getStopConsequenceCopy(decision.stopRecoverable).title}
+                {controller.stopConfirmTitle}
               </h3>
               <p
-                id={drawerDescriptionId}
-                data-testid="mobile-confirmation-body"
+                data-testid="mobile-stop-confirmation-body"
                 className="text-sm text-muted-foreground"
               >
-                {getStopConsequenceCopy(decision.stopRecoverable).body}
+                {controller.stopConfirmBody}
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -184,9 +330,9 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={closeDrawer}
-                disabled={mutations.stopMutation.isPending || mutations.forceStopMutation.isPending}
-                data-testid="mobile-confirmation-cancel"
+                data-testid="mobile-stop-confirmation-cancel"
+                onClick={closeStopConfirm}
+                disabled={pendingKind === 'stop'}
               >
                 Cancel
               </Button>
@@ -194,43 +340,28 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
                 type="button"
                 variant="destructive"
                 size="sm"
-                onClick={confirmStop}
-                disabled={mutations.stopMutation.isPending || mutations.forceStopMutation.isPending}
-                data-testid="mobile-confirmation-confirm"
+                data-testid="mobile-stop-confirmation-confirm"
+                onClick={() => {
+                  const stopAction = actions.find((a) => a.kind === 'stop')
+                  if (stopAction) controller.runAction(stopAction)
+                  setSheetOpen(false)
+                }}
+                disabled={pendingKind === 'stop'}
               >
-                {mutations.stopMutation.isPending || mutations.forceStopMutation.isPending
-                  ? 'Stopping...'
-                  : 'Stop workflow'}
+                {pendingKind === 'stop' ? 'Stopping...' : 'Stop workflow'}
               </Button>
             </div>
-            {actionError && (
-              <div
-                role="alert"
-                aria-live="polite"
-                data-testid="mobile-action-error"
-                className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
-              >
-                {actionError.message}
-              </div>
-            )}
           </div>
         )}
 
-        {confirmKind === 'send-back' && (
-          <div className="p-4 space-y-3" data-testid="mobile-send-back-form">
+        {sendBackOpen && (
+          <div
+            data-testid="mobile-send-back-form"
+            className="px-4 pb-4 space-y-3"
+          >
             <div className="space-y-1">
-              <h3
-                id={drawerTitleId}
-                data-testid="mobile-confirmation-title"
-                className="text-base font-semibold text-popover-foreground"
-              >
-                Send back for changes
-              </h3>
-              <p
-                id={drawerDescriptionId}
-                data-testid="mobile-confirmation-body"
-                className="text-sm text-muted-foreground"
-              >
+              <h3 className="text-base font-semibold text-popover-foreground">Send back for changes</h3>
+              <p className="text-sm text-muted-foreground">
                 Tell the agent what to change before the workflow continues.
               </p>
             </div>
@@ -256,36 +387,25 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={closeDrawer}
-                disabled={mutations.sendBackMutation.isPending}
-                data-testid="mobile-confirmation-cancel"
+                data-testid="mobile-send-back-cancel"
+                onClick={() => {
+                  setSendBackOpen(false)
+                  setSendBackText('')
+                }}
+                disabled={pendingKind === 'send-back'}
               >
                 Cancel
               </Button>
               <Button
                 type="button"
                 size="sm"
+                data-testid="mobile-send-back-confirm"
+                disabled={!controller.sendBackBodyValid(sendBackText) || pendingKind === 'send-back'}
                 onClick={submitSendBack}
-                disabled={
-                  !sendBackText.trim()
-                  || !decision.approvalStage
-                  || mutations.sendBackMutation.isPending
-                }
-                data-testid="mobile-confirmation-confirm"
               >
-                {mutations.sendBackMutation.isPending ? 'Sending back...' : 'Submit feedback'}
+                {pendingKind === 'send-back' ? 'Sending back...' : 'Submit feedback'}
               </Button>
             </div>
-            {actionError && (
-              <div
-                role="alert"
-                aria-live="polite"
-                data-testid="mobile-action-error"
-                className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
-              >
-                {actionError.message}
-              </div>
-            )}
           </div>
         )}
       </ConfirmationDrawer>

@@ -129,7 +129,6 @@ export const RAIL_CARD_TESTIDS = [
   'reference-rail-drift',
   'reference-rail-convergence',
   'reference-rail-configuration',
-  'reference-rail-actions',
   'reference-rail-prerequisites',
   'reference-rail-readiness',
 ] as const

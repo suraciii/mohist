@@ -77,3 +77,101 @@
   etc.). T-002 can use the same anchor to add the mobile action surface.
 - The current task is no longer a separate pill but is still carried on `decision.currentTask`
   (from `RuntimeDecision`). T-002 may consume that for mobile action description text if needed.
+
+# T-002 — Deliver the unified responsive issue decision surface
+
+## Codebase Patterns
+
+- `RuntimeDecision` continues to be authoritative for workflow actions (approve / send-back /
+  retry / resume / rerun / stop / start). The page-owned `deriveIssueDecisionActions` (under
+  `pages/issue-detail/model/`) composes the optional runtime decision with current Issue facts to
+  produce one ordered, pure `IssueDecisionAction[]` plus a primary fallback. The controller
+  `useIssueDecisionActionController` owns dispatch, pending/error, recoverable vs terminal Stop,
+  Stop confirmation, and send-back validation; `MobileActionBar` and `IssueDecisionSurface` both
+  consume it. `MobileActionBar` no longer duplicates mutation dispatch or pending lookup.
+- Composite parents with no runtime decision get only their applicable lifecycle / delegation
+  descriptors (mark-ready / close / ask-agent / view-transcript) from the page-owned model. The
+  rail `Actions` card is removed; `IssueActionsCard` is deleted along with its tests; the
+  workflow view is mounted `readOnly` and contains no `InlineApprovalControls` mutation path.
+- `IssueDecisionSurface` renders the desktop surface, rationale, next-action text, stop
+  confirmation, and send-back form. `MobileActionBar` renders the launcher + sheet for narrow
+  viewports; the launcher is independently enabled so a disabled primary action never hides
+  enabled secondary actions or their reasons. Disabled destructive buttons use neutral muted
+  styling instead of the live destructive variant. Both renderers use `aria-describedby` for
+  disabled reasons and `aria-live="polite"` for pending mutations.
+
+## Decisions
+
+- Allow `close` for composite parents (matches the existing `IssueActionsCard.showClose` rule
+  that excluded only health != active and an agent running on this issue; do not exclude parents).
+  Composite parents still do not get `mark-as-done` (the previous behavior). Mark-ready continues
+  to require `isDraft` and a non-archived, non-terminal issue.
+- Workflow actions continue to be copied from `RuntimeDecision`; they are not emitted when the
+  decision is null (e.g. composite parents, archived, terminal, no workflow run). When the
+  decision exists, only the kinds covered by the existing lifecycle are copied (approve,
+  send-back, retry, resume, rerun, stop, start); no new lifecycle actions are introduced.
+- `IssueDecisionAction` carries `enabled`, `reason`, `primary`, `destructive`, `mode`, `to`,
+  `order`, and `pendingLabel`. It does NOT carry mutation objects or callbacks — dispatch lives
+  in `useIssueDecisionActionController`. Navigation actions (ask-agent, view-transcript) carry
+  the `to` route computed through `useProjectPath()`.
+- `selectTranscriptSession` selects an active (active / running / probing) session before any
+  other; on ties, prefer the most recently started session, then the most recently created
+  session, and break remaining ties with `sessionName.localeCompare`. Ask Agent is independent
+  of session presence.
+- `MobileActionBar` renders the sheet launcher independently of primary enabled state. The sheet
+  preserves focus trapping via `ConfirmationDrawer`, Escape / close button, focus restoration
+  through the dialog unmount, send-back textarea, Stop confirmation, `safe-area-inset-bottom`
+  clearance, and non-overlapping page padding (`pb-[calc(8rem+env(safe-area-inset-bottom))]`
+  when the bar is mounted).
+
+## Gotchas
+
+- Initial `deriveIssueDecisionActions` accidentally excluded composite parents from `close`; the
+  test asserting the old behavior was updated to assert the new behavior, matching the existing
+  `IssueActionsCard.showClose` predicate.
+- `IssueDetailPage.control-workspace.spec.tsx` originally imported `mockIssueCommits` and
+  `mockIssueDiff` without using them; the imports were removed to satisfy `no-unused-imports`
+  and `npm run typecheck`.
+- `tests/IssueDetailPage.spec.tsx` had a `findRailCard(name: 'Configuration')` whose `name` was
+  unused; renamed to `_name` so the test boundary linter is satisfied without changing behavior.
+- Three test files (`IssueDetailPage.composite-parent-decision-surface.test.tsx`,
+  `IssueDetailPage.control-workspace.spec.tsx`, `IssueDetailPage.drift-recovery.spec.tsx`) used
+  `Object.defineProperty(window, 'innerWidth', ...)` to set the viewport; the `check:test-boundaries`
+  linter rejects this. Switched to `setScopedValue(window, 'innerWidth', ...)` from
+  `tests/support/scoped-property.ts`.
+- `scripts/node-test-file-budget-baseline.json` had a 558-line allowance for
+  `IssueDetailPage.narrow-action-bar.test.tsx`; the file is now 473 lines, so the allowance was
+  removed.
+- The composite-parent desktop test originally clicked the launcher with `.click()`, which
+  triggered a React `act` warning because the click handler scheduled a state update outside
+  `act`. Replaced with `fireEvent.click(launcher)`.
+
+## Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5033 / 5033 tests pass. T-001 baseline had 5098 tests
+  (10 failing because the page and decision-surface work was not yet completed). T-002
+  consolidates the four obsolete spec files (`IssueDetailPage.control-workspace.active.spec.tsx`,
+  `IssueDetailPage.control-workspace.terminal.spec.tsx`,
+  `IssueDetailPage.decision-adjacent-evidence.spec.tsx`,
+  `IssueDetailPage.execution-signal.spec.tsx`) and the `cards/IssueActionsCard.{tsx,test.tsx}`
+  pair into one `IssueDetailPage.control-workspace.spec.tsx` + the shared decision surface,
+  controller, and mobile action model. New focused coverage: 33 model tests in
+  `issueDecisionActions.test.ts`, 18 controller tests in `useIssueDecisionActions.test.tsx`,
+  4 composite-parent decision-surface page tests, and the 10 browser scenarios in
+  `tests/browser/issue-decision-surface.spec.ts`.
+- `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` —
+  10 / 10 browser scenarios pass.
+- `npm run check:fsd -w packages/web` — green (483 production modules).
+- `npm run check:test-boundaries -w packages/web` — green.
+
+## Notes for T-003
+
+- `BranchBar` already uses `useRebaseRecovery.canRequest` and `allowRebase`; the rebased disabled
+  copy lives there. T-003 must keep Rebase out of the issue decision action list (per the
+  capability's design) and apply the disabled-reason + neutral disabled styling rules to the
+  existing `BranchBar` controls.
+- The mobile sheet and desktop surface share the controller but the rebased control stays on
+  `BranchBar`. The "neutral disabled styling" CSS hooks (`bg-muted text-muted-foreground hover:bg-muted
+  border-border`) used for Stop / Send Back can be reused for Rebase when disabled.
+
