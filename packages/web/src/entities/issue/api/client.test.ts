@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getLabels, updateIssue } from './client'
+import { addComment, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getLabels, updateIssue } from './client'
 
 useMswServer()
 
@@ -78,6 +78,28 @@ describe('getIssueEvents', () => {
     const events = await getIssueEvents(42, 'proj-1')
 
     expect(events).toEqual([])
+  })
+})
+
+describe('addComment', () => {
+  it('sends the declared author and returns the persisted author', async () => {
+    let requestBody: unknown
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/comments', async ({ request }) => {
+        requestBody = await request.json()
+        return successResponse({
+          id: 'cmt-1',
+          author: 'Ada Lovelace',
+          body: 'Looks good',
+          createdAt: '2026-07-21T08:00:00Z',
+        })
+      }),
+    )
+
+    const comment = await addComment(42, 'Ada Lovelace', 'Looks good', 'proj-1', ['att-1'])
+
+    expect(requestBody).toEqual({ author: 'Ada Lovelace', body: 'Looks good', attachmentIds: ['att-1'] })
+    expect(comment.author).toBe('Ada Lovelace')
   })
 })
 

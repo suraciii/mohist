@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { IssueStatus, IssueHealth, WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { StageBar, workflowTimelineToStageStateMap, WORKFLOW_STAGES } from './StageBar'
@@ -27,7 +27,7 @@ export function WorkflowView({
   const { data: timeline } = timelineHook(issue.number, !isBacklog)
   const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
 
-  const getDefaultStage = useCallback((): WorkflowStage => {
+  const defaultStage = useMemo((): WorkflowStage => {
     if (isBacklog) return WorkflowStage.Plan
     if (isCompleted) return WorkflowStage.Integrate
     const currentIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
@@ -35,19 +35,11 @@ export function WorkflowView({
     return WorkflowStage.Plan
   }, [issue.workflowStage, isBacklog, isCompleted])
 
-  const [selectedStage, setSelectedStage] = useState<WorkflowStage>(getDefaultStage)
+  const [selectedStage, setSelectedStage] = useState<WorkflowStage>(defaultStage)
 
   useEffect(() => {
-    setSelectedStage(getDefaultStage())
-  }, [getDefaultStage])
-
-  const handleSelectStage = useCallback(
-    (stage: WorkflowStage) => {
-      if (readOnly) return
-      setSelectedStage(stage)
-    },
-    [readOnly],
-  )
+    setSelectedStage(defaultStage)
+  }, [issue.projectId, issue.number, defaultStage])
 
   return (
     <div className="space-y-4">
@@ -55,8 +47,7 @@ export function WorkflowView({
         stageStateMap={stageStateMap}
         issue={issue}
         selectedStage={selectedStage}
-        onSelectStage={handleSelectStage}
-        readOnly={readOnly}
+        onSelectStage={setSelectedStage}
       />
 
       {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked) && (
@@ -69,6 +60,7 @@ export function WorkflowView({
           stageStateMap={stageStateMap}
           issue={issue}
           readOnly={readOnly}
+          workflowRunId={timeline?.workflowRunId ?? issue.workflowRunId ?? null}
           dependencies={dependencies}
         />
       )}

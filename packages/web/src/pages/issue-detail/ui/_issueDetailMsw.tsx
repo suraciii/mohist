@@ -41,6 +41,9 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
     ),
     http.get(`${ISSUES}/events`, () => HttpResponse.json({ success: true, data: [] })),
     http.get(`${ISSUES}/workflow/artifacts`, () => HttpResponse.json({ success: true, data: [] })),
+    http.get(`${ISSUES}/workflow/tasks/:taskId/logs`, () =>
+      HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
+    ),
     http.get(`${ISSUES}/workflow-profile/variables`, () =>
       HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
     ),
@@ -123,6 +126,26 @@ export function mockIssueDiff(diff: Record<string, unknown> | null) {
   )
 }
 
+export function mockIssueDiffError(status = 503) {
+  server.use(
+    http.get(`${ISSUES}/diff`, () =>
+      HttpResponse.json({ success: false, error: 'Diff transport failed' }, { status }),
+    ),
+  )
+}
+
+export function mockIssueDiffPending() {
+  let resolve: ((response: Response) => void) | undefined
+  server.use(
+    http.get(`${ISSUES}/diff`, () => new Promise<Response>((done) => {
+      resolve = done
+    })),
+  )
+  return (diff: Record<string, unknown>) => {
+    resolve?.(HttpResponse.json({ success: true, data: diff }))
+  }
+}
+
 export function mockIssueCommits(commits: Record<string, unknown> | null) {
   server.use(
     http.get(`${ISSUES}/commits`, () =>
@@ -151,6 +174,22 @@ export function mockArtifacts(artifacts: Array<Record<string, unknown>>) {
   server.use(
     http.get(`${ISSUES}/workflow/artifacts`, () =>
       HttpResponse.json({ success: true, data: artifacts }),
+    ),
+  )
+}
+
+export function mockArtifactsError(status = 503) {
+  server.use(
+    http.get(`${ISSUES}/workflow/artifacts`, () =>
+      HttpResponse.json({ success: false, error: 'Artifact transport failed' }, { status }),
+    ),
+  )
+}
+
+export function mockArtifactContent(artifactId: string, content: string, contentType = 'text/markdown') {
+  server.use(
+    http.get(`${ISSUES}/workflow/artifacts/${artifactId}/content`, () =>
+      new HttpResponse(content, { headers: { 'content-type': contentType } }),
     ),
   )
 }

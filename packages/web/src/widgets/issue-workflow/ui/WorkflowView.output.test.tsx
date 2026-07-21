@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { QueryClient, useMutation } from '@tanstack/react-query'
-import { fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { createQueryClient, render } from '../../../../tests/test-utils'
 import { useMswServer } from '../../../../tests/support/msw'
@@ -8,6 +8,7 @@ import { WorkflowView } from './WorkflowView'
 import type { ArtifactContentHook } from './ArtifactContentViewer'
 import type { StepListDependencies } from './InlineApproval'
 import { IssueHealth, IssueStatus, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline } from '../../../entities/issue'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 
 let timeline: WorkflowTimeline
 
@@ -17,6 +18,8 @@ const dependencies: StepListDependencies = {
   approveIssue: async (issueNumber) => ({ issue: issue(issueNumber), context: null, message: 'approved' }),
   requestChangesHook: () => useMutation<ApprovalFeedback, Error, { issueNumber: number, data: { stage: string, body: string } }>({ mutationFn: async () => { throw new Error('not used') } }),
   artifactContentHook: (() => ({ data: undefined, isLoading: false, error: null })) as ArtifactContentHook,
+  taskLogHook: (() => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })) as TaskLogDataHook,
+  workflowSessionsHook: (() => ({ sessions: [], isLoading: false })) as WorkflowRunSessionsHook,
 }
 
 function issue(number = 1): Issue {
@@ -41,14 +44,17 @@ function structuredTimeline(): WorkflowTimeline {
 describe('WorkflowView structured output', () => {
   beforeEach(() => { timeline = structuredTimeline() })
 
-  it('renders process and PR fields without fabricating null output', () => {
+  it('renders process and PR fields without fabricating null output', async () => {
     const queryClient = createQueryClient()
     queryClient.setQueryData(['issues', 1, 'test-project', 'workflow-timeline'], timeline)
     const { container } = render(<WorkflowView issue={issue()} dependencies={dependencies} />, { queryClient: queryClient as QueryClient })
 
-    for (const title of ['Run release command', 'Open release PR', 'Complete without output']) {
+    for (const title of ['Run release command', 'Open release PR']) {
       fireEvent.click(screen.getByText(title).closest('button')!)
     }
+    await act(async () => { await Promise.resolve() })
+
+    expect(screen.getByText('Complete without output').closest('[data-testid="workflow-task-item"]')?.querySelector('button')).toBeNull()
 
     expect(screen.getByText(/"stdout": "release-ready"/)).toBeInTheDocument()
     expect(screen.getByText(/"exitCode": 0/)).toBeInTheDocument()

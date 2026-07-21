@@ -217,7 +217,7 @@ public abstract class EpicProgressionTestSupport
         public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
-        public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();

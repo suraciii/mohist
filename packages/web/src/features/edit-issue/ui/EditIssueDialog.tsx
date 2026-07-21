@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
@@ -9,7 +9,7 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { extractAttachmentIds, LabelEditor, updateIssue } from '../../../entities/issue'
+import { extractAttachmentIds, LabelEditor, partitionIssueBody, recombineIssueBody, updateIssue } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
@@ -28,8 +28,9 @@ export function EditIssueDialog({
   issue,
   issueUpdater = updateIssue,
 }: Props) {
+  const bodyPartition = useMemo(() => partitionIssueBody(issue.body), [issue.body])
   const [title, setTitle] = useState(issue.title)
-  const [body, setBody] = useState(issue.body ?? '')
+  const [description, setDescription] = useState(bodyPartition.description)
   const [labels, setLabels] = useState<LabelMap>(issue.labels ?? {})
   const [priority, setPriority] = useState<string>(issue.priority ?? 'p2')
   const [isDraft, setIsDraft] = useState(issue.isDraft)
@@ -38,23 +39,25 @@ export function EditIssueDialog({
   useEffect(() => {
     if (open) {
       setTitle(issue.title)
-      setBody(issue.body ?? '')
+      setDescription(bodyPartition.description)
       setLabels(issue.labels ?? {})
       setPriority(issue.priority ?? 'p2')
       setIsDraft(issue.isDraft)
     }
-  }, [open, issue])
+  }, [bodyPartition.description, open, issue])
 
   const mutation = useMutation({
-    mutationFn: () =>
-      issueUpdater(issue.number, {
+    mutationFn: () => {
+      const body = recombineIssueBody(bodyPartition, description)
+      return issueUpdater(issue.number, {
         title,
         body: body || undefined,
         attachmentIds: extractAttachmentIds(body),
         labels,
         priority,
         isDraft,
-      }, issue.projectId),
+      }, issue.projectId)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -83,8 +86,8 @@ export function EditIssueDialog({
             <label className="block text-xs font-medium text-foreground mb-1">Description</label>
             <AttachmentComposer
               projectId={issue.projectId}
-              value={body}
-              onChange={setBody}
+              value={description}
+              onChange={setDescription}
               placeholder="Optional description"
               rows={4}
               className="resize-none"

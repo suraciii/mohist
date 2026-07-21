@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { onTimelineEvent, useIssueEvents, type TimelineLiveEvent, type StoredCloudEventDto } from '../../entities/issue'
+import {
+  onTimelineEvent,
+  useIssueEvents,
+  useWorkflowTimeline,
+  type TimelineLiveEvent,
+  type StoredCloudEventDto,
+  type WorkflowTimeline,
+} from '../../entities/issue'
 import { classifyEvent } from './model/classify'
-import { describeEvent } from './model/describe'
+import { describeEvent, type TaskTitleResolver } from './model/describe'
 import { classifySource } from './model/source-tag'
 import type { TimelineEntry } from './model/types'
 
@@ -17,8 +24,20 @@ export type EventTimelineHistoryHook = (
   enabled: boolean,
 ) => EventTimelineHistoryResult
 
+export interface EventTimelineWorkflowResult {
+  data: WorkflowTimeline | null | undefined
+}
+
+export type EventTimelineWorkflowHook = (
+  issueNumber: number,
+  enabled: boolean,
+) => EventTimelineWorkflowResult
+
 const useDefaultHistory: EventTimelineHistoryHook = (issueNumber, enabled) =>
   useIssueEvents(issueNumber, enabled)
+
+const useDefaultWorkflow: EventTimelineWorkflowHook = (issueNumber, enabled) =>
+  useWorkflowTimeline(issueNumber, enabled)
 
 function eventData(payload: Record<string, unknown>): Record<string, unknown> {
   return (payload.data && typeof payload.data === 'object'
@@ -26,7 +45,7 @@ function eventData(payload: Record<string, unknown>): Record<string, unknown> {
     : payload) as Record<string, unknown>
 }
 
-function historyToEntry(event: StoredCloudEventDto): TimelineEntry {
+function historyToEntry(event: StoredCloudEventDto, resolveTaskTitle: TaskTitleResolver): TimelineEntry {
   const payload = eventData(event.data as Record<string, unknown>)
   const { category, attention } = classifyEvent(event.type, payload)
   return {
@@ -36,14 +55,14 @@ function historyToEntry(event: StoredCloudEventDto): TimelineEntry {
     source: classifySource(event.type),
     category,
     attention,
-    description: describeEvent(event.type, payload),
+    description: describeEvent(event.type, payload, resolveTaskTitle),
     detail: extractDetail(event.type, payload),
     payload,
     isLive: false,
   }
 }
 
-function liveToEntry(event: TimelineLiveEvent): TimelineEntry {
+function liveToEntry(event: TimelineLiveEvent, resolveTaskTitle: TaskTitleResolver): TimelineEntry {
   const payload = event.payload
   const { category, attention } = classifyEvent(event.type, payload)
   return {
@@ -53,7 +72,7 @@ function liveToEntry(event: TimelineLiveEvent): TimelineEntry {
     source: classifySource(event.type),
     category,
     attention,
-    description: describeEvent(event.type, payload),
+    description: describeEvent(event.type, payload, resolveTaskTitle),
     detail: extractDetail(event.type, payload),
     payload,
     isLive: true,
@@ -101,11 +120,22 @@ export function useEventTimeline(
   issueNumber: number,
   enabled: boolean = true,
   historyHook: EventTimelineHistoryHook = useDefaultHistory,
+  workflowHook: EventTimelineWorkflowHook = useDefaultWorkflow,
 ): {
   entries: TimelineEntry[]
   isLoading: boolean
 } {
   const { data: history, isLoading } = historyHook(issueNumber, enabled)
+  const { data: workflowTimeline } = workflowHook(issueNumber, enabled)
+  const resolveTaskTitle = useMemo<TaskTitleResolver>(() => {
+    const titles = new Map<string, string>()
+    for (const stage of workflowTimeline?.stages ?? []) {
+      for (const task of stage.tasks) {
+        titles.set(`${stage.stage}\u0000${task.id}`, task.title)
+      }
+    }
+    return (stage, taskId) => titles.get(`${stage}\u0000${taskId}`) ?? null
+  }, [workflowTimeline])
   const [liveTick, setLiveTick] = useState(0)
   const liveRef = useRef<TimelineEntry[]>([])
 
@@ -118,18 +148,22 @@ export function useEventTimeline(
     if (!enabled) return
     return onTimelineEvent((event) => {
       if (!belongsToIssue(event, issueNumber)) return
-      const entry = liveToEntry(event)
+      const entry = liveToEntry(event, resolveTaskTitle)
       liveRef.current = [entry, ...liveRef.current].slice(0, MAX_LIVE_EVENTS)
       setLiveTick((n) => n + 1)
     })
-  }, [issueNumber, enabled])
+  }, [issueNumber, enabled, resolveTaskTitle])
 
   const entries = useMemo(() => {
-    const historyEntries = (history ?? []).map(historyToEntry)
+    const historyEntries = (history ?? []).map((event) => historyToEntry(event, resolveTaskTitle))
     const seen = new Set<string>()
     const merged: TimelineEntry[] = []
 
-    for (const entry of liveRef.current) {
+    for (const liveEntry of liveRef.current) {
+      const entry = {
+        ...liveEntry,
+        description: describeEvent(liveEntry.type, liveEntry.payload, resolveTaskTitle),
+      }
       const key = dedupeKey(entry)
       if (!seen.has(key)) {
         seen.add(key)
@@ -146,7 +180,7 @@ export function useEventTimeline(
     }
 
     return merged.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-  }, [history, liveTick])
+  }, [history, liveTick, resolveTaskTitle])
 
   return { entries, isLoading }
 }

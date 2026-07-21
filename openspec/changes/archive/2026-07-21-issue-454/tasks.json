@@ -1,0 +1,131 @@
+{
+  "project": "mohist-local",
+  "description": "Deduplicate the issue detail reading flow, separate issue metadata from description content, make core sections deep-linkable, and restore truthful subject and comment attribution across workflow history.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Separate issue metadata from description content",
+      "spec": "specs/issue-metadata-presentation/spec.md#requirement-recognized-issue-frontmatter-is-presented-without-overriding-issue-state, specs/issue-metadata-presentation/spec.md#requirement-description-rendering-excludes-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-collapsed-description-hints-exclude-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-malformed-leading-frontmatter-does-not-enter-the-reading-flow, specs/issue-metadata-presentation/spec.md#requirement-description-editing-does-not-expose-raw-frontmatter",
+      "description": "Move issue-body partitioning into the Issue entity and make create, detail, preview, Details metadata, and edit flows consume that one contract. Keep authoritative Issue state ahead of conflicting body defaults, preserve closed envelopes during description-only edits, and deterministically hide and repair unclosed envelopes while raw metadata stays out of every description surface.",
+      "acceptanceCriteria": [
+        "The Issue entity public API owns one deterministic partition/recomposition contract that returns recognized recommended_workflow, recommended_workflow_reason, and risk metadata, post-envelope description content, original raw envelope, and none/closed/unclosed state; create-issue no longer owns a competing parser.",
+        "Parser coverage preserves existing quoted scalar and literal/folded block behavior and adds BOM, CRLF, unknown-key, bounded malformed-envelope, unclosed-envelope, empty-description, lossless closed recomposition, and one-delimiter unclosed repair cases without adding a YAML dependency.",
+        "IssueDetailPage partitions the body once and passes only description content to IssueDescriptionSection and its collapsed-preview builder; bounded malformed envelopes retain post-delimiter description, while an unclosed leading envelope renders no description or preview and exposes no raw text in the editor.",
+        "IssueDetailsCard labels body workflow/reason as recommendation metadata and renders exactly one Risk value using issue.risk before parsed body risk; the existing Workflow Profile rail remains the sole selected-profile presentation, and overridden risk plus recommended-versus-selected workflow tests prove stale defaults cannot replace or duplicate authoritative fields.",
+        "An issue containing only a frontmatter envelope renders no Description body while its recognized values remain visible in Details, and raw delimiters/keys never render as Markdown headings or preview text.",
+        "EditIssueDialog initializes its description textarea with post-envelope content only and recombines the raw envelope with edited content before PATCH; closed-envelope saves preserve recognized values, unknown lines, and line endings, while an unclosed envelope receives exactly one closing delimiter before new description content and reopens as a valid hidden envelope.",
+        "CreateIssueDialog retains its current recommendation and risk behavior through the entity parser, with existing frontmatter tests migrated rather than duplicated across feature slices.",
+        "Focused entity, create-issue, edit-issue, IssueDescriptionSection, IssueDetailsCard, and MSW-backed issue-detail tests cover display, preview, editing, preservation, partial metadata, and no-description behavior.",
+        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, and npm run test:run -w packages/web pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Entity-owned issue-body partition/recomposition API with precedence and malformed-envelope semantics, migrated create flow, sanitized detail/preview/edit presentations, structured Details metadata, and focused Web coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Treat selected workflow profile and Issue risk as current state; body workflow/reason are recommendations and body risk is fallback only. Preserve closed envelopes byte-for-byte, and make insertion of one missing delimiter the only unclosed-envelope repair. Do not add Issue columns, a YAML package, same-layer feature imports, or independent stripping regular expressions. This slice is independent of T-002 through T-004."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver one responsive workflow task inspector",
+      "spec": "specs/issue-detail-reading-flow/spec.md#requirement-workflow-tasks-have-one-stage-aware-home, specs/issue-detail-reading-flow/spec.md#requirement-task-rows-preserve-task-identity-and-honest-affordances, specs/issue-detail-reading-flow/spec.md#requirement-every-workflow-stage-remains-reachable",
+      "description": "Make WorkflowView the sole timeline-backed owner of stage selection and task inspection. Merge task logs and the useful progress-panel details into the canonical task row, remove the duplicate TaskProgressPanel path, and expose all four stages in a stable responsive selector without coupling inspection to workflow mutation permissions.",
+      "acceptanceCriteria": [
+        "IssueDetailPage renders exactly one workflow task list from WorkflowView/StepList and no TaskProgressPanel; each selected-stage task appears once and WorkflowView performs the only timeline-to-stage task mapping for this presentation.",
+        "The canonical TaskItem preserves TaskLogPanel access, structured output, failure reason/guidance, required files, artifact summaries, session links, lifecycle time, and existing checks/approval/feedback history before obsolete TaskProgressPanel code, exports, and superseded tests are deleted.",
+        "Task inspection remains available for read-only, archived, completed, and cancelled presentations where data exists, while workflow-mutating controls retain their existing authorization and remain disabled or absent as applicable.",
+        "A row with logs or other revealable details has an accessible disclosure state and visibly expands/collapses; a row without details is non-interactive and has no button/disclosure styling or unavailable click behavior.",
+        "Task title is the wrapping primary row text on desktop and phone width; artifact paths, runtime origin, session, and timestamps remain secondary and cannot hide or replace a completed task title, and interactive artifact/session controls are not nested inside another interactive control.",
+        "The stage selector uses four columns when space permits and a fixed 2x2 phone layout with no horizontal stage overflow; completed and pending stages remain selectable for inspection and expose selected-state semantics.",
+        "Changing stages updates the sole task list, and timeline polling does not reset a user's selected stage unless issue identity or the authoritative default stage changes.",
+        "Focused WorkflowView, StageBar, TaskItem, TaskLogPanel integration, issue-detail uniqueness, archived/read-only, and polling regression tests cover the complete behavior matrix.",
+        "A focused production-build Playwright scenario at phone width proves all four stages are visible/reachable, selecting each exposes its tasks, completed task titles remain visible with long metadata, disclosure behavior is honest, and the document has no horizontal overflow or overlap.",
+        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Single WorkflowView task inspector with canonical log-capable task rows, mutation-independent stage inspection, responsive 4/2-column stage selector, removed TaskProgressPanel, and focused unit/spec/browser coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Preserve StepList as owner of tasks, checks, approval evidence, and feedback history. Do not hide StepList tasks in favor of TaskProgressPanel, add a second timeline mapper, or make read-only mean non-inspectable. This slice establishes the final #workflow boundary consumed by T-005."
+    },
+    {
+      "id": "T-003",
+      "title": "Consolidate Changes and Artifacts in the reading flow",
+      "spec": "specs/issue-detail-reading-flow/spec.md#requirement-changes-have-one-summary-and-one-degraded-state, specs/issue-detail-reading-flow/spec.md#requirement-artifacts-have-one-stable-reading-flow-section",
+      "description": "Give changed-file state and the ordinary artifact collection one page location each. Fold diff summary and degraded workspace consequences into the Changes section, retain commits only when available, and collapse ArtifactOpener to the single reading-flow presentation while preserving approval-specific inline evidence.",
+      "acceptanceCriteria": [
+        "IssueDiffFilesSection is the sole Changes section and owns loading, available, zero-change, and unavailable states; the standalone diff-summary banner and trailing concatenated diff/commit fallback are removed.",
+        "When diff data is available, one Changes section identifies head/base and displays files changed, additions, and deletions while retaining changed-files navigation; no equivalent branch/count summary appears elsewhere in the ordinary reading flow.",
+        "When workspace state prevents diff and commit inspection, one consequence-oriented Changes message identifies what cannot be inspected, IssueCommitsSection does not repeat the workspace message, and output never contains duplicated text such as Workspace unavailable / Workspace unavailable.",
+        "IssueCommitsSection retains its current available and empty behavior and position but renders no separate shared-workspace failure; transport failure and available:false cases remain distinguishable in focused page tests.",
+        "LatestArtifactsPanel is the sole ordinary artifact collection at a stable reading-flow position across non-approval states, retains list/loading/error/empty/open-content behavior, and keeps the non-approval artifacts section boundary mounted with an explicit empty state when no workflow run or artifacts exist.",
+        "ArtifactOpener has one full-list contract; compact mode, compact-only props/exports/markup, and superseded tests are removed, while approval packages continue to render their required inline evidence without restoring a duplicate ordinary collection.",
+        "MSW-backed issue-detail tests assert exact Changes and Artifacts section cardinality, reading-flow order, available/empty/degraded matrices, artifact opening, approval/non-approval behavior, and absence of old banner, fallback, and compact evidence paths.",
+        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, and npm run test:run -w packages/web pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Single Changes state owner, single ordinary Artifacts section, preserved available commits and approval evidence, removed duplicate banner/fallback/compact paths, and focused Web coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Consolidate ownership rather than extracting reusable summary fragments for multiple placements. Keep the changed-files route, artifact content renderer, and approval package behavior unchanged. This slice establishes the final #artifacts boundary consumed by T-005."
+    },
+    {
+      "id": "T-004",
+      "title": "Restore truthful attribution in issue history",
+      "spec": "specs/issue-history-attribution/spec.md#requirement-task-activity-names-its-task-subject, specs/issue-history-attribution/spec.md#requirement-artifact-activity-names-its-artifact-subject, specs/issue-history-attribution/spec.md#requirement-new-comments-record-a-declared-author, specs/issue-history-attribution/spec.md#requirement-comment-rows-show-recorded-or-historical-attribution",
+      "description": "Resolve workflow task and artifact subjects in the Activity presentation while keeping durable event payloads identity-based. Add a complete declared-author contract for new comments across server persistence/API, Web, and CLI, while historical comments retain explicit Unknown author attribution.",
+      "acceptanceCriteria": [
+        "When Activity is enabled, the widget obtains the existing workflow timeline and builds a stage-plus-task-ID title lookup; task started/completed/failed summaries name the resolved title and fall back to the stable task ID rather than an anonymous Task Started/Completed/Failed label.",
+        "Artifact-recorded summaries name the event's displayable path directly, and both task and artifact subjects are visible in the row summary without opening raw event detail.",
+        "Historical and live events use the same subject-aware formatter and retain existing classification, attention, detail, deduplication, ordering, filters, and live-status behavior; no task title is added to durable domain event payloads or generic stored-event APIs.",
+        "A migration adds nullable IssueCommentRow.Author with no fabricated backfill; AddCommentRequest and the grain command require a trimmed 1-100 character author for every new comment, persist it atomically with body, and reject missing/blank/over-limit values with actionable errors without creating a row.",
+        "IssueCommentDto, IssueCommentResult, add response, and issue read projection expose nullable author; every newly accepted comment round-trips its exact trimmed declared author, while pre-migration null rows serialize safely and render Unknown author.",
+        "The Web Comment model and addComment client carry author, the comment composer requires an Author input before submission, and IssueCommentsSection renders author and creation time with the matching body; historical null/blank data renders the exact label Unknown author.",
+        "mo issue comment add requires --author for inline-body, file-body, table, and JSON paths, sends it to the API, surfaces server validation, and preserves all existing project/body behavior.",
+        "Comment author, timestamp, body, attachment rendering, deletion, composition, and Command+Enter behavior remain readable and functional at desktop and phone width.",
+        "Focused describeEvent/useEventTimeline/EventTimelinePanel tests cover title resolution, stage-key disambiguation, ID fallback, artifact path, historical/live parity, and unchanged event behavior; server migration/grain/API specs, Web comment tests, and CLI command specs cover declared-author success, validation, round-trip, and historical fallback.",
+        "A focused production-build phone Playwright scenario shows comment author, timestamp, and body without clipping, overlap, or horizontal document overflow.",
+        "npm test, npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Subject-aware Activity formatting, persisted required declared authors for new comments, historical Unknown author fallback, updated server/Web/CLI contracts, and focused cross-package/browser coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep workflow events immutable. Declared author is persisted attribution text, not authenticated identity: never infer Operator/You/client/channel values or describe it as verified. Existing rows remain null/Unknown author; all new Web/API/CLI commands require author. T-005 may change ActivityDialog control but does not consume this slice's formatter output."
+    },
+    {
+      "id": "T-005",
+      "title": "Make issue detail sections URL-addressable",
+      "spec": "specs/issue-detail-navigation/spec.md#requirement-core-issue-sections-have-stable-url-fragments, specs/issue-detail-navigation/spec.md#requirement-direct-section-urls-reveal-their-destination, specs/issue-detail-navigation/spec.md#requirement-fragment-navigation-works-within-an-already-open-issue",
+      "description": "Add route-local fragment navigation for the final Workflow, Artifacts, Activity, and Comments destinations. Use React Router location state as the sole authority, reveal query-backed sections after asynchronous rendering, and make the existing Activity dialog controlled by #activity while retaining its reusable uncontrolled mode.",
+      "acceptanceCriteria": [
+        "The final Workflow, Artifacts, Activity, and Comments destinations expose stable workflow, artifacts, activity, and comments DOM IDs and canonical #workflow, #artifacts, #activity, and #comments links without changing project scope, pathname, search, or the changed-files route.",
+        "Outside approval, LatestArtifactsPanel owns the sole artifacts ID; during approval, the ordinary panel is absent and ApprovalReviewPackage's inline artifact-evidence region owns the sole artifacts ID even while evidence is loading, missing, or unavailable.",
+        "A route-local issue-detail model reads location.hash and reveals #workflow, #artifacts, and #comments after their asynchronous content is ready; direct-load and already-open hash changes both target the requested section without navigating away from the issue.",
+        "ActivityDialog supports controlled open/onOpenChange composition while retaining its current uncontrolled default; on the issue page #activity opens and enables the timeline without a trigger click, the ordinary trigger navigates to #activity, and close clears only the hash idempotently.",
+        "The URL hash is the only page-level Activity/section state, browser back/forward updates the visible destination, and no duplicate activityOpen or section-selection state can diverge from the URL.",
+        "Unknown fragments leave the issue page usable and do not open Activity or scroll to an unrelated section; composite parents with no workflow destinations fail safely, while every workflow-capable approval and non-approval state provides a visible artifacts target.",
+        "Focused route-model, controlled/uncontrolled ActivityDialog, ApprovalReviewPackage, and MSW-backed IssueDetailPage tests cover all four direct fragments, non-approval and approval #artifacts ownership/cardinality, unavailable approval evidence, async target readiness, in-page fragment changes, open/close/back behavior, project/issue identity preservation, and unknown/absent targets.",
+        "A focused production-build Playwright spec opens separate phone and desktop issue URLs for #workflow, non-approval #artifacts, approval #artifacts, #activity, and #comments and proves each destination is visible, Activity opens without a trigger click, section content is not obscured or overlapped, and the document has no horizontal overflow.",
+        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "URL-derived issue section navigation, stable final section IDs, controlled hash-addressable Activity dialog, async fragment reveal behavior, and focused route/component/browser coverage.",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Consumes T-002's final Workflow boundary and T-003's ordinary Artifacts boundary, and assigns the same mutually exclusive ID to ApprovalReviewPackage evidence during approval. Keep navigation page-local; do not add nested routes, allow #artifacts to no-op on workflow-capable issues, depend only on native initial anchor scrolling, or duplicate the hash in component state. The DAG has four priority-1 roots and one priority-2 leaf and is acyclic."
+    }
+  ]
+}

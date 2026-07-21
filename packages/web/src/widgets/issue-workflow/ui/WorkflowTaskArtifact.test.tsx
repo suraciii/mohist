@@ -5,6 +5,7 @@ import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from '
 import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
 import { IssueCard } from '../../kanban-board/ui/IssueCard'
 import type { AgentStatus } from '../../../entities/agent'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 
 let timelineData: WorkflowTimeline | null = null
 let fileContent: { base: string; head: string } | null = null
@@ -23,12 +24,15 @@ const fileContentFn = async (
   return fileContent ?? { base: '', head: '' }
 }
 
+const taskLogHook: TaskLogDataHook = () => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })
+const workflowSessionsHook: WorkflowRunSessionsHook = () => ({ sessions: [], isLoading: false })
+
 function WorkflowView({ issue }: { issue: Issue }) {
   return (
     <DefaultWorkflowView
       issue={issue}
       timelineHook={timelineHook}
-      dependencies={{ fileContentFn }}
+      dependencies={{ fileContentFn, taskLogHook, workflowSessionsHook }}
     />
   )
 }
@@ -425,9 +429,7 @@ describe('Board card stage progress', () => {
       health: IssueHealth.Active,
       workflowStageProgress: { stage: 'Build', total: 0, completed: 0, running: 0, failed: 0 },
     })
-
     render(<IssueCard issue={issue} agentStatus={mockAgentStatus} />)
-
     expect(screen.queryByText('/')).not.toBeInTheDocument()
   })
 

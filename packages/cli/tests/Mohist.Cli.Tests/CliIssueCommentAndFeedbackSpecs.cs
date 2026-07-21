@@ -20,6 +20,7 @@ public class CliIssueCommentAndFeedbackSpecs
                     data = new
                     {
                         id = "comment_42",
+                        author = "Ada Lovelace",
                         body = "Looks good",
                     },
                 }, HttpStatusCode.Created);
@@ -28,14 +29,16 @@ public class CliIssueCommentAndFeedbackSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42", "--body", "Looks good"], output, error, fs, executor);
+            http, ["issue", "comment", "add", "42", "--author", "  Ada Lovelace  ", "--body", "Looks good"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
         Assert.Equal("/api/projects/proj_abc/issues/42/comments", postReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(postReq.Body!)!;
         Assert.Equal("Looks good", body["body"]?.GetValue<string>());
+        Assert.Equal("Ada Lovelace", body["author"]?.GetValue<string>());
         Assert.Contains("comment_42", output.ToString());
+        Assert.Contains("Ada Lovelace", output.ToString());
     }
 
     [Fact]
@@ -48,7 +51,7 @@ public class CliIssueCommentAndFeedbackSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { id = "comment_99", body = "long comment..." },
+                    data = new { id = "comment_99", author = "Grace Hopper", body = "long comment..." },
                 }, HttpStatusCode.Created);
             }
             return null!;
@@ -56,12 +59,13 @@ public class CliIssueCommentAndFeedbackSpecs
         fs.AddFile("/tmp/comment.md", "long comment...");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
+            http, ["issue", "comment", "add", "42", "--author", "Grace Hopper", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
         var body = JsonNode.Parse(postReq.Body!)!;
         Assert.Equal("long comment...", body["body"]?.GetValue<string>());
+        Assert.Equal("Grace Hopper", body["author"]?.GetValue<string>());
     }
 
     [Fact]
@@ -70,7 +74,7 @@ public class CliIssueCommentAndFeedbackSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "add", "42"], output, error, fs, executor);
+            http, ["issue", "comment", "add", "42", "--author", "Ada"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);
@@ -101,7 +105,7 @@ public class CliIssueCommentAndFeedbackSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { id = "comment_1", body = "ok" },
+                    data = new { id = "comment_1", author = "Ada", body = "ok" },
                 }, HttpStatusCode.Created);
             }
             return null!;
@@ -109,7 +113,7 @@ public class CliIssueCommentAndFeedbackSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "comment", "add", "42", "--body", "ok", "--project-id", "proj_xyz"],
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "--project-id", "proj_xyz"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -127,7 +131,7 @@ public class CliIssueCommentAndFeedbackSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { id = "comment_json", body = "ok" },
+                    data = new { id = "comment_json", author = "Ada", body = "ok" },
                 }, HttpStatusCode.Created);
             }
             return null!;
@@ -135,14 +139,88 @@ public class CliIssueCommentAndFeedbackSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "comment", "add", "42", "--body", "ok", "-o", "json"],
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "-o", "json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var json = JsonNode.Parse(output.ToString())!;
         Assert.Equal("comment_json", json["id"]?.GetValue<string>());
         Assert.Equal("ok", json["body"]?.GetValue<string>());
+        Assert.Equal("Ada", json["author"]?.GetValue<string>());
         Assert.DoesNotContain("Created comment", output.ToString());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task IssueCommentAdd_MissingOrBlankAuthor_FailsBeforePost(string? author)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+        var args = new List<string> { "issue", "comment", "add", "42", "--body", "Looks good" };
+        if (author is not null)
+        {
+            args.Add("--author");
+            args.Add(author);
+        }
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args.ToArray(), output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.Contains("--author", error.ToString());
+        Assert.Contains("required", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task IssueCommentAdd_AuthorOverLimit_FailsBeforePost()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "comment", "add", "42", "--author", new string('x', 101), "--body", "Looks good"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.Contains("100", error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueCommentAdd_TableOutput_ShowsRecordedAuthorAndBody()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(request =>
+            request.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new { success = true, data = new { id = "comment_table", author = "Ada", body = "Looks good" } })
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "Looks good", "-o", "table"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("author:  Ada", output.ToString());
+        Assert.Contains("body:    Looks good", output.ToString());
+    }
+
+    [Fact]
+    public async Task IssueCommentAdd_ServerValidation_SurfacesActionableMessage()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(request =>
+            request.Method == HttpMethod.Post
+                ? RecordingHttpHandler.JsonError("Comment author must be 100 characters or fewer.", "validation", HttpStatusCode.BadRequest)
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "Looks good"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("100 characters", output.ToString() + error.ToString());
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Post);
     }
 
     [Fact]

@@ -8,8 +8,6 @@ import {
   type WorkflowArtifactDirectory,
 } from '../../../entities/issue'
 
-export type ArtifactOpenerMode = 'full' | 'compact'
-
 export type ArtifactOpenerArtifactsHook = (
   ...args: Parameters<typeof useIssueWorkflowArtifacts>
 ) => Pick<ReturnType<typeof useIssueWorkflowArtifacts>, 'data' | 'isLoading' | 'error'>
@@ -17,11 +15,8 @@ export type ArtifactOpenerArtifactsHook = (
 export interface ArtifactOpenerProps {
   issueNumber: number
   workflowRunId?: string | null
-  mode: ArtifactOpenerMode
-  compactLimit?: number
   artifactsHook?: ArtifactOpenerArtifactsHook
   contentHook?: ArtifactContentHook
-  evidenceSummary?: string
 }
 
 export type { ArtifactContentHook }
@@ -61,87 +56,35 @@ function ArtifactItemRow({
 export function ArtifactOpener({
   issueNumber,
   workflowRunId,
-  mode,
-  compactLimit = 3,
   artifactsHook = useIssueWorkflowArtifacts,
   contentHook,
-  evidenceSummary,
 }: ArtifactOpenerProps) {
   const { data: artifacts, isLoading, error } = artifactsHook(issueNumber, {}, !!workflowRunId)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
 
-  if (!workflowRunId) return null
-
-  const visibleArtifacts = mode === 'compact' && compactLimit > 0
-    ? (artifacts ?? []).slice(0, compactLimit)
-    : (artifacts ?? [])
   const selectedArtifact = artifacts?.find((a) => a.artifactId === selectedArtifactId)
-  const listTestId = mode === 'compact' ? 'runtime-evidence-list' : 'latest-artifacts-list'
-
-  if (mode === 'compact') {
-    if (isLoading && (!artifacts || artifacts.length === 0)) return null
-    if (error) return null
-    if (visibleArtifacts.length === 0) return null
-    return (
-      <div
-        className="mt-3 rounded-md border border-border bg-muted/50 p-2"
-        data-testid="runtime-evidence"
-        data-mode={mode}
-        data-summary={evidenceSummary}
-      >
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Plan / check evidence
-        </div>
-        <div
-          className="space-y-1"
-          data-testid={listTestId}
-          data-mode={mode}
-        >
-          {visibleArtifacts.map((artifact) => (
-            <ArtifactItemRow
-              key={artifact.artifactId}
-              artifact={artifact}
-              onClick={() => setSelectedArtifactId(artifact.artifactId)}
-            />
-          ))}
-          {selectedArtifact && (
-            <ArtifactContentViewer
-              issueNumber={issueNumber}
-              artifactId={selectedArtifact.artifactId}
-              path={selectedArtifact.path}
-              size={selectedArtifact.size}
-              artifactKind={selectedArtifact.kind}
-              open={selectedArtifactId !== null}
-              contentHook={contentHook}
-              onOpenChange={(open) => {
-                if (!open) setSelectedArtifactId(null)
-              }}
-            />
-          )}
-        </div>
-      </div>
-    )
-  }
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <section id="artifacts" className="space-y-3 scroll-mt-20" data-testid="latest-artifacts-panel" aria-label="Artifacts">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-card-foreground">Latest Artifacts</h3>
-        {isLoading && <span className="text-xs text-muted-foreground">Loading...</span>}
+        <h2 className="text-sm font-semibold text-foreground">Artifacts</h2>
+        {workflowRunId && isLoading && <span className="text-xs text-muted-foreground">Loading...</span>}
       </div>
 
-      {error && (
+      {workflowRunId && error && (
         <div className="text-xs text-danger bg-danger-subtle border border-danger-border rounded-md px-3 py-2">
           Failed to load artifacts
         </div>
       )}
 
-      {!isLoading && !error && (!artifacts || artifacts.length === 0) && (
-        <div className="text-xs text-muted-foreground">No recorded artifacts yet.</div>
+      {(!workflowRunId || (!isLoading && !error && (!artifacts || artifacts.length === 0))) && (
+        <div className="text-xs text-muted-foreground">
+          {workflowRunId ? 'No recorded artifacts yet.' : 'No workflow run or recorded artifacts yet.'}
+        </div>
       )}
 
       {artifacts && artifacts.length > 0 && (
-        <div className="space-y-1" data-testid={listTestId}>
+        <div className="space-y-1" data-testid="latest-artifacts-list">
           {artifacts.map((artifact) => (
             <ArtifactItemRow
               key={artifact.artifactId}
@@ -166,6 +109,6 @@ export function ArtifactOpener({
           }}
         />
       )}
-    </div>
+    </section>
   )
 }

@@ -4,10 +4,12 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { createElement, type ReactNode } from 'react'
 import { ProjectProvider } from '../../entities/project'
 import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
-import type { StoredCloudEventDto } from '../../entities/issue/model/types'
+import type { StoredCloudEventDto, WorkflowTimeline } from '../../entities/issue/model/types'
+import { WorkflowStage } from '../../entities/issue'
 import {
   useEventTimeline,
   type EventTimelineHistoryHook,
+  type EventTimelineWorkflowHook,
 } from './useEventTimeline'
 
 // react-query resolves via notifyManager's scheduled timers; advance the clock
@@ -32,6 +34,9 @@ const historyHook: EventTimelineHistoryHook = (issueNumber, enabled) => useQuery
   },
   enabled,
 })
+
+let workflowResponse: WorkflowTimeline | undefined
+const workflowHook: EventTimelineWorkflowHook = () => ({ data: workflowResponse })
 
 function makeHistoryEvent(overrides: Partial<StoredCloudEventDto> = {}): StoredCloudEventDto {
   return {
@@ -84,7 +89,7 @@ function makeWrapper() {
 
 function renderTimelineHook(enabled: boolean = true) {
   return renderHook(
-    ({ number, isEnabled }) => useEventTimeline(number, isEnabled, historyHook),
+    ({ number, isEnabled }) => useEventTimeline(number, isEnabled, historyHook, workflowHook),
     {
       initialProps: { number: 42, isEnabled: enabled },
       wrapper: makeWrapper(),
@@ -94,6 +99,7 @@ function renderTimelineHook(enabled: boolean = true) {
 
 beforeEach(() => {
   historyResponse = []
+  workflowResponse = undefined
   requestedIssueNumbers = []
   vi.useFakeTimers()
 })
@@ -251,5 +257,75 @@ describe('useEventTimeline', () => {
       dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'after-open' }))
     })
     expect(result.current.entries.map((entry) => entry.id)).toEqual(['after-open'])
+  })
+
+  it('formats historical and live task events with the same stage-aware title resolver', async () => {
+    historyResponse = [makeHistoryEvent({
+      eventId: 'history-task',
+      type: 'com.mohist.workflow.task.completed',
+      data: { stage: 'build', taskId: 'T-004' },
+    })]
+    const titleWorkflowHook: EventTimelineWorkflowHook = () => ({
+      data: {
+        workflowRunId: 'wr-1',
+        status: 'running',
+        currentStage: 'build',
+        pendingWork: null,
+        availableActions: [],
+        stages: [
+          { stage: WorkflowStage.Plan, status: 'completed', order: 0, startedAt: null, completedAt: null, durationMs: null, checks: [], approval: null, tasks: [{ id: 'T-004', title: 'Plan title', uses: null, status: 'completed', startedAt: null, completedAt: null, durationMs: null, attempts: 1, message: null }] },
+          { stage: WorkflowStage.Build, status: 'running', order: 1, startedAt: null, completedAt: null, durationMs: null, checks: [], approval: null, tasks: [{ id: 'T-004', title: 'Build title', uses: null, status: 'running', startedAt: null, completedAt: null, durationMs: null, attempts: 1, message: null }] },
+        ],
+      },
+    })
+    const { result } = renderHook(
+      () => useEventTimeline(42, true, historyHook, titleWorkflowHook),
+      { wrapper: makeWrapper() },
+    )
+
+    await flush()
+    act(() => {
+      dispatchTimelineEvent(makeLiveEvent({
+        eventId: 'live-task',
+        type: 'com.mohist.workflow.task.completed',
+        payload: { stage: 'build', taskId: 'T-004' },
+      }))
+    })
+
+    expect(result.current.entries.map((entry) => entry.description))
+      .toEqual(['Build title completed', 'Build title completed'])
+  })
+
+  it('resolves a retained live task after workflow titles load', () => {
+    const { result, rerender } = renderTimelineHook()
+    act(() => {
+      dispatchTimelineEvent(makeLiveEvent({
+        type: 'com.mohist.workflow.task.started',
+        payload: { stage: 'build', taskId: 'T-004' },
+      }))
+    })
+    expect(result.current.entries[0].description).toBe('T-004 started')
+
+    workflowResponse = {
+      workflowRunId: 'wr-1',
+      status: 'running',
+      currentStage: 'build',
+      pendingWork: null,
+      availableActions: [],
+      stages: [{
+        stage: WorkflowStage.Build,
+        status: 'running',
+        order: 1,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        checks: [],
+        approval: null,
+        tasks: [{ id: 'T-004', title: 'Loaded title', uses: null, status: 'running', startedAt: null, completedAt: null, durationMs: null, attempts: 1, message: null }],
+      }],
+    }
+    rerender({ number: 42, isEnabled: true })
+
+    expect(result.current.entries[0].description).toBe('Loaded title started')
   })
 })

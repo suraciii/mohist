@@ -74,7 +74,11 @@ public static partial class IssueRoutes
             IssueCommentResult comment;
             try
             {
-                comment = await grain.AddCommentAsync(req.Body, req.AttachmentIds);
+                comment = await grain.AddCommentAsync(req.Author, req.Body, req.AttachmentIds);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
             }
             catch (AttachmentLimitException ex)
             {
@@ -84,7 +88,7 @@ public static partial class IssueRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
-            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
+            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body, author = comment.Author } });
         });
 
         group.MapPost("/{number:int}/done", async (

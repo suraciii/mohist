@@ -63,6 +63,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.FeedbackShow:
                 RenderFeedbackShow(data);
                 break;
+            case MohistCliApi.TableShape.CommentShow:
+                RenderCommentShow(data);
+                break;
             case MohistCliApi.TableShape.AgentList:
                 RenderAgentList(data);
                 break;

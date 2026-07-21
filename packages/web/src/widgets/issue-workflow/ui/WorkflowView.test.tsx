@@ -5,12 +5,13 @@ import { http, HttpResponse } from 'msw'
 import type { ComponentProps, ReactElement } from 'react'
 import { createQueryClient, render as renderWithProviders } from '../../../../tests/test-utils'
 import { useMswServer } from '../../../../tests/support/msw'
-import { WorkflowView as DefaultWorkflowView } from './WorkflowView'
+import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
 import type { ArtifactContentHook } from './ArtifactContentViewer'
 import type { StepListDependencies } from './InlineApproval'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline, type useWorkflowTimeline } from '../../../entities/issue'
 import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 
 let approveRequests: string[] = []
 let feedbackRequests: Array<{ issueNumber: number; stage: string; body: string }> = []
@@ -81,10 +82,20 @@ const artifactContentHook: ArtifactContentHook = (_issueNumber, artifactId, _opt
   return { data, isLoading: false, error: null }
 }
 
+const taskLogHook: TaskLogDataHook = () => ({
+  data: { lines: [], nextCursor: null, truncated: false },
+  isLoading: false,
+  isError: false,
+})
+
+const workflowSessionsHook: WorkflowRunSessionsHook = () => ({ sessions: [], isLoading: false })
+
 const workflowDependencies: StepListDependencies = {
   approveIssue: approveIssueFn,
   requestChangesHook,
   artifactContentHook,
+  taskLogHook,
+  workflowSessionsHook,
 }
 
 function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 'dependencies'>) {
@@ -139,6 +150,38 @@ function makeTimeline(): WorkflowTimeline {
         approval: null,
       },
     ],
+    availableActions: [],
+  }
+}
+
+function makeFourStageTimeline(): WorkflowTimeline {
+  const stages = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate]
+  return {
+    workflowRunId: 'workflow-run-1',
+    status: 'Running',
+    currentStage: WorkflowStage.Build,
+    pendingWork: null,
+    stages: stages.map((stage, index) => ({
+      stage,
+      status: stage === WorkflowStage.Build ? 'running' as const : index < 1 ? 'completed' as const : 'pending' as const,
+      order: index,
+      startedAt: index < 2 ? '2026-01-01T00:00:00.000Z' : null,
+      completedAt: index < 1 ? '2026-01-01T00:01:00.000Z' : null,
+      durationMs: index < 1 ? 60000 : null,
+      tasks: [{
+        id: `${stage}-task`,
+        title: `${stage} inspection task`,
+        uses: 'core/script',
+        status: stage === WorkflowStage.Build ? 'running' as const : index < 1 ? 'completed' as const : 'pending' as const,
+        startedAt: index < 2 ? '2026-01-01T00:00:00.000Z' : null,
+        completedAt: index < 1 ? '2026-01-01T00:01:00.000Z' : null,
+        durationMs: index < 1 ? 60000 : null,
+        attempts: 1,
+        message: null,
+      }],
+      checks: [],
+      approval: null,
+    })),
     availableActions: [],
   }
 }
@@ -286,23 +329,22 @@ describe('WorkflowView', () => {
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })
 
-  it('renders a scrollable stage stepper on mobile without clipping stage labels', async () => {
+  it('renders every stage in a fixed two-column mobile grid', async () => {
     setScopedValue(window, 'innerWidth', 390)
     setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
     render(<WorkflowView issue={makeIssue()} />)
 
-    const stageBar = await screen.findByTestId('workflow-stage-bar-scrollable-stepper')
-    expect(stageBar).toHaveClass('overflow-x-auto', 'flex-nowrap')
-    expect(screen.queryByTestId('workflow-stage-bar')).not.toBeInTheDocument()
+    const stageBar = await screen.findByTestId('workflow-stage-bar')
+    expect(stageBar).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-4')
+    expect(stageBar).not.toHaveClass('overflow-x-auto', 'flex-nowrap')
 
     for (const label of ['Plan', 'Build', 'Check', 'Integrate']) {
       const stageButton = screen.getByRole('button', { name: new RegExp(label, 'i') })
       expect(stageButton).toBeInTheDocument()
-      expect(stageButton).toHaveClass('min-w-32', 'shrink-0')
+      expect(stageButton).not.toBeDisabled()
       const labelNode = within(stageButton).getByText(label)
       expect(labelNode).toBeInTheDocument()
-      expect(labelNode).toHaveClass('whitespace-nowrap')
       expect(labelNode).not.toHaveClass('truncate')
     }
 
@@ -315,6 +357,59 @@ describe('WorkflowView', () => {
     render(<WorkflowView issue={makeIssue({ status: IssueStatus.Backlog, workflowStage: null })} />)
 
     expect(timelineRequests).toEqual([])
+  })
+
+  it('keeps every stage inspectable in read-only presentations', () => {
+    setWorkflowTimeline({ data: makeFourStageTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+
+    render(<WorkflowView issue={makeIssue()} readOnly />)
+
+    expect(screen.getByText('build inspection task')).toBeInTheDocument()
+    const planButton = screen.getByRole('button', { name: /Plan/i })
+    expect(planButton).not.toBeDisabled()
+    fireEvent.click(planButton)
+
+    expect(planButton).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByText('plan inspection task')).toBeInTheDocument()
+    expect(screen.queryByText('build inspection task')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
+  })
+
+  it('preserves user selection across timeline polling and resets for issue identity or default-stage changes', () => {
+    let polledTimeline = makeFourStageTimeline()
+    const pollingHook: WorkflowTimelineHook = () => ({ data: polledTimeline })
+    const issue = makeIssue()
+    const rendered = renderWithProviders(
+      <DefaultWorkflowView issue={issue} timelineHook={pollingHook} dependencies={workflowDependencies} />,
+    )
+    const stageBar = screen.getByTestId('workflow-stage-bar')
+
+    fireEvent.click(within(stageBar).getByRole('button', { name: /Plan/i }))
+    expect(screen.getByText('plan inspection task')).toBeInTheDocument()
+
+    polledTimeline = { ...makeFourStageTimeline(), status: 'AwaitingApproval' }
+    rendered.rerender(<DefaultWorkflowView issue={issue} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    expect(within(stageBar).getByRole('button', { name: /Plan/i })).toHaveAttribute('aria-current', 'step')
+
+    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2 })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    expect(within(stageBar).getByRole('button', { name: /Build/i })).toHaveAttribute('aria-current', 'step')
+
+    fireEvent.click(within(stageBar).getByRole('button', { name: /Plan/i }))
+    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2, projectId: 'other-project' })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    expect(within(stageBar).getByRole('button', { name: /Build/i })).toHaveAttribute('aria-current', 'step')
+
+    rendered.rerender(<DefaultWorkflowView issue={makeIssue({ number: 2, projectId: 'other-project', workflowStage: WorkflowStage.Check })} timelineHook={pollingHook} dependencies={workflowDependencies} />)
+    expect(within(stageBar).getByRole('button', { name: /Check/i })).toHaveAttribute('aria-current', 'step')
+  })
+
+  it.each([IssueStatus.Done, IssueStatus.Cancelled])('allows stage inspection for %s issues', (status) => {
+    setWorkflowTimeline({ data: makeFourStageTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+    const workflowStage = status === IssueStatus.Done ? WorkflowStage.Integrate : WorkflowStage.Build
+
+    render(<WorkflowView issue={makeIssue({ status, workflowStage })} readOnly />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Plan/i }))
+    expect(screen.getByText('plan inspection task')).toBeInTheDocument()
   })
 
   describe('InlineApproval - evidence rendering without mutation controls', () => {
@@ -591,7 +686,7 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Generate proposal').closest('button')
+      const taskRow = screen.getByText('Generate proposal').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).getByText('proposal.md')).toBeInTheDocument()
       expect(within(taskRow!).getByText('design.md')).toBeInTheDocument()
@@ -602,7 +697,7 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Write specs').closest('button')
+      const taskRow = screen.getByText('Write specs').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).getByText('specs/')).toBeInTheDocument()
     })
@@ -612,7 +707,7 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Create design').closest('button')
+      const taskRow = screen.getByText('Create design').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).queryByText('design.md')).not.toBeInTheDocument()
     })
@@ -622,7 +717,7 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const taskRow = screen.getByText('Review plan').closest('button')
+      const taskRow = screen.getByText('Review plan').closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(within(taskRow!).queryByRole('button', { name: /proposal\.md|design\.md|specs\// })).not.toBeInTheDocument()
     })
@@ -662,14 +757,16 @@ describe('WorkflowView', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
 
-    it('activates the artifact chip with Enter and Space keyboard events', () => {
+    it('renders artifact actions as buttons outside the task disclosure', () => {
       setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
       const chip = screen.getByRole('button', { name: 'proposal.md' })
-      fireEvent.keyDown(chip, { key: 'Enter' })
+      const disclosure = screen.getByRole('button', { name: 'Generate proposal' })
 
+      expect(disclosure.contains(chip)).toBe(false)
+      fireEvent.click(chip)
       expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })

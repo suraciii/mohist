@@ -87,6 +87,9 @@ useMswServer(
   http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow/tasks/:taskId/logs', () =>
+    HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
+  ),
   http.get('*/api/workflow-runs/:runId/sessions', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
@@ -624,6 +627,7 @@ describe('IssueDetailPage Markdown rendering', () => {
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument()
       })
+      fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Ada' } })
       const textarea = screen.getByPlaceholderText('Add a comment...')
       fireEvent.change(textarea, { target: { value: 'Test comment' } })
       const button = screen.getByRole('button', { name: 'Comment' })
@@ -956,7 +960,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('reference-rail-details-toggle')).toBeInTheDocument()
       expect(screen.getByTestId('reference-rail-configuration-toggle')).toBeInTheDocument()
-      expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeInTheDocument()
     })
 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
@@ -965,10 +969,11 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(referenceRail.contains(screen.getByTestId('reference-rail-details'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('reference-rail-configuration'))).toBe(true)
     expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
-    expect(readingFlow.contains(screen.getByText('Latest Artifacts', { selector: 'h3' }))).toBe(true)
-    expect(readingFlow.contains(screen.getByText('Task Progress'))).toBe(true)
+    expect(readingFlow.contains(screen.getByRole('heading', { name: 'Artifacts' }))).toBe(true)
+    expect(readingFlow.contains(screen.getByText('Tasks', { selector: 'h3' }))).toBe(true)
+    expect(screen.queryByText('Task Progress')).toBeNull()
     expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
-    expect(referenceRail.contains(screen.queryByText('Latest Artifacts', { selector: 'h3' })!)).toBe(false)
+    expect(referenceRail.contains(screen.getByRole('heading', { name: 'Artifacts' }))).toBe(false)
 
     const configurationCard = findRailCard('Configuration')
     expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()

@@ -1391,16 +1391,23 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
     }
 
-    public async Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null)
+    public async Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null)
     {
         RejectIfReloadRequired();
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+        if (string.IsNullOrWhiteSpace(author))
+            throw new ArgumentException("Comment author is required.", nameof(author));
+
+        var normalizedAuthor = author.Trim();
+        if (normalizedAuthor.Length > 100)
+            throw new ArgumentException("Comment author must be 100 characters or fewer.", nameof(author));
 
         var comment = new IssueCommentRow
         {
             Id = $"cmt_{Guid.NewGuid():N}",
             ProjectId = _issue.ProjectId,
             IssueNumber = _issue.Number,
+            Author = normalizedAuthor,
             Body = body,
         };
 
@@ -1410,7 +1417,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         await db.SaveChangesAsync();
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
-        return new IssueCommentResult(comment.Id, comment.Body);
+        return new IssueCommentResult(comment.Id, comment.Body, comment.Author);
     }
 
 }

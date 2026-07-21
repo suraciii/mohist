@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentType } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus } from '../../../entities/issue'
+import { IssueStatus, partitionIssueBody } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -9,7 +9,7 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundState } from '@/shared/ui/not-found-state'
-import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
+import { BranchBar, WorkflowView, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -25,6 +25,7 @@ import {
   type IssueDecisionAction,
 } from '../model/issueDecisionActions'
 import { getStopConsequenceCopy, useIssueDecisionActionController } from '../model/useIssueDecisionActions'
+import { useIssueDetailSectionNavigation } from '../model/useIssueDetailSectionNavigation'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
@@ -75,6 +76,7 @@ export function IssueDetailPage({
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
+  const [commentAuthor, setCommentAuthor] = useState('')
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
@@ -82,7 +84,10 @@ export function IssueDetailPage({
     {
       issueNumber,
       projectId,
-      onAddCommentSuccess: () => setCommentText(''),
+      onAddCommentSuccess: () => {
+        setCommentAuthor('')
+        setCommentText('')
+      },
       onDeleteCommentSuccess: () => {
         setDeletingCommentId(null)
         setDeleteCommentError(null)
@@ -116,6 +121,11 @@ export function IssueDetailPage({
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber, workflowDataEnabled)
+  const sectionNavigation = useIssueDetailSectionNavigation({
+    workflow: !!issue && !isCompositeParent,
+    artifacts: !!issue && !isCompositeParent,
+    comments: !!issue,
+  })
 
   const isBacklog = issue?.status === IssueStatus.Backlog
   const isArchived = !!issue?.archivedAt
@@ -152,6 +162,7 @@ export function IssueDetailPage({
   }
 
   const decision = decisionInputs ? deriveRuntimeDecision(decisionInputs) : null
+  const issueBody = useMemo(() => partitionIssueBody(issue?.body), [issue?.body])
 
   const decisionActions = useMemo(() => {
     if (!issue) {
@@ -342,6 +353,8 @@ export function IssueDetailPage({
                     <ActivityDialog
                       issueNumber={issueNumber}
                       workflowStatus={issue?.workflowStatus}
+                      open={sectionNavigation.activityOpen}
+                      onOpenChange={sectionNavigation.onActivityOpenChange}
                       TimelinePanel={components?.EventTimelinePanel}
                     />
                   )}
@@ -403,6 +416,16 @@ export function IssueDetailPage({
               <div className="mt-2 text-xs text-muted-foreground/70">
                 Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
               </div>
+              <nav aria-label="Issue sections" className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                {showWorkflowSections && (
+                  <>
+                    <Link to={sectionNavigation.links.workflow} className="text-muted-foreground hover:text-foreground">Workflow</Link>
+                    <Link to={sectionNavigation.links.artifacts} className="text-muted-foreground hover:text-foreground">Artifacts</Link>
+                    <Link to={sectionNavigation.links.activity} className="text-muted-foreground hover:text-foreground">Activity</Link>
+                  </>
+                )}
+                <Link to={sectionNavigation.links.comments} className="text-muted-foreground hover:text-foreground">Comments</Link>
+              </nav>
             </div>
 
             {isApproval ? (
@@ -452,7 +475,7 @@ export function IssueDetailPage({
               )}
 
               {showWorkflowSections && (
-                <div data-testid="workflow-view-frame">
+                <div id="workflow" className="scroll-mt-20" data-testid="workflow-view-frame">
                   <WorkflowView issue={issue} readOnly />
                 </div>
               )}
@@ -473,14 +496,6 @@ export function IssueDetailPage({
 
               {showWorkflowSections && (!isBacklog || issue.workflowRunId) && (
                 <div data-testid="runtime-evidence-frame" className="space-y-4">
-                  {!isBacklog && workflowStage && (
-                    <TaskProgressPanel
-                      issueNumber={issueNumber}
-                      currentStage={workflowStage}
-                      isAgentRunning={isAgentRunningOnThis}
-                    />
-                  )}
-
                   {!isBacklog && issue.workflowRunId && (
                     <WorkflowSessionsPanel
                       issueNumber={issueNumber}
@@ -490,49 +505,12 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              {showWorkflowSections && !isApproval && diffData?.available === true && (
-                <div
-                  className="min-w-0 px-4 py-3 text-sm"
-                  data-testid="diff-summary-banner"
-                  data-tier-weight="reading-flow"
-                >
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-                    <span className="min-w-0 text-muted-foreground break-words">
-                      <span className="font-medium text-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
-                      {' wants to merge into '}
-                      <span className="font-medium text-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
-                    </span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-foreground">{diffData.ahead}</span> ahead
-                    </span>
-                    {diffData.behind > 0 && (
-                      <>
-                        <span className="text-muted-foreground/40">·</span>
-                        <span className="text-muted-foreground">
-                          <span className="font-medium text-foreground">{diffData.behind}</span> behind
-                        </span>
-                      </>
-                    )}
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-foreground">{diffData.summary.filesChanged}</span> files changed
-                    </span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-success">+{diffData.summary.additions}</span>
-                    <span className="text-danger">-{diffData.summary.deletions}</span>
-                  </div>
-                  <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
-                    <span>·</span>
-                    <span>Workspace retained</span>
-                  </div>
-                </div>
-              )}
-
               {showWorkflowSections && (
                 <IssueDiffFilesSection
                   diffData={diffData}
+                  isLoading={diffQuery.isLoading}
+                  error={diffQuery.error}
+                  commitsUnavailable={commitsData?.available === false}
                   onViewFiles={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
                 />
               )}
@@ -544,17 +522,10 @@ export function IssueDetailPage({
                 />
               )}
 
-              {showWorkflowSections && (diffData?.available === false || commitsData?.available === false) && (
-                <div className="text-sm text-muted-foreground" data-tier-weight="reading-flow">
-                  <p>
-                    {diffData?.available === false && diffData.message}
-                    {diffData?.available === false && commitsData?.available === false && ' / '}
-                    {commitsData?.available === false && commitsData.message}
-                  </p>
-                </div>
-              )}
-
-              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
+              <IssueDescriptionSection
+                description={issueBody.description}
+                resolveIssueAttachment={resolveIssueAttachment}
+              />
 
               <IssueCommentsSection
                 comments={comments}
@@ -562,6 +533,8 @@ export function IssueDetailPage({
                 issueProjectId={issueProjectId}
                 commentText={commentText}
                 setCommentText={setCommentText}
+                commentAuthor={commentAuthor}
+                setCommentAuthor={setCommentAuthor}
                 deletingCommentId={deletingCommentId}
                 setDeletingCommentId={setDeletingCommentId}
                 deleteCommentError={deleteCommentError}
@@ -584,6 +557,7 @@ export function IssueDetailPage({
               >
                 <IssueDetailsCard
                   issue={issue}
+                  bodyMetadata={issueBody}
                   unframed
                 />
               </CollapsibleRailCard>

@@ -1,15 +1,17 @@
 import { Link } from 'react-router-dom'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { Issue } from '../../../../entities/issue'
+import type { IssueBodyPartition } from '../../../../entities/issue'
 import { useProjectPath } from '../../../../entities/project'
 
 export type IssueDetailsCardIssue = Pick<
   Issue,
-  'status' | 'projectName' | 'repository' | 'parentIssueRef' | 'childIssuesSummary' | 'repositoryName'
+  'status' | 'projectName' | 'repository' | 'parentIssueRef' | 'childIssuesSummary' | 'repositoryName' | 'risk'
 >
 
 export interface IssueDetailsCardProps {
   issue: IssueDetailsCardIssue
+  bodyMetadata: Pick<IssueBodyPartition, 'recommendedWorkflow' | 'recommendedWorkflowReason' | 'risk'>
   unframed?: boolean
 }
 
@@ -21,11 +23,34 @@ function resolveRepositoryName(issue: IssueDetailsCardIssue): string | null {
   return null
 }
 
-export function IssueDetailsCard({ issue, unframed = false }: IssueDetailsCardProps) {
+export function IssueDetailsCard({ issue, bodyMetadata, unframed = false }: IssueDetailsCardProps) {
   const toProjectPath = useProjectPath()
   const repositoryName = resolveRepositoryName(issue)
+  const risk = issue.risk ?? bodyMetadata.risk
   const content = (
     <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
+        {bodyMetadata.recommendedWorkflow && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="recommended-workflow-metadata-row">
+            <dt className="shrink-0 text-muted-foreground">Recommended workflow</dt>
+            <dd className="min-w-0 break-words text-right font-medium text-foreground">
+              {bodyMetadata.recommendedWorkflow}
+            </dd>
+          </div>
+        )}
+        {bodyMetadata.recommendedWorkflowReason && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="recommendation-reason-metadata-row">
+            <dt className="shrink-0 text-muted-foreground">Recommendation reason</dt>
+            <dd className="min-w-0 break-words text-right text-foreground">
+              {bodyMetadata.recommendedWorkflowReason}
+            </dd>
+          </div>
+        )}
+        {risk && (
+          <div className="flex min-w-0 justify-between gap-3" data-testid="risk-metadata-row">
+            <dt className="text-muted-foreground">Risk</dt>
+            <dd className="min-w-0 break-words text-right font-medium text-foreground">{risk}</dd>
+          </div>
+        )}
         {issue.parentIssueRef && (
           <div className="flex min-w-0 justify-between gap-3" data-testid="parent-issue-metadata-row">
             <dt className="text-muted-foreground">Parent Issue</dt>

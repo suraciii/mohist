@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { MessageSquareIcon } from 'lucide-react'
-import { Button } from '@/shared/ui/components/button'
+import { ChevronDownIcon, MessageSquareIcon } from 'lucide-react'
 import { getFileContent } from '../../../entities/issue'
 import type { StageTaskState, WorkflowArtifactSummary } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -10,6 +9,7 @@ import { getDeliveryFailureGuidance } from '../../../shared/lib/delivery-failure
 import { formatClock, formatDuration, formatOriginLabel, formatOriginTitle } from './format'
 import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, SpinnerIcon } from './StageStatusIcons'
 import { DeliveryFailureBanner } from './failure-panels'
+import { TaskLogPanel, useDefaultTaskLogData, type TaskLogDataHook, type WorkflowRunSessionsHook } from './TaskLogPanel'
 
 function TaskLifecycleTime({ task }: { task: StageTaskState }) {
   const startedAt = task.startedAt
@@ -139,17 +139,9 @@ function TaskArtifactSummaryChip({
     onClick()
   }
   return (
-    <span
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={handleClick}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          event.stopPropagation()
-          onClick()
-        }
-      }}
       className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-info-subtle text-info hover:bg-info-subtle/80 transition-colors cursor-pointer"
       title={`Open recorded ${summary.path}`}
     >
@@ -163,7 +155,7 @@ function TaskArtifactSummaryChip({
         </svg>
       )}
       <span className="font-mono truncate">{summary.path}</span>
-    </span>
+    </button>
   )
 }
 
@@ -191,18 +183,23 @@ function isDeliveryFailureTask(task: StageTaskState): boolean {
 export function TaskItem({
   task,
   issueNumber,
-  readOnly,
+  workflowRunId,
   artifactContentHook,
   fileContentFn = getFileContent,
+  taskLogHook,
+  workflowSessionsHook,
 }: {
   task: StageTaskState
   issueNumber: number
-  readOnly: boolean
+  workflowRunId: string | null
   artifactContentHook?: ArtifactContentHook
   fileContentFn?: typeof getFileContent
+  taskLogHook?: TaskLogDataHook
+  workflowSessionsHook?: WorkflowRunSessionsHook
 }) {
   const [expanded, setExpanded] = useState(false)
   const [selectedArtifact, setSelectedArtifact] = useState<WorkflowArtifactSummary | null>(null)
+  const { projectId } = useProject()
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
   const isFailed = task.status === 'failed'
@@ -216,7 +213,17 @@ export function TaskItem({
   const deliveryFailure = isFailed && isDeliveryTask
     ? getDeliveryFailureGuidance(task.error?.code)
     : null
-  const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
+  const resolvedTaskLogHook = taskLogHook ?? useDefaultTaskLogData
+  const taskLogResult = resolvedTaskLogHook({
+    issueNumber,
+    taskId: task.taskId,
+    projectId,
+    workflowRunId,
+    enabled: task.taskId.trim().length > 0 && task.status !== 'pending',
+  })
+  const hasLogs = task.taskId.trim().length > 0
+    && (isRunning || (taskLogResult.data?.lines.length ?? 0) > 0)
+  const canExpand = hasLogs || hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -233,59 +240,63 @@ export function TaskItem({
   const originLabel = formatOriginLabel(task.origin)
   const originTitle = formatOriginTitle(task.origin)
   const sessionName = task.sessionName?.trim()
+  const detailsId = `task-details-${issueNumber}-${encodeURIComponent(task.taskId)}`
+
+  const primaryContent = (
+    <>
+      {icon}
+      <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-medium text-card-foreground">
+        {task.title}
+      </span>
+      {isFailed && <span className="shrink-0 text-xs text-danger">failed</span>}
+      {canExpand && (
+        <ChevronDownIcon
+          className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        />
+      )}
+    </>
+  )
 
   return (
     <div
       className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-danger-border bg-danger-subtle/40' : 'border-border bg-card'}`}
+      data-testid="workflow-task-item"
+      data-task-title={task.title}
     >
-      <Button
-        variant="ghost"
-        onClick={() => !readOnly && canExpand && setExpanded(!expanded)}
-        disabled={readOnly}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors h-auto justify-start font-normal"
-      >
-        {icon}
-        <span className="text-sm text-card-foreground flex-1 truncate">{task.title}</span>
-        {task.status === 'completed' && hasArtifacts && (
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {artifactSummaries.map((summary) => (
-              <TaskArtifactSummaryChip
-                key={summary.artifactId}
-                summary={summary}
-                onClick={() => setSelectedArtifact(summary)}
-              />
-            ))}
-          </div>
-        )}
-        {hasReason && (
-          <span className="text-xs text-warning flex-shrink-0" title={taskReason ?? undefined}>reason</span>
-        )}
-        {originLabel && (
-          <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
-        )}
-        {sessionName && (
-          <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />
-        )}
-        <TaskLifecycleTime task={task} />
-        {isFailed && (
-          <span className="text-xs text-danger flex-shrink-0">failed</span>
-        )}
-        {canExpand && !readOnly && (
-          <svg
-            className={`h-3 w-3 text-muted-foreground transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.23 8.27a.75.75 0 01.02-1.06z"
-              clipRule="evenodd"
+      {canExpand ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-muted"
+        >
+          {primaryContent}
+        </button>
+      ) : (
+        <div className="flex min-w-0 items-start gap-2 px-3 py-2">
+          {primaryContent}
+        </div>
+      )}
+      {(task.status === 'completed' && hasArtifacts) || hasReason || originLabel || sessionName || task.startedAt || task.attempts > 1 ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pl-9 text-xs text-muted-foreground" data-testid="workflow-task-metadata">
+          {task.status === 'completed' && artifactSummaries.map((summary) => (
+            <TaskArtifactSummaryChip
+              key={summary.artifactId}
+              summary={summary}
+              onClick={() => setSelectedArtifact(summary)}
             />
-          </svg>
-        )}
-      </Button>
+          ))}
+          {hasReason && <span className="text-warning" title={taskReason ?? undefined}>reason</span>}
+          {originLabel && <span className="break-all font-mono text-[11px]" title={originTitle}>{originLabel}</span>}
+          {sessionName && <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />}
+          {task.attempts > 1 && <span>{task.attempts} attempts</span>}
+          <TaskLifecycleTime task={task} />
+        </div>
+      ) : null}
       {expanded && canExpand && (
-        <div className="px-3 pb-2 border-t bg-muted">
+        <div id={detailsId} className="px-3 pb-2 border-t bg-muted" data-testid="workflow-task-details">
           <div className="mt-2 space-y-2">
             {deliveryFailure && (
               <DeliveryFailureBanner
@@ -325,6 +336,20 @@ export function TaskItem({
               <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">
                 {JSON.stringify(taskOutput, null, 2)}
               </pre>
+            )}
+            {isFailed && !hasReason && !hasOutput && <p className="text-xs text-danger">Task failed</p>}
+            {hasLogs && (
+              <TaskLogPanel
+                issueNumber={issueNumber}
+                taskId={task.taskId}
+                workflowRunId={workflowRunId}
+                taskStatus={task.status}
+                sessionName={task.sessionName ?? null}
+                origin={task.origin ?? null}
+                classification={task.classification ?? null}
+                taskLogHook={() => taskLogResult}
+                workflowSessionsHook={workflowSessionsHook}
+              />
             )}
           </div>
         </div>

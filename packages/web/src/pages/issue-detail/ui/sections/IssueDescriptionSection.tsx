@@ -1,9 +1,8 @@
 import { MarkdownReader } from '@/shared/ui'
-import type { Issue } from '../../../../entities/issue'
 import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
 export interface IssueDescriptionSectionProps {
-  issue: Pick<Issue, 'body'>
+  description: string
   resolveIssueAttachment: (id: string) => MarkdownAttachment | null
 }
 
@@ -26,9 +25,9 @@ function buildPreviewHint(body: string): string | null {
   return `${(lastSpace > 80 ? truncated.slice(0, lastSpace) : truncated).trimEnd()}…`
 }
 
-export function IssueDescriptionSection({ issue, resolveIssueAttachment }: IssueDescriptionSectionProps) {
-  if (!issue.body) return null
-  const previewHint = buildPreviewHint(issue.body)
+export function IssueDescriptionSection({ description, resolveIssueAttachment }: IssueDescriptionSectionProps) {
+  if (!description.trim()) return null
+  const previewHint = buildPreviewHint(description)
   return (
     <section
       data-testid="description-section"
@@ -46,7 +45,7 @@ export function IssueDescriptionSection({ issue, resolveIssueAttachment }: Issue
         </p>
       )}
       <MarkdownReader
-        content={issue.body}
+        content={description}
         mode="collapsible"
         collapsedHeight={600}
         baseHeadingLevel={2}

@@ -13,6 +13,8 @@ export type { StageDurationMetricsResponse, StageDurationMetricsWindow, StageDur
 export { statusBadge, statusLabel } from './lib/status-badge'
 export { LabelEditor } from './lib/label-editor'
 export type { LabelEditorProps } from './lib/label-editor'
+export { partitionIssueBody, recombineIssueBody } from './lib/issue-frontmatter'
+export type { IssueBodyPartition, IssueFrontmatterKind } from './lib/issue-frontmatter'
 export { IssuePrerequisitePicker } from './ui/IssuePrerequisitePicker'
 export type { IssuePrerequisitePickerProps } from './ui/IssuePrerequisitePicker'
 export {

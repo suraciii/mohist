@@ -324,17 +324,17 @@ export function ApprovalReviewPackage({
   )
 
   const evidence: ReactNode = approvalStage === 'plan' ? (
-    <div data-testid="approval-review-evidence" className="mt-4 min-w-0 space-y-5">
+    <div id="artifacts" data-testid="approval-review-evidence" className="mt-4 min-w-0 scroll-mt-20 space-y-5">
       <ArtifactSlot issueNumber={issueNumber} path="proposal.md" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
       <ArtifactSlot issueNumber={issueNumber} path="tasks.json" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
     </div>
   ) : approvalStage === 'check' ? (
-    <div data-testid="approval-review-evidence" className="mt-4 min-w-0 space-y-5">
+    <div id="artifacts" data-testid="approval-review-evidence" className="mt-4 min-w-0 scroll-mt-20 space-y-5">
       <ArtifactSlot issueNumber={issueNumber} path="review.md" workflowRunId={workflowRunId} artifactsHook={artifactListHook} contentHook={artifactContentHook} />
       <DiffSummary data={diffData} isLoading={diffIsLoading} error={diffError} />
     </div>
   ) : (
-    <div data-testid="approval-review-evidence" className="mt-4 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+    <div id="artifacts" data-testid="approval-review-evidence" className="mt-4 scroll-mt-20 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
       No inline evidence is configured for this approval stage.
     </div>
   )

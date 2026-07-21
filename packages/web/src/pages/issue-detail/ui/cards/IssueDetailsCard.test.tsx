@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../../entities/project'
 import type { Project } from '../../../../entities/project'
 import { IssueDetailsCard, type IssueDetailsCardIssue } from './IssueDetailsCard'
+import type { IssueBodyPartition } from '../../../../entities/issue'
 import { useProject } from '../../../../entities/project'
 import type { ReactNode } from 'react'
 
@@ -22,12 +23,15 @@ function ProjectProbe({ children }: { children: ReactNode }) {
   return <>{ctx ? children : null}</>
 }
 
-function renderCard(issue: IssueDetailsCardIssue) {
+function renderCard(
+  issue: IssueDetailsCardIssue,
+  bodyMetadata: Pick<IssueBodyPartition, 'recommendedWorkflow' | 'recommendedWorkflowReason' | 'risk'> = {},
+) {
   return render(
     <MemoryRouter>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
         <ProjectProbe>
-          <IssueDetailsCard issue={issue} unframed />
+          <IssueDetailsCard issue={issue} bodyMetadata={bodyMetadata} unframed />
         </ProjectProbe>
       </ProjectProvider>
     </MemoryRouter>,
@@ -86,5 +90,36 @@ describe('IssueDetailsCard status metadata removal', () => {
     const details = screen.getByTestId('issue-detail-details-metadata')
     expect(within(details).queryByText('Issue Stage')).toBeNull()
     expect(within(details).queryByText('Workflow Stage')).toBeNull()
+  })
+
+  it('labels workflow body values as recommendations', () => {
+    renderCard(baseIssue, {
+      recommendedWorkflow: 'mohist/local',
+      recommendedWorkflowReason: 'Best fit for this change',
+    })
+
+    const details = screen.getByTestId('issue-detail-details-metadata')
+    expect(within(details).getByText('Recommended workflow')).toBeTruthy()
+    expect(within(details).getByText('mohist/local')).toBeTruthy()
+    expect(within(details).getByText('Recommendation reason')).toBeTruthy()
+    expect(within(details).getByText('Best fit for this change')).toBeTruthy()
+    expect(within(details).queryByText('Workflow Profile')).toBeNull()
+  })
+
+  it('renders one authoritative Risk value instead of a conflicting body default', () => {
+    renderCard({ ...baseIssue, risk: 'high' }, { risk: 'low' })
+
+    const details = screen.getByTestId('issue-detail-details-metadata')
+    expect(within(details).getAllByText('Risk')).toHaveLength(1)
+    expect(within(details).getByText('high')).toBeTruthy()
+    expect(within(details).queryByText('low')).toBeNull()
+  })
+
+  it('uses body risk only when Issue risk is absent', () => {
+    renderCard({ ...baseIssue, risk: null }, { risk: 'medium' })
+
+    const details = screen.getByTestId('issue-detail-details-metadata')
+    expect(within(details).getAllByText('Risk')).toHaveLength(1)
+    expect(within(details).getByText('medium')).toBeTruthy()
   })
 })

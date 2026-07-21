@@ -33,6 +33,7 @@ export interface TaskLogDataHookInput {
   taskId: string
   projectId: string | null | undefined
   workflowRunId: string | null
+  enabled?: boolean
 }
 
 export interface TaskLogDataResult {
@@ -68,12 +69,12 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskSt
   'skipped',
 ])
 
-const useDefaultTaskLogData: TaskLogDataHook = ({ issueNumber, taskId, workflowRunId }) =>
+export const useDefaultTaskLogData: TaskLogDataHook = ({ issueNumber, taskId, workflowRunId, enabled = true }) =>
   useIssueWorkflowTaskLog(
     issueNumber,
     taskId,
     { limit: TASK_LOG_RETAINED_LIMIT },
-    true,
+    enabled,
     workflowRunId,
   )
 

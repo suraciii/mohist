@@ -1,7 +1,6 @@
 import { Button } from '@/shared/ui/components/button'
 import { WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
 import type { Issue, StageStateRead, StageCheckState } from '../../../entities/issue'
-import { useIsMobile } from '@/shared/hooks/use-mobile'
 import { formatDuration } from './format'
 import { StageStatusIcon } from './StageStatusIcons'
 
@@ -65,6 +64,7 @@ export function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useW
         artifacts: [],
         artifactSummaries: task.artifactSummaries,
         output: task.output ?? null,
+        error: task.error,
         startedAt: task.startedAt,
         completedAt: task.completedAt,
         updatedAt: task.completedAt ?? task.startedAt ?? '',
@@ -100,35 +100,29 @@ function StageBarCell({
   status,
   duration,
   selected,
-  readOnly,
   onClick,
-  isMobile,
 }: {
   stage: WorkflowStage
   status: string
   duration: number | null
   selected: boolean
-  readOnly: boolean
   onClick: () => void
-  isMobile: boolean
 }) {
   const bgColor = selected ? 'bg-muted border-border' : 'bg-background border-border'
   const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1)
-  const layoutClass = isMobile ? 'min-w-32 shrink-0' : 'flex-1 min-w-0'
-  const labelClass = isMobile ? 'whitespace-nowrap' : 'truncate'
 
   return (
     <Button
       variant="ghost"
       onClick={onClick}
-      disabled={readOnly && status === 'pending'}
-      className={`${layoutClass} rounded-lg border p-3 text-left transition-colors h-auto justify-start font-normal ${bgColor} ${
-        !readOnly && status !== 'pending' ? 'cursor-pointer hover:bg-muted' : ''
-      } ${status === 'pending' && !selected ? 'opacity-60' : ''}`}
+      aria-current={selected ? 'step' : undefined}
+      className={`min-w-0 rounded-md border p-3 text-left transition-colors h-auto justify-start font-normal hover:bg-muted ${bgColor} ${
+        status === 'pending' && !selected ? 'opacity-60' : ''
+      }`}
     >
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex min-w-0 items-center gap-2 mb-1">
         <StageStatusIcon status={status} />
-        <span className={`text-sm font-medium text-foreground ${labelClass}`}>{stageLabel}</span>
+        <span className="min-w-0 break-words text-sm font-medium text-foreground">{stageLabel}</span>
       </div>
       {status === 'completed' && duration != null && (
         <span className="text-xs text-muted-foreground/70 ml-7">{formatDuration(duration)}</span>
@@ -145,45 +139,28 @@ export function StageBar({
   issue,
   selectedStage,
   onSelectStage,
-  readOnly,
 }: {
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   selectedStage: WorkflowStage
   onSelectStage: (stage: WorkflowStage) => void
-  readOnly: boolean
 }) {
-  const isMobile = useIsMobile()
-
   return (
     <div
-      className={`flex items-stretch gap-2 ${isMobile ? 'overflow-x-auto flex-nowrap pb-1' : ''}`}
-      data-testid={isMobile ? 'workflow-stage-bar-scrollable-stepper' : 'workflow-stage-bar'}
+      className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4"
+      data-testid="workflow-stage-bar"
     >
-      {WORKFLOW_STAGES.map((stage, idx) => {
+      {WORKFLOW_STAGES.map((stage) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         const duration = getStageDuration(stage, stageStateMap)
         return (
-          <div key={stage} className={`flex items-stretch ${isMobile ? 'shrink-0' : 'flex-1 min-w-0'}`}>
-            {idx > 0 && (
-              <div className="flex items-center px-1">
-                <svg className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-            )}
+          <div key={stage} className="grid min-w-0">
             <StageBarCell
               stage={stage}
               status={status}
               duration={duration}
               selected={selectedStage === stage}
-              readOnly={readOnly}
               onClick={() => onSelectStage(stage)}
-              isMobile={isMobile}
             />
           </div>
         )

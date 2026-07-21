@@ -24,11 +24,49 @@ public class IssueApiSpecs
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commented issue", projectId = project.Id });
 
-        var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { body = "Looks good" });
+        var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { author = "  Ada Lovelace  ", body = "Looks good" });
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Equal("Looks good", comment.Body);
-        Assert.Contains(detail.Comments, c => c.Id == comment.Id && c.Body == "Looks good");
+        Assert.Equal("Ada Lovelace", comment.Author);
+        Assert.Contains(detail.Comments, c => c.Id == comment.Id && c.Body == "Looks good" && c.Author == "Ada Lovelace");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")]
+    public async Task AddComment_InvalidAuthor_ReturnsActionableValidationWithoutCreatingRow(string author)
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"comment-author-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Comment validation" });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/comments",
+            new { author, body = "Not persisted" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains(author.Length > 100 ? "100" : "required", error.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Empty(detail.Comments);
+    }
+
+    [Fact]
+    public async Task AddComment_MissingAuthor_ReturnsActionableValidationWithoutCreatingRow()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"comment-author-missing-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Missing author" });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/comments",
+            new { body = "Not persisted" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("author", error.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Empty(detail.Comments);
     }
 
     [Fact]
@@ -255,7 +293,7 @@ public class IssueApiSpecs
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
     private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
     private sealed record ProjectDto(string Id);
-    private sealed record CommentDto(string Id, string Body);
+    private sealed record CommentDto(string Id, string Body, string? Author);
     private sealed record PrerequisiteDto(int Number, bool Completed);
     private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
     private sealed record BlockerIssueDto(int Number, string Title);
