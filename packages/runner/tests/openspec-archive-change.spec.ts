@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { JsonObject } from "../src/core/types.js"
 import {
   archiveChangeAction,
   setArchiveFileSystemForTest,
@@ -24,97 +24,142 @@ describe("mohist/archive-change", () => {
     vi.useRealTimers()
   })
 
-  it("writes a keyed checkpoint atomically before moving and clears it after commit", async () => {
+  it("first archive: moves, commits, and writes the archive destination to vars", async () => {
     const events: string[] = []
     const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "abc1234" }))
 
     const result = await callAction(archiveChangeAction, context(workDir, changeDir))
-    const checkpointPath = checkpointPathFor(workDir, "workflow-1", "openspec/changes/issue-127")
 
     expect(result.error).toBeUndefined()
-    expect((result.output as Record<string, unknown>).destination).toBe(join(workDir, destinationRel))
-    expect(events[0]).toMatch(/^git-path:/)
+    const output = result.output as Record<string, unknown>
+    expect(output.destination).toBe(join(workDir, destinationRel))
+    expect(output.destinationRel).toBe(destinationRel)
+    expect(output.changed).toBe(true)
     expect(events).toContain(`rename:openspec/changes/issue-127->${destinationRel}`)
-    expect(await fileSystem.exists(checkpointPath)).toBe(false)
+    expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
   })
 
-  it("resumes a post-move failure from the exact checkpoint destination", async () => {
-    const { fileSystem, workDir, changeDir, destinationRel } = fixture()
-    let failCommit = true
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit([], destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], commitFailure: () => failCommit }))
-
-    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
-    expect(first.error?.code).toBe("retry-safe")
-    expect((first.error?.message ?? "")).toContain("git commit archive change failed")
-
-    failCommit = false
-    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
-    expect(retry.error).toBeUndefined()
-    expect((retry.output as Record<string, unknown>).destination).toBe(join(workDir, destinationRel))
-  })
-
-  it("reuses a versioned collision destination across a restart", async () => {
-    const { fileSystem, workDir, changeDir, baseDestinationRel } = fixture()
-    const destinationRel = `${baseDestinationRel}-v2`
-    fileSystem.writeFile(join(workDir, baseDestinationRel, "old.md"), "old\n")
-    setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit([], destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "v2sha" }))
-
-    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
-    expect(first.error).toBeUndefined()
-    expect((first.output as Record<string, unknown>).destination).toBe(join(workDir, destinationRel))
-
-    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
-    expect(retry.error?.code).toBe("missing-source")
-  })
-
-  it.each([
-    ["malformed", "not-json"],
-    ["wrong version", JSON.stringify({ version: 2, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: "openspec/changes/archive/2026-07-11-issue-127" })],
-    ["escaping destination", JSON.stringify({ version: 1, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: "openspec/changes/archive/../outside" })],
-  ])("rejects %s checkpoint before mutation", async (_name, checkpoint) => {
+  it("idempotent: hint points at an existing destination and source is gone — no move, no commit, no var rewrite", async () => {
     const events: string[] = []
-    const { fileSystem, workDir, changeDir } = fixture()
-    const sourceRel = "openspec/changes/issue-127"
-    const checkpointPath = checkpointPathFor(workDir, "workflow-1", sourceRel)
-    await fileSystem.writeAtomic(checkpointPath, checkpoint)
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
+    // The prior archive already moved source -> destination; seed the destination.
+    fileSystem.writeFile(join(workDir, destinationRel, "proposal.md"), "proposal\n")
     setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit(events, "openspec/changes/archive/unused"))
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
 
-    expect(result.error?.code).toBe("config-error")
-    expect(events.filter((event) => event.startsWith("rename:") || event.startsWith("git:"))).toEqual([])
+    expect(result.error).toBeUndefined()
+    const output = result.output as Record<string, unknown>
+    expect(output.noChange).toBe(true)
+    expect(output.changed).toBe(false)
+    expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
+    expect(events.some((event) => event.startsWith("git:"))).toBe(false)
+    expect(result.effects?.writeVars).toBeUndefined()
   })
 
-  it("reports partial archive when checkpoint-bound source and destination both exist", async () => {
+  it("stale hint with source still present re-archives and overwrites the var", async () => {
     const events: string[] = []
-    const { fileSystem, workDir, changeDir, destinationRel } = fixture()
-    const checkpointPath = checkpointPathFor(workDir, "workflow-1", "openspec/changes/issue-127")
-    fileSystem.writeFile(join(workDir, destinationRel, "archive.md"), "archive\n")
-    await fileSystem.writeAtomic(checkpointPath, JSON.stringify({ version: 1, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: destinationRel }))
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
+    setArchiveFileSystemForTest(fileSystem)
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`] }))
+
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: "openspec/changes/archive/2025-12-31-issue-127" }))
+
+    expect(result.error).toBeUndefined()
+    expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
+    expect(events).toContain(`rename:openspec/changes/issue-127->${destinationRel}`)
+  })
+
+  it("stale hint with neither source nor destination present fails missing-source", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
+    setArchiveFileSystemForTest(fileSystem)
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
+
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
+
+    expect(result.error?.code).toBe("missing-source")
+    expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
+  })
+
+  it("no hint and no source fails missing-source (first-time archive without a change directory)", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events, /* withSource */ false)
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
     const result = await callAction(archiveChangeAction, context(workDir, changeDir))
 
+    expect(result.error?.code).toBe("missing-source")
+  })
+
+  it("partial-archive: hint points at existing destination and source also present", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
+    fileSystem.writeFile(join(workDir, destinationRel, "archive.md"), "archive\n")
+    setArchiveFileSystemForTest(fileSystem)
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
+
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir, { archiveHint: destinationRel }))
+
     expect(result.error?.code).toBe("partial-archive")
     expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
   })
 
-  it("reports missing source when neither checkpoint-bound path exists", async () => {
-    const { fileSystem, workDir, changeDir, destinationRel } = fixture([], false)
-    const checkpointPath = checkpointPathFor(workDir, "workflow-1", "openspec/changes/issue-127")
-    await fileSystem.writeAtomic(checkpointPath, JSON.stringify({ version: 1, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: destinationRel }))
+  it("commit failure rolls back the move and returns retry-safe (retry starts clean)", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
+    let failCommit = true
     setArchiveFileSystemForTest(fileSystem)
-    setOpenSpecGitRunnerForTest(fakeGit([], destinationRel))
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], commitFailure: () => failCommit }))
+
+    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
+    expect(first.error?.code).toBe("retry-safe")
+    expect((first.error?.message ?? "")).toContain("git commit archive change failed")
+    // Rollback moved the directory back to source.
+    expect(events).toContain(`rename:${destinationRel}->openspec/changes/issue-127`)
+    expect(await fileSystem.hasFiles(join(workDir, "openspec", "changes", "issue-127"))).toBe(true)
+    // No var written on failure.
+    expect(first.effects?.writeVars).toBeUndefined()
+
+    failCommit = false
+    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
+    expect(retry.error).toBeUndefined()
+    expect(retry.effects?.writeVars).toEqual({ archive: destinationRel })
+  })
+
+  it("reuses a versioned collision destination when the base archive slot is taken", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, baseDestinationRel } = fixture(events)
+    const destinationRel = `${baseDestinationRel}-v2`
+    fileSystem.writeFile(join(workDir, baseDestinationRel, "old.md"), "old\n")
+    setArchiveFileSystemForTest(fileSystem)
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "v2sha" }))
 
     const result = await callAction(archiveChangeAction, context(workDir, changeDir))
 
-    expect(result.error?.code).toBe("missing-source")
+    expect(result.error).toBeUndefined()
+    const output = result.output as Record<string, unknown>
+    expect(output.destination).toBe(join(workDir, destinationRel))
+    expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
+  })
+
+  it("no-change commit (already committed on a prior attempt) persists the var without a new commit", async () => {
+    const events: string[] = []
+    const { fileSystem, workDir, changeDir, destinationRel } = fixture(events)
+    setArchiveFileSystemForTest(fileSystem)
+    setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [] }))
+
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
+
+    expect(result.error).toBeUndefined()
+    const output = result.output as Record<string, unknown>
+    expect(output.noChange).toBe(true)
+    // The var is still written so future reruns treat it as idempotent.
+    expect(result.effects?.writeVars).toEqual({ archive: destinationRel })
   })
 })
 
@@ -129,10 +174,6 @@ function fixture(events: string[] = [], withSource = true) {
 
 function fakeGit(events: string[], destinationRel: string, options: { changedFiles?: string[]; sha?: string; commitFailure?: () => boolean } = {}) {
   return async (_workDir: string, args: string[]) => {
-    if (args[0] === "rev-parse" && args[1] === "--git-path") {
-      events.push(`git-path:${args[2]}`)
-      return gitOk(`.git/${args[2]}`)
-    }
     const key = args.join(" ")
     events.push(`git:${key}`)
     if (key === `add -A ${destinationRel}`) return gitOk("")
@@ -215,7 +256,9 @@ function relativeWorkspacePath(path: string) {
   return path.replace("/workspace/", "")
 }
 
-function context(workDir: string, changeDir: string): ActionContext {
+function context(workDir: string, changeDir: string, overrides: { archiveHint?: string } = {}): ActionContext {
+  const withInput: JsonObject = { changeDir }
+  if (overrides.archiveHint !== undefined) withInput.archiveHint = overrides.archiveHint
   return {
     workflowRunId: "workflow-1",
     workId: "integrate:archive-change.1",
@@ -223,17 +266,12 @@ function context(workDir: string, changeDir: string): ActionContext {
     stage: "integrate",
     title: "Archive change",
     uses: "mohist/archive-change",
-    with: { changeDir },
+    with: withInput,
     variables: {},
     workDir,
     signal: new AbortController().signal,
     writeVars: vi.fn(),
   }
-}
-
-function checkpointPathFor(workDir: string, workflowRunId: string, sourceRel: string) {
-  const key = createHash("sha256").update(`${workflowRunId}\0${sourceRel}`).digest("hex")
-  return join(workDir, ".git", "mohist", "archive-change", `${key}.json`)
 }
 
 function gitOk(stdout: string) {

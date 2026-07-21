@@ -207,11 +207,13 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       description: "Archive an OpenSpec change directory and commit the move",
       inputs: {
         changeDir: { types: ["string"], required: true, description: "Path to the OpenSpec change directory" },
+        archiveHint: { types: ["string"], description: "Persisted archive destination (relative) from a prior run; when present and the destination still exists, the archive is treated as already complete" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
         { name: "source", description: "Source change directory" },
         { name: "destination", description: "Archive destination directory" },
+        { name: "destinationRel", description: "Archive destination relative to the workspace root" },
         { name: "changed", description: "Whether the archive step modified the repository" },
         { name: "noChange", description: "Whether the archive step produced no changes" },
         { name: "commitMessage", description: "Commit message when the archive step changed the repository" },
@@ -225,7 +227,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "missing-source", description: "Source change directory is missing" },
         { code: "config-error", description: "Archive configuration is invalid" },
       ],
-      capabilities: ["workflow-checkpoint"],
+      capabilities: ["write-vars"],
     },
     run: archiveChangeAction,
   }),

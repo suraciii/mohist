@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import type { ActionResult, AddTaskInput, JsonObject, JsonValue } from "../core/types.js"
@@ -11,7 +10,6 @@ import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 import { fail, succeed } from "./action-result.js"
 
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
-const ARCHIVE_CHECKPOINT_VERSION = 1
 
 const ACTION_SOURCE = "action:openspec"
 
@@ -58,7 +56,17 @@ const defaultArchiveFileSystem: ArchiveFileSystem = {
   },
   moveDirectory: moveChangeDir,
   readText: async (path) => await readFile(path, "utf8"),
-  writeAtomic: writeArchiveCheckpoint,
+  writeAtomic: async (path, content) => {
+    await mkdir(dirname(path), { recursive: true })
+    const temporary = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
+    try {
+      const { writeFile } = await import("node:fs/promises")
+      await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
+      await rename(temporary, path)
+    } finally {
+      await rm(temporary, { force: true }).catch(() => undefined)
+    }
+  },
   remove: async (path) => await rm(path, { force: true }),
 }
 
@@ -159,72 +167,59 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
   const sourceValidation = validateWorkspaceRelativePath(sourceRel)
   if (sourceValidation) return archiveFailure("config-error", sourceValidation, { kind: "archive-change" })
 
-  const checkpoint = await resolveArchiveCheckpoint(host, sourceRel)
-  if (checkpoint.kind === "failure") return checkpoint.result
-
-  let destination: string
-  const checkpointPath = checkpoint.path
-  if (checkpoint.value) {
-    const persisted = checkpoint.value
-    const destinationValidation = validateCheckpointDestination(host.workDir, archiveDir, persisted.destination)
-    if (destinationValidation.kind === "failure") return archiveFailure("config-error", destinationValidation.message, { kind: "archive-change" })
-    destination = destinationValidation.path
-    const sourcePresent = await archiveFileSystem.exists(changeDir)
-    const destinationPresent = await archiveFileSystem.exists(destination)
-    if (sourcePresent && destinationPresent) {
-      return archiveFailure("partial-archive", `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${destination}`, { kind: "archive-change" })
-    }
-    if (!sourcePresent && !destinationPresent) {
-      return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
-    }
-    if (sourcePresent) {
-      try {
-        await archiveFileSystem.moveDirectory(changeDir, destination)
-      } catch (err) {
-        return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
-      }
-    }
-  } else {
-    if (!(await archiveFileSystem.exists(changeDir)) || !(await archiveFileSystem.hasFiles(changeDir))) {
-      return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
-    }
-    await archiveFileSystem.ensureDirectory(archiveDir)
-    const today = new Date().toISOString().slice(0, 10)
-    const archivePrefix = `${today}-${sourceName}`
-    const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
-    if (!resolvedDestination) return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, { kind: "archive-change" })
-    destination = resolvedDestination
-    const destinationRel = relativePath(host.workDir, destination)
-    const destinationValidation = validateCheckpointDestination(host.workDir, archiveDir, destinationRel)
-    if (destinationValidation.kind === "failure") return archiveFailure("config-error", destinationValidation.message, { kind: "archive-change" })
-
-    if (!host.checkpoint) return archiveFailure("config-error", "Archive change requires the workflow-checkpoint capability", { kind: "archive-change" })
-    const workflowToken = await host.checkpoint.token(`archive-change/${sourceRel}`)
-
-    const checkpointValue: ArchiveCheckpoint = {
-      version: ARCHIVE_CHECKPOINT_VERSION,
-      workflowRunId: workflowToken,
-      source: sourceRel,
-      destination: destinationRel,
-    }
-    try {
-      await archiveFileSystem.writeAtomic(checkpointPath, `${JSON.stringify(checkpointValue)}\n`)
-    } catch (err) {
-      return archiveFailure("retry-safe", `Failed to persist archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
-    }
-    try {
-      await archiveFileSystem.moveDirectory(changeDir, destination)
-    } catch (err) {
-      return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
-    }
+  // Idempotency is driven by the workflow variable `vars.archive`, surfaced
+  // here as `archiveHint` (a workspace-relative destination path). The server
+  // persists it across workspace rebuilds, so rerun-from-stage / retry find
+  // the previously archived destination instead of falling back to a missing
+  // source. The variable is seeded to null by the profile, so a first-time
+  // archive sees an empty hint.
+  const hintRel = readArchiveHint(inputs)
+  const hintedDestination = hintRel ? validateHintDestination(host.workDir, archiveDir, hintRel) : null
+  if (hintRel && !hintedDestination) {
+    return archiveFailure("config-error", `Archive hint escapes archive root: ${hintRel}`, { kind: "archive-change" })
   }
 
+  const sourcePresent = await archiveFileSystem.exists(changeDir)
+  const destinationPresent = hintedDestination ? await archiveFileSystem.exists(hintedDestination) : false
+
+  if (hintedDestination && destinationPresent && !sourcePresent) {
+    // Already archived on a prior run and the source has since been moved;
+    // the archived destination is the source of truth. Idempotent success —
+    // no move, no commit, no variable rewrite (the var already holds this
+    // destination from the prior run).
+    return archiveSuccessNoChange(changeDir, hintedDestination, hintRel!, /* writeVar */ false)
+  }
+  if (sourcePresent && destinationPresent && hintedDestination) {
+    return archiveFailure("partial-archive", `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${hintedDestination}`, { kind: "archive-change" })
+  }
+  if (!sourcePresent) {
+    return archiveFailure("missing-source", `Change directory not found: ${changeDir}`, { kind: "archive-change" })
+  }
+  if (!(await archiveFileSystem.hasFiles(changeDir))) {
+    return archiveFailure("missing-source", `Change directory is empty: ${changeDir}`, { kind: "archive-change" })
+  }
+
+  await archiveFileSystem.ensureDirectory(archiveDir)
+  const today = new Date().toISOString().slice(0, 10)
+  const archivePrefix = `${today}-${sourceName}`
+  const destination = await uniqueDestination(archiveDir, archivePrefix)
+  if (!destination) return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, { kind: "archive-change" })
   const destinationRel = relativePath(host.workDir, destination)
+  const destinationValidation = validateHintDestination(host.workDir, archiveDir, destinationRel)
+  if (!destinationValidation) return archiveFailure("config-error", `Archive destination escapes archive root: ${destinationRel}`, { kind: "archive-change" })
+
+  try {
+    await archiveFileSystem.moveDirectory(changeDir, destination)
+  } catch (err) {
+    return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" })
+  }
+
   const commitMessage = `${ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX}: ${sourceName}`
   const opts = sinkOptions(host)
 
   const addResult = await openSpecGitRunner(host.workDir, ["add", "-A", destinationRel], host.signal, opts)
   if (!addResult.success) {
+    await rollbackMove(destination, changeDir)
     return archiveFailure("retry-safe", `git add archive change failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -236,6 +231,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const rmResult = await openSpecGitRunner(host.workDir, ["rm", "-rf", "--cached", "--ignore-unmatch", sourceRel], host.signal, opts)
   if (!rmResult.success) {
+    await rollbackMove(destination, changeDir)
     return archiveFailure("retry-safe", `git rm --cached archive change failed: ${rmResult.combinedOutput || rmResult.stderr || `exit ${rmResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -247,6 +243,7 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const diffResult = await openSpecGitRunner(host.workDir, ["diff", "--cached", "--name-only", "--", sourceRel, destinationRel], host.signal, opts)
   if (!diffResult.success) {
+    await rollbackMove(destination, changeDir)
     return archiveFailure("retry-safe", `git diff archive change failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -258,18 +255,15 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
   if (changedFiles.length === 0) {
-    await archiveFileSystem.remove(checkpointPath)
-    return succeed({
-        kind: "archive-change",
-        source: changeDir,
-        destination,
-        changed: false,
-        noChange: true,
-      })
+    // Nothing to commit (e.g. the move was already committed on a prior
+    // attempt). The archive is durable; persist the destination so future
+    // reruns treat it as idempotent.
+    return archiveSuccessNoChange(changeDir, destination, destinationRel, /* writeVar */ true)
   }
 
   const commitResult = await openSpecGitRunner(host.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], host.signal, opts)
   if (!commitResult.success) {
+    await rollbackMove(destination, changeDir)
     return archiveFailure("retry-safe", `git commit archive change failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`, {
       kind: "archive-change",
       source: changeDir,
@@ -280,22 +274,72 @@ export async function archiveChangeAction(inputs: JsonObject, host: ActionHost):
     })
   }
 
-  await archiveFileSystem.remove(checkpointPath)
-
   const headResult = await openSpecGitRunner(host.workDir, ["rev-parse", "HEAD"], host.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
 
-  return succeed({
-      kind: "archive-change",
+  return {
+    output: {
+      kind: "archive-change" as const,
       source: changeDir,
       destination,
+      destinationRel,
       changed: true,
       noChange: false,
       commitMessage,
       commitSha,
       commitOutput: commitResult.combinedOutput,
       changedFiles,
-    })
+    },
+    effects: { writeVars: { archive: destinationRel } },
+  }
+}
+
+function archiveSuccessNoChange(changeDir: string, destination: string, destinationRel: string, writeVar: boolean): ActionResult {
+  const output: JsonObject = {
+    kind: "archive-change",
+    source: changeDir,
+    destination,
+    destinationRel,
+    changed: false,
+    noChange: true,
+  }
+  return writeVar
+    ? { output, effects: { writeVars: { archive: destinationRel } } }
+    : { output }
+}
+
+async function rollbackMove(destination: string, source: string): Promise<void> {
+  // If the commit phase fails after the directory move, roll the move back so
+  // a retry starts from a clean first-archive state (source present, no
+  // partial archive). Best effort — a failed rollback only means the next
+  // attempt will see both source and destination and report partial-archive.
+  try {
+    await archiveFileSystem.moveDirectory(destination, source)
+  } catch {
+    // Swallow: the caller already failed; the retry surface is the source
+    // of truth, not this rollback.
+  }
+}
+
+function readArchiveHint(inputs: JsonObject): string | null {
+  const raw = inputs["archiveHint"]
+  if (raw === null || raw === undefined) return null
+  if (typeof raw !== "string") return null
+  const trimmed = raw.trim()
+  return trimmed === "" ? null : trimmed
+}
+
+function validateHintDestination(workDir: string, archiveDir: string, destinationRel: string): string | null {
+  const path = resolve(workDir, destinationRel)
+  const archiveRoot = resolve(archiveDir)
+  const inside = relative(archiveRoot, path)
+  if (!destinationRel || isAbsolute(destinationRel) || destinationRel.includes("\0") || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+    return null
+  }
+  if (relative(workDir, path).replace(/\\/g, "/") !== destinationRel.replace(/\\/g, "/")) {
+    return null
+  }
+  return path
 }
 
 type ArchiveErrorCode = "retry-safe" | "partial-archive" | "missing-source" | "config-error"
@@ -354,73 +398,9 @@ function injectOpenSpecTaskPromptSelector(prompt: JsonValue, taskId: string | un
   return { ...prompt, with: nextWith }
 }
 
-interface ArchiveCheckpoint {
-  version: number
-  workflowRunId: string
-  source: string
-  destination: string
-}
-
-async function resolveArchiveCheckpoint(host: ActionHost, sourceRel: string): Promise<
-  | { kind: "ok"; path: string; value: ArchiveCheckpoint | null }
-  | { kind: "failure"; result: ActionResult }
-> {
-  if (!host.checkpoint) return { kind: "failure", result: archiveFailure("config-error", "Archive change requires the workflow-checkpoint capability", { kind: "archive-change" }) }
-  const token = await host.checkpoint.token(`archive-change/${sourceRel}`)
-  const key = createHash("sha256").update(`${token}\0${sourceRel}`).digest("hex")
-  const result = await openSpecGitRunner(host.workDir, ["rev-parse", "--git-path", `mohist/archive-change/${key}.json`], host.signal, sinkOptions(host))
-  if (!result.success) return { kind: "failure", result: archiveFailure("config-error", `Unable to resolve archive checkpoint path: ${result.combinedOutput || result.stderr}`, { kind: "archive-change" }) }
-  const rawPath = result.stdout.trim()
-  if (!rawPath) return { kind: "failure", result: archiveFailure("config-error", "Git returned an empty archive checkpoint path", { kind: "archive-change" }) }
-  const path = isAbsolute(rawPath) ? resolve(rawPath) : resolve(host.workDir, rawPath)
-  if (!(await archiveFileSystem.exists(path))) return { kind: "ok", path, value: null }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(await archiveFileSystem.readText(path))
-  } catch (err) {
-    return { kind: "failure", result: archiveFailure("config-error", `Malformed archive checkpoint: ${err instanceof Error ? err.message : String(err)}`, { kind: "archive-change" }) }
-  }
-  if (!isArchiveCheckpoint(parsed) || parsed.source !== sourceRel) {
-    return { kind: "failure", result: archiveFailure("config-error", "Archive checkpoint does not match this source", { kind: "archive-change" }) }
-  }
-  return { kind: "ok", path, value: parsed }
-}
-
-async function writeArchiveCheckpoint(path: string, content: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  const temporary = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
-  try {
-    await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
-    await rename(temporary, path)
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined)
-  }
-}
-
-function isArchiveCheckpoint(value: unknown): value is ArchiveCheckpoint {
-  if (!isObject(value)) return false
-  return value.version === ARCHIVE_CHECKPOINT_VERSION
-    && typeof value.workflowRunId === "string"
-    && typeof value.source === "string"
-    && typeof value.destination === "string"
-}
-
 function validateWorkspaceRelativePath(value: string): string | null {
   if (!value || isAbsolute(value) || value.startsWith("../") || value.includes("\0")) return `Archive source path escapes workspace: ${value}`
   return null
-}
-
-function validateCheckpointDestination(workDir: string, archiveDir: string, destinationRel: string): { kind: "ok"; path: string } | { kind: "failure"; message: string } {
-  const path = resolve(workDir, destinationRel)
-  const archiveRoot = resolve(archiveDir)
-  const inside = relative(archiveRoot, path)
-  if (!destinationRel || isAbsolute(destinationRel) || destinationRel.includes("\0") || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
-    return { kind: "failure", message: `Archive checkpoint destination escapes archive root: ${destinationRel}` }
-  }
-  if (relative(workDir, path).replace(/\\/g, "/") !== destinationRel.replace(/\\/g, "/")) {
-    return { kind: "failure", message: `Archive checkpoint destination is not canonical: ${destinationRel}` }
-  }
-  return { kind: "ok", path }
 }
 
 function resolveChangeDir(workDir: string, withInput: JsonObject) {
