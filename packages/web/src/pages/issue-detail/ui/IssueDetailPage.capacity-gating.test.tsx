@@ -69,9 +69,10 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
+    const startButton = await waitFor(() => screen.getByTestId('decision-action-start'))
     expect(startButton).toBeDisabled()
-    expect(startButton.getAttribute('title')).toMatch(/capacity is full/i)
+    const reason = await screen.findByTestId('decision-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/capacity is full/i)
   })
 
   it('enables Start when capacity.active < capacity.max even if activeAgents is empty', async () => {
@@ -84,7 +85,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
+    const startButton = await waitFor(() => screen.getByTestId('decision-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -103,7 +104,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
+    const startButton = await waitFor(() => screen.getByTestId('decision-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -118,9 +119,10 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
+    const startButton = await waitFor(() => screen.getByTestId('decision-action-start'))
     expect(startButton).toBeDisabled()
-    expect(startButton.getAttribute('title')).toMatch(/capacity is full/i)
+    const reason = await screen.findByTestId('decision-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/capacity is full/i)
   })
 
   it('treats capacity.max === 0 as not-full (does not disable Start on a zero-max placeholder)', async () => {
@@ -133,12 +135,12 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
+    const startButton = await waitFor(() => screen.getByTestId('decision-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
 
-  it('keeps the other-issues running indicator visible from activeAgents when no agent is running on this issue', async () => {
+  it('does not render a legacy "agents running on other issues" indicator inside the decision surface', async () => {
     mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
     mockAgentStatus({
       activeAgents: [
@@ -150,6 +152,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText(/1 agent running on other issues/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeInTheDocument())
+    expect(screen.queryByText(/agent running on other issues/i)).toBeNull()
   })
 })

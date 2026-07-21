@@ -164,8 +164,8 @@ describe('IssueDetailPage runtime decision surface', () => {
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
-    const surface = screen.getByTestId('runtime-decision-surface')
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
+    const surface = screen.getByTestId('issue-decision-surface')
     expect(surface.dataset.summary).toBe('running')
 
     const surfaceRect = surface.getBoundingClientRect()
@@ -195,11 +195,11 @@ describe('IssueDetailPage runtime decision surface', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
-    const surface = screen.getByTestId('runtime-decision-surface')
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
+    const surface = screen.getByTestId('issue-decision-surface')
     expect(surface.dataset.summary).toBe('approval-required')
-    expect(surface.querySelector('[data-testid="runtime-action-approve"]')).toBeTruthy()
-    expect(surface.querySelector('[data-testid="runtime-action-send-back"]')).toBeTruthy()
+    expect(surface.querySelector('[data-testid="decision-action-approve"]')).toBeTruthy()
+    expect(surface.querySelector('[data-testid="decision-action-send-back"]')).toBeTruthy()
     const workflowFrame = screen.getByTestId('workflow-view-frame')
     expect(workflowFrame.querySelector('[data-testid="approve-button"]')).toBeNull()
     expect(workflowFrame.querySelector('[data-testid="request-changes-button"]')).toBeNull()
@@ -229,11 +229,11 @@ describe('IssueDetailPage runtime decision surface', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
     const stopButtons = screen.getAllByRole('button', { name: 'Stop' })
     expect(stopButtons).toHaveLength(1)
-    expect(stopButtons[0]).toBe(screen.getByTestId('runtime-action-stop'))
-    expect(screen.getByTestId('reference-rail').querySelector('[data-testid="runtime-action-stop"]')).toBeNull()
+    expect(stopButtons[0]).toBe(screen.getByTestId('decision-action-stop'))
+    expect(screen.getByTestId('reference-rail').querySelector('[data-testid="decision-action-stop"]')).toBeNull()
   })
 
   it('keeps the sessions panel reachable as supporting evidence beneath the surface', async () => {
@@ -252,9 +252,9 @@ describe('IssueDetailPage runtime decision surface', () => {
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
 
-    const surface = screen.getByTestId('runtime-decision-surface')
+    const surface = screen.getByTestId('issue-decision-surface')
     const sessions = container.querySelector('[data-testid="workflow-sessions-panel"]')
     if (sessions) {
       const surfaceRect = surface.getBoundingClientRect()
@@ -418,13 +418,13 @@ describe('IssueDetailPage disconnected-runtime-notice routing', () => {
 
     const { container } = renderPageWithToastHost()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeTruthy())
 
     fireEvent.click(screen.getByTestId('trigger-disconnected-notice'))
 
     await waitFor(() => expect(screen.getByTestId('runtime-toast-connection-disconnected')).toBeTruthy())
 
-    const surface = screen.getByTestId('runtime-decision-surface')
+    const surface = screen.getByTestId('issue-decision-surface')
     const description = Array.from(container.querySelectorAll('h2'))
       .find((heading) => heading.textContent === 'Description')
     const commitsHeading = Array.from(container.querySelectorAll('h2'))
@@ -654,7 +654,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 
     renderPage()
 
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     expect(surface).toBeTruthy()
 
     const headerTier = screen.getByTestId('status-header-tier')
@@ -682,7 +682,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
     expect(screen.getByTestId('status-header-tier')).toBeTruthy()
     expect(screen.getByTestId('reading-flow')).toBeTruthy()
     expect(screen.getByTestId('reference-rail')).toBeTruthy()
-    expect(screen.getByTestId('runtime-decision-surface-frame')).toBeTruthy()
+    expect(screen.getByTestId('issue-decision-surface-frame')).toBeTruthy()
     expect(screen.getByTestId('workflow-view-frame')).toBeTruthy()
     expect(screen.getByTestId('workflow-profile-editor-frame')).toBeTruthy()
     expect(screen.getByTestId('issue-detail-content-grid')).toBeTruthy()
@@ -798,33 +798,33 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 })
 
 describe('IssueDetailPage Ask Agent entry', () => {
-  it('renders an Ask Agent button in the Actions card section', async () => {
-    mockIssue(makeIssue())
+  it('renders an Ask Agent button in the issue decision surface for a non-backlog issue', async () => {
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
 
     renderPage()
 
-    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    const button = await waitFor(() => screen.getByTestId('decision-action-ask-agent'))
     expect(button).toBeTruthy()
     expect(button.textContent).toContain('Ask Agent')
   })
 
   it('navigates to the composer with ?issue=<number> on click', async () => {
-    mockIssue(makeIssue({ number: 14 }))
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build', number: 14 }))
 
     renderPage()
 
-    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    const button = await waitFor(() => screen.getByTestId('decision-action-ask-agent'))
     fireEvent.click(button)
 
     expect(screen.getByTestId('current-path').textContent).toContain('/agent-sessions/new?issue=14')
   })
 
   it('uses encodeURIComponent for the issue number in the navigation URL', async () => {
-    mockIssue(makeIssue({ number: 14 }))
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build', number: 14 }))
 
     renderPage()
 
-    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    const button = await waitFor(() => screen.getByTestId('decision-action-ask-agent'))
     fireEvent.click(button)
 
     expect(screen.getByTestId('current-path').textContent).toMatch(/\/agent-sessions\/new\?issue=14(&|$)/)
@@ -832,7 +832,7 @@ describe('IssueDetailPage Ask Agent entry', () => {
 })
 
 describe('IssueDetailPage runtime status badges', () => {
-  it('groups identity metadata separately from one runtime summary badge', async () => {
+  it('keeps identity metadata visible and shows the runtime summary only inside the headline (no separate runtime badge row)', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -859,16 +859,18 @@ describe('IssueDetailPage runtime status badges', () => {
     renderPage()
 
     const identity = await waitFor(() => screen.getByTestId('status-badges-identity'))
-    const runtime = screen.getByTestId('status-badges-runtime')
     expect(within(identity).getByTestId('priority-chip')).toBeTruthy()
     expect(within(identity).getByTestId('draft-pill')).toBeTruthy()
-    expect(within(runtime).getAllByTestId('runtime-status-pill')).toHaveLength(1)
-    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'running')
+    expect(screen.queryByTestId('status-badges-runtime')).toBeNull()
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
     expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
     expect(screen.queryByTestId('health-pill')).not.toBeInTheDocument()
+
+    const headline = screen.getByTestId('status-headline')
+    expect(headline.dataset.summary).toBe('running')
   })
 
-  it('renders the queued runtime badge for backlog issues waiting on a prerequisite', async () => {
+  it('renders the queued summary inside the headline for backlog issues waiting on a prerequisite', async () => {
     mockIssue(makeIssue({
       status: 'backlog',
       workflowStage: null,
@@ -880,7 +882,9 @@ describe('IssueDetailPage runtime status badges', () => {
 
     renderPage()
 
-    const runtime = await waitFor(() => screen.getByTestId('status-badges-runtime'))
-    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'queued')
+    const headline = await waitFor(() => screen.getByTestId('status-headline'))
+    expect(headline.dataset.summary).toBe('queued')
+    expect(screen.queryByTestId('status-badges-runtime')).toBeNull()
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
   })
 })

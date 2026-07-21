@@ -112,7 +112,6 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
-      'reference-rail-actions',
       'reference-rail-prerequisites',
     ]
     for (const testId of railItems) {
@@ -152,7 +151,6 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
     expect(referenceRail.dataset.railMode).toBe('desktop')
     expect(screen.getByTestId('reference-rail-details').dataset.collapsed).toBe('false')
-    expect(screen.getByTestId('reference-rail-actions').dataset.collapsed).toBe('false')
 
     act(() => {
       viewport.setNarrow(true)
@@ -168,7 +166,6 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
-      'reference-rail-actions',
       'reference-rail-prerequisites',
     ]) {
       expect(screen.getByTestId(testId).dataset.collapsed).toBe('true')

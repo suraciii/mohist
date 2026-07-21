@@ -1,0 +1,82 @@
+{
+  "project": "mohist-local",
+  "description": "Make the issue detail page state status once and provide one trustworthy, responsive decision surface for workflow, lifecycle, delegation, and transcript actions with honest unavailable states.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Consolidate issue status and decision context",
+      "spec": "specs/issue-decision-surface/spec.md#requirement-issue-status-has-one-authoritative-presentation",
+      "description": "Make the sticky status headline the sole issue status statement while retaining workflow stage progress and integrating the current task when a runtime decision exists. Add an issue-only headline/context for composite parents, remove repeated runtime and stage metadata, and make approval-pause versus manually-stopped rationale and next-action copy explicit without changing runtime summary precedence.",
+      "acceptanceCriteria": [
+        "For running, queued, approval-required, blocked, failed, and done issues, the page renders exactly one runtime summary in StatusHeadline; the header RuntimeSummaryPill is removed and no replacement runtime badge is added elsewhere.",
+        "When a current task exists, StatusHeadline communicates it once as part of the headline/status text and does not render the separate current-task pill; stage progress remains visible when available and backlog issues do not fabricate task or progress data.",
+        "A composite parent with no RuntimeDecision receives one sticky issue-only status statement using its current Issue status and child summary; it renders no workflow stage or current task and does not require a workflow request.",
+        "IssueDetailsCard no longer accepts or renders Issue Stage or Workflow Stage, while parent/child relationships, project, repository name, base branch, and Git URL remain unchanged.",
+        "Approval-pause rationale states that an approval decision is pending without saying the viewer must review or approve; interrupted or manually stopped workflow copy identifies the stop/recovery situation and does not describe it as awaiting approval.",
+        "Runtime summary precedence and server-offered workflow actions are unchanged, verified by the existing derive-runtime-decision behavior matrix remaining green.",
+        "Focused status-header, cross-tier, archived, Details, and runtime-presentation tests cover status uniqueness, current-task deduplication, all runtime summaries, and the two paused meanings.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated issue-detail StatusHeadline, header composition, IssueDetailsCard, runtime decision copy, and focused Web regression tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep StatusHeadline sticky and preserve the existing runtime summary derivation for workflow-capable issues. The composite-parent path is a page-owned issue presentation, not a fabricated RuntimeDecision. This task establishes the corrected context consumed by T-002's desktop and mobile decision presentations. Do not restructure the reading flow or remove non-status Details metadata."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver the unified responsive issue decision surface",
+      "spec": "specs/issue-decision-surface/spec.md#requirement-issue-actions-use-one-decision-surface",
+      "description": "Implement the complete issue-detail action slice: derive one page-owned action list from an optional RuntimeDecision plus authoritative Issue lifecycle, delegation, and concrete-session facts; bind it to one controller; and use it for both desktop controls and a complete mobile action sheet. Preserve issue-only actions for composite parents, remove the rail and workflow-local command paths, replace synthetic transcript inspection with real session navigation, and make every displayed unavailable runtime action visibly and accessibly explained.",
+      "acceptanceCriteria": [
+        "A pure issue-detail action model copies server-offered approve, send back, retry, resume, rerun stage, stop, and start descriptors from RuntimeDecision when one exists, and derives applicable mark ready, close, mark as done, Ask Agent, and View transcript descriptors from current Issue/session facts; it carries ordering, primary emphasis, enabled state, product-language reason, destructive intent, and interaction mode without containing mutation objects or callbacks.",
+        "A table-driven unit matrix preserves existing lifecycle applicability for drafts, composite parents, active execution, stopped/completed workflows, archived issues, and terminal issue states; irrelevant actions are omitted and consolidation never enables an action that the RuntimeDecision or existing issue lifecycle facts do not authorize.",
+        "A composite parent with no RuntimeDecision receives its applicable mark ready, close, and Ask Agent actions in the desktop and mobile issue decision surface, receives no workflow action or transcript action without a concrete session, and does not lose actions when the rail Actions card is removed.",
+        "One action controller and one runtime mutation adapter own dispatch, pending/error state, recoverable versus terminal Stop selection, Stop confirmation, and send-back feedback validation for both desktop and mobile renderers; MobileActionBar no longer duplicates runtime dispatch or pending/error lookup.",
+        "The desktop decision surface is the sole location for applicable workflow, lifecycle, and Ask Agent commands; the reference-rail Actions card and IssueActionsCard usage are removed, and WorkflowView retains task/check/artifact/report/feedback evidence without InlineApprovalControls or another approve/request-changes mutation path.",
+        "Approval and send-back remain available together when server-authorized, send-back still requires non-empty feedback and the approval stage, and action errors remain visible without changing API calls or query invalidation behavior.",
+        "Displayed but temporarily unavailable runtime actions have visible helper text associated through aria-describedby, use neutral unmistakably disabled styling including disabled destructive actions, and contain none of the words projection, surface, or backend; irrelevant unavailable actions are not rendered.",
+        "When approve, send back, Stop, mark ready, close, or mark as done is pending, both renderers use the operation-specific progress label and a visible aria-describedby-linked reason in an aria-live=polite region stating that another request is unavailable until completion; the pending control uses neutral disabled styling and cannot dispatch twice.",
+        "A running issue with no executable command shows a product-language explanation of the blocking condition and next transition rather than an unexplained all-disabled action set.",
+        "Session selection is deterministic: active/running/probing sessions win, otherwise the most recently started or created session wins with session name as a stable tie-break; the resulting View transcript action is enabled and opens that concrete session route, while no-session states render no transcript action and Ask Agent remains available according to its existing rule.",
+        "At phone width, an independently enabled action-sheet launcher exposes every applicable descriptor, including both approval alternatives and lifecycle actions, and includes the same rationale and next-action text as desktop; a disabled primary command cannot block access to enabled secondary actions or disabled reasons.",
+        "The mobile sheet preserves keyboard focus trapping, Escape/close behavior, focus restoration, send-back input, Stop confirmation, safe-area clearance, and non-overlapping page padding; disabled mobile destructive actions do not retain live destructive styling.",
+        "Focused model/controller tests and MSW-backed issue-detail specs cover action ordering/applicability, authorization preservation, lifecycle migration, approval routing, workflow and lifecycle pending states, all-dead explanation, disabled copy, deterministic transcript navigation, desktop placement, and narrow action parity; obsolete IssueActionsCard, RuntimeDecisionSurface action, and primary-only MobileActionBar expectations are removed rather than duplicated.",
+        "A focused Playwright browser spec against the production Web build verifies desktop action uniqueness and phone action-sheet reachability, disabled visual treatment, rationale/next-action visibility, transcript navigation, and no control/content overlap using controlled API responses.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Canonical issue-detail action model and controller; migrated desktop and mobile decision UI; removed duplicate rail/approval/inspect paths; transcript navigation; focused unit, page-spec, and browser coverage.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep this one vertical slice: switching desktop without mobile or removing the rail before lifecycle actions enter the shared model would leave a supported viewport or composite parent unusable. RuntimeDecision is authoritative only for workflow actions; current Issue facts and unchanged lifecycle predicates are authoritative for lifecycle actions. Compose them under pages/issue-detail and reuse the normalized context from T-001. Do not add reopen or move Rebase into this action list."
+    },
+    {
+      "id": "T-003",
+      "title": "Make unavailable Rebase controls honest",
+      "spec": "specs/issue-decision-surface/spec.md#requirement-unavailable-actions-are-honest-and-accessible",
+      "description": "Keep Rebase beside branch/workspace evidence but make every displayed unavailable state explain itself visibly and accessibly. Derive product-language reasons from workspace checking/status and conflict-resolution facts, and neutralize disabled styling without changing Rebase eligibility or execution.",
+      "acceptanceCriteria": [
+        "When Rebase is disabled because workspace status is loading or incomplete, the visible helper text explains that branch status is still being checked and is associated with the control through aria-describedby.",
+        "When Rebase is disabled during conflict resolution or another existing unavailable state, the visible helper text names that user-facing condition; no disabled reason contains projection, surface, or backend.",
+        "Every disabled Rebase control uses a neutral unmistakably disabled treatment on desktop and narrow layouts instead of retaining enabled amber or other actionable emphasis; enabled Rebase appearance and behavior remain unchanged.",
+        "BranchBar continues to use useRebaseRecovery.canRequest and allowRebase as its authority, retains queued/rebasing/conflict/error evidence, and triggers the existing mutation only when enabled.",
+        "BranchBar tests cover loading, incomplete workspace status, conflict resolution, enabled Rebase, visible reason text, aria-describedby linkage, and disabled versus enabled class treatment.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated BranchBar unavailable-state reasons and styling with focused component tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001 and T-002: Rebase remains contextual to branch/workspace evidence and does not consume the issue action model. Do not change useRebaseRecovery eligibility, add a shared cross-domain action abstraction, or move Rebase into the canonical issue action list."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { QueryClient, useMutation } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import type { ComponentProps, ReactElement } from 'react'
@@ -317,8 +317,8 @@ describe('WorkflowView', () => {
     expect(timelineRequests).toEqual([])
   })
 
-  describe('InlineApproval - awaiting approval', () => {
-    it('does not render or initialize approval controls when mounted read-only', () => {
+  describe('InlineApproval - evidence rendering without mutation controls', () => {
+    it('does not render the InlineApprovalControls or initialize any approval mutation when mounted read-only', () => {
       setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
@@ -333,13 +333,14 @@ describe('WorkflowView', () => {
         },
       })} readOnly />)
 
-      expect(screen.queryByText('Approval Required')).not.toBeInTheDocument()
       expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
       expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('request-changes-form')).not.toBeInTheDocument()
+      expect(approveRequests).toEqual([])
       expect(feedbackRequests).toEqual([])
     })
 
-    it('renders Approve and Request changes actions; no Reject or Send back labels', () => {
+    it('does not render approve/request-changes mutation controls even when not read-only', () => {
       setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
@@ -354,110 +355,55 @@ describe('WorkflowView', () => {
         },
       })} />)
 
-      expect(screen.getByText('Approval Required')).toBeInTheDocument()
-      expect(screen.getByTestId('approve-button')).toBeInTheDocument()
-      expect(screen.getByTestId('request-changes-button')).toBeInTheDocument()
+      expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /send back/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^reject$/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /approve anyway/i })).not.toBeInTheDocument()
+      expect(approveRequests).toEqual([])
+      expect(feedbackRequests).toEqual([])
     })
 
-    it('Request changes action is hidden when stage is not awaiting approval', () => {
+    it('renders the read-only approval evidence panel when an approval output is awaiting', () => {
+      setWorkflowTimeline(({
+        data: makeAwaitingApprovalTimeline(),
+      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+
+      render(<WorkflowView issue={makeIssue({
+        workflowStage: WorkflowStage.Plan,
+        health: 'attention' as IssueHealth,
+        approvalState: {
+          status: 'awaiting',
+          stage: WorkflowStage.Plan,
+          requestedAt: '2026-01-01T00:01:00.000Z',
+          output: { result: 'PASS', checks: [] },
+        },
+      })} readOnly />)
+
+      expect(screen.getByTestId('step-list-approval-evidence')).toBeInTheDocument()
+    })
+
+    it('hides approval evidence when stage is not awaiting approval', () => {
       setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
-      })} />)
+      })} readOnly />)
 
-      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('request-changes-disabled')).not.toBeInTheDocument()
-      expect(screen.queryByText('Approval Required')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('step-list-approval-evidence')).not.toBeInTheDocument()
     })
 
-    it('Request changes action is hidden when stage is running', () => {
+    it('hides approval evidence when stage is running', () => {
       setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({
         workflowStage: WorkflowStage.Build,
         workflowStatus: 'running',
         health: IssueHealth.Active,
-      })} />)
+      })} readOnly />)
 
-      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
-    })
-
-    it('clicking Request changes opens a text input for feedback body', () => {
-      setWorkflowTimeline(({
-        data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
-
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
-
-      fireEvent.click(screen.getByTestId('request-changes-button'))
-
-      const form = screen.getByTestId('request-changes-form')
-      expect(form).toBeInTheDocument()
-      expect(screen.getByTestId('request-changes-textarea')).toBeInTheDocument()
-      expect(screen.getByTestId('submit-request-changes')).toBeInTheDocument()
-    })
-
-    it('Submit button is disabled without feedback body', () => {
-      setWorkflowTimeline(({
-        data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
-
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
-
-      fireEvent.click(screen.getByTestId('request-changes-button'))
-
-      const submit = screen.getByTestId('submit-request-changes')
-      expect(submit).toBeDisabled()
-    })
-
-    it('submitting feedback sends the stage and body through the request-changes mutation', async () => {
-      setWorkflowTimeline(({
-        data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
-
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
-
-      fireEvent.click(screen.getByTestId('request-changes-button'))
-      const textarea = screen.getByTestId('request-changes-textarea') as HTMLTextAreaElement
-      fireEvent.change(textarea, { target: { value: 'Please address the security findings' } })
-      fireEvent.click(screen.getByTestId('submit-request-changes'))
-
-      await waitFor(() => {
-        expect(feedbackRequests).toEqual([{
-          issueNumber: 1,
-          stage: 'plan',
-          body: 'Please address the security findings',
-        }])
-      })
+      expect(screen.queryByTestId('step-list-approval-evidence')).not.toBeInTheDocument()
     })
 
     it('renders feedback history when feedback records exist', () => {
@@ -591,11 +537,10 @@ describe('WorkflowView', () => {
       expect(screen.getByText(/apply-feedback task is pending/)).toBeInTheDocument()
     })
 
-    it('Feedback history is visible during the running feedback-loop without the approval card', () => {
+    it('Feedback history is visible during the running feedback-loop without the approval evidence', () => {
       // While the apply-feedback task is running, the stage is `Running`
       // and the server's `RequestChanges` clears the stage approval
-      // state, so `issue.approvalState` is null. The InlineApproval
-      // card is hidden. The feedback-history timeline should still
+      // state, so `issue.approvalState` is null. The feedback-history timeline should still
       // surface the open cycle.
       setWorkflowTimeline(({
         data: {
@@ -632,65 +577,12 @@ describe('WorkflowView', () => {
         feedback,
       })} />);
 
-      // The InlineApproval card is hidden because the stage is running.
       expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
       expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument();
-      // The feedback history still surfaces the open cycle.
       expect(screen.getByText('Feedback history')).toBeInTheDocument();
       expect(screen.getByText('Pending feedback')).toBeInTheDocument();
       expect(screen.getByText(/apply-feedback task is pending/)).toBeInTheDocument();
     });
-
-    it('Approve action calls approveIssue', async () => {
-      const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
-      setWorkflowTimeline(({
-        data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
-
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
-
-      fireEvent.click(screen.getByTestId('approve-button'))
-
-      await waitFor(() => {
-        expect(approveRequests).toEqual(['1'])
-      })
-      await waitFor(() => {
-        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
-      })
-      invalidateSpy.mockRestore()
-    })
-
-    it('Cancel button closes the feedback input and discards the text', () => {
-      setWorkflowTimeline(({
-        data: makeAwaitingApprovalTimeline(),
-      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
-
-      render(<WorkflowView issue={makeIssue({
-        workflowStage: WorkflowStage.Plan,
-        health: 'attention' as IssueHealth,
-        approvalState: {
-          status: 'awaiting',
-          stage: WorkflowStage.Plan,
-          requestedAt: '2026-01-01T00:01:00.000Z',
-        },
-      })} />)
-
-      fireEvent.click(screen.getByTestId('request-changes-button'))
-      const textarea = screen.getByTestId('request-changes-textarea') as HTMLTextAreaElement
-      fireEvent.change(textarea, { target: { value: 'Draft text' } })
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-      expect(screen.queryByTestId('request-changes-form')).not.toBeInTheDocument()
-      expect(screen.getByTestId('request-changes-button')).toBeInTheDocument()
-    })
   })
 
   describe('artifact chips on task rows', () => {

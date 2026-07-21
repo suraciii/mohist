@@ -1,0 +1,249 @@
+# T-001 — Consolidate issue status and decision context
+
+## Codebase Patterns
+
+- `RuntimeDecision` (widgets/issue-workflow/model) is authoritative for workflow summary / actions; the
+  page now adds a separate, page-owned `IssueDecisionContext` for the composite-parent path.
+  The composite-parent case is intentionally issue-only: no fabricated workflow stage, current task,
+  or workflow action.
+- `StatusHeadline` is sticky; it remains the single runtime-summary statement. The previous
+  duplicate `runtime-status-pill` in the header identity row is removed. No replacement badge.
+- `IssueDetailsCard` no longer renders Issue Stage or Workflow Stage rows. Parent/child, project,
+  repository name, base branch, and Git URL are unchanged.
+- Two paused meanings: `approval-required` says "approval decision is pending"; interrupted/manual
+  stop says "Execution stopped manually. Resume or rerun to continue." They are mutually exclusive
+  in copy.
+
+## Decisions
+
+- Add `deriveIssueOnlyStatus` in `pages/issue-detail/model/issueDecisionContext.ts` (pure function).
+  Inputs: status, health, isDraft, isArchived, childSummary. Returns { label, headline, rationale,
+  nextAction } without any DOM/mutation concerns.
+- Add `IssueOnlyStatusHeadline` in `pages/issue-detail/ui/`. Reuses the same `data-testid="status-headline"`
+  anchor and `data-tier-weight="status-header"` sticky placement so existing tier tests still pass.
+  Uses `data-summary="issue-only"`.
+- `StatusHeadline` for workflow-capable issues: drop the separate `status-headline-current-task` pill.
+  The headline text from `deriveRuntimeDecision` already embeds the current task for running /
+  approval-required / blocked / failed (e.g. "Task running: X", "Approval pending on X"). Add
+  `data-has-current-task` attribute for tests; keep the sticky + summary + stage progress + headline.
+- `pills.tsx` no longer exports `RuntimeSummaryPill`. The component was the only consumer of the
+  header identity row's runtime pill; that row is gone.
+- Update `IssueDetailPage.tsx` to:
+  - Use `IssueOnlyStatusHeadline` when `isCompositeParent`, else the existing `StatusHeadline`.
+  - Drop the `RuntimeSummaryPill` render and the `status-badges-runtime` group.
+  - Stop passing `workflowStage: null` overrides to `IssueDetailsCard` (the type no longer
+    includes that field).
+
+## Gotchas
+
+- `RuntimeSummaryPill` removal: `IssueDetailPage.test.tsx`, `IssueDetailPage.status-header.test.tsx`,
+  `IssueDetailPage.archived.test.tsx` and the cross-tier tests all referenced
+  `status-badges-runtime` / `runtime-status-pill`. They are updated to assert the headline is the
+  sole summary carrier and the page-wide count of runtime-status-pill nodes is 0.
+- `IssueDetailsCardIssue` type lost `workflowStage`. `IssueDetailPage.tsx` no longer needs to strip
+  it; tests that passed `workflowStage: 'build'` into the card must no longer assert the row
+  shows (the row itself is gone, see `tests/IssueDetailPage.spec.tsx`).
+- `runtime-presentations.ts` approval-pause rationale: "The workflow is paused and waiting for your
+  review." -> "The workflow is paused while an approval decision is pending." The next-action copy
+  is now "An approval decision is needed to continue" instead of "Review and approve to continue".
+- `runtime-presentations.ts` blocked/interrupted rationale: "The workflow was interrupted. Resume or
+  rerun to continue." -> "Execution stopped manually. Resume or rerun to continue." The
+  interrupted health path test in `IssueDetailPage.control-workspace.active.spec.tsx` was updated to
+  assert stop/recovery language and absence of approval language.
+- Headline "Approval required on X" -> "Approval pending on X" (matching the rationale copy).
+- Backlog / queued path: the headline for `queued` is "Waiting to start (workflow)" when no stage.
+  The new `StatusHeadline` keeps the same sticky section, the same `data-testid="status-headline"`,
+  and does not fabricate a stage / progress / current task when none exist (existing cross-tier
+  test still asserts null for those three nodes when stage progress is null).
+
+## Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5027 / 5027 tests pass (added 14 new in
+  `IssueDetailPage.status-uniqueness.test.tsx`, 6 in
+  `widgets/issue-workflow/model/runtime-presentations.test.ts`, 3 in
+  `pages/issue-detail/ui/cards/IssueDetailsCard.test.tsx`, 9 in
+  `pages/issue-detail/model/issueDecisionContext.test.ts`).
+- `npm run check:fsd -w packages/web` — green (481 modules).
+- `npm run check:test-boundaries -w packages/web` — green.
+
+## Notes for T-002
+
+- `RuntimeDecision` continues to be authoritative for workflow actions; the page-owned
+  `deriveIssueOnlyStatus` is for the composite-parent case only. Do not extend
+  `deriveRuntimeDecision` with composite-parent logic.
+- The `data-testid="status-headline"` anchor is shared by both `StatusHeadline` and
+  `IssueOnlyStatusHeadline`. The data-summary differentiates them (`"running"` / `"issue-only"`,
+  etc.). T-002 can use the same anchor to add the mobile action surface.
+- The current task is no longer a separate pill but is still carried on `decision.currentTask`
+  (from `RuntimeDecision`). T-002 may consume that for mobile action description text if needed.
+
+# T-002 — Deliver the unified responsive issue decision surface
+
+## Codebase Patterns
+
+- `RuntimeDecision` continues to be authoritative for workflow actions (approve / send-back /
+  retry / resume / rerun / stop / start). The page-owned `deriveIssueDecisionActions` (under
+  `pages/issue-detail/model/`) composes the optional runtime decision with current Issue facts to
+  produce one ordered, pure `IssueDecisionAction[]` plus a primary fallback. The controller
+  `useIssueDecisionActionController` owns dispatch, pending/error, recoverable vs terminal Stop,
+  Stop confirmation, and send-back validation; `MobileActionBar` and `IssueDecisionSurface` both
+  consume it. `MobileActionBar` no longer duplicates mutation dispatch or pending lookup.
+- Composite parents with no runtime decision get only their applicable lifecycle / delegation
+  descriptors (mark-ready / close / ask-agent / view-transcript) from the page-owned model. The
+  rail `Actions` card is removed; `IssueActionsCard` is deleted along with its tests; the
+  workflow view is mounted `readOnly` and contains no `InlineApprovalControls` mutation path.
+- `IssueDecisionSurface` renders the desktop surface, rationale, next-action text, stop
+  confirmation, and send-back form. `MobileActionBar` renders the launcher + sheet for narrow
+  viewports; the launcher is independently enabled so a disabled primary action never hides
+  enabled secondary actions or their reasons. Disabled destructive buttons use neutral muted
+  styling instead of the live destructive variant. Both renderers use `aria-describedby` for
+  disabled reasons and `aria-live="polite"` for pending mutations.
+
+## Decisions
+
+- Allow `close` for composite parents (matches the existing `IssueActionsCard.showClose` rule
+  that excluded only health != active and an agent running on this issue; do not exclude parents).
+  Composite parents still do not get `mark-as-done` (the previous behavior). Mark-ready continues
+  to require `isDraft` and a non-archived, non-terminal issue.
+- Workflow actions continue to be copied from `RuntimeDecision`; they are not emitted when the
+  decision is null (e.g. composite parents, archived, terminal, no workflow run). When the
+  decision exists, only the kinds covered by the existing lifecycle are copied (approve,
+  send-back, retry, resume, rerun, stop, start); no new lifecycle actions are introduced.
+- `IssueDecisionAction` carries `enabled`, `reason`, `primary`, `destructive`, `mode`, `to`,
+  `order`, and `pendingLabel`. It does NOT carry mutation objects or callbacks — dispatch lives
+  in `useIssueDecisionActionController`. Navigation actions (ask-agent, view-transcript) carry
+  the `to` route computed through `useProjectPath()`.
+- `selectTranscriptSession` selects an active (active / running / probing) session before any
+  other; on ties, prefer the most recently started session, then the most recently created
+  session, and break remaining ties with `sessionName.localeCompare`. Ask Agent is independent
+  of session presence.
+- `MobileActionBar` renders the sheet launcher independently of primary enabled state. The sheet
+  preserves focus trapping via `ConfirmationDrawer`, Escape / close button, focus restoration
+  through the dialog unmount, send-back textarea, Stop confirmation, `safe-area-inset-bottom`
+  clearance, and non-overlapping page padding (`pb-[calc(8rem+env(safe-area-inset-bottom))]`
+  when the bar is mounted).
+
+## Gotchas
+
+- Initial `deriveIssueDecisionActions` accidentally excluded composite parents from `close`; the
+  test asserting the old behavior was updated to assert the new behavior, matching the existing
+  `IssueActionsCard.showClose` predicate.
+- `IssueDetailPage.control-workspace.spec.tsx` originally imported `mockIssueCommits` and
+  `mockIssueDiff` without using them; the imports were removed to satisfy `no-unused-imports`
+  and `npm run typecheck`.
+- `tests/IssueDetailPage.spec.tsx` had a `findRailCard(name: 'Configuration')` whose `name` was
+  unused; renamed to `_name` so the test boundary linter is satisfied without changing behavior.
+- Three test files (`IssueDetailPage.composite-parent-decision-surface.test.tsx`,
+  `IssueDetailPage.control-workspace.spec.tsx`, `IssueDetailPage.drift-recovery.spec.tsx`) used
+  `Object.defineProperty(window, 'innerWidth', ...)` to set the viewport; the `check:test-boundaries`
+  linter rejects this. Switched to `setScopedValue(window, 'innerWidth', ...)` from
+  `tests/support/scoped-property.ts`.
+- `scripts/node-test-file-budget-baseline.json` had a 558-line allowance for
+  `IssueDetailPage.narrow-action-bar.test.tsx`; the file is now 473 lines, so the allowance was
+  removed.
+- The composite-parent desktop test originally clicked the launcher with `.click()`, which
+  triggered a React `act` warning because the click handler scheduled a state update outside
+  `act`. Replaced with `fireEvent.click(launcher)`.
+
+## Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5033 / 5033 tests pass. T-001 baseline had 5098 tests
+  (10 failing because the page and decision-surface work was not yet completed). T-002
+  consolidates the four obsolete spec files (`IssueDetailPage.control-workspace.active.spec.tsx`,
+  `IssueDetailPage.control-workspace.terminal.spec.tsx`,
+  `IssueDetailPage.decision-adjacent-evidence.spec.tsx`,
+  `IssueDetailPage.execution-signal.spec.tsx`) and the `cards/IssueActionsCard.{tsx,test.tsx}`
+  pair into one `IssueDetailPage.control-workspace.spec.tsx` + the shared decision surface,
+  controller, and mobile action model. New focused coverage: 33 model tests in
+  `issueDecisionActions.test.ts`, 18 controller tests in `useIssueDecisionActions.test.tsx`,
+  4 composite-parent decision-surface page tests, and the 10 browser scenarios in
+  `tests/browser/issue-decision-surface.spec.ts`.
+- `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` —
+  10 / 10 browser scenarios pass.
+- `npm run check:fsd -w packages/web` — green (483 production modules).
+- `npm run check:test-boundaries -w packages/web` — green.
+
+## Notes for T-003
+
+- `BranchBar` already uses `useRebaseRecovery.canRequest` and `allowRebase`; the rebased disabled
+  copy lives there. T-003 must keep Rebase out of the issue decision action list (per the
+  capability's design) and apply the disabled-reason + neutral disabled styling rules to the
+  existing `BranchBar` controls.
+- The mobile sheet and desktop surface share the controller but the rebased control stays on
+  `BranchBar`. The "neutral disabled styling" CSS hooks (`bg-muted text-muted-foreground hover:bg-muted
+  border-border`) used for Stop / Send Back can be reused for Rebase when disabled.
+
+# T-003 — Make unavailable Rebase controls honest
+
+## Codebase Patterns
+
+- `BranchBar` remains the owner of Rebase beside branch and workspace evidence. Rebase eligibility is still the conjunction of `useRebaseRecovery.canRequest` and the `allowRebase` prop; the existing `rebase.trigger` mutation is unchanged.
+- `RebaseAction` is the shared rendering path for the upstream-unknown and behind/allowed layouts, so desktop and narrow layouts receive the same disabled reason, `aria-describedby` linkage, and neutral disabled classes.
+
+## Decisions
+
+- Unavailable copy is derived in priority order from conflict resolution, an in-progress/queued rebase, unknown upstream status, incomplete ahead/behind status, issue-level permission, and the remaining recovery gate.
+- Reasons are rendered as visible helper text with a stable `id`, while `title` remains a pointer supplement. Disabled Rebase uses `border-border bg-muted text-muted-foreground hover:bg-muted`; enabled Rebase keeps its existing contextual gray or amber classes.
+- Conflict-resolution status continues to render the existing resolving evidence and now includes the visible product-language reason without exposing implementation terms.
+
+## Verification
+
+- Focused `BranchBar.test.tsx` — 11 / 11 tests pass, covering loading, incomplete status, upstream errors, conflict resolution, enabled execution, visible reasons, accessible linkage, and enabled/disabled classes.
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5035 / 5035 tests pass across 372 files.
+
+# Review Fixes — Restore Pending and No-Action Decision Contracts
+
+## Decisions
+
+- The active issue-detail controller rejects all dispatch while any decision mutation is pending.
+  Both desktop and mobile render every displayed decision action as unavailable during that period,
+  with the same visible, `aria-describedby`-linked explanation. The initiating command retains its
+  operation-specific progress label.
+- The mobile sheet stays open after dispatch so its pending state and mutation error remain visible.
+  A zero-action state still exposes an enabled `Open actions` launcher whose sheet contains the
+  rationale, next action, and no-action explanation; the desktop decision surface likewise renders
+  its context when a runtime decision has no commands.
+- Removed the obsolete `RuntimeDecisionSurface`, its handler/types/tests, and the unused page
+  models that only fed that renderer. Runtime decisions now contain workflow actions only; concrete
+  transcript routing remains in `deriveIssueDecisionActions`. Unavailable workflow reasons use
+  product language and contain no implementation terminology.
+
+## Focused Verification
+
+- `npm run typecheck -w packages/web` — green.
+- Focused Vitest run for controller, desktop/mobile decision renderers, narrow-page behavior, and
+  runtime presentations — 62 / 62 tests pass.
+
+## Final Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 4967 / 4967 tests pass across 367 files.
+- `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` — 10 / 10 pass.
+- `npm run check:fsd -w packages/web` — green (478 production modules).
+- `npm run check:test-boundaries -w packages/web` — green (367 active Web Vitest files).
+
+# Review Fixes — Preserve Authorized Dispatch and Historical Transcripts
+
+## Decisions
+
+- The shared decision controller now rejects any descriptor whose current `enabled` flag is false,
+  before considering its interaction mode. Confirmation forms may remain visible across a query
+  update, but they cannot dispatch a command after the runtime decision or lifecycle state revokes it.
+- Transcript navigation remains enabled whenever the issue has a workflow run and a concrete session,
+  including archived, completed, and cancelled issues. Those states still omit mutation and delegation
+  actions; the transcript remains the read-only historical entry point.
+
+## Focused Verification
+
+- `npm run typecheck -w packages/web` — green.
+- Focused action-model and controller tests — 61 / 61 tests pass.
+
+## Final Verification
+
+- `npm run test:run -w packages/web` — 4968 / 4968 tests pass across 367 files.
+- `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` — 10 / 10 pass.
+- `npm run check:fsd -w packages/web` — green (478 production modules).
+- `npm run check:test-boundaries -w packages/web` — green (367 active Web Vitest files).

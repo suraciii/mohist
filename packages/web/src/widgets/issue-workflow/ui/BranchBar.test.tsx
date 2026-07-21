@@ -5,7 +5,8 @@ import type { ComponentProps } from 'react'
 import { http, HttpResponse } from 'msw'
 import { useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
-import { WorkflowStage } from '../../../entities/issue'
+import { LiveTaskContext, WorkflowStage } from '../../../entities/issue'
+import type { RebaseConflictState } from '../../../entities/issue'
 import { BranchBar } from './BranchBar'
 
 let rebaseRequests: string[] = []
@@ -33,6 +34,7 @@ const project = {
 function renderBranch(
   workspaceStatus: unknown | 'loading',
   props: Partial<ComponentProps<typeof BranchBar>> = {},
+  rebaseConflict: RebaseConflictState | null = null,
 ) {
   const issueNumber = props.issueNumber ?? 161
   const queryClient = new QueryClient({
@@ -47,13 +49,15 @@ function renderBranch(
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
-        <BranchBar
-          issueNumber={issueNumber}
-          stage={props.stage === undefined ? WorkflowStage.Build : props.stage}
-          isAgentRunning={props.isAgentRunning ?? false}
-          baseBranch={props.baseBranch}
-          allowRebase={props.allowRebase}
-        />
+        <LiveTaskContext.Provider value={{ activeTaskId: null, activeTaskElapsedMs: null, rebaseConflict }}>
+          <BranchBar
+            issueNumber={issueNumber}
+            stage={props.stage === undefined ? WorkflowStage.Build : props.stage}
+            isAgentRunning={props.isAgentRunning ?? false}
+            baseBranch={props.baseBranch}
+            allowRebase={props.allowRebase}
+          />
+        </LiveTaskContext.Provider>
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -79,15 +83,24 @@ describe('BranchBar', () => {
       conflictingFiles: [],
     }, { stage: null, isAgentRunning: true, baseBranch: 'master', allowRebase: true })
 
-    expect(screen.getByRole('button', { name: /rebase onto master/i })).not.toBeDisabled()
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect(rebase).not.toBeDisabled()
+    expect(rebase).toHaveClass('border-amber-300', 'text-amber-800', 'hover:bg-amber-50')
+    expect(rebase).not.toHaveClass('border-border', 'bg-muted', 'text-muted-foreground')
     expect(screen.getByText(/80 behind/i)).toBeTruthy()
   })
 
   it('shows a stable rebase action while workspace status is loading when a run exists', () => {
     renderBranch('loading', { stage: null, isAgentRunning: true, baseBranch: 'master', allowRebase: true })
 
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
     expect(screen.getByText('Checking upstream...')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /rebase onto master/i })).toBeDisabled()
+    expect(reason).toHaveTextContent('Branch status is still being checked.')
+    expect(rebase).toBeDisabled()
+    expect(rebase).toHaveAttribute('aria-describedby', reason.id)
+    expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
+    expect(rebase).not.toHaveClass('border-amber-300', 'text-amber-800', 'hover:bg-amber-50')
   })
 
   it('does not claim ahead/behind status until the runner returns numeric counts', () => {
@@ -97,9 +110,31 @@ describe('BranchBar', () => {
       baseBranch: 'master',
     }, { baseBranch: 'master', allowRebase: true })
 
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
     expect(screen.getByText('Checking upstream...')).toBeTruthy()
-    expect(screen.queryByText('workspace available')).toBeNull()
-    expect(screen.getByRole('button', { name: /rebase onto master/i })).toBeDisabled()
+    expect(reason).toHaveTextContent('Branch status is still being checked.')
+    expect(rebase).toBeDisabled()
+    expect(rebase).toHaveAttribute('aria-describedby', reason.id)
+    expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
+  })
+
+  it('keeps rebase disabled with a product-language reason when rebase is not allowed', () => {
+    renderBranch({
+      exists: true,
+      branch: 'mohist/run-wr-161',
+      baseBranch: 'master',
+      ahead: 0,
+      behind: 2,
+      rebaseInProgress: false,
+    }, { allowRebase: false })
+
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
+    expect(reason).toHaveTextContent('Rebase is unavailable for this issue.')
+    expect(rebase).toBeDisabled()
+    expect(rebase).toHaveAttribute('aria-describedby', reason.id)
+    expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
   })
 
   it('does not treat error status default 0/0 counts as real workspace progress', () => {
@@ -112,9 +147,15 @@ describe('BranchBar', () => {
       conflictingFiles: [],
     }, { baseBranch: 'master', allowRebase: true })
 
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
     expect(screen.getByText('未能检查上游')).toBeTruthy()
     expect(screen.queryByText('up to date')).toBeNull()
-    expect(screen.getByRole('button', { name: /rebase onto master/i })).toBeDisabled()
+    expect(reason).toHaveTextContent('Branch status could not be checked.')
+    expect(rebase).toBeDisabled()
+    expect(rebase).toHaveAttribute('aria-describedby', reason.id)
+    expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
+    expect(reason.textContent).not.toMatch(/projection|surface|backend/i)
   })
 
   it('shows retained Done workflow workspace archive-removal copy when a Done issue has a workspace', () => {
@@ -154,8 +195,34 @@ describe('BranchBar', () => {
       behind: 0,
     }, { baseBranch: 'master', allowRebase: true })
 
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
     expect(screen.getByText('未能检查上游')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /rebase onto master/i })).toBeDisabled()
+    expect(reason).toHaveTextContent('Branch status could not be checked.')
+    expect(rebase).toBeDisabled()
+    expect(rebase).toHaveAttribute('aria-describedby', reason.id)
+    expect(rebase).toHaveClass('border-border', 'bg-muted', 'text-muted-foreground', 'hover:bg-muted')
+  })
+
+  it('explains that conflict resolution blocks another rebase request', () => {
+    renderBranch({
+      exists: true,
+      branch: 'mohist/run-wr-161',
+      baseBranch: 'master',
+      ahead: 1,
+      behind: 4,
+      rebaseInProgress: false,
+      conflictingFiles: ['src/conflict.ts'],
+    }, { allowRebase: true }, {
+      issueNumber: 161,
+      conflicts: ['src/conflict.ts'],
+      status: 'resolving',
+    })
+
+    expect(screen.getByText('Resolving conflicts...')).toBeTruthy()
+    const reason = screen.getByTestId('branch-bar-rebase-reason')
+    expect(reason).toHaveTextContent('Rebase is unavailable while conflict resolution is in progress.')
+    expect(reason.textContent).not.toMatch(/projection|surface|backend/i)
   })
 
   it('keeps rebasing state above unknown upstream state when fetch fails during rebase', () => {

@@ -336,7 +336,7 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('reference-rail')).toBeTruthy())
-    expect(screen.queryByTestId('runtime-action-start')).toBeNull()
+    expect(screen.queryByTestId('decision-action-start')).toBeNull()
     expect(screen.queryByTestId('mark-ready-button')).toBeNull()
     expect(screen.queryByTestId('start-readiness')).toBeNull()
     expect(screen.queryByText(/^Force Stop$/i)).toBeNull()
@@ -348,46 +348,41 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
     expect(screen.queryByRole('button', { name: /^Start$/ })).toBeNull()
   })
 
-  it('shows an explanatory note in the Actions card instead of any controls for an archived issue', async () => {
+  it('does not render any active-workflow controls for an archived issue', async () => {
     mockIssue(archivedDoneIssue())
 
     renderPage()
 
-    const note = await waitFor(() => screen.getByTestId('archived-actions-note'))
-    expect(note.textContent ?? '').toMatch(/archived/i)
-    expect(note.textContent ?? '').toMatch(/start, stop, retry, rerun, resume/i)
+    await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
+    expect(screen.queryByTestId('decision-action-start')).toBeNull()
+    expect(screen.queryByTestId('decision-action-stop')).toBeNull()
+    expect(screen.queryByTestId('decision-action-approve')).toBeNull()
+    expect(screen.queryByText(/start, stop, retry, rerun, resume/i)).toBeNull()
   })
 
-  it('still allows the non-archived Done issue to render its Actions card empty of active-workflow controls too', async () => {
+  it('still allows the non-archived Done issue to render its decision surface empty of active-workflow controls too', async () => {
     mockIssue(activeDoneIssue())
 
     const { container } = renderPage()
 
     await waitFor(() => expect(screen.getByTestId('reference-rail')).toBeTruthy())
-    expect(screen.queryByTestId('archived-actions-note')).toBeNull()
-    expect(container.querySelector('[data-testid="runtime-action-start"]')).toBeNull()
+    expect(container.querySelector('[data-testid="decision-action-start"]')).toBeNull()
     expect(container.querySelector('[data-testid="mark-ready-button"]')).toBeNull()
   })
 })
 
 describe('IssueDetailPage archived Done issue — workflow status reflects Done state', () => {
-  it('renders one Done runtime pill for an archived Done issue', async () => {
+  it('renders one Done summary inside the headline for an archived Done issue and no header runtime pill', async () => {
     mockIssue(archivedDoneIssue())
 
     renderPage()
 
-    const runtime = await waitFor(() => screen.getByTestId('runtime-status-pill'))
-    expect(runtime).toHaveAttribute('data-summary', 'done')
-    expect(runtime.textContent ?? '').toMatch(/Done/i)
+    const headline = await waitFor(() => screen.getByTestId('status-headline'))
+    expect(headline.dataset.summary).toBe('done')
+    expect(headline.textContent ?? '').toMatch(/Done/i)
+    expect(screen.queryByTestId('runtime-status-pill')).toBeNull()
     expect(screen.queryByTestId('health-pill')).toBeNull()
-  })
-
-  it('renders the runtime-decision surface with summary=done for an archived Done issue', async () => {
-    mockIssue(archivedDoneIssue())
-
-    renderPage()
-
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    expect(surface.dataset.summary).toBe('done')
   })
 })

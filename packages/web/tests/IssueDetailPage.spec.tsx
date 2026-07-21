@@ -712,16 +712,17 @@ describe('IssueDetailPage Markdown rendering', () => {
       })
       renderWithQueryClient(<IssueDetailPage />)
       const surface = await waitFor(() => {
-        const el = screen.getByTestId('runtime-decision-surface')
+        const el = screen.getByTestId('issue-decision-surface')
         expect(el).toBeInTheDocument()
         return el
       })
       await waitFor(() => {
-        expect(within(surface).getByTestId('runtime-action-retry')).toBeInTheDocument()
+        expect(within(surface).getByTestId('decision-action-retry')).toBeInTheDocument()
       })
-      fireEvent.click(within(surface).getByTestId('runtime-action-retry'))
+      fireEvent.click(within(surface).getByTestId('decision-action-retry'))
       await waitFor(() => {
-        expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
+        const errorEl = screen.queryByTestId('decision-action-error')
+        expect(errorEl?.textContent ?? '').toMatch(/no retryable failed work/)
       })
     })
 
@@ -735,18 +736,18 @@ describe('IssueDetailPage Markdown rendering', () => {
       })
       renderWithQueryClient(<IssueDetailPage />)
       const surface = await waitFor(() => {
-        const el = screen.getByTestId('runtime-decision-surface')
+        const el = screen.getByTestId('issue-decision-surface')
         expect(el).toBeInTheDocument()
         return el
       })
       await waitFor(() => {
-        expect(within(surface).getByTestId('runtime-action-retry')).toBeInTheDocument()
-        expect(within(surface).getByTestId('runtime-action-rerun')).toBeInTheDocument()
+        expect(within(surface).getByTestId('decision-action-retry')).toBeInTheDocument()
+        expect(within(surface).getByTestId('decision-action-rerun')).toBeInTheDocument()
       })
-      fireEvent.click(within(surface).getByTestId('runtime-action-retry'))
+      fireEvent.click(within(surface).getByTestId('decision-action-retry'))
       await waitFor(() => {
         expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
-        expect(within(surface).getByTestId('runtime-action-rerun')).toBeInTheDocument()
+        expect(within(surface).getByTestId('decision-action-rerun')).toBeInTheDocument()
       })
     })
   })
@@ -867,10 +868,8 @@ describe('IssueDetailPage workflow profile integration', () => {
     return screen.getByTestId('reference-rail-details')
   }
 
-  function findRailCard(name: 'Configuration' | 'Actions') {
-    const testId = name === 'Configuration'
-      ? 'reference-rail-configuration'
-      : 'reference-rail-actions'
+  function findRailCard(_name: 'Configuration') {
+    const testId = 'reference-rail-configuration'
     return screen.getByTestId(testId)
   }
 
@@ -914,8 +913,8 @@ describe('IssueDetailPage workflow profile integration', () => {
     })
 
     const detailsCard = findDetailsCard()
-    expect(within(detailsCard).getByText('Issue Stage')).toBeInTheDocument()
-    expect(within(detailsCard).getByText('Workflow Stage')).toBeInTheDocument()
+    expect(within(detailsCard).queryByText('Issue Stage')).toBeNull()
+    expect(within(detailsCard).queryByText('Workflow Stage')).toBeNull()
     expect(within(detailsCard).getByText('Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Test Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Repository')).toBeInTheDocument()
@@ -957,7 +956,6 @@ describe('IssueDetailPage workflow profile integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('reference-rail-details-toggle')).toBeInTheDocument()
       expect(screen.getByTestId('reference-rail-configuration-toggle')).toBeInTheDocument()
-      expect(screen.getByTestId('reference-rail-actions-toggle')).toBeInTheDocument()
       expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
     })
 
@@ -966,7 +964,7 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     expect(referenceRail.contains(screen.getByTestId('reference-rail-details'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('reference-rail-configuration'))).toBe(true)
-    expect(referenceRail.contains(screen.getByTestId('reference-rail-actions'))).toBe(true)
+    expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
     expect(readingFlow.contains(screen.getByText('Latest Artifacts', { selector: 'h3' }))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Task Progress'))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
@@ -975,10 +973,6 @@ describe('IssueDetailPage workflow profile integration', () => {
     const configurationCard = findRailCard('Configuration')
     expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()
     expect(within(configurationCard).getByText('Per-stage overrides')).toBeInTheDocument()
-
-    const actionsCard = findRailCard('Actions')
-    expect(within(actionsCard).queryByText('Coder Model')).not.toBeInTheDocument()
-    expect(within(actionsCard).queryByText('Per-stage overrides')).not.toBeInTheDocument()
   })
 
   it('groups backlog prerequisite controls with configuration instead of a separate rail card', async () => {

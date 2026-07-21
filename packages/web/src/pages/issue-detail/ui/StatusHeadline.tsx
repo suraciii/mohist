@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 import { cn } from '@/shared/lib/utils'
-import type { RuntimeDecision, RuntimeSummary } from '../../../widgets/issue-workflow'
+import type { RuntimeCurrentTask, RuntimeDecision, RuntimeSummary } from '../../../widgets/issue-workflow'
 
 export interface StatusHeadlineStageProgress {
   stage?: string | null
@@ -76,6 +76,13 @@ const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
   },
 }
 
+function buildHeadlineText(headline: string, currentTask: RuntimeCurrentTask | null): string {
+  if (!currentTask) return headline
+  if (headline.toLowerCase().includes(currentTask.title.toLowerCase())) return headline
+  const label = currentTask.kind === 'check' ? 'Check' : 'Task'
+  return `${headline} · ${label}: ${currentTask.title}`
+}
+
 function StageProgress({
   stageProgress,
 }: {
@@ -101,8 +108,8 @@ function StageProgress({
 export function StatusHeadline({ decision, stageProgress }: StatusHeadlineProps) {
   const presentation = SUMMARY_PRESENTATION[decision.summary]
   const Icon = presentation.icon
-  const currentTaskTitle = decision.currentTask?.title ?? null
   const hasStageProgress = !!(stageProgress?.stage && (stageProgress.total ?? 0) > 0)
+  const headlineText = buildHeadlineText(decision.headline, decision.currentTask)
 
   return (
     <section
@@ -110,6 +117,7 @@ export function StatusHeadline({ decision, stageProgress }: StatusHeadlineProps)
       data-summary={decision.summary}
       data-sticky="true"
       data-tier-weight="status-header"
+      data-has-current-task={decision.currentTask ? 'true' : 'false'}
       aria-label="Issue status headline"
       className={cn(
         'sticky top-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-b px-4 py-3 shadow-sm',
@@ -134,34 +142,16 @@ export function StatusHeadline({ decision, stageProgress }: StatusHeadlineProps)
         </span>
       </div>
 
-      {decision.headline && (
+      {headlineText && (
         <h2
           data-testid="status-headline-headline"
           className="text-sm font-semibold leading-tight text-card-foreground"
         >
-          {decision.headline}
+          {headlineText}
         </h2>
       )}
 
       {hasStageProgress && stageProgress && <StageProgress stageProgress={stageProgress} />}
-
-      {currentTaskTitle && (
-        <span
-          data-testid="status-headline-current-task"
-          data-task-kind={decision.currentTask?.kind ?? 'task'}
-          className="inline-flex items-center gap-1.5 rounded-full border border-current/20 bg-card/70 px-2.5 py-1 text-xs font-medium text-card-foreground"
-        >
-          <span className="text-[10px] uppercase tracking-wide opacity-70">
-            {decision.currentTask?.kind === 'check' ? 'Check' : 'Task'}
-          </span>
-          <span className="font-semibold">{currentTaskTitle}</span>
-          {decision.currentTask?.status && (
-            <span className="text-[10px] uppercase tracking-wide opacity-80">
-              · {decision.currentTask.status}
-            </span>
-          )}
-        </span>
-      )}
     </section>
   )
 }

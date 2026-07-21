@@ -75,7 +75,6 @@ describe('IssueDetailPage reference-rail — lightest visual weight', () => {
 
     expect(within(screen.getByTestId('reference-rail-details')).queryByRole('heading', { name: 'Details' })).toBeNull()
     expect(within(screen.getByTestId('reference-rail-workflow-profile')).queryAllByText('Workflow Profile')).toHaveLength(1)
-    expect(within(screen.getByTestId('reference-rail-actions')).queryByRole('heading', { name: 'Actions' })).toBeNull()
   })
 })
 

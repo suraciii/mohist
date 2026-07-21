@@ -141,7 +141,7 @@ function expectAssigned(testId: string, anchor: string) {
 }
 
 describe('IssueDetailPage cross-tier verification: archived path', () => {
-  it('assigns headline, identity row, action surface, and archived pill/banner to status-header tier; reading flow and reference rail populated', async () => {
+  it('assigns headline, identity row, and archived pill/banner to status-header tier; reading flow and reference rail populated', async () => {
     mockIssue(baseIssue({
       status: 'done',
       workflowStage: 'done',
@@ -172,13 +172,13 @@ describe('IssueDetailPage cross-tier verification: archived path', () => {
     expect(headerTier.contains(headline)).toBe(true)
     expect(headerTier.contains(screen.getByTestId('issue-detail-header'))).toBe(true)
     expect(headerTier.contains(screen.getByTestId('archived-banner'))).toBe(true)
-    expect(headerTier.contains(screen.getByTestId('runtime-decision-surface'))).toBe(true)
     expect(readingFlow.contains(screen.getByTestId('archived-banner'))).toBe(false)
 
     expect(readingFlow.contains(screen.getByTestId('description-section'))).toBe(true)
     expect(readingFlow.contains(screen.getByTestId('comments-section'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('reference-rail-details'))).toBe(true)
-    expect(referenceRail.contains(screen.getByTestId('reference-rail-actions'))).toBe(true)
+    expect(referenceRail.querySelector('[data-testid="issue-decision-surface"]')).toBeNull()
+    expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
 
     expect(readingFlow.contains(screen.getByTestId('archived-banner'))).toBe(false)
     expect(referenceRail.contains(screen.getByTestId('archived-banner'))).toBe(false)
@@ -210,8 +210,8 @@ describe('IssueDetailPage cross-tier verification: backlog readiness path', () =
 
     expect(headerTier.contains(screen.getByTestId('issue-detail-header'))).toBe(true)
     expect(headerTier.querySelector('[data-testid="draft-pill"]')).toBeTruthy()
-    expect(headerTier.contains(screen.getByTestId('runtime-decision-surface'))).toBe(true)
-    expect(headerTier.querySelector('[data-testid="runtime-action-start"]')).toBeTruthy()
+    expect(headerTier.contains(screen.getByTestId('issue-decision-surface'))).toBe(true)
+    expect(headerTier.querySelector('[data-testid="decision-action-start"]')).toBeTruthy()
 
     expect(headerTier.contains(screen.getByTestId('reference-rail-readiness'))).toBe(false)
     expect(referenceRail.contains(screen.getByTestId('reference-rail-readiness'))).toBe(true)
@@ -294,12 +294,12 @@ describe('IssueDetailPage cross-tier verification: blocked health path', () => {
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('blocked')
     expect(headline.textContent ?? '').toMatch(/Blocked/i)
-    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('The workflow is blocked and needs an action to continue.')
+    expect(screen.getByTestId('decision-rationale').textContent ?? '').toContain('The workflow is blocked and needs an action to continue.')
 
     expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
 
     const readingFlow = screen.getByTestId('reading-flow')
-    expect(readingFlow.contains(screen.getByTestId('runtime-decision-surface'))).toBe(false)
+    expect(readingFlow.contains(screen.getByTestId('issue-decision-surface'))).toBe(false)
   })
 })
 
@@ -340,13 +340,14 @@ describe('IssueDetailPage cross-tier verification: capacity gating path', () => 
     const headerTier = await waitFor(() => screen.getByTestId('status-header-tier'))
     const referenceRail = screen.getByTestId('reference-rail')
     const readingFlow = screen.getByTestId('reading-flow')
-    const startButton = screen.getByTestId('runtime-action-start')
+    const startButton = screen.getByTestId('decision-action-start')
 
     expect(headerTier.contains(startButton)).toBe(true)
     expect(readingFlow.contains(startButton)).toBe(false)
     expect(referenceRail.contains(startButton)).toBe(false)
     expect(startButton).toBeDisabled()
-    expect(startButton.getAttribute('title')).toMatch(/capacity is full/i)
+    const reason = screen.getByTestId('decision-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/capacity is full/i)
   })
 
   it('enables the Start action in the header tier when capacity is not full', async () => {
@@ -360,7 +361,7 @@ describe('IssueDetailPage cross-tier verification: capacity gating path', () => 
     renderPage()
 
     const headerTier = await waitFor(() => screen.getByTestId('status-header-tier'))
-    const startButton = screen.getByTestId('runtime-action-start')
+    const startButton = screen.getByTestId('decision-action-start')
     expect(headerTier.contains(startButton)).toBe(true)
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
@@ -420,7 +421,7 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
     const readingFlow = screen.getByTestId('reading-flow')
     const referenceRail = screen.getByTestId('reference-rail')
 
-    const statusHeaderBlocks = ['status-headline', 'issue-detail-header', 'runtime-decision-surface']
+    const statusHeaderBlocks = ['status-headline', 'issue-detail-header', 'issue-decision-surface']
     const readingFlowBlocks = [
       'workflow-view-frame',
       'pr-delivery-summary-frame',
@@ -436,7 +437,6 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
-      'reference-rail-actions',
       'reference-rail-prerequisites',
     ]
 
@@ -473,7 +473,7 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
     expect(tierWeight[readingFlow.dataset.tierWeight as keyof typeof tierWeight]).toBe(2)
     expect(tierWeight[referenceRail.dataset.tierWeight as keyof typeof tierWeight]).toBe(1)
 
-    const surface = screen.getByTestId('runtime-decision-surface')
+    const surface = screen.getByTestId('issue-decision-surface')
     expect(headerTier.contains(surface)).toBe(true)
     expect(readingFlow.contains(surface)).toBe(false)
     expect(referenceRail.contains(surface)).toBe(false)
@@ -482,7 +482,7 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
     expect(referenceRail.contains(detailsHeading)).toBe(true)
 
 
-    const allRuntimeActions = page.querySelectorAll('[data-testid^="runtime-action-"]')
+    const allRuntimeActions = page.querySelectorAll('[data-testid^="decision-action-"]')
     for (const action of Array.from(allRuntimeActions)) {
       expect(headerTier.contains(action)).toBe(true)
       expect(readingFlow.contains(action)).toBe(false)

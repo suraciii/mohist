@@ -186,9 +186,9 @@ function hasRecoverableStop(input: RuntimeDecisionInput): boolean {
 }
 
 function pickPrimaryAction(actions: RuntimeAvailableAction[]): RuntimeAvailableAction | null {
-  const executable = actions.find((action) => action.kind !== 'inspect' && action.enabled)
+  const executable = actions.find((action) => action.enabled)
   if (executable) return executable
-  return actions.find((action) => action.kind !== 'inspect') ?? null
+  return actions[0] ?? null
 }
 
 function buildDriftNote(input: RuntimeDecisionInput): string | null {
