@@ -385,7 +385,7 @@ describe("mohist/openspec-tasks", () => {
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(3)
-    expect(loadedWithList.map((with_) => with_.prompt)).toEqual([
+    expect(loadedWithList.map((with_: Record<string, unknown>) => with_.prompt)).toEqual([
       { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-001" } },
       { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-002" } },
       { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-003" } },

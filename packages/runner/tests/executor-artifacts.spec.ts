@@ -50,7 +50,7 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | 
   }
 }
 
-function makeRegistry(handler: (inputs: Record<string, never>, host: ActionHost) => Promise<ActionResult>, errors: { code: string }[] = []): ActionRegistry {
+function makeRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>, errors: { code: string }[] = []): ActionRegistry {
   return defineTestActions({
     "test/action": {
       run: handler,
