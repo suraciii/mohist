@@ -242,7 +242,7 @@ describe("opencodeAction — happy path + turn fact", () => {
     const { runtime, client } = buildRuntime()
     await ensureReady(runtime)
     let runtimeSessionId: string | null = null
-    const openWorkflowAgentSession = vi.fn(async () => ({ runtimeSessionId, workDir: "/tmp/work" }))
+    const openWorkflowAgentSession = vi.fn(async (_projectId: string, _workflowRunId: string, _sessionName: string, _body: unknown) => ({ runtimeSessionId, workDir: "/tmp/work" }))
     const attachWorkflowAgentSession = vi.fn(async (_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) => {
       runtimeSessionId = (body as { runtimeSessionId: string }).runtimeSessionId
     })
@@ -266,11 +266,16 @@ describe("opencodeAction — happy path + turn fact", () => {
     expect(second.error).toBeUndefined()
     expect(client.sessionCreate).toHaveBeenCalledTimes(1)
     expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
+    expect(openWorkflowAgentSession).toHaveBeenCalledTimes(2)
     expect(attachWorkflowAgentSession).toHaveBeenCalledTimes(1)
     expect(attachWorkflowAgentSession.mock.invocationCallOrder[0])
       .toBeLessThan(client.sessionPrompt.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER)
     expect(client.sessionPrompt.mock.calls.map((call) => (call[0] as { sessionID: string }).sessionID))
       .toEqual(["ses_default", "ses_default"])
+    for (const call of openWorkflowAgentSession.mock.calls) {
+      expect((call[3] as { runtime?: string }).runtime).toBe("opencode")
+    }
+    expect((attachWorkflowAgentSession.mock.calls[0][3] as { runtime?: string }).runtime).toBe("opencode")
   })
 
   it("Does not submit the first prompt when persisting the new binding fails", async () => {

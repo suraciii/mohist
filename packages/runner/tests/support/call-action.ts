@@ -146,6 +146,7 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
               issueNumber: context.issueNumber,
               epicNumber: context.epicNumber,
               workDir: context.workDir,
+              runtime: "opencode",
             },
             context.signal,
           )
@@ -183,6 +184,7 @@ function opencodeAgent(context: ActionContext): AgentTurn | undefined {
               workDir: created.value.workDir,
               model: request.options?.model ?? null,
               workId: context.workId,
+              runtime: "opencode",
             },
             context.signal,
           )
