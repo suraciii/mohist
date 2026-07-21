@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { createIssue, getIssueEvents, getLabels, updateIssue } from './client'
+import { createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getLabels, updateIssue } from './client'
 
 useMswServer()
 
@@ -78,6 +78,38 @@ describe('getIssueEvents', () => {
     const events = await getIssueEvents(42, 'proj-1')
 
     expect(events).toEqual([])
+  })
+})
+
+describe('getIssueWorkflowArtifactContent', () => {
+  it('preserves recorded JSON file content instead of treating it as a directory listing', async () => {
+    const body = '{\n  "task": "review"\n}'
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () => new HttpResponse(body, {
+        headers: { 'content-type': 'application/json' },
+      })),
+    )
+
+    await expect(getIssueWorkflowArtifactContent(455, 'artifact-tasks', {}, 'proj-1')).resolves.toEqual({
+      kind: 'text',
+      content: body,
+      contentType: 'application/json',
+    })
+  })
+
+  it('keeps directory listings as directory content', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts/:artifactId/content', () => HttpResponse.json({
+        entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
+        totalSize: 42,
+      })),
+    )
+
+    await expect(getIssueWorkflowArtifactContent(455, 'artifact-directory', {}, 'proj-1')).resolves.toEqual({
+      kind: 'directory',
+      entries: [{ relativePath: 'report.md', size: 42, contentType: 'text/markdown' }],
+      totalSize: 42,
+    })
   })
 })
 

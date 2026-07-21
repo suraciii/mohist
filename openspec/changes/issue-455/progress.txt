@@ -24,3 +24,6 @@
 
 - The approval shortcut guard now detects editable ancestors, preventing `a` or `m` from escaping a nested contenteditable or role-textbox child. A focused regression test covers the nested contenteditable case.
 - Verification completed: focused ApprovalReviewPackage Vitest file and Web typecheck.
+- Browser fixtures now cover phone Plan artifact rendering, long-token overflow, direct approval and structured send-back requests, phone Check review/diff rendering, and secondary-action navigation. The approval action bar layers above the global mobile navigation so More actions remains operable.
+- JSON file artifacts now retain their raw recorded text; only JSON payloads shaped as directory listings are treated as directories. Focused client tests cover both response types.
+- Verification completed: focused issue API client Vitest file, Web typecheck, and focused issue decision-surface Playwright suite (14 tests).

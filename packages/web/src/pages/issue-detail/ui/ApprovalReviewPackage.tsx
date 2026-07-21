@@ -374,7 +374,7 @@ export function ApprovalReviewPackage({
       )}
 
       {isNarrowViewport && (
-        <div data-testid="approval-mobile-action-bar" className="fixed inset-x-0 bottom-0 z-30 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+        <div data-testid="approval-mobile-action-bar" className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
           <div className="mx-auto grid w-full max-w-md grid-cols-[1fr_1fr_auto] gap-2 rounded-xl border border-border bg-popover/95 p-2 shadow-lg backdrop-blur">
             <Button type="button" data-testid="approval-mobile-approve" aria-describedby={approveReason ? 'approval-mobile-approve-reason' : undefined} disabled={!approve?.enabled || controller.pendingKind !== null} onClick={() => approve && controller.runAction(approve)} className="min-h-11">
               {controller.pendingKind === 'approve' ? 'Approving...' : 'Approve'}

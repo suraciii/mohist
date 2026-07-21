@@ -205,6 +205,12 @@ export type WorkflowArtifactContentResult =
   | { kind: 'text'; content: string; contentType: string | null }
   | { kind: 'directory'; entries: WorkflowArtifactDirectoryEntry[]; totalSize: number }
 
+function isWorkflowArtifactDirectory(value: unknown): value is WorkflowArtifactDirectory {
+  if (!value || typeof value !== 'object') return false
+  const directory = value as Partial<WorkflowArtifactDirectory>
+  return Array.isArray(directory.entries) && typeof directory.totalSize === 'number'
+}
+
 export async function getIssueWorkflowArtifactContent(
   number: number,
   artifactId: string,
@@ -222,12 +228,18 @@ export async function getIssueWorkflowArtifactContent(
   }
 
   const contentType = res.headers.get('content-type')
+  const content = await res.text()
   if (!options.file && contentType?.includes('application/json')) {
-    const directory = await res.json() as WorkflowArtifactDirectory
-    return { kind: 'directory', entries: directory.entries ?? [], totalSize: directory.totalSize ?? 0 }
+    try {
+      const directory = JSON.parse(content) as unknown
+      if (isWorkflowArtifactDirectory(directory)) {
+        return { kind: 'directory', entries: directory.entries!, totalSize: directory.totalSize! }
+      }
+    } catch {
+      return { kind: 'text', content, contentType }
+    }
   }
 
-  const content = await res.text()
   return { kind: 'text', content, contentType }
 }
 

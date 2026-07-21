@@ -51,6 +51,11 @@ interface IssueFixture {
   repository?: { name: string; baseBranch: string; gitUrl: string }
 }
 
+interface ApprovalEvidenceFixture {
+  artifacts?: Record<string, string>
+  diff?: Record<string, unknown>
+}
+
 function makeIssue(issue: IssueFixture): Record<string, unknown> {
   return {
     number: issue.number,
@@ -113,7 +118,12 @@ const sessions = [
   },
 ]
 
-async function mockIssueDetailApi(page: Page, issue: Record<string, unknown>, sessionsOverride?: typeof sessions) {
+async function mockIssueDetailApi(
+  page: Page,
+  issue: Record<string, unknown>,
+  sessionsOverride?: typeof sessions,
+  approvalEvidence?: ApprovalEvidenceFixture,
+) {
   await page.route('**/hubs/events**', (route) => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -137,7 +147,7 @@ async function mockIssueDetailApi(page: Page, issue: Record<string, unknown>, se
       return route.fulfill({ json: response(issue) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/diff`) {
-      return route.fulfill({ json: response({ available: false, reason: 'not_started', message: 'no workspace' }) })
+      return route.fulfill({ json: response(approvalEvidence?.diff ?? { available: false, reason: 'not_started', message: 'no workspace' }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/commits`) {
       return route.fulfill({ json: response({ available: false, reason: 'not_started', message: 'no workspace' }) })
@@ -158,7 +168,34 @@ async function mockIssueDetailApi(page: Page, issue: Record<string, unknown>, se
       return route.fulfill({ json: response({ exists: false, reason: 'not_started' }) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/workflow/artifacts`) {
-      return route.fulfill({ json: response([]) })
+      const artifactPath = url.searchParams.get('path')
+      const artifactContent = artifactPath ? approvalEvidence?.artifacts?.[artifactPath] : undefined
+      return route.fulfill({
+        json: response(artifactContent === undefined || !artifactPath ? [] : [{
+          artifactId: `artifact-${artifactPath}`,
+          workflowRunId: issue.workflowRunId,
+          taskRunId: 'task-1',
+          path: artifactPath,
+          kind: 'file',
+          contentType: artifactPath.endsWith('.md') ? 'text/markdown' : 'application/json',
+          size: artifactContent.length,
+          recordedAt: '2026-07-01T03:00:00Z',
+          displayName: artifactPath,
+        }]),
+      })
+    }
+    const artifactContentPrefix = `/projects/${project.id}/issues/${issue.number}/workflow/artifacts/`
+    if (method === 'GET' && path.startsWith(artifactContentPrefix) && path.endsWith('/content')) {
+      const artifactId = path.slice(artifactContentPrefix.length, -'/content'.length)
+      const artifactPath = artifactId.replace(/^artifact-/, '')
+      const artifactContent = approvalEvidence?.artifacts?.[artifactPath]
+      if (artifactContent === undefined) {
+        return route.fulfill({ status: 404, body: 'Artifact content not found' })
+      }
+      return route.fulfill({
+        body: artifactContent,
+        contentType: artifactPath.endsWith('.md') ? 'text/markdown' : 'application/json',
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issue.number}/workflow-profile/variables`) {
       return route.fulfill({ json: response({ vars: {}, stages: {} }) })
@@ -467,6 +504,143 @@ test.describe('Issue decision surface browser layout', () => {
     await expect.poll(() => approveRequests).toBe(1)
     await page.keyboard.press('Meta+Enter')
     await expect.poll(() => feedbackRequests).toBe(1)
+  })
+
+  test('phone plan approval renders recorded artifacts without overflow and sends direct actions once', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 820 })
+    const issue = makeIssue({
+      number: 412,
+      status: 'in_progress',
+      workflowStage: 'plan',
+      workflowStatus: 'paused',
+      workflowRunId: 'wr-plan-approval',
+      health: 'paused',
+      approvalState: { status: 'awaiting', stage: 'plan', requestedAt: '2026-07-01T03:00:00Z' },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'awaiting-approval',
+        workflowSummaryState: 'approval-required',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    const longToken = 'x'.repeat(600)
+    await mockIssueDetailApi(page, issue, [], {
+      artifacts: {
+        'proposal.md': '# Plan evidence\n\nReview this proposal inline.',
+        'tasks.json': `{ "token": "${longToken}" }`,
+      },
+    })
+    let approveRequests = 0
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)) approveRequests += 1
+    })
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+
+    await expect(page.getByTestId('approval-artifact-proposal.md')).toContainText('Plan evidence')
+    await expect(page.getByTestId('approval-artifact-tasks.json').locator('pre')).toContainText(longToken)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+    const approve = page.getByTestId('approval-mobile-approve')
+    const sendBack = page.getByTestId('approval-mobile-send-back')
+    await expect(approve).toBeVisible()
+    await expect(sendBack).toBeVisible()
+    const viewport = page.viewportSize()
+    expect(viewport).not.toBeNull()
+    for (const control of [approve, sendBack]) {
+      const controlBox = await box(control)
+      expect(controlBox.x).toBeGreaterThanOrEqual(0)
+      expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(viewport!.width)
+      expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(viewport!.height)
+    }
+
+    await approve.click()
+    await expect.poll(() => approveRequests).toBe(1)
+    await sendBack.click()
+    const feedback = page.getByTestId('send-back-feedback-textarea')
+    await expect(feedback).toBeFocused()
+    await page.getByRole('radio', { name: 'Scope' }).click()
+    await feedback.fill('Keep the plan focused.')
+    const feedbackRequest = page.waitForRequest((request) => request.method() === 'POST'
+      && request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/feedback`))
+    await page.getByTestId('send-back-feedback-submit').click()
+    expect(JSON.parse((await feedbackRequest).postData() ?? '{}')).toEqual({
+      stage: 'plan',
+      body: 'Category: Scope\n\nKeep the plan focused.',
+    })
+  })
+
+  test('phone check approval renders recorded review and diff summary without overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 820 })
+    const issue = makeIssue({
+      number: 413,
+      status: 'in_progress',
+      workflowStage: 'check',
+      workflowStatus: 'paused',
+      workflowRunId: 'wr-check-approval',
+      health: 'paused',
+      approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-07-01T03:00:00Z' },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'awaiting-approval',
+        workflowSummaryState: 'approval-required',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    await mockIssueDetailApi(page, issue, [], {
+      artifacts: { 'review.md': '# Check review\n\nThe implementation is ready.' },
+      diff: {
+        available: true,
+        head: 'feature/approval-review',
+        base: 'main',
+        ahead: 2,
+        behind: 0,
+        summary: { filesChanged: 3, additions: 42, deletions: 7 },
+      },
+    })
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+
+    await expect(page.getByTestId('approval-artifact-review.md')).toContainText('Check review')
+    const diff = page.getByTestId('approval-diff-summary')
+    await expect(diff).toContainText('feature/approval-review compared with main')
+    await expect(diff).toContainText('3 files changed')
+    await expect(diff).toContainText('+42')
+    await expect(diff).toContainText('-7')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    await expect(page.getByTestId('approval-mobile-approve')).toBeVisible()
+    await expect(page.getByTestId('approval-mobile-send-back')).toBeVisible()
+    await expect(page.getByTestId('mobile-action-sheet-launcher')).toHaveCount(0)
+  })
+
+  test('phone approval secondary actions navigate without hiding direct controls', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 820 })
+    const issue = makeIssue({
+      number: 414,
+      status: 'in_progress',
+      workflowStage: 'plan',
+      workflowStatus: 'paused',
+      workflowRunId: 'wr-secondary-actions',
+      health: 'paused',
+      approvalState: { status: 'awaiting', stage: 'plan', requestedAt: '2026-07-01T03:00:00Z' },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'awaiting-approval',
+        workflowSummaryState: 'approval-required',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    await mockIssueDetailApi(page, issue, sessions, { artifacts: { 'proposal.md': '# Plan', 'tasks.json': '{}' } })
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+
+    await page.getByRole('button', { name: 'More actions' }).click()
+    await expect(page.getByTestId('approval-mobile-approve')).toBeVisible()
+    await expect(page.getByTestId('approval-mobile-send-back')).toBeVisible()
+    await page.getByTestId('approval-more-action-ask-agent').click()
+    await expect(page).toHaveURL(new RegExp(`/agent-sessions/new\\?issue=${issue.number}$`))
+
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+    await page.getByRole('button', { name: 'More actions' }).click()
+    await page.getByTestId('approval-more-action-view-transcript').click()
+    await expect(page).toHaveURL(new RegExp(`/issues/${issue.number}/workflow/sessions/coder-2$`))
   })
 
   test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({ page }) => {
