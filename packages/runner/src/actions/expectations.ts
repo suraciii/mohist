@@ -28,7 +28,7 @@ const OUTPUT_MARKER_PATH = "_output"
  * fact-channel marker against the turn's final assistant text.
  *
  * The completion evaluator is intentionally agnostic to which Action
- * returned. It does NOT read `ActionContext.with.expect` (the Action
+ * returned. It does NOT read the Action host's input (the Action
  * never receives `expect`); the executor passes the rendered `expect`
  * object directly.
  *

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
 
 afterEach(() => {

@@ -3,7 +3,8 @@ import {
   mergeReadyAction,
   setDeliveryGitRunnerForTest,
 } from "../src/actions/merge-ready.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
 
 type WorkspaceCall = { workDir: string; args: string[] }

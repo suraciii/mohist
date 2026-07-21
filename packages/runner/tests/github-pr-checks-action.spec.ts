@@ -3,7 +3,8 @@ import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
 import { githubPrChecksAction } from "../src/actions/github-pr-checks-action.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import {
   checksRollup,
   createMergeGhTestHarness,

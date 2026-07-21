@@ -310,7 +310,10 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
   })
 
   it("OpenSpecTaskWithoutBuildPromptVariable_OmitsBaseInLoaderSpec", async () => {
@@ -330,7 +333,10 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
   })
 
   it("OpenSpecTaskWithCustomItemsPath_PropagatesItemsInLoaderSpec", async () => {
@@ -353,7 +359,10 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "items.nested", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
   })
 
   it("OpenSpecTaskWithMultipleTasks_InjectsPerTaskSelectors", async () => {
@@ -373,9 +382,11 @@ describe("mohist/openspec-tasks", () => {
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(3)
-    for (const with_ of loadedWithList) {
-      expect(with_.prompt).toBeUndefined()
-    }
+    expect(loadedWithList.map((with_) => with_.prompt)).toEqual([
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" } },
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-002", base: "${{ prompts.build }}" } },
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-003", base: "${{ prompts.build }}" } },
+    ])
   })
 
   it("OpenSpecTaskWithDefaultRegistry_OpenSpecTaskPromptLoaderIsRegistered", () => {

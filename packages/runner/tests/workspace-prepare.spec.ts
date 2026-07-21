@@ -6,7 +6,8 @@ import {
   workspacePrepareAction,
 } from "../src/actions/workspace-prepare.js"
 import { callAction } from "./support/call-action.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 
 type GitCall = { workDir: string; args: string[] }
 

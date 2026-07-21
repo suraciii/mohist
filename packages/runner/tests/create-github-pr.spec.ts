@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"

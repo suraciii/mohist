@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { callAction } from "./support/call-action.js"
 

@@ -1,4 +1,5 @@
-import type { ActionContext, ActionResult, JsonObject } from "../../src/core/types.js"
+import type { ActionResult, JsonObject } from "../../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./action-test-context.js"
 import type { ActionHost, AgentTurn, AgentTurnRequest, IssueFieldsHost } from "../../src/actions/host.js"
 import { resolveIssueFields } from "../../src/actions/issue-fields.js"
 import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../../src/actions/opencode.js"

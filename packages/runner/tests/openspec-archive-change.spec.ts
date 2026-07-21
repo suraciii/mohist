@@ -7,7 +7,7 @@ import {
   setOpenSpecGitRunnerForTest,
   type ArchiveFileSystem,
 } from "../src/actions/openspec.js"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { callAction } from "./support/call-action.js"
 
 const ARCHIVE_TEST_TIME = new Date("2026-07-11T12:00:00.000Z")

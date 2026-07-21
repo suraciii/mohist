@@ -1,4 +1,4 @@
-import type { ActionContext, JsonObject } from "../../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./action-test-context.js"
 import type { ActionHost } from "../../src/actions/host.js"
 
 export function hostFromContext(context: Pick<ActionContext, "workDir" | "signal" | "log">): ActionHost {
