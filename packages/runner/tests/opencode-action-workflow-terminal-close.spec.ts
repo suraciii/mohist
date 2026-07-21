@@ -4,7 +4,6 @@ import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
-import type { RuntimeModelCatalog } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionContext } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -37,10 +36,6 @@ interface BuildArgs {
 
 function buildRuntime(args: BuildArgs = {}) {
   const subscription = new FakeSubscription()
-  const catalog: RuntimeModelCatalog = {
-    models: [{ providerID: "openai", modelID: "gpt-5", variants: ["low", "high"] }],
-    fetchedAt: 0,
-  }
   const sessionCreate = vi.fn(async () => ({ data: { id: "ses_bound" } }))
   const sessionPrompt = vi.fn(async (params: { sessionID: string; directory?: string; parts?: unknown }) => {
     if (args.emitDuringPrompt) {
@@ -69,7 +64,6 @@ function buildRuntime(args: BuildArgs = {}) {
   const sessionStatus = vi.fn(async () => ({ data: {} }))
   const clientProxy = {
     global: { health: vi.fn(async () => ({ data: { ok: true } })), event: vi.fn() },
-    v2: { provider: { list: vi.fn(async () => ({ data: { data: [] } })) }, model: { list: vi.fn(async () => ({ data: { data: catalog.models.map((m) => ({ id: m.modelID, providerID: m.providerID, variants: m.variants.map((id) => ({ id })) })) } })) } },
     session: { create: sessionCreate, prompt: sessionPrompt, promptAsync: sessionPromptAsync, abort: sessionAbort, messages: vi.fn(), get: sessionGet, status: sessionStatus },
   }
   const server: OpencodeServerHandle = {
@@ -81,7 +75,6 @@ function buildRuntime(args: BuildArgs = {}) {
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
     serverFactory: async () => server,
-    catalogFactory: () => ({ async list() { return catalog } }),
     eventSubscriptionFactory: () => subscription,
   }
   const runtime = new OpenCodeRuntime(deps)
