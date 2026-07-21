@@ -1,454 +1,279 @@
 # CLI 参考
 
-`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。本文是 `mo` 命令面的**产品 spec**——命令面必须满足本文的命令、参数与命名约定。设计原则见 [`design/cli.md`](../design/cli.md)（面向开发者）。首次安装上手走 [快速上手](getting-started.md)。
+`mo` 是 Mohist 面向人和 Agent 的命令行。它是一门小而稳定的操作语言：命令负责表达意图，帮助负责给出当前版本的精确调用方式，Skill 负责补充只有 Mohist 才有的判断规则。
 
-> 本文先于实现。命令面随各命令组的改进 issue 逐步对齐到本文；未对齐处以代码为实装事实，但本文是目标，实装去追赶 spec，而非相反。
+本文定义目标产品形态。当前版本尚未对齐的部分集中列在文末；在迁移完成前，以本机 `mo --help` 为可执行事实。
 
-## 全局约定
+## 产品承诺
 
-- **形状**：`mo <资源> <动词>`。资源是名词（issue、epic、workflow），动词是动作（create、get、start）。
-- **根命令层只有资源**：`mo` 直接子命令都是资源或资源组，没有裸动词（受控例外仅 `mo info` 一项，见「系统诊断」）。
-- **输出格式**：所有 get/list 类命令支持 `-o table|json|yaml|compact`。**输出格式不创造命令**——看资源 yaml 用 `mo <资源> get <id> -o yaml`，不存在 `mo <资源> yaml`。
-- **项目作用域**：项目内资源支持 `--project <名>` 与 `--project-id <id>` 两种形式，缺一不可。作用域用 flag 表达（对标 `--namespace`），不进命令路径——项目作用域内的资源在顶层有自己的命令组，通过 `--project` 限定，不嵌套在 `mo project` 下（仓库、issue、epic、agent 等都是如此）。
-- **预演**：会改状态的控制类命令支持 `--dry-run`。
-- **别名**：高频命令提供短别名（`ls` = list、`rm` = delete），别名与正名同行为。
+- **可预测**：看到资源和动作，就能推导命令；同一能力只有一个规范路径。
+- **可发现**：从 `mo --help` 进入命令组，再进入叶子帮助，不需要先读完整手册。
+- **上下文克制**：每层只提供完成当前决策所需的信息，不重复下一层已经能回答的内容。
+- **对自动化稳定**：非交互调用不会等待输入；结构化输出只返回请求的字段；失败总是非零退出。
+- **人机同面**：Agent 和人使用同一套命令、帮助与错误信息，不维护第二套 Agent 专用命令面。
 
-### 输出格式与项目作用域 flag
+Agent 已经会读命令和推理。`mo` 不教它通用 shell 知识，只告诉它 Mohist 的资源、状态约束、相近动作的区别，以及下一条准确命令。
 
-资源子命令的 `-o` 与 `--project` 覆盖范围：
+## 使用方式
 
-- `list`、`get` 和 session 子命令支持 `-o table|json`。
-- 项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`，但**并非**所有子命令都同时接受两者——`--project` 走名解析、`--project-id` 走 id 解析，缺哪个就报参数错。具体每个命令的 flag 集合以 `mo <命令> --help` 为准。
+一次操作通常只需要三层信息：
 
-`--project` 与 `--project-id` 互斥——同一个命令不能同时传两个，会本地失败、不发请求。
+```bash
+mo --help
+mo run --help
+mo run retry --help
+```
 
-## 动词词表（全命令面统一，不得跨资源自造同义词）
-
-| 动作类 | 规范动词 | 语义 |
+| 层级 | 回答的问题 | 内容 |
 |---|---|---|
-| 列表 | `list` | 列出资源的多个实例 |
-| 查单条 | `get` | 取一个资源的详情 |
-| 新增独立资源 | `create` | 造一个带身份的新资源（project/issue/epic/agent/template） |
-| 加集合成员 | `add` | 往现有宿主集合加一项（label 目录项/repo/comment/prereq） |
-| 改 | `update` | 修改资源字段 |
-| 删除（真删） | `delete` | 永久删除资源（project/repo/template） |
-| 归档（软删，可恢复） | `archive` | 归档资源，可逆（issue/agent） |
-| 键值查询/设置 | `get`/`set` | 仅 `mo config` 的 KV 范式 |
+| 根帮助 | 有哪些能力？ | 按任务分组的命令索引、每组一句说明、少量起步示例 |
+| 命令组帮助 | 该选哪个动作？ | 资源边界、动作列表、最容易混淆的相邻资源 |
+| 叶子帮助 | 这一条怎么准确执行？ | 结果、用法、参数、状态前提、JSON 字段和两三个示例 |
+| `mo help <topic>` | 多个命令共用什么规则？ | `output`、`environment`、`exit-codes` 等横切约定 |
+| Mohist Skill | 当前场景该怎么推进？ | 首次读取、恢复决策、场景 Skill 路由和少量硬规则 |
 
-删除与归档是两个动作，不混用：真删除用 `delete`，归档（可恢复）用 `archive`。issue 与 agent 的"删除"实为归档，用 `archive`，不用 `delete`。
+帮助不展示服务内部名称、通信路径、源码位置、历史 issue 或迁移别名。它描述当前命令的产品行为。
 
-## 根命令层
+## 命令语言
 
-```
-mo project      项目
-mo repo         仓库
-mo issue        工作项
-mo epic         产品目标
-mo workflow     工作流执行（WorkflowRun）
-mo events       事件投递运维与实时观察
-mo agent        智能体
-mo label        标签
-mo runner       执行器
-mo server       服务端
-mo notification 通知配置
-mo config       全局配置（键值）
-mo system       系统诊断
-mo otel         OpenTelemetry 查询
-mo opencode     OpenCode 模型
-mo skills       技能分发
-mo install      安装（动词根，装机用途）
-mo update       升级（动词根，装机用途）
-mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一资源）
+命令只有两种形状：
+
+```text
+resource-command = mo <area> [<subarea>] <action> [target] [flags]
+task-command     = mo <task> [target] [flags]
 ```
 
-## Workflow（工作流执行 / WorkflowRun）
+- `area` 是用户正在操作的产品对象或任务区域，例如 `issue`、`run`、`session`。
+- `subarea` 只在对象由 area 拥有或离开 area 就失去明确含义时出现，例如 `issue comment`、`issue template`、`routing rule`。
+- `action` 是稳定的英文动词，例如 `list`、`view`、`retry`。
+- `task` 是无需人为包装成资源的直接任务，目前只有 `help`、`install`、`update`、`info`。
+- `target` 优先使用最短的稳定身份；项目作用域通过 `--project` 表达。
+- subarea 最多一层。可独立寻址且经常直接操作的资源使用顶层命令，例如 `session`。
+- 一项能力只有一个规范路径。筛选条件和便捷寻址使用 flag，不复制一组同义命令。
+- 根层不强求语法上的“全是名词”。`install`、`update`、`info` 直接表达任务，比人为包装进抽象资源更清楚。
 
-直接以工作流执行 ID（`workflowRunId`）寻址一次具体的工作流执行。这是核心域——驱动一个 issue 从 Draft 走到 Done 的生产线本身。
+目标命令面不提供 `show/get/view`、`update/edit`、`unarchive/restore` 这类内建同义路径。用户自己的 shell alias 不属于 `mo` 契约。
 
-### 控制动作
+### 动词词表
 
-| 命令 | 作用 |
+| 意图 | 规范动词 | 规则 |
+|---|---|---|
+| 列出资源 | `list` | 返回集合 |
+| 查看一个资源 | `view` | 返回单个资源的当前状态 |
+| 创建独立资源 | `create` | 创建有稳定身份的资源 |
+| 修改资源 | `edit` | 修改现有资源属性 |
+| 永久删除 | `delete` | 资源不再存在 |
+| 加入或移出集合 | `add` / `remove` | 不删除被关联对象本身 |
+| 软删除与恢复 | `archive` / `restore` | 保留身份和历史 |
+| 键值配置 | `get` / `set` / `unset` | 只用于 `config` 或明确的键值子资源 |
+| 领域动作 | `start`、`approve`、`retry` 等 | 直接使用 Mohist 的状态变化语言 |
+
+`retry`、`rerun`、`pause`、`stop` 不是同义词：
+
+- `retry` 重试当前失败的 task 或 check，并为这次人工重试恢复完整的自动恢复预算。
+- `rerun` 使整条 Run 从头重新执行；`--from-stage <stage>` 只使该 Stage 及之后的结果失效并重新执行。
+- `pause` 中断当前推进但保留恢复入口；`resume` 继续同一条 Run。
+- `stop` 使 Run 永久终止，不能再 `resume`。
+
+## 命令地图
+
+根帮助按用户任务分组，而不是输出一条没有层次的长列表。
+
+| 分组 | 命令组 | 管理的对象 |
+|---|---|---|
+| Work | `project`、`repo`、`issue`、`epic`、`label` | 项目空间、工作项与组织关系 |
+| Automation | `workflow`、`run`、`agent`、`session`、`event`、`routing` | 工作流定义、执行、Agent 与事件响应 |
+| Operations | `runner`、`server`、`runtime`、`notification`、`otel` | 执行资源、服务与可观测性 |
+| Tools | `help`、`config`、`skill`、`install`、`update`、`info` | 帮助主题、本机配置、Skill 和安装维护 |
+
+### 核心命令组
+
+| 命令组 | 规范动作 |
 |---|---|
-| `mo workflow approve <runId>` | 审批通过 |
-| `mo workflow reject <runId> --message <理由>` | 审批打回（理由必需） |
-| `mo workflow retry <runId>` | 失败后原地重试当前阶段 |
-| `mo workflow rerun <runId>` | 从头重跑 |
-| `mo workflow rerun <runId> --from-stage <阶段>` | 从指定阶段重跑（变体用 flag，不另造 `rerun-from-stage` 命令） |
-| `mo workflow resume <runId>` | 恢复暂停的执行 |
-| `mo workflow pause <runId>` | 暂停（可恢复） |
-| `mo workflow stop <runId>` | 终止（不可恢复） |
+| `project` | `list`、`view`、`create`、`edit`、`use`、`delete`、`status`；`prompt list/view/set/unset/preview`；`variable list/get/set/unset` |
+| `repo` | `list`、`view`、`add`、`edit`、`remove`、`set-default` |
+| `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`；`comment list/add`；`commit list`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset` |
+| `epic` | `list`、`view`、`create`、`edit`、`link`、`unlink`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
+| `label` | `list`、`view`、`create`、`edit`、`delete` |
+| `workflow` | `list`、`view`、`create`、`edit`、`delete`、`set-default`；`view --yaml` 读取原始 Workflow Definition |
+| `run` | `list`、`view`、`watch`、`logs`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`feedback list/view`；只读 `variable list/get` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch` |
+| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
+| `event` | `list`、`tail`；`dead-letter list/redeliver` |
+| `routing` | `rule list/view/create/edit/archive/restore/move`；`test` 评估整张路由表 |
 
-这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与事件路由触发的 Mohist Agent——它们手里只有执行 ID。
+### 运维与工具命令组
 
-所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。issue 快捷方式同样使用 `mo issue rerun <编号> --from-stage <阶段>`；`pause` 可恢复，`stop` 是终态。
-
-### 查询
-
-| 命令 | 作用 |
+| 命令组 | 规范动作 |
 |---|---|
-| `mo workflow get <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。默认 table 是摘要视图，`-o json/yaml` 是全貌。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
-| `mo workflow variables <runId>` `[--stage <阶段>] [--key <键路径>]` | 生效变量（子资源，有独立寻址） |
-| `mo workflow events <runId>` `[--limit <n>]` | 事件流（关联资源） |
-| `mo workflow list-sessions <runId>` | 该执行的会话列表（关联资源，只列出） |
+| `runner` | `list`、`view`、`status`、`start`、`stop`、`restart`、`logs`、`uninstall` |
+| `server` | `status`、`health`、`info`、`start`、`stop`、`restart`、`logs`、`uninstall`；`logs --source` 区分应用与受管服务日志 |
+| `runtime` | `list`、`view`；只读 `model list` |
+| `notification` | `setup` |
+| `otel` | `status`、`query` |
+| `config` | `list`、`get`、`set`、`unset` |
+| `skill` | `list`、`view`、`install`、`path`、`sync` |
+| `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
+| `install` | 安装 `server` 或 `runner` |
+| `update` | 更新全部组件或一个指定组件 |
+| `info` | 查看本机 CLI、安装来源与有效环境 |
 
-`get` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
-
-## Events（事件投递运维与实时观察）
-
-事件投递失败并耗尽自动重试后进入 dead letter。运维入口只连接本机 Mohist 服务，查询结果默认显示恢复状态，避免把正在重投的记录误当成可再次重试的记录。
-
-| 命令 | 作用 |
-|---|---|
-| `mo events tail [--match <expr>]` | 实时观察当前（或 `--project` / `--project-id` 指定）项目的 canonical 事件流；一行一个 NDJSON envelope，Ctrl-C 干净退出 |
-| `mo events dead-letter list [--handler <处理者>] [--limit <1-500>] [-o table\|json]` | 列出尚未解决的 dead letter；table 包含 `status`、尝试次数和安全摘要 |
-| `mo events dead-letter redeliver <id> [-o table\|json]` | 只重投该记录中失败的处理者；成功后将记录标为已解决 |
-
-`mo events tail` 把 `--match` 透传给服务端，服务端是表达式编译的唯一权威：语法错误会得到位置化的 400 诊断，CLI 在 stream 打开前向 stderr 输出位置并以非零状态退出。无 `--match` 时每个项目事件都打印一行 NDJSON envelope。Tail 不会重放订阅前发生的事件；按下 Ctrl-C 时立刻取消请求并释放订阅。
-
-服务端与 `mo` 共用同一 operator credential，按以下顺序解析：
-
-1. `MOHIST_OPERATOR_TOKEN`；
-2. `~/.mohist/config.jsonc` 中的 `Mohist:OperatorToken`；
-3. `MOHIST_OPERATOR_TOKEN_PATH`、`Mohist:OperatorTokenPath` 或默认 `~/.mohist/operator-token` 指向的凭据文件。
-
-环境变量优先于配置文件。默认凭据文件由本机服务首次启动时创建；托管部署可通过配置文件指定共享路径，无需再为 CLI 配置第二份覆盖值。
-
-## Workflow Profile
-
-Workflow Profile 是 Project-scoped collection。Profile 只管理 Workflow Definition；
-Variables 和 Prompts 有各自独立的命令组。
-
-```
-mo project workflow profile list [--described]                 列出 Project 的 Profiles
-mo project workflow profile get <profile-id>                   查看一个 Profile
-mo project workflow profile create <profile-id> --yaml @<file> 创建 Profile
-mo project workflow profile update <profile-id> --yaml @<file> 替换 Profile Definition
-mo project workflow profile delete <profile-id>                删除 Profile
-mo project workflow profile set-default <profile-id>           设置 Project 默认 Profile
-```
-
-`get/create/update/delete/set-default` 必须解析一个 Project；`list` 也只列当前或显式指定
-Project 的资源，不降级为跨 Project 列表。默认 Profile 和仍被 Issue 显式选择的 Profile
-不能直接删除。`mohist/*` Profile 随 Mohist 版本更新；可以选择或设为默认值，但不能
-`update` 或 `delete`。
-
-Issue 使用 `mo issue create/update --workflow-profile <profile-id>` 选择 Profile。传空值或
-`default` 清除显式选择，重新继承 Project 默认值。
-
-## Workflow Variables
-
-Variables 与 Profile 分开管理。Project 和 Issue 都可以设置 workflow-wide 与 per-stage
-值；Run 的 `setVars` 由 Workflow task 写入。
-
-```
-mo project variables get
-mo project variables set --var <key>=<value>
-mo project variables set --stage-var <stage>.<key>=<value>
-mo project variables clear --var <key>
-mo project variables clear --stage-var <stage>.<key>
-
-mo issue variables get <number>
-mo issue variables set <number> --var <key>=<value>
-mo issue variables set <number> --stage-var <stage>.<key>=<value>
-mo issue variables clear <number> --var <key>
-mo issue variables clear <number> --stage-var <stage>.<key>
-```
-
-`set` 可以重复传入 `--var` 和 `--stage-var`，一次提交所有修改。`clear` 删除当前 scope
-中的值，使其重新继承前一个 scope；它不会删除其他 scope 保存的值。
-
-`mo workflow variables <runId> [--stage <stage>] [--key <path>]` 继续只读本次 Run 的
-Effective Variables。
-
-## Project Prompt
-
-Prompt 只在 Project 中配置，不提供 Issue Prompt 命令。
-
-```
-mo project prompt list
-mo project prompt get <key>
-mo project prompt set <key> --body <text>
-mo project prompt set <key> --body-file <path>
-mo project prompt delete <key>
-mo project prompt preview <key>
-```
-
-删除 Project Prompt 后，该 key 恢复使用 builtin Prompt；没有 builtin 时读取失败。
-
-## Project（项目）
-
-```
-mo project create <名> --path <仓库路径>     --path 的仓库注册为 default 仓库
-mo project list
-mo project get <名或id>
-mo project use <名或id>            设置当前项目
-mo project delete <名或id>
-mo project status                  当前项目聚合状态
-mo project workflow ...            Workflow Profile 管理（见上）
-mo project variables ...           Project Variables
-mo project prompt ...              Project Prompts
-```
-
-## Repository（仓库）
-
-一个 project 可声明多个仓库作为执行资源（产品的 server 与 web 是两个代码库时，同一 project 声明两个仓库）。每个 Issue 绑定一个目标仓库；未指定时绑定当前 default 仓库。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。产品语义见 [仓库](repositories.md)。
-
-```
-mo repo list [--project <名>]
-mo repo add <名> --git-url <url> [--base-branch <分支>] [--set-default] [--project <名>]
-mo repo update <名> [flags] [--project <名>]
-mo repo set-default <名> [--project <名>]
-mo repo delete <名> [--project <名>]
-```
-
-仓库是往项目集合加成员，用 `add`（不是 create）。
+每个命令组的叶子帮助才是参数清单。根帮助和本文命令地图不复制所有 flag。
 
 ## Issue（工作项）
 
-```
-mo issue create <标题> [--parent <编号>] [options]
-mo issue list [--parent <编号>] [options]
-mo issue get <编号>
-mo issue update <编号> [options]
-mo issue variables get <编号>
-mo issue variables set <编号> [--var <键>=<值>] [--stage-var <阶段>.<键>=<值>]
-mo issue variables clear <编号> [--var <键>] [--stage-var <阶段>.<键>]
-mo issue start <编号>
-mo issue approve <编号>
-mo issue reject <编号> --message <理由>
-mo issue retry <编号>
-mo issue rerun <编号>
-mo issue rerun <编号> --from-stage <阶段>
-mo issue stop <编号>                            终止（不可恢复）
-mo issue force-stop <编号>                      暂停（可恢复）
-mo issue resume <编号>
-mo issue done <编号>                            手工标记完成（workflow 必须已终止）
-mo issue rebase <编号>
-mo issue close <编号>
-mo issue reopen <编号>
-mo issue archive <编号>                         归档（软删，可恢复）
-mo issue archive --all-completed [options]
-mo issue unarchive <编号>
-mo issue comment add <编号> [--body <文本>|--body-file <路径>]
-mo issue prereq add <编号> <前置编号>
-mo issue prereq remove <编号> <前置编号>
-mo issue logs <编号>
-mo issue events <编号> [--limit <n>]
-mo issue diff <编号>
-mo issue commits <编号>
-mo issue sessions <编号>
-mo issue session show <编号> <名称>
-mo issue session transcript <编号> <名称>
-mo issue session compact <编号> <名称>
-mo issue session reset <编号> <名称>
-mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径>]
-mo issue session cancel <编号> <名称>
-```
+`mo issue` 管理工作本身：内容、组织关系、目标仓库、Profile 选择，以及 Draft / Done / Closed / Archived 等 Issue 生命周期。`mo issue start <number>` 表达“开始这项工作”，成功后创建并绑定一条 WorkflowRun。
 
-`compact` 使用当前执行后端的原生压缩并保持底层 Session 身份；`reset` 建立
-没有旧上下文的新 Session 并保留会话沿革；`followup` 在执行中进入当前回合，空闲
-时开始下一回合。会话身份与来源见 [Agent 与 AgentSession](agents.md)；OpenCode 的
-具体行为见 [`mohist/opencode` Action](actions/opencode.md)。
+审批、恢复、暂停和终止改变的是 WorkflowRun，因此只放在 `mo run`。Issue 的评论、前置条件、模板、变量、diff 和 commit 仍留在 `mo issue`，因为它们描述或辅助这项工作。
 
-常用示例：
+## Workflow Profile
 
-```
-mo issue comment add <number> --body "请补充错误处理"
-mo issue prereq add <number> <prereq-number>
-mo issue prereq remove <number> <prereq-number>
-mo issue reject <number> --message <message>
-mo issue rerun <number> --from-stage <stage>
-```
+`mo workflow` 管理 Project 范围的 Workflow Profile。它定义未来的 Run 如何推进；修改 Profile 或 Project 默认值，不改变已经开始的 Run。
 
-Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
+`workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 
-`--parent` 创建/挂靠子 issue，`mo issue update <编号> --parent none` 解除。`mo issue create <标题> --repo <资源名>` 选择目标仓库；省略 `--repo` 时绑定当前 default 仓库。未启动 Issue 可通过 `mo issue update <编号> --repo <资源名>` 重指派，启动后目标仓库锁定。`mo issue list --repo <资源名>` 按已存储的目标仓库筛选。复合 issue 的完整语义见 [复合 Issue 与子 Issue](sub-issues.md)。
+## WorkflowRun
 
-## Epic（产品目标）
+`mo run` 查看和控制一次 WorkflowRun。Issue 号可以便捷寻址当前 Run，但不会因此复制 `mo issue approve`、`mo issue retry` 等控制命令。
 
-```
-mo epic create <title> [options]
-mo epic list
-mo epic get <epic-number>
-mo epic update <epic-number> [options]
-mo epic link <epic-number> <issue-number>
-mo epic unlink <epic-number> <issue-number>
-mo epic start <epic-number>                  开始自动推进
-mo epic pause <epic-number>                  暂停自动推进
-mo epic resume <epic-number>
-mo epic done <epic-number>                   标记里程碑完成
-mo epic close <epic-number>                  放弃里程碑
-mo epic reopen <epic-number>                 将完成或关闭的 Epic 恢复为 idle
-```
-
-epic 无 delete——里程碑用 done（完成）或 close（放弃）收尾，不删除。
-Epic 和 Issue 的编号都只在所属 Project 内唯一；命令在 `--project` 指定的 Project 中解析编号。
-
-## Mohist Agent（Named Agent）
-
-`mo agent` 管理的是 Project 内有稳定身份的 Mohist Agent。Inline Agent 由 Workflow
-task 的 Action Input 定义，不通过这组命令创建或管理。
-
-```
-mo agent create [options]
-mo agent list
-mo agent get <名或id>
-mo agent update <名或id> [options]
-mo agent archive <名或id>           归档（软删，可恢复）
-mo agent session list <agent>
-mo agent session get <会话id>
-mo agent session transcript <会话id>
-mo agent session launch <agent> [--prompt <文本>|--prompt-file <路径>]
-mo agent session followup <会话id> [--text <文本>|--text-file <路径>]
-mo agent session compact <会话id>
-mo agent session reset <会话id>
-mo agent session cancel <会话id>
-```
-
-`mo issue session ...` 与 `mo agent session ...` 面向同一种 AgentSession。前者按
-Workflow 来源查找，后者按 Mohist Agent 来源查找；它们不是两套 Session 模型。
-
-`launch` 是便利入口：它解析指定 Mohist Agent，并同时创建一次 AgentJob 和一段
-AgentSession。AgentJob 负责这次执行的成功或失败，命令返回的 Session ID 用于查看
-对话和继续 follow-up。`cancel` 只中断当前执行回合，不删除 AgentSession。
-
-## Label（标签）
-
-```
-mo label list                       标签目录
-mo label add <key> [--description <text>] [--supported-values <v1,v2>]
-mo label update <key> [options]
-mo label delete <key>                delete 为正名，remove/rm 为别名
-```
-
-label 是往项目标签目录加定义，用 `add`（不是 create）。
-
-## Runner（执行器）
-
-```
-mo runner start                    启动执行器受管服务
-mo runner stop                     停止执行器受管服务
-mo runner restart                  重启执行器受管服务
-mo runner list [--scope all|global|project]
-mo runner get <执行器id>
-mo runner status                    在线执行器摘要
-mo runner uninstall                 卸载执行器受管服务
-```
-
-执行器的安装/启停见「安装与升级」。
-
-## Server（服务端）
-
-```
-mo server start                     启动服务端受管服务
-mo server stop                      停止服务端受管服务
-mo server restart                   重启服务端受管服务
-mo server health                    健康检查
-mo server info                      服务端系统诊断
-mo server status                    服务状态
-mo server logs                      服务日志（受管服务的运维日志）
-mo server uninstall                 卸载服务端受管服务
-```
-
-`mo system logs`（应用日志）与 `mo server logs`（运维日志）内容不同：前者是应用输出，后者是 systemd/计划任务层日志。
-
-## 系统诊断（只读）
-
-```
-mo info                             CLI 本地环境与安装来源（受控例外：跨资源只读）
-mo system logs                      应用日志
-mo otel query <sql> [--db <路径>]   直接查询 OpenTelemetry 数据库（无需服务端）
-mo otel status                      OpenTelemetry 采集器状态（需服务端）
-mo opencode models                  当前项目可用模型
-```
-
-## Notification（通知配置）
-
-```
-mo notification setup               通知平台配置向导
-```
-
-## 配置（键值）
-
-```
-mo config list
-mo config get <键>
-mo config set <键> <值>
-```
-
-`mo config get/set` 是键值范式，与资源 `get` 语义不同但词相同——KV 查询是 CLI 通用惯例（如 git config），保留。
-
-## 技能分发
-
-```
-mo skills list
-mo skills install
-mo skills get <name>
-mo skills path <name>
-mo skills sync
-```
-
-`mo skills` 的输出格式统一走 `-o`，不用 `--json` 布尔开关。
-
-> 工作树 skill-data 同步到托管缓存（`mo skills sync`）：在 worktree 内的 `skill-data/` 目录修改后，必须跑一次 `mo skills sync`，改动才会出现在新启动的 agent session 上下文中。`mo skills sync` 只在「工作树 skill-data 同步到托管缓存」的场景下需要——已经装好且不需要调整的 skill 不必每次都跑。
-
-## 安装与升级（动词根集中）
-
-装机与升级只走动词根 `mo install` / `mo update`。
-
-```
-mo install server                   安装服务端为受管服务
-mo install runner                   安装执行器为受管服务
-
-mo update                           升级全部（CLI + 服务端 + 执行器）
-mo update cli                       仅升级 mo CLI
-mo update server                    仅升级服务端
-mo update runner                    仅升级执行器
-```
-
-## 实装差距
-
-- 当前 `mo project workflow template` 与 `mo project workflow config` 仍把 Profile、
-  Variables 和 Prompts 分成旧 template/config 结构；目标命令面以本文三个独立资源组为准。
-- 当前 `mo issue workflow config` 仍支持 inline template；目标命令面只保留 Profile
-  选择与 Issue Variables。
-- **查单条动词未收敛**：本文的目标动词是 `get`，当前实装中 issue / project / epic / agent 等主要资源用的是 `show`（`get` 已用于 skills、template、config 等）。操作类文档（快速上手、Issue 管理等）按当前实装写 `show`，保证示例可直接运行；动词收敛到 `get` 随各命令组改进 issue 推进。
-- issue-407 已交付两种来源统一的 Compact / Reset 命令面。`compact` 原地压缩并保持
-  当前 Runtime Session；`reset` 只在 Session 空闲且原绑定仍为当前绑定时建立没有旧上下文的
-  Runtime Session。两者都保持并返回同一稳定 Session ID。当前 Runtime Session 不存在时，
-  命令会明确失败并提示 Reset。具体执行后端的压缩和新 Session 创建仍由 issue-409 落地；
-  在此之前 Compact 与 Reset 会报告执行后端不可用。
-- 其它命令面随各命令组改进 issue 进一步对齐到本文。
-
-## 典型工作流脚本
+需要一条 Run 的命令接受以下两种目标之一：
 
 ```bash
-# 批量启动 backlog
-for n in 42 43 44 45 46; do mo issue start $n; done
-
-# 重试所有 blocked 的 issue
-mo issue list --output json | jq '.[] | select(.health=="blocked") | .number' | \
-  while read n; do mo issue retry $n; done
-
-# 直接控制一个工作流执行（不通过 issue 号）
-mo workflow get wr_abc123 -o yaml
-mo workflow approve wr_abc123
+mo run retry wr_abc123
+mo run retry --issue 42
 ```
 
-## 命令找不到？
+位置参数直接使用 WorkflowRun ID；`--issue` 解析该 Issue 当前绑定的 Run。两者必须且只能提供一个。Issue 号在 Project 内唯一，因此可同时使用 `--project`。
 
-- 看完整命令树：`mo --help`
-- 看子命令选项：`mo <命令> --help`
-- 本文是 spec，不是实装清单——某命令在本文出现但 `mo --help` 没有，说明该命令面改进尚未落地，查对应 issue。
+## Agent 与 Session
 
-## 退出码
+`agent` 是 Project 内有稳定身份的 Mohist Agent。`session` 是可独立寻址的 AgentSession，不属于两套不同的命令树。
+
+- `mo agent launch <agent>` 创建一次 Agent 工作并返回 Session ID。
+- `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
+- `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
+- `mo session list --run <run-id>` 查看该 Run 的 Session。
+- 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。
+
+来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
+
+## Project 作用域
+
+Project 范围内的命令遵循同一套解析规则：
+
+1. 显式传入 `--project <name-or-id>` 时使用该 Project。
+2. 否则使用当前目录或本机配置选中的 Project。
+3. 无法唯一解析时直接失败，并提示如何传入 `--project` 或选择当前 Project。
+
+命令面只有 `--project`，不再并列 `--project-id`。Project 名称和 ID 都由同一个参数解析。
+
+## 输入与交互
+
+- 短文本使用 `--body`、`--message` 或该命令明确声明的参数。
+- 长文本使用与短文本同名的 file flag，例如 `--body-file`、`--prompt-file`、`--text-file`；传 `-` 表示从 stdin 读取。
+- Workflow Definition 等完整文档使用 `--file <path>`；传 `-` 表示从 stdin 读取。
+- 在 TTY 中，少数安装、setup 和 create 命令可以在缺少可选输入时询问。
+- 在非 TTY 中，任何命令都不询问；缺少必填输入时立即失败并给出可执行提示。
+- `MOHIST_PROMPT_DISABLED=1` 在任何环境中关闭询问，便于 Agent、脚本和 CI 获得确定行为。
+- 永久删除或不可恢复的控制动作在交互环境中确认；自动化通过叶子帮助声明的 `--yes` 显式确认。
+
+不提供“一律支持”的 `--dry-run`。只有能给出真实、完整预览的命令才声明预览能力。
+
+## 输出
+
+默认输出服务于人类阅读：列表是紧凑表格，单个资源是精简详情，成功的状态修改是一行结果。
+
+返回资源的命令支持字段选择：
+
+```bash
+mo issue list --json number,title,status
+mo run view --issue 42 --json id,status,currentStage
+```
+
+- `--json <fields>` 只输出请求的字段。字段顺序不影响语义。
+- 不提供通用 `-o` / `--output`；命令只有默认人类视图和显式字段选择两条常规输出路径。
+- 单资源输出一个 JSON object；集合输出一个 JSON array。不增加 `{ ok, data, error }` 包装。
+- 单独传 `--json` 时列出该命令可选的字段并退出，不要求 Agent 猜字段名。
+- JSON 字段是命令契约。叶子帮助列出当前版本支持的字段。
+- 连续事件与日志使用一行一个 JSON object 的 NDJSON；不会把无限流包装成数组。
+- 正常结果只写 stdout。错误、提示、确认和进度只写 stderr。
+- 人类输出允许改善排版；脚本和 Agent 只依赖 JSON 或 NDJSON。
+
+初始命令面不内置 `--jq`、`--template` 或通用 YAML renderer。Agent 可以请求最小 JSON 字段，再使用现有 shell 工具处理；只有反复出现且无法通过字段选择解决的需求，才扩展 CLI。
+
+`mo workflow view <profile> --yaml` 是明确的资源专属视图：Workflow Definition 本身就是 YAML 工件。`--yaml` 与 `--json` 互斥，也不表示其它资源支持 YAML 输出。
+
+## 错误与退出
+
+错误首先要让 Agent 直接修正下一次调用，同时也要让人读得懂：
+
+```text
+error: issue 42 has no active workflow run [run_not_found]
+hint: start it with `mo issue start 42`
+```
+
+- 第一行说明失败对象、原因和稳定错误码。
+- `hint:` 只在存在明确恢复动作时出现，并给出可执行命令或缺失参数。
+- 参数错误同时展示相关 usage，不倾倒整个根帮助。
+- 服务返回的领域错误保留其具体原因，不替换成笼统的 “request failed”。
+- 默认不输出调用栈或内部通信细节。
+
+退出码保持小而稳定：
 
 | Code | 含义 |
 |---|---|
-| 0 | 成功 |
-| 1 | 一般错误（参数错、API 返回错误等） |
-| 2 | 命令解析失败 |
+| `0` | 成功 |
+| `1` | 操作失败、状态不允许或服务不可用 |
+| `2` | 命令或参数用法错误 |
+| `130` | 用户中断 |
 
----
+错误不因 `--json` 改成另一套 envelope；调用方始终通过退出码判断成功，再从 stderr 读取同一份高质量诊断。
+
+## 典型调用
+
+```bash
+# 只读取做决策需要的字段
+mo issue list --json number,title,status
+
+# 启动 Issue，再通过 Issue 号查看其当前 Run
+mo issue start 42
+mo run view --issue 42
+
+# 重试失败点，或从 build Stage 重新执行
+mo run retry --issue 42
+mo run rerun --issue 42 --from-stage build
+
+# 找到会话后读取 transcript
+mo session list --issue 42 --json id,name,status
+mo session transcript session_abc123
+
+# 从 stdin 提交长内容
+mo issue comment add 42 --body-file -
+```
+
+## Skill 的角色
+
+Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这些内容：
+
+- 对已有 Issue，先读哪些当前事实再行动。
+- 何时用 `retry`、`rerun`、`pause`、`stop` 或 `reset`。
+- 何时转入 explore、create issue、create epic 等场景 Skill。
+- 哪些 Mohist 状态约束不能从通用 CLI 常识推导。
+- 最后提醒使用当前叶子帮助确认精确 flag，并只请求需要的 JSON 字段。
+
+完整命令表、通用 flag、输出格式和安装细节不在 Skill 中重复。这样 CLI 升级后，Agent 读取的是当前二进制生成的帮助，而不是一份容易过期的副本。
+
+## 实装差距
+
+当前命令面仍有以下主要差距：
+
+- `workflow` 当前主要表示 WorkflowRun；Workflow Profile 位于更深的 Project 子命令。目标是 `workflow` 管 Profile、`run` 管执行。
+- Run 控制目前同时出现在 workflow 和 issue 下。目标只保留 `run` 的规范入口，Issue 号作为 `--issue` 选择器。
+- AgentSession 目前按 Issue 与 Agent 来源分散在不同路径。目标统一到 `session`。
+- 资源读取和修改混用 `show`、`get`、`update` 等词。目标统一为 `view`、`edit`。
+- 项目作用域、输出模式和默认输出尚未统一。目标只保留 `--project` 与字段选择式 `--json`。
+- 当前根帮助、叶子帮助和 Mohist Skill 含有重复信息及部分内部实现描述。目标按本文的渐进披露边界重写。
+- 当前 `system`、`opencode` 等实现导向入口尚未归入目标的 `server`、`runtime` 命令组。
+- 其它用户指南在迁移期间仍可能展示当前可运行的旧路径；完成命令迁移后再一次性更新示例。
 
 对应源码：`packages/cli/`。

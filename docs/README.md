@@ -34,7 +34,7 @@
 > 怎么通过 Web UI 看进度，怎么用 `mo` 命令行操作。
 
 - [Web UI 指南](web-ui.md) —— 看板、详情页、活动流、设置
-- [CLI 参考](cli-reference.md) —— `mo` 命令完整说明
+- [CLI 参考](cli-reference.md) —— `mo` 的目标命令语言、命令地图与交互契约
 
 ## 板块 5：执行后端与扩展
 
