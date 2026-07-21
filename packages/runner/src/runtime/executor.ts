@@ -10,6 +10,7 @@ import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
+import type { PiRuntime } from "./pi/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
@@ -58,6 +59,7 @@ export class WorkExecutor {
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
+    private piRuntime: PiRuntime | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -251,6 +253,7 @@ export class WorkExecutor {
       workDir,
       signal,
       log,
+      piRuntime: this.piRuntime,
       exec: async (command, args) => {
         const { runCommand } = await import("../system/process.js")
         const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)

@@ -1,5 +1,6 @@
 import { defineAction } from "./define-action.js"
 import type { ActionDefinition } from "./manifest.js"
+import type { ActionHost } from "./host.js"
 import { opencodeAction } from "./opencode.js"
 import { piAction } from "./pi.js"
 import {
@@ -160,7 +161,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "turn-failed", description: "Pi turn failed for an unspecified reason" },
       ],
     },
-    run: piAction,
+    run: (inputs, host: ActionHost) => piAction(inputs, host),
   }),
   defineAction({
     manifest: {
