@@ -427,18 +427,11 @@ test.describe('Issue decision surface browser layout', () => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 407,
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      workflowRunId: 'wr-running',
+      status: 'backlog',
       health: 'active',
       isDraft: true,
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't-1', title: 'Build' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
+      canStart: true,
+      blocker: { kind: 'draft' },
     })
     await mockIssueDetailApi(page, issue, [])
     await page.goto(`/${project.name}/issues/${issue.number}`)
@@ -449,21 +442,22 @@ test.describe('Issue decision surface browser layout', () => {
 
     const sheet = page.getByTestId('mobile-action-sheet')
     await expect(sheet).toBeVisible()
-    const stopButton = sheet.getByTestId('mobile-sheet-action-stop')
+    const startButton = sheet.getByTestId('mobile-sheet-action-start')
+    await expect(startButton).toBeDisabled()
+    await expect(sheet.getByTestId('mobile-sheet-action-start-reason')).toBeVisible()
     const askAgentLink = sheet.getByTestId('mobile-sheet-action-ask-agent')
-    await expect(askAgentLink).toBeVisible()
+    await expect(askAgentLink).toHaveCount(0)
 
     const viewport = page.viewportSize()
     expect(viewport).not.toBeNull()
     const launcherBox = await box(launcher)
     const sheetBox = await box(sheet)
+    const startBox = await box(startButton)
     expect(launcherBox.x + launcherBox.width).toBeLessThanOrEqual(viewport!.width)
     expect(sheetBox.x + sheetBox.width).toBeLessThanOrEqual(viewport!.width)
     expect(sheetBox.y).toBeLessThan(viewport!.height)
-    if (await stopButton.isVisible()) {
-      const stopBox = await box(stopButton)
-      expect(boxesOverlap(sheetBox, stopBox)).toBe(false)
-    }
+    expect(startBox.x).toBeGreaterThanOrEqual(0)
+    expect(startBox.x + startBox.width).toBeLessThanOrEqual(viewport!.width)
   })
 
   test('phone sheet does not overlap page content and closes via Escape', async ({ page }) => {
