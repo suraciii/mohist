@@ -10,7 +10,7 @@ This is runner infrastructure for reporting Session facts. The Server remains th
 
 **Goals:**
 
-- Durably retain Workflow turn events and follow-up user input on the originating runner until positively accepted.
+- Durably retain Workflow turn events and follow-up user input on the originating runner until positively accepted, while preserving the existing operation-fenced settlement rule for follow-up terminal outcomes.
 - Resume pending delivery after transient failure, runner restart, and server reconnection.
 - Preserve FIFO order per logical AgentSession while allowing unrelated sessions to progress independently.
 - Keep network delivery and retry outside the Workflow Action result and follow-up runtime invocation.
@@ -22,6 +22,7 @@ This is runner infrastructure for reporting Session facts. The Server remains th
 - Exactly-once transcript persistence when a response is lost after the Server accepted an event.
 - Moving pending events to another runner or retargeting them to a newer physical runtime binding.
 - Recovering a follow-up runtime invocation interrupted by runner process failure.
+- Recovering a Workflow event when the runner terminates before that event's asynchronous local enqueue commits.
 - A general-purpose runner outbox for work results, task logs, or other transports.
 - Administrative eviction, dead-lettering, or replay controls for permanently rejected Session events.
 
@@ -31,7 +32,7 @@ This is runner infrastructure for reporting Session facts. The Server remains th
 
 `RunnerHost` will own one `AgentSessionRuntimeEventOutbox` shared by Workflow reporting and SignalR follow-up handling. It replaces `FollowupFailureOutbox` rather than adding a second queue. `WorkExecutor` will pass the shared outbox through `ActionContext` to the Workflow OpenCode Action; `RunnerSignalRClient` will pass the same instance to the follow-up handler and own its connection lifecycle hooks.
 
-The outbox accepts a normalized record containing a local record ID, a binding-free discriminated Session target, the original `runtimeSessionId`, optional Workflow work metadata, and exactly one runtime event with its original payload. Follow-up input and operation-correlated follow-up terminal outcomes use the same record shape as Workflow input, activity, and close events.
+The outbox accepts a normalized record containing a local record ID, a binding-free discriminated Session target, the original `runtimeSessionId`, optional Workflow work metadata, exactly one runtime event with its original payload, and an acknowledgement policy. Workflow input/activity/close and follow-up input use `matching-receipt`; operation-correlated follow-up terminal outcomes use `successful-response` to preserve their current operation-fenced protocol.
 
 Alternatives considered:
 
@@ -40,11 +41,13 @@ Alternatives considered:
 
 ### D2: Persist ordered records before detached network delivery
 
-`enqueue(record)` assigns the record's order synchronously, appends it to the in-memory state, and resolves only after an atomic snapshot containing that record has been persisted under `.mohist/runner-state/runtime-events.json`. Adjacent mutations may be coalesced into one snapshot, but every returned enqueue promise must be covered by a completed write. The file store writes a temporary file and renames it over the snapshot; the outbox logic depends on an injected store so tests use an in-memory implementation.
+`enqueue(record)` assigns the record's order synchronously, appends it to the in-memory state, and resolves only after an atomic snapshot containing that record has been persisted under `.mohist/runner-state/runtime-events.json`. Adjacent mutations may be coalesced into one snapshot, but every returned enqueue promise must be covered by a completed write. The snapshot/import store depends on a narrow `RuntimeEventOutboxFileSystem` port for read, owner-only temporary write, atomic rename, and legacy-file marking. Production uses a Node filesystem adapter; tests run the same store and importer against a recording in-memory implementation of that port.
 
 The ordered entry list is the persistence authority for sequence position. A canonical sequence key is derived in one place from the logical target fields: `(projectId, workflowRunId, sessionName)` for Workflow sessions or `(projectId, sessionId)` for generic sessions. The optional binding carried by a follow-up command is not persisted as part of the target; the original `runtimeSessionId` is stored separately and is never recomputed during retry.
 
-The Workflow reporter no longer performs HTTP requests. It enqueues input before starting the OpenCode prompt, enqueues projected events as they are observed, enqueues one logical close after runtime completion, and waits only for its local persistence promises before returning. It does not await delivery or retry. Follow-up handling persists its input before invoking `runtime.followup`; terminal callbacks enqueue their outcome without invoking the runtime again.
+The Workflow reporter no longer performs HTTP requests. It awaits local input enqueue before starting the OpenCode prompt. Because `RuntimeTurnObserver.onEvent` is synchronous, each callback immediately registers an ordered asynchronous enqueue promise; after `runTurn` returns, the reporter enqueues one logical close and waits for every local enqueue to settle before returning the unchanged runtime result. It never waits for Server delivery or retry. The recoverable restart boundary is a completed local enqueue, not observation alone; a process crash before an observed event's local commit remains outside this issue.
+
+Follow-up handling awaits local input enqueue before invoking `runtime.followup`. If that local write fails, the handler returns `unavailable` and does not invoke the runtime, allowing command delivery to be retried. Server upload remains detached. Terminal callbacks enqueue their outcome without invoking the runtime again. A local write failure after runtime execution is observable and marks the outbox unhealthy, but does not replace the runtime result.
 
 Alternatives considered:
 
@@ -52,21 +55,25 @@ Alternatives considered:
 - Store an entire completed turn as one record: rejected because input must precede runtime execution and per-event acceptance is needed to retain the exact failed suffix.
 - Use an append-only journal immediately: rejected as unnecessary complexity for the current volume. Coalesced atomic snapshots preserve the existing outbox pattern; write amplification is tracked as a risk.
 
-### D3: Send one event per request and require a matching receipt
+### D3: Send one event per request with an event-kind-specific acknowledgement policy
 
-The outbox sends the head event alone through the existing Workflow or generic runtime-events endpoint. `ServerConnection.agentSessionRuntimeEvents` will return `AgentSessionRuntimeEventReceipt[]`, matching the existing Workflow method. The head is acknowledged only when the response contains its event type. A timeout, transport error, non-2xx response, malformed response, empty receipt, or receipt without the submitted type leaves the head pending.
+The outbox sends the head event alone through the existing Workflow or generic runtime-events endpoint. `ServerConnection.agentSessionRuntimeEvents` will return `AgentSessionRuntimeEventReceipt[]`, matching the existing Workflow method.
 
-One event per request makes the existing `{ type }` receipt unambiguous without changing the API. A response can be lost after server acceptance, so retry remains at-least-once and can duplicate an event; no local record ID is sent as a server deduplication key.
+For Workflow input/activity/close and follow-up input, the head is acknowledged only when the response contains its event type. A timeout, transport error, non-2xx response, malformed response, empty receipt, or receipt without the submitted type leaves that head pending.
+
+Operation-correlated `session.followup_completed` and `session.followup_failed` records preserve the existing terminal protocol: timeout, transport error, non-2xx, and malformed JSON remain pending, but a 2xx with a valid receipt array settles the local record even when that array is empty. Server acceptance consumes the pending operation lease, so replay after a lost successful response legitimately returns `[]`; requiring a match would fence the Session forever. This exception is explicit in the persisted record policy and is not applied to content or Workflow close events. The existing `Promise<AgentSessionRuntimeEventReceipt[]>` connection result is therefore sufficient for both policies: rejection represents transport/status/parse failure, and resolution provides the valid array inspected by the selected policy.
+
+One event per request makes the existing `{ type }` content receipt unambiguous without changing the API. A content response can be lost after server acceptance, so retry remains at-least-once and can duplicate an event; no local record ID is sent as a server deduplication key.
 
 Alternatives considered:
 
-- Treat any 2xx as success, as the current follow-up outbox does: rejected because stale-binding and transcript-boundary rejection return 2xx with an empty receipt.
+- Treat any 2xx as success for every event: rejected because stale-binding and transcript-boundary rejection return 2xx with an empty receipt. The rule is retained only for operation-fenced follow-up terminals, where a consumed lease makes replay receipts non-repeatable.
 - Batch a complete pending suffix: rejected because type-only receipts cannot identify individual repeated event types reliably and one rejected head must fence all later events in that sequence.
 - Add delivery IDs to the Server API: rejected by the issue's explicit server idempotency non-goal.
 
 ### D4: Drain one FIFO per logical AgentSession with bounded cross-session concurrency
 
-At most one head per sequence key is in flight. After a matching receipt is received, acknowledgement re-enters the serialized mutation path, verifies that the same record is still the head, removes it, persists the new snapshot, and advances that sequence. A failed or unaccepted head fences later records for that logical Session, including records for a newer physical binding. Different sequence keys remain eligible and drain with a small bounded concurrency so one stale Session cannot stop all delivery.
+At most one head per sequence key is in flight. After the head's acknowledgement policy is satisfied, acknowledgement re-enters the serialized mutation path, verifies that the same record is still the head, removes it, persists the new snapshot, and advances that sequence. A failed or unaccepted head fences later records for that logical Session, including records for a newer physical binding. Different sequence keys remain eligible and drain with a small bounded concurrency so one stale Session cannot stop all delivery.
 
 The outbox uses the existing bounded request timeout and retry timer pattern. Enqueue, startup, automatic reconnect, and forced reconnect all call the same idempotent `kick()` operation. Concurrent kicks share in-flight sequence work rather than starting duplicate requests.
 
@@ -78,7 +85,7 @@ Alternatives considered:
 
 ### D5: Make outbox readiness part of runner lifecycle, not Action completion
 
-The outbox loads before the runner starts accepting SignalR commands or claiming work. A missing file means an empty queue; an unreadable or invalid file makes the outbox unavailable and keeps the runner from accepting new execution that it cannot record. After SignalR starts, the initial drain is kicked asynchronously so a server outage does not delay runner startup. Both automatic and forced reconnect paths invoke the same drain hook.
+The outbox loads before the runner starts accepting SignalR commands or claiming work. A missing file means an empty queue; an unreadable or invalid file makes the outbox unavailable. `RunnerHost` includes `outbox.ready()` in its claim gate, and the follow-up handler checks the same state before accepting a command. After SignalR starts, the initial drain is kicked asynchronously so a server outage does not delay runner startup. Both automatic and forced reconnect paths invoke the same drain hook.
 
 `stop()` cancels retry timers and in-flight HTTP attempts but does not remove pending records. A later start reloads and resumes them. Store failures after startup are logged without event payloads, retain the records in memory, mark the outbox unhealthy for new work, and schedule persistence recovery; they do not replace an already-running OpenCode result.
 
@@ -89,7 +96,7 @@ Alternatives considered:
 
 ### D6: Import the existing follow-up terminal state idempotently
 
-On first load, the new file store also reads `.mohist/runner-state/followup-failures.json` version 1. Each legacy entry is converted to a `session.followup_completed` or `session.followup_failed` record with deterministic ID `legacy-followup-terminal:{operationId}`. The importer merges by ID, atomically persists the new snapshot, and only then marks the legacy file migrated. Re-running after a crash cannot create a second pending record for the same operation.
+On first load, the new file store also reads `.mohist/runner-state/followup-failures.json` version 1. Each legacy entry is converted to a `session.followup_completed` or `session.followup_failed` record with deterministic ID `legacy-followup-terminal:{operationId}` and `successful-response` acknowledgement. The importer merges by ID, atomically persists the new snapshot, and only then marks the legacy file migrated. Re-running after a crash cannot create a second pending record for the same operation.
 
 Alternatives considered:
 
@@ -98,25 +105,27 @@ Alternatives considered:
 
 ### D7: Test behavior through injected stores, transport fakes, and fake time
 
-Outbox unit tests will share one in-memory store across two outbox instances to model restart. They will cover matching and empty receipts, timeout/retry with fake timers, per-sequence ordering, cross-sequence progress, concurrent kicks, stale bindings, snapshot failure, and idempotent legacy import. No test will instantiate the physical file adapter or touch a temporary directory.
+Outbox unit tests will share one recording `RuntimeEventOutboxFileSystem` across two real snapshot-store/outbox instances to model restart. They will cover serialization, owner-only write options, temporary-write/rename ordering, matching and empty content receipts, successful empty terminal receipts, timeout/retry with fake timers, per-sequence ordering, cross-sequence progress, concurrent kicks, stale bindings, snapshot failure, and idempotent legacy import at every write/rename/marker boundary. No test will instantiate the Node filesystem adapter or touch a temporary directory.
 
-Runner specs will verify that Workflow input/activity/close and follow-up input/outcome enter the shared outbox in order, that runtime execution and Workflow results do not await HTTP delivery, and that retry never invokes `runtime.followup` again. Connection tests will verify receipt parsing for both endpoint shapes; SignalR lifecycle tests will verify startup and reconnect kicks. Existing real-filesystem `FollowupFailureOutbox` tests will be replaced rather than retained beside the new suite.
+Runner specs will verify that Workflow input/activity/close and follow-up input/outcome enter the shared outbox in order, that runtime execution and Workflow results do not await HTTP delivery, and that retry never invokes `runtime.followup` again. Host specs will prove an unhealthy outbox prevents polling/claiming and later health recovery resumes it; SignalR follow-up specs will prove an unhealthy outbox returns `unavailable` before runtime invocation. Connection tests will verify receipt parsing for both endpoint shapes, and lifecycle tests will verify startup and reconnect kicks. Existing real-filesystem `FollowupFailureOutbox` tests will be replaced rather than retained beside the new suite.
 
 ## Risks / Trade-offs
 
-- [A Server acceptance followed by a lost response causes replay and may duplicate transcript content] -> Keep one local logical record and remove it only on a matching receipt; accept at-least-once behavior because server deduplication is explicitly out of scope, and cover the ambiguous-response path in tests.
+- [A content-event Server acceptance followed by a lost response causes replay and may duplicate transcript content] -> Keep one local logical record and remove it only on a matching receipt; accept at-least-once behavior because server deduplication is explicitly out of scope, and cover the ambiguous-response path in tests.
+- [A follow-up terminal response is lost after the operation lease is consumed] -> Preserve the existing successful-response settlement policy for operation-correlated terminal records so a valid empty replay receipt clears the local head; malformed responses still retry, and the policy is not generalized to content events.
+- [The runner exits after observing a Workflow event but before its asynchronous local enqueue commits] -> Start enqueue immediately, wait for all local writes before returning the turn result, and define completed local enqueue as the restart-recovery boundary; full in-progress turn journaling is outside this change.
 - [A permanently stale binding leaves its sequence head pending forever and blocks newer events for that logical Session] -> Never retarget or drop the event; isolate the blockage to that Session, retain warning diagnostics without payload content, and leave administrative remediation to a follow-up change.
 - [A long outage or permanently rejected event grows the local state file] -> Coalesce snapshot writes, bound concurrent drains, expose queue/store failures in runner logs, and do not apply a lossy retention limit in this change.
 - [Snapshot rewrites amplify I/O for high-volume delta streams] -> Coalesce adjacent enqueue and acknowledgement mutations. If measured volume makes this material, replace the store behind the same outbox interface with an append journal in a separate change.
-- [Disk-full, permission, or corruption failures can defeat local durability] -> Use atomic replacement and restrictive file permissions, fail runner readiness when state cannot be loaded, mark the runner unhealthy on later persistence failure, and never silently switch to best-effort upload.
+- [Disk-full, permission, or corruption failures can defeat local durability] -> Use atomic replacement and restrictive file permissions, fail runner readiness when state cannot be loaded, gate host claims and follow-up acceptance on outbox health, mark the runner unhealthy on later persistence failure, and never silently switch to best-effort upload.
 - [The outbox stores prompts and assistant/tool payloads on runner disk] -> Keep the file under runner-owned `.mohist/runner-state`, use owner-only permissions, and exclude payloads from diagnostics.
 - [A crash during legacy import could leave both files present] -> Use deterministic imported IDs and persist the new snapshot before marking the old file migrated, making import replay-safe.
 
 ## Migration Plan
 
-1. Add the shared outbox model, injected persistence boundary, physical snapshot store, receipt validation, per-sequence drain logic, and in-memory tests.
+1. Add the shared outbox model, acknowledgement policies, injected file-I/O boundary, physical snapshot/import store, per-sequence drain logic, and recording-filesystem tests.
 2. Change the generic `ServerConnection` runtime-events method to return the receipts already produced by the Server.
-3. Construct and load the shared outbox in `RunnerHost`, pass it through `WorkExecutor`/`ActionContext` and `RunnerSignalRClient`, and unify startup, reconnect, and stop hooks.
+3. Construct and load the shared outbox in `RunnerHost`, add it to the claim and follow-up acceptance gates, pass it through `WorkExecutor`/`ActionContext` and `RunnerSignalRClient`, and unify startup, reconnect, and stop hooks.
 4. Replace direct Workflow reporter uploads and follow-up input emission with durable enqueue; route follow-up terminal outcomes through the same outbox and remove `FollowupFailureOutbox` after its migration reader is covered.
 5. Run runner typecheck and tests. No Server, database, Web, or API deployment ordering is required because endpoint shapes do not change.
 

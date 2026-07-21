@@ -16,7 +16,7 @@ After every Workflow-source OpenCode turn with an associated AgentSession finish
 
 ### Requirement: Terminal events eventually converge Workflow session state
 
-A Workflow terminal event that is not positively accepted SHALL remain pending across transient upload failures, runner restart, and server reconnection. Once the server accepts the event, Workflow session reads SHALL resolve the corresponding latest turn to `completed` or `failed` and MUST NOT continue to present that turn as running.
+A locally committed Workflow terminal event that is not positively accepted SHALL remain pending across transient upload failures, runner restart, and server reconnection. Once the server accepts the event, Workflow session reads SHALL resolve the corresponding latest turn to `completed` or `failed` and MUST NOT continue to present that turn as running.
 
 #### Scenario: Completed close is accepted after restart
 
@@ -48,7 +48,7 @@ The runner MUST NOT deliver a Workflow turn's terminal event before that turn's 
 
 ### Requirement: Terminal delivery failure does not control Workflow completion
 
-Failure, timeout, or retry of a `session.closed` upload MUST NOT change, suppress, replace, or delay the Workflow turn result until terminal delivery succeeds. The terminal event SHALL remain pending independently of that result.
+Failure, timeout, or retry of a `session.closed` Server upload MUST NOT change, suppress, replace, or delay the Workflow turn result until terminal delivery succeeds. The reporter MUST complete local persistence of the terminal event before returning that result, and the terminal event SHALL remain pending independently of Server delivery.
 
 #### Scenario: Successful turn's terminal upload fails
 

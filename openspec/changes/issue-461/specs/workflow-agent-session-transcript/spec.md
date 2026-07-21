@@ -10,7 +10,7 @@ For every Workflow-source OpenCode turn with an associated AgentSession, the sys
 
 #### Scenario: Pending transcript events survive restart
 
-- **WHEN** the runner restarts with unaccepted reasoning, tool, usage, or model events from a Workflow turn
+- **WHEN** the runner restarts with locally committed but Server-unaccepted reasoning, tool, usage, or model events from a Workflow turn
 - **THEN** it SHALL resume delivery of those original events
 - **AND** accepted events SHALL appear in the associated Workflow AgentSession transcript in their original order
 
@@ -43,11 +43,11 @@ A Workflow turn's `session.input` MUST be positively accepted before any depende
 
 ### Requirement: Transcript delivery failure is independent of the Workflow result
 
-A Workflow transcript upload failure MUST be observable for diagnosis, but MUST NOT prevent the OpenCode prompt from running, change a successful runtime result to failed, replace or obscure the original runtime failure, or delay returning the Workflow result until transcript delivery succeeds. The failed transcript events SHALL remain pending for later delivery.
+A Workflow transcript Server-upload failure MUST be observable for diagnosis, but MUST NOT prevent the OpenCode prompt from running after its input is locally durable, change a successful runtime result to failed, replace or obscure the original runtime failure, or delay returning the Workflow result until Server delivery succeeds. The locally committed transcript events SHALL remain pending for later delivery. The reporter MUST settle local persistence of all observed events before returning the Workflow result.
 
 #### Scenario: Initial input upload fails while the turn succeeds
 
-- **WHEN** the initial `session.input` upload fails and the OpenCode turn succeeds
+- **WHEN** the initial `session.input` is locally durable, its Server upload fails, and the OpenCode turn succeeds
 - **THEN** the Workflow turn SHALL return its successful runtime result without waiting for a successful retry
 - **AND** the input and subsequent turn events SHALL remain pending in production order
 
