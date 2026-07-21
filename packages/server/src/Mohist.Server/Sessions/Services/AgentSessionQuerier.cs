@@ -496,7 +496,7 @@ public class AgentSessionQuerier : IScopedService
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
+        var session = await FindReadableSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
         return await BuildSessionMetadataDtoAsync(db, session, sessionName, ct);
@@ -510,7 +510,7 @@ public class AgentSessionQuerier : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
+        var session = await FindReadableSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
@@ -662,6 +662,41 @@ public class AgentSessionQuerier : IScopedService
                 (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString()),
                 (AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId),
                 (AgentSessionQueryMetadataKeys.SessionName, sessionName)),
+            ct: ct);
+    }
+
+    private async Task<AgentSessionRecord?> FindReadableSessionAsync(
+        MohistDbContext db,
+        string projectId,
+        int issueNumber,
+        string sessionName,
+        CancellationToken ct)
+    {
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
+            .ToListAsync(ct);
+        var workflowRunId = rows
+            .Select(row => ReadWorkflowRunId(row.State))
+            .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+
+        if (!string.IsNullOrWhiteSpace(workflowRunId))
+        {
+            return await _sessionQuery.FirstByLabelsAsync(
+                AgentSessionDtoMapper.Labels(
+                    (AgentSessionQueryMetadataKeys.ProjectId, projectId),
+                    (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString()),
+                    (AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId),
+                    (AgentSessionQueryMetadataKeys.SessionName, sessionName)),
+                ct: ct);
+        }
+
+        return await _sessionQuery.FirstByLabelsAsync(
+            AgentSessionDtoMapper.Labels(
+                (AgentSessionQueryMetadataKeys.ProjectId, projectId),
+                (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString()),
+                (AgentSessionQueryMetadataKeys.SourceKind, "workflow"),
+                (AgentSessionQueryMetadataKeys.SessionName, sessionName)),
+            AgentSessionQueryOrder.CreatedDescending,
             ct: ct);
     }
 

@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- `AgentSessionQuerier.FindCurrentSessionAsync` is the active-run-only resolver shared by issue-scoped commands; historical fallback must not be added there.
+- Issue-scoped metadata and transcript reads can reuse `AgentSessionQuery.FirstByLabelsAsync` with `CreatedDescending`; persisted workflow labels provide project, issue, source kind, and session name boundaries.
+- Metadata JSON exposes the logical session identity as `id`; transcript runtime filtering operates on transcript-turn `RuntimeSessionId` within that logical session.
+
+## T-001
+
+- Added a read-specific resolver that uses the exact active workflow-run lookup when an issue has a run reference and otherwise selects the newest matching persisted `workflow` session.
+- Added API specs for completed and cancelled history, newest selection, active-run precedence, missing and cross-boundary records, runtime-session filtering, and active-run-only command routes.
+- Focused history specs pass: 8 tests. Existing session read and mapper regression specs pass: 14 tests.
