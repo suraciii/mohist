@@ -7,7 +7,7 @@ Approvers often reach an issue on a phone but cannot read the decision evidence 
 - Replace the generic decision presentation while an issue awaits approval with an inline review package that keeps the evidence and approve/send-back actions together; non-approval states retain the existing decision-surface behavior.
 - For plan approval, show `proposal.md` and `tasks.json` directly on the issue page without requiring an artifact dialog.
 - For check approval, show `review.md` and the current diff summary directly on the issue page without requiring a dialog.
-- Make approval evidence readable and actions thumb-reachable on phone-width viewports, with no horizontal page scrolling.
+- Make approval evidence readable on phone-width viewports with no horizontal page scrolling, and place direct thumb-reachable Approve and Send back controls alongside it: Approve completes in one tap, Send back opens its structured inline form in one tap, and neither action requires the generic action drawer or another dialog.
 - Add direction, scope, and detail choices to the send-back form alongside free text, while continuing to submit one feedback text payload through the existing workflow contract.
 - Add discoverable desktop shortcuts: `a` approves, `m` opens send-back, and Command+Enter submits both send-back feedback and issue comments.
 

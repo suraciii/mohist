@@ -12,7 +12,7 @@ This is a Web-only composition and interaction change. The Server remains author
 
 - Replace the generic approval presentation with one stage-aware review package at the existing top decision position.
 - Inline the exact Plan or Check evidence with independent loading, missing, and failure states.
-- Preserve one action descriptor list and one command controller across responsive layouts.
+- Preserve one action descriptor list and one command controller across responsive layouts while making the two approval actions direct on a phone.
 - Share one structured send-back draft and deterministic text serialization across desktop and mobile.
 - Add safe, contextual desktop shortcuts and form-local Command+Enter submission.
 - Preserve all non-approval issue-detail behavior.
@@ -31,11 +31,13 @@ This is a Web-only composition and interaction change. The Server remains author
 
 Add `ApprovalReviewPackage` under `pages/issue-detail/ui` and mount it in the current decision-surface frame whenever the derived summary is `approval-required`. The page will pass the current issue number, workflow run ID, approval stage, decision copy, shared action descriptors/controller, primary action, viewport mode, and diff query state. The package will own approval-only artifact queries, send-back draft state, and approval shortcut registration.
 
-On desktop, the package will compose the existing `IssueDecisionSurface` with inline evidence in its evidence slot. On narrow viewports, it will render the same evidence at the top position and the existing fixed, safe-area-aware mobile action control. The approval package, rather than `IssueDetailPage`, will choose between these renderers so its send-back draft survives live viewport changes. For non-approval states, `IssueDetailPage` will retain the existing desktop surface and mobile bar unchanged.
+On desktop, the package will compose the existing `IssueDecisionSurface` with inline evidence in its evidence slot. On narrow viewports, it will render the same evidence plus an approval-specific fixed, safe-area-aware action bar containing direct Approve and Send back controls. Approve will dispatch the existing descriptor immediately; Send back will reveal and focus the non-modal `SendBackFeedbackForm` inline within the review package. The approval path will not open `MobileActionBar`'s generic action sheet or `ConfirmationDrawer`. The package, rather than `IssueDetailPage`, will choose between responsive approval renderers so its send-back draft survives live viewport changes. For non-approval states, `IssueDetailPage` will retain the existing desktop surface and generic mobile bar unchanged.
 
 The lower `LatestArtifactsPanel` and standalone diff-summary banner will be suppressed while the approval package presents those same facts. Workflow history, sessions, task progress, changed-files navigation, and comments remain in the reading flow.
 
 Alternative considered: add artifact queries and approval branches directly to `IssueDetailPage`, `IssueDecisionSurface`, and `MobileActionBar`. This is locally incremental but enlarges the page orchestrator and keeps approval state split across responsive renderers, so it is rejected.
+
+Alternative considered: reuse the current mobile launcher and expose approval actions in its modal sheet. That preserves generic mobile behavior but requires an extra tap before Approve or Send back and separates the actions from the review package, so approval mode receives direct controls instead.
 
 ### Resolve evidence from the approval stage and current run
 
@@ -55,7 +57,7 @@ Alternative considered: build a task-specific JSON UI and reuse the full changed
 
 ### Share one controlled structured send-back form
 
-Create a page-local controlled `SendBackFeedbackForm` used by both responsive action renderers. Its draft is `{ category: 'direction' | 'scope' | 'detail' | null, body: string }`; category is presented as an accessible single-choice segmented control and free text remains required. Opening, cancellation, validation, pending state, hints, and submission operate on the package-owned draft rather than renderer-local state.
+Create a page-local controlled `SendBackFeedbackForm` used by both responsive action renderers. Its draft is `{ category: 'direction' | 'scope' | 'detail' | null, body: string }`; category is presented as an accessible single-choice segmented control and free text remains required. On a phone, the direct Send back control reveals this form inline and moves focus to it without modal semantics. Opening, cancellation, validation, pending state, hints, and submission operate on the package-owned draft rather than renderer-local state.
 
 A pure serializer will produce one stable body:
 
@@ -82,9 +84,10 @@ Alternative considered: register all three behaviors in a global shortcut bus. T
 - `[Risk] Cached artifacts from an earlier workflow run appear in a new approval` -> Include `workflowRunId` in artifact-list cache identity and test a run-ID transition.
 - `[Risk] One evidence request fails and collapses the whole package` -> Model and render each artifact and diff state independently.
 - `[Risk] Evidence failure encourages approval without review` -> Show a prominent inline unavailable state, but keep server-authorized actions available rather than introducing a new client-side workflow gate.
-- `[Risk] Desktop and mobile feedback behavior diverges again` -> Keep one draft, serializer, form component, and controller path; allow only layout/disclosure to differ.
+- `[Risk] Desktop and mobile feedback behavior diverges again` -> Keep one draft, serializer, form component, and controller path; allow only layout to differ.
 - `[Risk] Single-key shortcuts approve accidentally while typing or using modified browser commands` -> Require an unmodified, non-repeating key outside editable targets and disable dispatch while unavailable or pending.
 - `[Risk] Long Markdown or JSON causes mobile overflow` -> Apply `min-width: 0` through the package and explicit wrapping to preformatted/unbroken content; verify document width in a real browser.
+- `[Risk] Two fixed mobile actions become cramped or overlap safe areas` -> Use stable two-column control dimensions, allow labels to wrap without resizing the bar, reserve page bottom padding, and verify both phone approval stages in Chromium.
 - `[Trade-off] A Plan package makes up to two exact-path list requests and two content requests` -> Prefer deterministic server selection and independent states; TanStack Query caches each result.
 - `[Trade-off] Category is encoded as readable text rather than structured data` -> Keep one stable prefix format and do not introduce parsing or category-dependent workflow behavior.
 
@@ -92,10 +95,10 @@ Alternative considered: register all three behaviors in a global shortcut bus. T
 
 1. Add the approval evidence map, category serializer, and focused unit tests, including run-scoped artifact query keys.
 2. Extract reusable artifact text and compact diff-summary presentations without changing existing dialog or non-approval output.
-3. Add `ApprovalReviewPackage` and independent Plan/Check evidence states at the existing top decision slot.
-4. Replace renderer-owned send-back state with the shared controlled form, then add approval and Command+Enter keyboard handlers and hints.
+3. Add `ApprovalReviewPackage`, independent Plan/Check evidence states, and the direct drawer-free mobile approval bar at the existing top decision slot.
+4. Replace renderer-owned send-back state with the shared controlled inline form, then add approval and Command+Enter keyboard handlers and hints.
 5. Suppress duplicate lower artifact/diff summaries only during approval and retain all non-approval composition.
-6. Add component/spec coverage for Plan and Check packages, failures, serialization/history, action uniqueness, shortcut guards, and comment submission. Extend the focused browser spec for desktop shortcuts and phone-width wrapping, horizontal overflow, fixed-action reachability, and safe-area clearance.
+6. Add component/spec coverage for Plan and Check packages, failures, serialization/history, direct mobile action completion, action uniqueness, shortcut guards, and comment submission. Extend the focused browser spec with phone Plan and phone Check workflows that verify wrapping, horizontal overflow, safe-area clearance, one-tap Approve, one-tap inline Send back opening/submission, and absence of the generic action drawer.
 7. Run Web typecheck and test suites, then the focused browser specification.
 
 No data migration or staged backend rollout is required. The change ships in one Web bundle against unchanged APIs. Rollback is a Web-code revert; no data repair or compatibility step is needed.

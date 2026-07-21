@@ -50,19 +50,31 @@ The check approval review package SHALL render the recorded contents of `review.
 
 ### Requirement: The approval package is usable on a phone
 
-At a phone-width viewport, approval artifact content SHALL wrap or otherwise fit within the page without causing horizontal page scrolling, including long JSON values and unbroken text. Approve and send back SHALL remain reachable through the phone decision controls while the owner reviews the evidence, and the controls SHALL account for the viewport edge and safe area.
+At a phone-width viewport, approval artifact content SHALL wrap or otherwise fit within the page without causing horizontal page scrolling, including long JSON values and unbroken text. Approve and send back SHALL be visible as direct, thumb-reachable controls alongside the review package while the owner reads the evidence. Approve SHALL execute from one tap, Send back SHALL reveal its structured inline form from one tap, and neither action SHALL require opening the generic action drawer or another dialog. The controls SHALL account for the viewport edge and safe area.
 
 #### Scenario: Plan approval is reviewed on a phone
 
 - **WHEN** an owner opens a plan approval package at a phone-width viewport
 - **THEN** `proposal.md` and `tasks.json` SHALL be readable without horizontal page scrolling
-- **AND** approve and send back SHALL remain reachable through the phone decision controls
+- **AND** direct approve and send-back controls SHALL remain visible and thumb-reachable alongside the package
+- **AND** no generic action drawer or dialog SHALL be required to reach either action
 
 #### Scenario: Check approval is reviewed on a phone
 
 - **WHEN** an owner opens a check approval package at a phone-width viewport
 - **THEN** `review.md` and the diff summary SHALL be readable without horizontal page scrolling
-- **AND** approve and send back SHALL remain reachable without being obscured by the viewport edge or safe area
+- **AND** direct approve and send-back controls SHALL remain visible without being obscured by the viewport edge or safe area
+- **AND** no generic action drawer or dialog SHALL be required to reach either action
+
+#### Scenario: Approve completes directly on a phone
+
+- **WHEN** an owner taps the direct Approve control in a phone approval package
+- **THEN** the authorized approval action SHALL be requested without an intervening disclosure
+
+#### Scenario: Send back opens directly on a phone
+
+- **WHEN** an owner taps the direct Send back control
+- **THEN** the structured send-back form SHALL become available inline without an action drawer or dialog
 
 ### Requirement: Send-back feedback is guided without changing its workflow contract
 
