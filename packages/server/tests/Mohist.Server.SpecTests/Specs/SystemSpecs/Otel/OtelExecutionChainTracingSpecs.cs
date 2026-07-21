@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 /// End-to-end "single unbroken trace" tests for the production
 /// OpenTelemetry pipeline. These exercise the full Mohist server
 /// (Orleans silo + ASP.NET Core + EF Core + HttpClient + SignalR)
-/// through <see cref="MohistIntegrationFixture"/> and assert that
+/// through <see cref="OtelIntegrationFixture"/> and assert that
 /// activities emitted from all five automatic instrumentation
 /// sources share one trace id, with correct parent-child links
 /// along the real execution path. This is the binding acceptance
@@ -26,11 +26,11 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 /// across all segments" requirement.
 /// </summary>
 [Collection("OtelTracing")]
-public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFixture>
+public class OtelExecutionChainTracingSpecs : IClassFixture<OtelIntegrationFixture>
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly OtelIntegrationFixture _fixture;
 
-    public OtelExecutionChainTracingSpecs(MohistIntegrationFixture fixture)
+    public OtelExecutionChainTracingSpecs(OtelIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
