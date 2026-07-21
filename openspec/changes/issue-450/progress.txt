@@ -15,3 +15,12 @@
 - `ModelRuntime.getAvailable()` succeeded in an isolated temporary home with an empty catalog and network disabled. No user auth files, credentials, prompts, messages, or provider response content entered the artifact.
 - The smoke creates temporary `.pi` settings/extensions/skills/prompts and verifies project-local resources are absent from effective project resources while SDK non-project defaults may remain available; context files remain loadable. It runs a separate CLAUDE-only context check because the loader selects the applicable instruction file for a given project hierarchy.
 - Clean verification passed with Node `v22.23.1`: `npm ci`, Runner typecheck, Runner test CI (97 files / 1,159 tests), and the smoke script. The checked-in Node release remains the concrete `22.19.0` minimum pin.
+
+## T-002 Notes
+
+- `packages/runner/src/runtime/pi` is the only module importing `@earendil-works/pi-coding-agent`; its public index exposes only Mohist-owned request, result, diagnostic, event, catalog, and policy types.
+- The SDK factory fixes `projectTrusted: false`, reloads an explicit `DefaultResourceLoader` with the same cwd/agentDir, and creates sessions with `noTools: "builtin"`. Tests use the injectable factory and never load user configuration or contact a provider.
+- Pi physical bindings are normalized absolute session-file paths and are cached by path. Cache misses call `openSession` with the exact bound path; open failures return `missing-session` with Reset guidance and never fall back to create.
+- Deadline and interruption outcomes are fixed before abort. The prompt is raced only against that fixed result so a late prompt resolution cannot turn timeout/interruption/provider failure into success; abort diagnostics share the returned diagnostic array.
+- Provider policy parsing is pure: defaults are frozen, configured regexes append to defaults, threshold must be positive, and invalid configuration returns an actionable diagnostic. SDK/provider strings are masked before normalized event and diagnostic sinks.
+- Verification after T-002 implementation: Runner typecheck, test typecheck, focused Pi tests (7), and full Runner tests (98 files / 1,166 tests) passed.

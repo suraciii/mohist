@@ -178,6 +178,17 @@ SERVER_URL=http://localhost:3456 RUNNER_ID=my-runner npm start
 
 务必显式设 `RUNNER_ID`——容器化后 server 的主机名/网络变了，runner id 默认基于 hostname，漂移会让 workflow 的 sticky assignment 失配。
 
+### Pi provider retry policy
+
+Runner validates these optional settings before it claims work. The default policy treats quota, credit, billing, and usage-limit messages as terminal and allows five consecutive provider retry attempts. Additional patterns are JSON regex sources and are appended to the defaults; the threshold must be a positive integer.
+
+```bash
+MOHIST_PROVIDER_ERROR_PATTERNS='["account suspended","provider-specific limit"]'
+MOHIST_PROVIDER_RETRY_THRESHOLD=5
+```
+
+Invalid JSON, regular expressions, or thresholds prevent Runner startup with a diagnostic. Credentials remain managed by Pi and are not copied into Mohist settings.
+
 ---
 
 # 远程访问（两种模式通用）
