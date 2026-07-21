@@ -13,12 +13,18 @@ public class WorkflowActivityQuerier : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
+    private readonly TimeProvider _timeProvider;
 
-    public WorkflowActivityQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery)
+    public WorkflowActivityQuerier(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        WorkflowQuerier workflowQuerier,
+        AgentSessionQuery sessionQuery,
+        TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _workflowQuerier = workflowQuerier;
         _sessionQuery = sessionQuery;
+        _timeProvider = timeProvider;
     }
 
     public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
@@ -33,9 +39,11 @@ public class WorkflowActivityQuerier : IScopedService
                 },
                 AgentSessionQueryOrder.CreatedDescending,
                 ct: ct);
+        var workflowStatuses = await LoadRunningWorkflowStatusesAsync(db, sessions, projectId, ct);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
         var result = new List<ActiveAgentDto>();
 
-        foreach (var record in sessions.Where(IsActive))
+        foreach (var record in sessions)
         {
             var session = record.Session;
             var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
@@ -49,6 +57,9 @@ public class WorkflowActivityQuerier : IScopedService
 
             if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
             {
+                if (!string.Equals(AgentSessionJsonHelper.StatusName(session, now), "active", StringComparison.Ordinal))
+                    continue;
+
                 var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
                 var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
                 result.Add(new ActiveAgentDto(
@@ -76,7 +87,9 @@ public class WorkflowActivityQuerier : IScopedService
             if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(workId))
                 continue;
 
-            var status = await _workflowQuerier.GetStatusAsync(workflowRunId);
+            if (!workflowStatuses.TryGetValue(workflowRunId, out var status))
+                continue;
+
             var pending = status?.PendingWork;
             if (status is null || pending is null || pending.WorkId != workId) continue;
 
@@ -108,10 +121,42 @@ public class WorkflowActivityQuerier : IScopedService
         return result;
     }
 
+    private async Task<IReadOnlyDictionary<string, WorkflowStatusView>> LoadRunningWorkflowStatusesAsync(
+        MohistDbContext db,
+        IReadOnlyList<AgentSessionRecord> sessions,
+        string? projectId,
+        CancellationToken ct)
+    {
+        var workflowRunIds = sessions
+            .Select(record => record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (workflowRunIds.Length == 0) return new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
+
+        var runningStatus = WorkflowRunStatus.Running.ToString().ToLowerInvariant();
+        var runningWorkflowIdsQuery = db.WorkflowRuns.AsNoTracking()
+            .Where(run => workflowRunIds.Contains(run.WorkflowRunId) && run.Status == runningStatus);
+        if (!string.IsNullOrWhiteSpace(projectId))
+            runningWorkflowIdsQuery = runningWorkflowIdsQuery.Where(run => run.MetadataProjectId == projectId);
+
+        var runningWorkflowIds = await runningWorkflowIdsQuery
+            .Select(run => run.WorkflowRunId)
+            .ToListAsync(ct);
+        var statuses = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
+        foreach (var workflowRunId in runningWorkflowIds)
+        {
+            var status = await _workflowQuerier.GetStatusAsync(workflowRunId);
+            if (status is not null)
+                statuses[workflowRunId] = status;
+        }
+
+        return statuses;
+    }
+
     private static DateTime LastActivityAt(AgentSession session) =>
         session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
-
-    private static bool IsActive(AgentSessionRecord record) => record.Row.AgentSessionId is not null;
 
     private static async Task<IReadOnlyList<AgentSessionRecord>> ListAllSessionsAsync(MohistDbContext db, CancellationToken ct)
     {

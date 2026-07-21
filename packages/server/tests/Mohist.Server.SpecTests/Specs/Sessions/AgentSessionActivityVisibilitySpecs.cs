@@ -109,6 +109,21 @@ public class AgentSessionActivityVisibilitySpecs
     }
 
     [Fact]
+    public async Task ActiveAgents_StaleGenericSession_IsNotReported()
+    {
+        var project = await CreateProjectAsync("gen-stale-activeagents");
+        var sessionId = $"session-{Guid.NewGuid():N}";
+
+        await InsertGenericSessionAsync(project, sessionId, "agent_stale", "stale-agent", issueNumber: null);
+
+        var status = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project}/agent/status");
+        var activeAgents = status.GetProperty("activeAgents").EnumerateArray().ToList();
+
+        Assert.DoesNotContain(activeAgents, agent => agent.GetProperty("sessionId").GetString() == sessionId);
+    }
+
+    [Fact]
     public async Task WorkflowActivityCard_DoesNotLeakAgentIdOrAgentName()
     {
         var project = await CreateProjectAsync("gen-wf-regression");
@@ -194,7 +209,7 @@ public class AgentSessionActivityVisibilitySpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: TestTime.UtcDateTime,
+                LastDataAt: _fixture.TimeProvider.GetUtcNow().UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
