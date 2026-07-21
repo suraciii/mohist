@@ -218,6 +218,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private snapshotInFlight: Promise<void> | null = null
   private readonly inflightDelivery = new Set<Promise<void>>()
   private deliveryAbort: AbortController | null = null
+  private recoveryRequiresLoad = false
   private loadAttempts = 0
   private readonly bootstrapSignal: AbortController = new AbortController()
 
@@ -256,6 +257,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       raw = await this.fileSystem.readText(this.filePath)
     } catch (error) {
       this.healthy = false
+      this.recoveryRequiresLoad = true
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
       return
@@ -264,8 +266,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.healthy = true
       try {
         await this.importLegacyFileIfPresent()
+        this.recoveryRequiresLoad = false
       } catch (error) {
         this.healthy = false
+        this.recoveryRequiresLoad = true
         this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
         this.scheduleLocalRetry()
         return
@@ -278,6 +282,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       // unhealthy until either the original snapshot becomes readable
       // again or another load/save path replaces it.
       this.healthy = false
+      this.recoveryRequiresLoad = true
       this.lastLoadError = new Error("runtime events snapshot is unreadable")
       this.scheduleLocalRetry()
       return
@@ -287,8 +292,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.healthy = true
     try {
       await this.importLegacyFileIfPresent()
+      this.recoveryRequiresLoad = false
     } catch (error) {
       this.healthy = false
+      this.recoveryRequiresLoad = true
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
       return
@@ -492,12 +499,17 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (this.localRetry) return
     this.localRetry = this.timer.setTimeout(() => {
       this.localRetry = null
-      void this.retryPersistSnapshot()
+      void this.retryLocalRecovery()
     }, this.localRetryDelayMs)
   }
 
-  private async retryPersistSnapshot(): Promise<void> {
+  private async retryLocalRecovery(): Promise<void> {
     if (this.stopped) return
+    if (this.recoveryRequiresLoad) {
+      await this.load()
+      if (this.healthy) void this.kick()
+      return
+    }
     if (this.snapshotInFlight) {
       await this.snapshotInFlight.catch(() => undefined)
     }
@@ -505,6 +517,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       try {
         await this.persistSnapshot()
         this.healthy = true
+        this.recoveryRequiresLoad = false
         this.lastLoadError = null
         void this.kick()
       } catch (error) {

@@ -391,14 +391,18 @@ describe("AgentSessionRuntimeEventOutbox — autonomous health recovery", () => 
   it("unreadable startup snapshot is never replaced with empty state; load retries idempotently", async () => {
     const fileSystem = new RecordingFileSystem()
     fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, "{ not json")
-    const { outbox } = makeOutbox({ fileSystem })
+    const { outbox } = makeOutbox({ fileSystem, localRetryDelayMs: 100 })
     await outbox.load()
     expect(outbox.ready()).toBe(false)
     expect(fileSystem.textStore.get(RUNTIME_EVENT_OUTBOX_FILE)).toBe("{ not json")
 
-    // Heal the file and trigger load() again — without an explicit enqueue.
+    await vi.advanceTimersByTimeAsync(100)
+    expect(outbox.ready()).toBe(false)
+    expect(fileSystem.textStore.get(RUNTIME_EVENT_OUTBOX_FILE)).toBe("{ not json")
+
+    // Heal the file and let autonomous load recovery restore readiness.
     fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({ version: 1, entries: [] }))
-    await outbox.load()
+    await vi.advanceTimersByTimeAsync(100)
     expect(outbox.ready()).toBe(true)
   })
 })
