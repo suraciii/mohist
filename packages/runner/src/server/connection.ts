@@ -320,8 +320,15 @@ export class ServerConnection {
     await this.post(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`, body, signal)
   }
 
-  async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: unknown, signal: AbortSignal) {
-    await this.post(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`, body, signal)
+  async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {

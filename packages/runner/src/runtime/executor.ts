@@ -8,6 +8,7 @@ import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
+import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
@@ -75,10 +76,23 @@ export class WorkExecutor {
      */
     private openCodeRuntime: OpenCodeRuntime | null = null,
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
+    /**
+     * Shared AgentSession runtime-event outbox (issue-461). Wired from
+     * `RunnerHost` so the Workflow reporter and generic follow-up handler
+     * route through one host-owned durable queue. The outbox replaces
+     * the prior `FollowupFailureOutbox` and absorbs the direct upload
+     * paths. Hosts may swap it via {@link updateRuntimeEventOutbox}.
+     */
+    private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
+    private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
     this.openCodeRuntime = runtime
+  }
+
+  updateRuntimeEventOutbox(outbox: AgentSessionRuntimeEventOutbox | null) {
+    this.agentSessionRuntimeEventOutbox = outbox
   }
 
   async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -175,7 +189,7 @@ export class WorkExecutor {
       let rawResult: unknown
       try {
         rawResult = await definition.run({
-          ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
+          ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
           with: validatedWith as never,
           rawWith: work.with,
           workDir,
@@ -223,7 +237,7 @@ export class WorkExecutor {
         variables,
         signal,
         resolveCleanupAgentAction(legacyHandler(definition)),
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime) },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
         log,
       )
       if (worktreeResult.status !== "completed") {
@@ -246,7 +260,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
+      context: baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -420,6 +434,8 @@ export function baseContext(
   connection: ServerConnection,
   log: TaskLogger | null = null,
   openCodeRuntime: OpenCodeRuntime | null = null,
+  agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
+  runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
 ): Omit<ActionContext, "with" | "workDir"> {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   return {
@@ -441,9 +457,15 @@ export function baseContext(
     agentSessionId: work.agentSessionId,
     serverConnection: connection,
     openCodeRuntime,
+    agentSessionRuntimeEventOutbox,
+    runtimeEventRecordId,
     log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }
+}
+
+function defaultRuntimeEventRecordId(): string {
+  return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
 function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {

@@ -3,6 +3,7 @@ import * as signalR from "@microsoft/signalr"
 import { isUnderRunnerRoot, resolveWorkspaceQuery, RunnerSignalRClient, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { CommandResult } from "../src/system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
+import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 
 interface CapturedBuilder {
   url?: string
@@ -273,6 +274,19 @@ describe("RunnerSignalRClient handshake", () => {
 })
 
 describe("RunnerSignalRClient liveness + reconnect", () => {
+  function recoveryOutbox(recover = vi.fn(async () => {})): AgentSessionRuntimeEventOutbox {
+    return {
+      ready: () => false,
+      load: async () => {},
+      recover,
+      enqueueBeforeExecution: async () => {},
+      enqueueProducedFact: async () => {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot: () => [],
+    }
+  }
+
   it("GetConnectionId_IsNullBeforeStart", () => {
     builders.length = 0
     const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
@@ -286,6 +300,19 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     const id = client.getConnectionId()
     expect(id).not.toBeNull()
     expect(id).toMatch(/^conn-/)
+    await client.stop()
+  })
+
+  it("Start_RecoversRuntimeEventOutbox", async () => {
+    builders.length = 0
+    const recover = vi.fn(async () => {})
+    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
+    })
+
+    await client.start()
+
+    expect(recover).toHaveBeenCalledTimes(1)
     await client.stop()
   })
 
@@ -399,6 +426,20 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     expect(seen[0]).toMatch(/^conn-/)
   })
 
+  it("ForceReconnect_RecoversRuntimeEventOutbox", async () => {
+    builders.length = 0
+    const recover = vi.fn(async () => {})
+    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
+    })
+    const conn = builders.at(-1)!.connection
+    conn.state = signalR.HubConnectionState.Connected
+
+    await client.forceReconnect(new AbortController().signal)
+
+    expect(recover).toHaveBeenCalledTimes(1)
+  })
+
   it("ForceReconnect_StartsDirectly_WhenDisconnected", async () => {
     builders.length = 0
     const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
@@ -434,6 +475,22 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     conn.connectionId = "conn-new"
     conn._reconnectHandler?.("conn-new")
     expect(seen).toEqual(["conn-new"])
+  })
+
+  it("OnReconnected_RecoversRuntimeEventOutbox", async () => {
+    builders.length = 0
+    const recover = vi.fn(async () => {})
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
+    })
+    const conn = builders.at(-1)!.connection
+    conn.state = signalR.HubConnectionState.Connected
+    conn.connectionId = "conn-new"
+
+    conn._reconnectHandler?.("conn-new")
+    await Promise.resolve()
+
+    expect(recover).toHaveBeenCalledTimes(1)
   })
 
   it("OnReconnected_UsesConnectionConnectionId_WhenCallbackArgMissing", async () => {

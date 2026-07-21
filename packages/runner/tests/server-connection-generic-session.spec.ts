@@ -95,11 +95,17 @@ describe("ServerConnection.attachAgentSession (generic)", () => {
 
 describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
   it("AgentSessionRuntimeEvents_PostsToGenericRuntimeEventsUrl", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "[]" }))
     const connection = new ServerConnection(options())
 
-    await connection.agentSessionRuntimeEvents("project-1", "session-abc", { workId: "work-1", workType: "agent-job", stage: "agent", runtimeSessionId: "runtime-1", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] }, new AbortController().signal)
+    const receipts = await connection.agentSessionRuntimeEvents(
+      "project-1",
+      "session-abc",
+      { workId: "work-1", workType: "agent-job", stage: "agent", runtimeSessionId: "runtime-1", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] },
+      new AbortController().signal,
+    )
 
+    expect(receipts).toEqual([])
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/runtime-events$/)
     expect(init.method).toBe("POST")
@@ -109,6 +115,20 @@ describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
       runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }],
     })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)
+  })
+
+  it("AgentSessionRuntimeEvents_ReturnsParsedReceipts", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify([{ type: "session.input" }, { type: "message.delta" }]) }))
+    const connection = new ServerConnection(options())
+
+    const receipts = await connection.agentSessionRuntimeEvents(
+      "project-1",
+      "session-abc",
+      { workId: null, workType: null, stage: null, runtimeSessionId: "runtime-1", runtimeEvents: [{ type: "session.input", payload: {} }] },
+      new AbortController().signal,
+    )
+
+    expect(receipts).toEqual([{ type: "session.input" }, { type: "message.delta" }])
   })
 })
 
@@ -150,7 +170,7 @@ describe("ServerConnection generic vs workflow URL segregation", () => {
   })
 
   it("GenericRuntimeEventsUrl_ContainsAgentSessionsPrefix", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "[]" }))
     await new ServerConnection(options()).agentSessionRuntimeEvents("project-1", "session-abc", { runtimeEvents: [] }, new AbortController().signal)
     const genericRuntime = (fetchMock.mock.calls[0] as [string, RequestInit])[0]
 
