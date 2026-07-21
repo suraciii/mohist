@@ -192,6 +192,7 @@ function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
     recover: async () => {},
     async enqueueBeforeExecution() { throw new Error("disk full (input)") },
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
+    async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
     kick: async () => {},
     stop: async () => {},
     snapshot() { return [] },
@@ -205,6 +206,7 @@ function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
     recover: async () => {},
     async enqueueBeforeExecution() {},
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
+    async enqueueProducedFactBatch() { throw new Error("disk full (produced)") },
     kick: async () => {},
     stop: async () => {},
     snapshot() { return [] },
@@ -389,6 +391,12 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
           throw new Error("disk full (produced)")
         }
       },
+      async enqueueProducedFactBatch() {
+        if (firstCall) {
+          firstCall = false
+          throw new Error("disk full (produced)")
+        }
+      },
       kick: async () => {},
       stop: async () => {},
       snapshot() { return [] },
@@ -473,6 +481,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     const records: RuntimeEventRecord[] = []
     const beforeExecutionCalls: RuntimeEventRecord[] = []
     const producedFactCalls: RuntimeEventRecord[] = []
+    const producedFactBatchCalls: RuntimeEventRecord[][] = []
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
@@ -486,6 +495,16 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         producedFactCalls.push(record as RuntimeEventRecord)
         if (failEnqueueProducedFact) throw new Error("produced-fact snapshot failed")
         records.push(record as RuntimeEventRecord)
+      },
+      async enqueueProducedFactBatch(batch) {
+        producedFactBatchCalls.push([...batch] as RuntimeEventRecord[])
+        for (const record of batch) {
+          producedFactCalls.push(record as RuntimeEventRecord)
+        }
+        if (failEnqueueProducedFact) throw new Error("produced-fact snapshot failed")
+        for (const record of batch) {
+          records.push(record as RuntimeEventRecord)
+        }
       },
       kick: async () => {},
       stop: async () => {},
@@ -504,7 +523,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
         return () => `id_${++counter}`
       })(),
     })
-    return { reporter, outbox, records, beforeExecutionCalls, producedFactCalls }
+    return { reporter, outbox, records, beforeExecutionCalls, producedFactCalls, producedFactBatchCalls }
   }
 
   it("settles after all queued produced-fact enqueues, including a rejected input", async () => {
@@ -546,5 +565,48 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     } finally {
       errorSpy.mockRestore()
     }
+  })
+
+  it("buffers streaming deltas and flushes them as one batch before the close fact", async () => {
+    const { reporter, producedFactCalls, producedFactBatchCalls } = buildReporter()
+    await reporter.awaitInput("p", "ses_1")
+    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "a" } })
+    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "b" } })
+    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "c" } })
+    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+    await reporter.settle()
+
+    // One batch covering all three deltas, then the close fact enqueued singly.
+    expect(producedFactBatchCalls).toHaveLength(1)
+    expect(producedFactBatchCalls[0]).toHaveLength(3)
+    expect(producedFactBatchCalls[0].map((r) => r.event.type)).toEqual(["reasoning.delta", "reasoning.delta", "reasoning.delta"])
+    // Order: all deltas precede the close fact.
+    expect(producedFactCalls.map((r) => r.event.type)).toEqual([
+      "reasoning.delta",
+      "reasoning.delta",
+      "reasoning.delta",
+      "session.closed",
+    ])
+  })
+
+  it("flushes buffered deltas when a non-delta event arrives mid-turn", async () => {
+    const { reporter, producedFactCalls, producedFactBatchCalls } = buildReporter()
+    await reporter.awaitInput("p", "ses_1")
+    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "a" } })
+    reporter.registerEvent({ type: "tool_call.started", runtimeSessionId: "ses_1", workDir: "/w", payload: {} })
+    reporter.registerEvent({ type: "reasoning.delta", runtimeSessionId: "ses_1", workDir: "/w", payload: { text: "b" } })
+    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId: "ses_1" })
+    await reporter.settle()
+
+    // First delta flushed by the non-delta event; second delta flushed before close.
+    expect(producedFactBatchCalls).toHaveLength(2)
+    expect(producedFactBatchCalls[0]).toHaveLength(1)
+    expect(producedFactBatchCalls[1]).toHaveLength(1)
+    expect(producedFactCalls.map((r) => r.event.type)).toEqual([
+      "reasoning.delta",
+      "tool_call.started",
+      "reasoning.delta",
+      "session.closed",
+    ])
   })
 })
