@@ -27,3 +27,4 @@
 - Browser fixtures now cover phone Plan artifact rendering, long-token overflow, direct approval and structured send-back requests, phone Check review/diff rendering, and secondary-action navigation. The approval action bar layers above the global mobile navigation so More actions remains operable.
 - JSON file artifacts now retain their raw recorded text; only JSON payloads shaped as directory listings are treated as directories. Focused client tests cover both response types.
 - Verification completed: focused issue API client Vitest file, Web typecheck, and focused issue decision-surface Playwright suite (14 tests).
+- Final verification completed: Web typecheck, full Web Vitest suite (4984 tests), and focused issue decision-surface Playwright suite (14 tests).
