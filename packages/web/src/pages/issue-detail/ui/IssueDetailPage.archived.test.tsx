@@ -354,7 +354,8 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
     expect(screen.queryByTestId('decision-action-start')).toBeNull()
     expect(screen.queryByTestId('decision-action-stop')).toBeNull()
     expect(screen.queryByTestId('decision-action-approve')).toBeNull()

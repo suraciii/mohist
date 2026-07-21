@@ -205,7 +205,8 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
     expect(headline.dataset.summary).toBe('done')
     expect(headline.textContent ?? '').toMatch(/Done/i)
 
-    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
     expect(screen.queryByTestId('decision-action-start')).toBeNull()
     expect(screen.queryByTestId('decision-action-stop')).toBeNull()
     expect(screen.queryByTestId('decision-action-approve')).toBeNull()

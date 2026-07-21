@@ -137,7 +137,8 @@ describe('IssueDecisionSurface — workflow/lifecycle authorization', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
     for (const kind of ['start', 'stop', 'approve', 'retry', 'resume', 'rerun']) {
       const action = screen.queryByTestId(`decision-action-${kind}`)
       if (action) {
@@ -163,7 +164,8 @@ describe('IssueDecisionSurface — workflow/lifecycle authorization', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
     for (const kind of ['mark-ready', 'close', 'mark-as-done', 'start', 'stop']) {
       expect(screen.queryByTestId(`decision-action-${kind}`)).toBeNull()
     }

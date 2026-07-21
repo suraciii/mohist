@@ -125,7 +125,8 @@ describe('IssueDecisionSurface — composite parent (no workflow decision)', () 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('issue-decision-surface')).toBeNull()
+    expect(screen.getByTestId('issue-decision-surface')).toBeTruthy()
+    expect(screen.getByTestId('decision-no-action-explanation')).toBeTruthy()
   })
 
   it('exposes the same decision surface actions on mobile via the sheet', async () => {
