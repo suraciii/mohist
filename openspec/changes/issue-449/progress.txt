@@ -108,3 +108,11 @@
 - `RoutedPlan` remains persisted as the canonical first-writer record after Runner acceptance for replay identity, but activation/reminder recovery must gate on `RunnerAccepted`; otherwise a later activation could repeat prepared dispatch. The durable reminder is removed at the acceptance fence.
 - The routed activation spec uses `DeactivateOnIdle` on the target grain so the OnActivate recovery path is exercised deterministically while the reminder remains registered.
 - Verification is green: focused routed-launch/launcher specs, `npm test`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner`.
+
+## T-003 Implementation Discoveries
+
+- Issue event-feed composition now belongs to `AgentOps/Services/IssueEventFeedAssembler`; the issue API no longer asks Workflow to merge Issue and WorkflowRun events, while the workflow-run endpoint keeps its existing limited read.
+- `WorkflowEventQuerier.ListValidWorkflowEventsAsync` returns the complete invalidation-filtered sequence. The limited workflow endpoint delegates to it and truncates only for that endpoint, so AgentOps applies the cross-store time-first limit after complete candidate collection.
+- Routed issue-feed candidates are selected from generic `agent-launch` sessions carrying the AgentJob trigger labels and an issue label. A transcript part is eligible only when it is failed, its payload delivery id equals its correlation key, and the id uses the canonical `agent-job:{jobKey}:terminal` prefix; Runtime and follow-up closes therefore cannot duplicate the routed outcome.
+- The projected AgentSession envelope uses transcript-part id as its local id, `{sessionId}:closed:{deliveryId}` as event id, canonical AgentSession source/subject, terminal `LastSeenAt`, `1.0`, `application/json`, project/issue extensions, and terminal plus Agent/trigger correlation data.
+- Focused unit coverage proves global selection with event-id/timestamp disagreement, equal-time ordering, full envelope projection, and non-canonical close exclusion. Existing CLI issue command specs continue to pass because the CLI consumes the issue events endpoint as raw JSON.

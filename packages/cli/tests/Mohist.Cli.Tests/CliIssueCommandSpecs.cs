@@ -112,6 +112,44 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueEvents_Json_PreservesRoutedSessionClosedOutcome()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new
+                    {
+                        id = 9,
+                        eventId = "session-1:closed:agent-job:job-1:terminal",
+                        source = "/mohist/agent-session/session-1",
+                        type = "session.closed",
+                        data = new
+                        {
+                            status = "failed",
+                            failureReason = "workspace unavailable",
+                            triggerEventId = "evt-1",
+                            triggerRuleId = "rule-1",
+                        },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "events", "42"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_test/issues/42/events", handler.Requests.Single().RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("session-1:closed:agent-job:job-1:terminal", stdout, StringComparison.Ordinal);
+        Assert.Contains("workspace unavailable", stdout, StringComparison.Ordinal);
+        Assert.Contains("evt-1", stdout, StringComparison.Ordinal);
+        Assert.Contains("rule-1", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ArchiveAllCompleted_Table_PrintsServerResult()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

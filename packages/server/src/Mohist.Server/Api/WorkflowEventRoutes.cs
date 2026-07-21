@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services;
@@ -12,7 +13,7 @@ public static class WorkflowEventRoutes
         var byProject = app.MapGroup("/api/projects/{projectRef}/issues/{number:int}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        byProject.MapGet("/events", async (HttpContext context, int number, int? limit, IssueQuerier issues, WorkflowEventQuerier eventQuery) =>
+        byProject.MapGet("/events", async (HttpContext context, int number, int? limit, IssueQuerier issues, IssueEventFeedAssembler eventQuery) =>
         {
             var project = context.GetResolvedProject();
 
@@ -20,7 +21,7 @@ public static class WorkflowEventRoutes
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
             var ct = HttpContextRequestAborted(context);
-            var merged = await eventQuery.ListIssueEventsAsync(project.Id, number, issue.WorkflowRunId, limit ?? 200, ct);
+            var merged = await eventQuery.ListAsync(project.Id, number, issue.WorkflowRunId, limit ?? 200, ct);
             var response = merged
                 .Select(StoredCloudEventDto.From)
                 .ToList();
