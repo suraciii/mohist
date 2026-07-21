@@ -44,6 +44,13 @@
 - Focused CLI OTel tests: 18 passed.
 - Updated the server spec-file size baseline for the additional response-size assertion helper; ArchTests reported the exact new size of 27947 bytes.
 
+## Review-fix verification
+
+- `dotnet build Mohist.sln --no-restore`: passed with 0 warnings and 0 errors.
+- Telemetry server specs: 82 passed.
+- CLI OTel command specs: 18 passed.
+- Server ArchTests: 30 passed after rebuilding the project to refresh the embedded size baseline.
+
 ## Review fix 2: prove SQLite interruption and release
 
 - The production executor now exposes test-only callbacks for the real interrupt registration and post-disposal boundary without changing runtime behavior.
