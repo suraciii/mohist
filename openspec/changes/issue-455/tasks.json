@@ -1,0 +1,59 @@
+{
+  "project": "mohist-local",
+  "description": "Turn approval waits into mobile-first inline review packages with guided send-back feedback and safe, discoverable issue-detail keyboard actions.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver the inline approval review package",
+      "spec": "specs/issue-decision-surface/spec.md#requirement-an-approval-wait-presents-one-review-package",
+      "description": "Implement the complete approval-specific issue decision surface for Plan and Check, including current-run inline evidence, responsive action access, and independent unavailable states. Replace duplicated desktop/mobile send-back drafts with one controlled direction/scope/detail form that serializes to the existing text feedback contract, while leaving every non-approval state unchanged.",
+      "acceptanceCriteria": [
+        "IssueDetailPage detects approval mode only from the derived approval-required decision and mounts one page-local ApprovalReviewPackage at the existing top decision position; non-approval desktop and mobile decision presentations retain their existing behavior and authorized action set.",
+        "The Plan package queries exact current-run paths and renders proposal.md through MarkdownReader plus raw recorded tasks.json in a wrapped pre without requiring file selection or a dialog; list loading/error, missing, content loading/error, and unexpected-directory states are identified independently for each artifact.",
+        "The Check package renders review.md inline plus a compact current diff summary containing compared branches, files changed, additions, and deletions; transport failure and available:false are distinct inline states and neither suppresses an available review.md.",
+        "Artifact-list cache identity includes workflowRunId without changing the HTTP request, exact-path selection does not depend on displayName, suffix matching, or API array order, and a focused query test proves a run-ID change cannot reuse the prior run's list result.",
+        "Artifact text rendering is shared with the existing dialog: Markdown behavior remains unchanged, JSON and other text remain raw, and min-width, pre-wrap, word-break, and overflow-wrap constraints prevent long unbroken values from widening the issue page.",
+        "Desktop composes the existing IssueDecisionSurface and controller with inline evidence; phone width renders the same evidence at the top and retains the fixed safe-area-aware action access with both authorized Approve and Send back reachable while scrolling.",
+        "During approval, the lower LatestArtifactsPanel and standalone diff-summary banner do not duplicate package evidence; workflow history, sessions, task progress, changed-files navigation, comments, and the sole controller-backed approve/send-back command path remain available.",
+        "One controlled SendBackFeedbackForm is used by desktop and mobile with a required single category choice of direction, scope, or detail and required nonblank free text; cancellation, viewport changes, pending state, validation, and errors cannot create divergent drafts or duplicate dispatch.",
+        "Submitting send-back produces exactly one body in the stable form Category: <Title-cased category>, a blank line, and the trimmed owner text, then invokes the existing controller with the current approval stage; no API, DTO, persistence, workflow, or server change is introduced.",
+        "Feedback history renders the serialized category and free text when the issue returns to Plan, blank feedback cannot submit, and an evidence loading or failure state does not create a new client-side approval authorization gate.",
+        "Focused pure, query, artifact-renderer, decision-surface, MobileActionBar, FeedbackHistory, and MSW-backed issue-detail tests cover Plan and Check success/failure matrices, exact action uniqueness, serialization, current-run scoping, responsive state sharing, and non-approval regression without real network or wall-clock time.",
+        "A focused Playwright browser spec against the production Web build verifies desktop inline Plan evidence and phone-width Check evidence, long Markdown/JSON wrapping, no horizontal document overflow, fixed action reachability, safe-area clearance, and one approve/send-back location using controlled API responses.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ApprovalReviewPackage with current-run Plan/Check evidence, reusable artifact and diff presentation, one responsive structured send-back form, issue-detail integration, and focused unit/spec/browser coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep this as one vertical slice because the package owns both responsive evidence and send-back draft state. Preserve the issue-453 IssueDecisionActionController as the only mutation path; do not revive InlineApprovalControls, parse tasks.json into a new model, block approval on evidence failure, or change Server contracts. Unknown custom approval stages retain authorized actions and show an explicit no-configured-evidence state."
+    },
+    {
+      "id": "T-002",
+      "title": "Add issue-detail keyboard actions",
+      "spec": "specs/issue-detail-keyboard-actions/spec.md#requirement-approval-shortcuts-act-only-in-an-actionable-approval-view",
+      "description": "Add contextual desktop approval shortcuts to the completed review package and Command+Enter submission to its send-back form and the issue comment composer. Route every keyboard path through the same visible-control callbacks, validation, authorization, and pending safeguards, and make applicable bindings discoverable beside their controls.",
+      "acceptanceCriteria": [
+        "While a desktop approval package is active, an unmodified non-repeating a invokes the enabled Approve descriptor exactly once through the existing controller and m opens the enabled shared send-back form; unavailable, pending, non-approval, and narrow-viewport states dispatch neither shortcut.",
+        "The approval listener ignores input, textarea, select, role=textbox, and contenteditable targets as well as modified keys and key repeat, cleans up on unmount or viewport/state change, and prevents default browser behavior only when it handles a shortcut.",
+        "Command+Enter in the shared send-back textarea invokes the same submit callback as its button exactly once when category/body validation passes and no request is pending; invalid, composing, repeating, or pending events do not dispatch again and plain Enter remains multiline input.",
+        "IssueCommentsSection centralizes button and keyboard submission behind one callback; Command+Enter forwarded by AttachmentComposer submits one nonblank non-pending comment exactly once, while blank, pending, composing, and repeating events do not submit and plain Enter remains multiline input.",
+        "Desktop approval controls visibly advertise a for Approve and m for Send back only when the matching action is available, and the displayed send-back and comment forms visibly advertise Command+Enter; the contextual bindings are not added to the application-wide shortcut catalogue.",
+        "Focused hook/component and MSW-backed issue-detail tests cover a/m success, editable-target suppression, modifier/repeat/pending/unavailable guards, cleanup, send-back and comment Command+Enter, plain Enter, invalid submissions, one request per keypress, and hint visibility.",
+        "The focused Playwright issue-decision-surface spec verifies desktop a approval, m form opening, visible shortcut hints, editable-field safety, Command+Enter send-back submission, and unchanged visible-control behavior against controlled API responses.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts pass with no Git-visible generated changes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Contextual approval shortcut hook, guarded Command+Enter submission for send-back and comments, local shortcut hints, and focused unit/spec/browser coverage.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Consumes T-001's ApprovalReviewPackage and controlled SendBackFeedbackForm. Keep single-key bindings page-local and desktop-only; do not introduce a global shortcut bus, change button semantics, add Ctrl+Enter beyond the specified Command+Enter contract, or bypass the shared action controller and form callbacks. The dependency graph is T-001 -> T-002 and is acyclic."
+    }
+  ]
+}
