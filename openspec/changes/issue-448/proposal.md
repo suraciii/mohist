@@ -7,9 +7,10 @@ Workflow authors cannot correctly use most built-in Actions without reading impl
 - Bring every supported built-in Action's product contract page to the same three-part shape—inputs (name, required, default), output fields, and an error code catalog—mirroring the declarations in `packages/runner/src/actions/built-ins.ts`.
 - Add contract coverage for the Actions that currently have none: `mohist/github-pr-checks`, `core/process`, `core/script`, `core/artifact-exists`, `core/marker`, `mohist/openspec-tasks`, `mohist/openspec-artifacts`, and `mohist/archive-change`.
 - Expand the existing Git (`docs/actions/git.md`) and GitHub PR (`docs/actions/github-pr.md`) group pages beyond input lists to include outputs, error codes, and a directly usable example per Action.
+- Reconcile the existing `mohist/opencode` (`docs/actions/opencode.md`) and `mohist/pi` (`docs/actions/pi.md`) pages with their current manifests: add the missing `timeout` input to both input tables, add a structured error code catalog to `opencode.md`, and correct the `pi.md` error code table to match the 6 manifest-declared codes (removing undeclared codes such as `invalid-input`, `timeout`, `interrupted`, `session-reporting-failed`, `incompatible-runtime`, and adding the missing `unavailable-runtime`).
 - Update `docs/actions/README.md` to enumerate every supported built-in Action and link to its contract page, and remove the "OpenSpec 和 `core/*` 的独立产品契约页仍待补齐" gap footnote.
 - Each example is a self-contained snippet that can be pasted directly into a Workflow definition.
-- Preserve `mohist/pi`'s own 实装差距 note (Pi runtime gaps remain) and do not document tombstoned Actions (e.g. `mohist/acp-agent`).
+- Preserve `mohist/pi`'s 实装差距 section (Pi runtime gaps remain) and do not document tombstoned Actions (e.g. `mohist/acp-agent`).
 
 ## Capabilities
 
@@ -17,7 +18,7 @@ Workflow authors cannot correctly use most built-in Actions without reading impl
 
 ## Impact
 
-- Documentation only: `docs/actions/README.md`, `docs/actions/git.md`, `docs/actions/github-pr.md`, plus new contract pages under `docs/actions/` covering the `core/*` and OpenSpec Actions.
+- Documentation only: `docs/actions/README.md`, `docs/actions/git.md`, `docs/actions/github-pr.md`, `docs/actions/opencode.md`, `docs/actions/pi.md`, plus new contract pages under `docs/actions/` covering the `core/*` and OpenSpec Actions.
 - The authoritative source for content is the Runner manifest registry in `packages/runner/src/actions/built-ins.ts`; documentation mirrors it and does not change runtime behavior.
 - No code, API, runner, server, CLI, Web, dependency, or storage changes; no migration.
-- Does not alter `mohist/pi`'s existing runtime-gap footnote and does not introduce pages for removed Actions.
+- Does not alter `mohist/pi`'s existing 实装差距 section (runtime-gap note) and does not introduce pages for removed Actions.

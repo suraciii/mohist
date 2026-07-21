@@ -1,6 +1,6 @@
 {
   "project": "mohist-local",
-  "description": "Documentation-only change: publish a complete product contract page for every supported built-in Action (inputs, outputs, error codes, and a directly usable example), fill the eight currently-undocumented Actions, and make the Action contract overview enumerate every supported Action without a remaining-coverage gap footnote.",
+  "description": "Documentation-only change: publish a complete product contract page for every supported built-in Action (inputs, outputs, error codes, and a directly usable example), fill the eight currently-undocumented Actions, reconcile the existing opencode.md and pi.md pages with their current manifests, and make the Action contract overview enumerate every supported Action without a remaining-coverage gap footnote.",
   "tasks": [
     {
       "id": "T-001",
@@ -46,7 +46,7 @@
         "Each Action section ends with one self-contained YAML snippet using only declared inputs; delivery examples bind repositoryUrl, source, target, remote, and prNumber through identified ${{ }} expressions and never rely on implicit Variable fallback",
         "No business error code table lists invalid-input, unexpected-error, or timeout as Action-owned; each table is preceded by the platform-codes attribution note where applicable",
         "git diff --name-only shows modifications to docs/actions/git.md and docs/actions/github-pr.md only (plus this task's openspec artifacts); no source file under packages/ is modified",
-        "Manual manifest cross-check for all nine Git and GitHub PR Actions against packages/runner/src/actions/built-ins.ts confirms no declared input, output, or business error code is missing and no undeclared symbol is introduced"
+        "Manual manifest cross-check for all ten Git and GitHub PR Actions against packages/runner/src/actions/built-ins.ts confirms no declared input, output, or business error code is missing and no undeclared symbol is introduced"
       ],
       "priority": 1,
       "mode": "AFK",
@@ -54,10 +54,36 @@
       "output": "Expanded docs/actions/git.md and docs/actions/github-pr.md with three-facet sections and a copy-pasteable example per Action, including the new mohist/github-pr-checks section",
       "dependsOn": [],
       "passes": false,
-      "notes": "Independent of T-001 (different files). Follows design D1 (keep existing group pages) and D2 (manifest is the authority). Examples use the post-#445 explicit-binding pattern already proven in mohist/github-pr. The mohist/github-pr-checks section is net-new content on github-pr.md, not a separate page."
+      "notes": "Independent of T-001 and T-003 (different files). Follows design D1 (keep existing group pages) and D2 (manifest is the authority). Examples use the post-#445 explicit-binding pattern already proven in mohist/github-pr. The mohist/github-pr-checks section is net-new content on github-pr.md, not a separate page."
     },
     {
       "id": "T-003",
+      "title": "Reconcile existing opencode.md and pi.md pages with their current manifests",
+      "spec": "specs/action-contract-pages/spec.md#Contract pages mirror manifest declarations exactly, specs/action-contract-pages/spec.md#Platform-owned error codes are not documented as Action-owned, specs/action-contract-pages/spec.md#Every supported built-in Action has a product contract page",
+      "description": "Reconcile docs/actions/opencode.md and docs/actions/pi.md with their current manifest declarations in packages/runner/src/actions/built-ins.ts. For opencode.md: add the timeout input (default 3600000) to the input table, and add a structured error code catalog listing all 9 manifest-declared business codes (runtime-unavailable, session-workspace-mismatch, session-binding-failed, runtime-session-missing, unavailable-runtime, incompatible-runtime, permission-required, interrupted, turn-failed). For pi.md: add the timeout input to the input table, correct the error code table to match the 6 manifest-declared codes (removing undeclared codes invalid-input, session-reporting-failed, incompatible-runtime, timeout, interrupted and adding the missing unavailable-runtime), and remove the prose statement '本 issue 不提供 Action Input 覆盖' which contradicts the manifest. Preserve the pi.md 实装差距 section and all Session/runtime/responsability-boundary prose on both pages unchanged.",
+      "acceptanceCriteria": [
+        "docs/actions/opencode.md input table includes the timeout input with default 3600000 alongside prompt, session, and options",
+        "docs/actions/opencode.md contains a structured error code catalog (错误码 | 含义 table) listing exactly the 9 manifest-declared business codes: runtime-unavailable, session-workspace-mismatch, session-binding-failed, runtime-session-missing, unavailable-runtime, incompatible-runtime, permission-required, interrupted, turn-failed",
+        "docs/actions/pi.md input table includes the timeout input with default 3600000 alongside prompt, session, and options",
+        "docs/actions/pi.md error code table lists exactly the 6 manifest-declared business codes: runtime-unavailable, session-workspace-mismatch, session-binding-failed, runtime-session-missing, unavailable-runtime, turn-failed",
+        "docs/actions/pi.md no longer lists invalid-input, session-reporting-failed, incompatible-runtime, timeout, or interrupted as business error codes in the error code table",
+        "docs/actions/pi.md no longer contains the statement '本 issue 不提供 Action Input 覆盖' or any equivalent claim that the timeout input is not overridable",
+        "docs/actions/pi.md 实装差距 section is preserved unchanged (the runtime-gap bullets about AgentJob backend, Session commands, and model catalog remain)",
+        "No error code table on either page lists the platform-reserved codes invalid-input, unexpected-error, or timeout as Action-owned",
+        "The existing Session semantics, runtime, responsibility-boundary, and usage prose on both pages remains unchanged beyond the reconciled input table and error code sections",
+        "git diff --name-only shows modifications to docs/actions/opencode.md and docs/actions/pi.md only (plus this task's openspec artifacts); no source file under packages/ is modified",
+        "Manual manifest cross-check for mohist/opencode and mohist/pi against packages/runner/src/actions/built-ins.ts lines 114-165 confirms the input tables and error code tables now match exactly"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reconciled docs/actions/opencode.md (timeout input + structured error code catalog) and docs/actions/pi.md (timeout input + corrected error code table + removed contradicting prose)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001 and T-002 (different files). The pi.md error code table was written before the manifest existed (issue-444); it now needs to match the manifest as authority per design D2. The pi.md 实装差距 section is about runtime implementation gaps (AgentJob backend, Session commands, model catalog) — those stay unchanged. Only the input table, error code table, and the contradicting '本 issue 不提供 Action Input 覆盖' statement are reconciled."
+    },
+    {
+      "id": "T-004",
       "title": "Enumerate every supported Action in the overview and close the docs coverage gap note",
       "spec": "specs/action-contract-pages/spec.md#The contract overview page enumerates every supported Action, specs/action-contract-pages/spec.md#Documentation change does not alter runtime behavior",
       "description": "Update docs/actions/README.md so the 当前 Action section enumerates every supported built-in Action grouped by family with a link to each contract page or section anchor, and remove the 实装差距 bullet that states OpenSpec and core Actions still lack independent contract pages. Update the single 文档缺口 status line in design/workflow/actions.md Status item 5 to reflect that the docs gap is closed. Preserve mohist/pi's existing runtime-gap note and do not introduce pages for tombstoned Actions.",
@@ -76,10 +102,11 @@
       "output": "Updated docs/actions/README.md enumeration and gap section; updated design/workflow/actions.md Status item 5",
       "dependsOn": [
         "T-001",
-        "T-002"
+        "T-002",
+        "T-003"
       ],
       "passes": false,
-      "notes": "Depends on T-001 and T-002 because the overview must link to all contract pages and section anchors they create. Follows design D4 (enumerate every supported Action; remove gap footnote) and the spec scenario 'The remaining-Actions gap footnote is removed'."
+      "notes": "Depends on T-001, T-002, and T-003 because the overview must link to all contract pages and section anchors they create or reconcile. The gap footnote can only be removed once every supported Action — including the reconciled opencode and pi pages — has a consistent contract page. Follows design D4 (enumerate every supported Action; remove gap footnote) and the spec scenario 'The remaining-Actions gap footnote is removed'."
     }
   ]
 }

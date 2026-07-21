@@ -16,7 +16,7 @@ Stakeholders: workflow authors writing `uses`/`with` task and check definitions;
 **Goals:**
 
 - Publish one contract page section per supported built-in Action, each with the three facets (inputs with required/kinds/default, outputs, business error codes) plus a directly usable example.
-- Fill the eight currently-undocumented Actions and expand the existing Git and GitHub PR group pages beyond input-only.
+- Fill the eight currently-undocumented Actions, expand the existing Git and GitHub PR group pages beyond input-only, and reconcile the existing `opencode.md` and `pi.md` pages with their current manifests (add missing `timeout` input, fix error code tables, add structured error catalog to `opencode.md`).
 - Make `docs/actions/README.md` enumerate every supported built-in Action with a link to its contract page; remove the "OpenSpec 和 `core/*` 的独立产品契约页仍待补齐" gap footnote.
 - Keep each page consistent with the manifest in `built-ins.ts` so that reading docs alone is sufficient to write a correct task.
 
@@ -26,7 +26,7 @@ Stakeholders: workflow authors writing `uses`/`with` task and check definitions;
 - No changes to manifests, execution functions, runner, server, CLI, Web, dependencies, or stored data.
 - No design-layer content (`design/workflow/actions.md` Status, runtime internals); the only permitted `design/` edit is updating the existing "文档缺口" status footnote to reflect that the docs gap is closed.
 - No pages for tombstoned Actions (e.g. `mohist/acp-agent`).
-- No edits to `mohist/pi`'s existing 实装差距 note beyond keeping it intact.
+- No edits to `mohist/pi`'s existing 实装差距 section (the runtime-gap note at the bottom of `pi.md`); the input table and error code table above it ARE in scope for reconciliation.
 
 ## Decisions
 
@@ -34,8 +34,8 @@ Stakeholders: workflow authors writing `uses`/`with` task and check definitions;
 
 Contract pages stay grouped by family rather than one file per Action, mirroring the existing `git.md` and `github-pr.md` layout. Final layout under `docs/actions/`:
 
-- `opencode.md` — `mohist/opencode` (already complete).
-- `pi.md` — `mohist/pi` (already complete; gap note preserved).
+- `opencode.md` — `mohist/opencode` (reconcile with manifest: add `timeout` input, add structured error code catalog).
+- `pi.md` — `mohist/pi` (reconcile with manifest: add `timeout` input, fix error code table to match the 6 declared codes; 实装差距 section preserved).
 - `git.md` — `mohist/workspace-prepare`, `mohist/rebase`, `mohist/rebase-status`, `mohist/merge-ready`, `mohist/push` (expand each to three facets + example).
 - `github-pr.md` — `mohist/create-github-pr`, `mohist/mark-github-pr-ready`, `mohist/merge-github-pr`, `mohist/github-pr-status`, **plus** `mohist/github-pr-checks` (new section).
 - `core.md` (new) — `core/process`, `core/script`, `core/artifact-exists`, `core/marker`.
@@ -108,9 +108,10 @@ Implementation order (each step lands before the next):
 
 1. Create `docs/actions/core.md` and `docs/actions/openspec.md` with the full three-facet sections and examples for the eight new Actions.
 2. Expand `docs/actions/git.md` and `docs/actions/github-pr.md` to add outputs, error codes, and examples for every existing Action; add the missing `mohist/github-pr-checks` section to `github-pr.md`.
-3. Update `docs/actions/README.md` enumeration and remove the remaining-Actions gap footnote per D4.
-4. Update the single status line in `design/workflow/actions.md` Status item 5.
-5. Manual manifest cross-check (D5) for all 19 supported Actions; paste-test representative examples.
+3. Reconcile `docs/actions/opencode.md` and `docs/actions/pi.md` with their current manifests: add the `timeout` input to both input tables, add a structured error code catalog to `opencode.md`, and correct the `pi.md` error code table to match the 6 manifest-declared codes.
+4. Update `docs/actions/README.md` enumeration and remove the remaining-Actions gap footnote per D4.
+5. Update the single status line in `design/workflow/actions.md` Status item 5.
+6. Manual manifest cross-check (D5) for all 19 supported Actions; paste-test representative examples.
 
 Rollback strategy: revert the merge commit. Docs return to their pre-issue state.
 
