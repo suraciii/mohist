@@ -1,6 +1,7 @@
 import { defineAction } from "./define-action.js"
 import type { ActionDefinition } from "./manifest.js"
 import { opencodeAction } from "./opencode.js"
+import { piAction } from "./pi.js"
 import {
   createGitHubPrAction,
   markGitHubPrReadyAction,
@@ -135,6 +136,30 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
     },
     run: opencodeAction,
+  }),
+  defineAction({
+    manifest: {
+      name: "mohist/pi",
+      description: "Run a Pi agent turn",
+      inputs: {
+        prompt: { types: ["string", "object"], required: true, description: "Prompt string or structured prompt spec" },
+        session: { types: ["string"], description: "Logical session name; falls back to work id when absent" },
+        options: { types: ["object"], description: "Turn options such as model and variant" },
+        timeout: { types: ["number"], default: 3600000, description: "Turn deadline in milliseconds" },
+      },
+      outputs: [
+        { name: "promise", description: "Completion promise projected by the task executor" },
+      ],
+      errors: [
+        { code: "runtime-unavailable", description: "The Pi runtime is unavailable" },
+        { code: "session-workspace-mismatch", description: "AgentSession is bound to a different workspace" },
+        { code: "session-binding-failed", description: "Failed to resolve or persist the AgentSession binding" },
+        { code: "runtime-session-missing", description: "Runtime session is missing" },
+        { code: "unavailable-runtime", description: "Runtime reported unavailable" },
+        { code: "turn-failed", description: "Pi turn failed for an unspecified reason" },
+      ],
+    },
+    run: piAction,
   }),
   defineAction({
     manifest: {

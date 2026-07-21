@@ -66,6 +66,9 @@ export class PiRuntime {
     } catch (cause) { return this.failure("missing-session", "The bound Pi Session is missing or corrupt", [resetDiagnostic(), diagnostic("session-open-failed", this.mask(message(cause)))]) }
 
     const diagnostics: PiDiagnostic[] = []
+    if (request.options?.unknownKeys && request.options.unknownKeys.length > 0) {
+      diagnostics.push(diagnostic("options-unknown-keys", `Ignored unknown option keys: ${request.options.unknownKeys.join(", ")}`, "info"))
+    }
     const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
     const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
     let fixed: PiResult<PiTurnResult> | null = null

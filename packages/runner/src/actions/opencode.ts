@@ -130,7 +130,7 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
     binding = { runtimeSessionId: null, workDir: context.workDir }
   }
 
-  if (binding.runtimeSessionId === null && sessionName && context.serverConnection && context.projectId) {
+  if ((binding.runtimeSessionId === null || expectedRuntime !== "opencode") && sessionName && context.serverConnection && context.projectId) {
     const created = await runtime.createSession({
       target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
       model: runtimeModel(options),

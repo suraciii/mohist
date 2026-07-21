@@ -60,6 +60,7 @@ export interface PiSessionResult {
 export interface PiTurnOptions {
   readonly model?: string | null
   readonly variant?: string | null
+  readonly unknownKeys?: readonly string[]
 }
 
 export interface PiTurnRequest {

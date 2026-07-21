@@ -39,3 +39,11 @@
 - `workflowSessionName` trims explicit names and falls back to the Work ID for omitted/null/blank names. OpenCode binding and task/check coordinator keys use this same helper and the same rendered Action input.
 - WorkExecutor holds the task lease across the complete Inline Agent segment, including completion checks, worktree enforcement, and cleanup reinvocation. Check execution acquires the shared coordinator per Inline Agent Action while retaining independent Sessions' concurrency.
 - T-004 verification: baseline focused tests passed (18), coordinator/focused regression tests passed (9), Runner typecheck passed, and the full Runner suite passed (100 files / 1,173 tests).
+
+## T-005 Notes
+
+- `mohist/pi` is registered through the existing ActionRegistry and shares the task/check completion path through the private `turnFact.finalAssistantText`; public task output remains the existing promise projection.
+- Pi binding creation is explicit in the Action: open logical Session, create absolute Pi path, guarded attach, accepted `session.input`, then `PiRuntime.runTurn`. Runtime switches create the target runtime's own physical Session; the previous runtime ID is never passed to the target adapter.
+- Pi runtime readiness is owned by RunnerHost alongside OpenCode. Failed Pi startup is retried from the existing work-claim readiness loop, while registration continues to project only the OpenCode catalog.
+- Pi runtime events are buffered for one turn and sent in order. Successful and submitted failure turns append one `session.closed`; terminal reporting uses an independent 30-second signal and preserves the runtime error when terminal acceptance fails.
+- Existing Runner host tests need the default test setup to inject a no-network Pi runtime because real Pi catalog initialization is provider/network backed; product Pi tests use the explicit runtime factory seam.

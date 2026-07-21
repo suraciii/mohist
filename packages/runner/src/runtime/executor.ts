@@ -10,6 +10,7 @@ import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
+import type { PiRuntime } from "./pi/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
@@ -50,7 +51,7 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  * handler's own output unchanged through completion evaluation
  * (design D5).
  */
-const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
+const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode", "mohist/pi"])
 
 export class WorkExecutor {
   constructor(
@@ -89,6 +90,7 @@ export class WorkExecutor {
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private readonly workflowSessionTurnCoordinator: WorkflowSessionTurnCoordinator | null = null,
+    private piRuntime: PiRuntime | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -97,6 +99,10 @@ export class WorkExecutor {
 
   updateRuntimeEventOutbox(outbox: AgentSessionRuntimeEventOutbox | null) {
     this.agentSessionRuntimeEventOutbox = outbox
+  }
+
+  updatePiRuntime(runtime: PiRuntime | null) {
+    this.piRuntime = runtime
   }
 
   async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -194,7 +200,7 @@ export class WorkExecutor {
         let rawResult: unknown
         try {
           const actionContext = {
-            ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
+            ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime),
             with: validatedWith,
             workDir,
             ...(definition.manifest.name === "mohist/openspec-tasks"
@@ -245,7 +251,7 @@ export class WorkExecutor {
           variables,
           signal,
           resolveCleanupAgentAction(legacyHandler(definition)),
-          { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
+          { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime) },
           log,
         )
         if (worktreeResult.status !== "completed") {
@@ -280,7 +286,7 @@ export class WorkExecutor {
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
       coordinator: this.workflowSessionTurnCoordinator ?? undefined,
-      context: baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
+      context: baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -460,6 +466,7 @@ export function baseContext(
   openCodeRuntime: OpenCodeRuntime | null = null,
   agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
   runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
+  piRuntime: PiRuntime | null = null,
 ): Omit<ActionInvocationContext, "with" | "workDir"> {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   return {
@@ -482,6 +489,7 @@ export function baseContext(
     openCodeRuntime,
     agentSessionRuntimeEventOutbox,
     runtimeEventRecordId,
+    piRuntime,
     log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }
