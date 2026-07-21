@@ -216,3 +216,11 @@
 - `npm run typecheck -w packages/web` — green.
 - Focused Vitest run for controller, desktop/mobile decision renderers, narrow-page behavior, and
   runtime presentations — 62 / 62 tests pass.
+
+## Final Verification
+
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 4967 / 4967 tests pass across 367 files.
+- `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` — 10 / 10 pass.
+- `npm run check:fsd -w packages/web` — green (478 production modules).
+- `npm run check:test-boundaries -w packages/web` — green (367 active Web Vitest files).
