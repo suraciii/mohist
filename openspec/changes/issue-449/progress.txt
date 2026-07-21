@@ -101,6 +101,14 @@
 - `npm test` green: 1365 CLI + 1256 server unit + 30 arch + 2891 server spec
   + 4993 web + 1159 runner tests all pass.
 
+## Review Fixes In Progress
+
+- Terminal recovery now registers the durable reminder before persisting a
+  pending Session-close obligation. Registration failure aborts the state write
+  so a terminal job cannot be saved without a durable wake-up.
+- Routed workspace resolution now treats missing run issue/epic lineage as a
+  mismatch when the triggering envelope supplies that lineage.
+
 ## T-002 Implementation Discoveries
 
 - WorkflowRun ownership is persisted in `WorkflowRunRow.MetadataProjectId` and `IssueNumber` computed columns; deserializing `WorkflowRun` alone is insufficient for routed ownership validation. `WorkflowRunQuerier.LoadRoutingContextAsync` now returns the run plus those persisted ownership values.

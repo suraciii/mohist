@@ -915,6 +915,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             // tick all retry the original delivery and converge on a
             // single close fact.
             State.PendingSessionClose ??= pending;
+            if (State.PendingSessionClose is not null)
+                await EnsureRecoveryReminderAsync();
             await SaveAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
@@ -935,14 +937,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
-        await SaveAsync();
 
-        // Register the durable reminder AFTER terminal state is durable.
-        // A reminder tick that loads state without a PendingSessionClose
-        // self-cleans, which covers the (rare) failure where SaveAsync
-        // commits the terminal row but a follow-up write/load flips the
-        // pending flag to null before the reminder row materialises.
+        // Register before persisting terminal state. This makes the
+        // reminder an orphan if the state write fails, which its next tick
+        // cleans up, but avoids persisting a terminal close obligation that
+        // has no durable wake-up after an activation loss.
         await EnsureRecoveryReminderAsync();
+        await SaveAsync();
 
         _log.LogInformation(
             "AgentJob {Id} terminal: {Status} ({Reason}, category={Category}, deliveryId={DeliveryId})",
@@ -955,22 +956,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task EnsureRecoveryReminderAsync()
     {
-        try
-        {
-            await this.RegisterOrUpdateReminder(
-                RecoveryReminderName,
-                RecoveryReminderDue,
-                RecoveryReminderPeriod);
-        }
-        catch (Exception ex)
-        {
-            // A reminder-service failure does not lose the pending
-            // delivery (it remains on State and on the next
-            // activation/report the grain retries). Log and continue.
-            _log.LogWarning(ex,
-                "AgentJob {Id} could not register agent-job-recovery reminder; delivery will retry on next activation/report",
-                Key);
-        }
+        await this.RegisterOrUpdateReminder(
+            RecoveryReminderName,
+            RecoveryReminderDue,
+            RecoveryReminderPeriod);
     }
 
     private PendingSessionClose BuildPendingSessionClose(

@@ -107,18 +107,18 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
                     $"workflow run '{envelopeWorkflowRunId}' belongs to project '{routingContext.ProjectId ?? "(unknown)"}', not '{projectId}'");
             }
 
-            if (issueNumber is > 0 && routingContext.IssueNumber is { } runIssue && runIssue != issueNumber.Value)
+            if (issueNumber is > 0 && routingContext.IssueNumber != issueNumber)
             {
                 return RoutedExecutionContextResolution.Unresolved(
                     RoutedResolutionFailure.LineageMismatch,
-                    $"workflow run '{envelopeWorkflowRunId}' belongs to issue {runIssue}, not {issueNumber.Value}");
+                    $"workflow run '{envelopeWorkflowRunId}' belongs to issue {routingContext.IssueNumber?.ToString() ?? "(none)"}, not {issueNumber.Value}");
             }
 
-            if (envelopeEpic is > 0 && routingContext.EpicNumber is { } runEpic && runEpic != envelopeEpic.Value)
+            if (envelopeEpic is > 0 && routingContext.EpicNumber != envelopeEpic)
             {
                 return RoutedExecutionContextResolution.Unresolved(
                     RoutedResolutionFailure.LineageMismatch,
-                    $"workflow run '{envelopeWorkflowRunId}' belongs to epic {runEpic}, not {envelopeEpic.Value}");
+                    $"workflow run '{envelopeWorkflowRunId}' belongs to epic {routingContext.EpicNumber?.ToString() ?? "(none)"}, not {envelopeEpic.Value}");
             }
 
             if (run.Workspace is null || string.IsNullOrWhiteSpace(run.Workspace.Path))
@@ -176,18 +176,18 @@ public sealed class RoutedAgentLaunchContextResolver : IScopedService
                     $"issue-bound workflow run '{boundRun.Id}' belongs to project '{boundContext.ProjectId ?? "(unknown)"}', not '{projectId}'");
         }
 
-        if (boundContext.IssueNumber is { } boundIssue && boundIssue != issueNumber.Value)
+        if (boundContext.IssueNumber != issueNumber)
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.LineageMismatch,
-                $"issue-bound workflow run '{boundRun.Id}' belongs to issue {boundIssue}, not {issueNumber.Value}");
+                $"issue-bound workflow run '{boundRun.Id}' belongs to issue {boundContext.IssueNumber?.ToString() ?? "(none)"}, not {issueNumber.Value}");
         }
 
-        if (envelopeEpic is > 0 && boundContext.EpicNumber is { } boundEpic && boundEpic != envelopeEpic.Value)
+        if (envelopeEpic is > 0 && boundContext.EpicNumber != envelopeEpic)
         {
             return RoutedExecutionContextResolution.Unresolved(
                 RoutedResolutionFailure.LineageMismatch,
-                $"issue-bound workflow run '{boundRun.Id}' belongs to epic {boundEpic}, not {envelopeEpic.Value}");
+                $"issue-bound workflow run '{boundRun.Id}' belongs to epic {boundContext.EpicNumber?.ToString() ?? "(none)"}, not {envelopeEpic.Value}");
         }
 
         if (boundRun.Workspace is null || string.IsNullOrWhiteSpace(boundRun.Workspace.Path))
