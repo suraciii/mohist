@@ -382,6 +382,7 @@ export class RunnerHost {
       this.openCodeRuntime,
       new AgentJobExecutor(this.connection, this.openCodeRuntime),
       this.agentSessionRuntimeEventOutbox,
+      undefined,
       this.workflowSessionTurnCoordinator,
       this.piRuntime,
     )

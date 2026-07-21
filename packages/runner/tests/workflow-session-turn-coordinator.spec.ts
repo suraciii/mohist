@@ -3,8 +3,10 @@ import { executeCheckDispatch } from "../src/runtime/check-execution.js"
 import { WorkflowSessionTurnCoordinator } from "../src/runtime/workflow-session-turn-coordinator.js"
 import { workflowSessionName } from "../src/actions/workflow-session-name.js"
 import { ActionRegistry } from "../src/actions/registry.js"
+import { defineAction } from "../src/actions/define-action.js"
+import type { ActionDefinition } from "../src/actions/manifest.js"
 import { succeed } from "../src/actions/action-result.js"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionInvocationContext } from "../src/actions/context.js"
 import { deferred } from "./support/deferred.js"
 
 const key = (sessionName: string) => ({
@@ -12,6 +14,34 @@ const key = (sessionName: string) => ({
   workflowRunId: "workflow-1",
   sessionName,
 })
+
+const AGENT_MANIFEST = {
+  name: "mohist/opencode",
+  inputs: {
+    prompt: { types: ["string"] as const, required: true as const },
+    session: { types: ["string"] as const },
+  },
+  outputs: [{ name: "promise" }],
+  errors: [{ code: "turn-failed" }],
+}
+
+const PI_MANIFEST = {
+  name: "mohist/pi",
+  inputs: {
+    prompt: { types: ["string"] as const, required: true as const },
+    session: { types: ["string"] as const },
+  },
+  outputs: [{ name: "promise" }],
+  errors: [{ code: "turn-failed" }],
+}
+
+function makeRegistry(action: (context: ActionInvocationContext) => ReturnType<typeof succeed>): ActionRegistry {
+  const definitions: ActionDefinition[] = [
+    defineAction({ manifest: AGENT_MANIFEST, run: action }),
+    defineAction({ manifest: PI_MANIFEST, run: action }),
+  ]
+  return new ActionRegistry(definitions)
+}
 
 describe("WorkflowSessionTurnCoordinator", () => {
   it("serializes task cleanup and a check across runtime changes", async () => {
@@ -76,38 +106,35 @@ describe("WorkflowSessionTurnCoordinator", () => {
 describe("check Action turn coordination", () => {
   it("serializes same-name checks while leaving different names independent", async () => {
     const coordinator = new WorkflowSessionTurnCoordinator()
-    const actions = new ActionRegistry()
     const release = deferred<void>()
     const started: string[] = []
-    const action = async (context: ActionContext) => {
+    const action = async (context: ActionInvocationContext) => {
       const session = String(context.with?.session ?? context.workId).trim()
       started.push(session)
       if (session === "shared" && started.filter((value) => value === "shared").length === 1) await release.promise
       return succeed("ok")
     }
-    actions.register("mohist/opencode", action)
-    actions.register("mohist/pi", action)
+    const actions = makeRegistry(action)
     const context = {
       workflowRunId: "workflow-1",
       workId: "check-work",
       workType: "checks",
       projectId: "project-1",
-      variables: {},
       signal: new AbortController().signal,
       writeVars: async () => {},
-    }
+    } as const
     const shared = executeCheckDispatch(
-      [{ name: "task", uses: "mohist/opencode", with: { session: " shared " } }],
+      [{ name: "task", uses: "mohist/opencode", with: { prompt: "hello", session: " shared " } }],
       {},
       { actions, context, coordinator, formatUnresolved: () => "unresolved", resolveWorkDir: async () => "/work", toCheckStatus: (status) => status },
     )
     const sharedAgain = executeCheckDispatch(
-      [{ name: "retry", uses: "mohist/pi", with: { session: "shared" } }],
+      [{ name: "retry", uses: "mohist/pi", with: { prompt: "hello", session: "shared" } }],
       {},
       { actions, context, coordinator, formatUnresolved: () => "unresolved", resolveWorkDir: async () => "/work", toCheckStatus: (status) => status },
     )
     const other = executeCheckDispatch(
-      [{ name: "other", uses: "mohist/pi", with: { session: "other" } }],
+      [{ name: "other", uses: "mohist/pi", with: { prompt: "hello", session: "other" } }],
       {},
       { actions, context, coordinator, formatUnresolved: () => "unresolved", resolveWorkDir: async () => "/work", toCheckStatus: (status) => status },
     )

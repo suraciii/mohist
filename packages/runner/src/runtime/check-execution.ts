@@ -99,7 +99,7 @@ async function runOneCheck(
       }
     }
     const workDir = await deps.resolveWorkDir(renderedWith)
-    const runAction = async (): Promise<{ status: string; message?: string; error?: ActionError; output?: JsonObject | null; invalidOutputReason?: string }> => {
+    const runAction = async (): Promise<CheckResultRow & { invalidOutputReason?: string }> => {
       let rawResult: unknown
       try {
         const actionContext: ActionInvocationContext = {
@@ -154,14 +154,7 @@ async function runOneCheck(
         runAction,
       )
       : await runAction()
-    if (result.invalidOutputReason) {
-      return {
-        name: check.name,
-        status: "fail",
-        message: result.message,
-        invalidOutputReason: result.invalidOutputReason,
-      }
-    }
+    return result
   } catch (error) {
     return {
       name: check.name,

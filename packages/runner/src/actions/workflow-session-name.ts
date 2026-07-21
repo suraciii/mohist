@@ -1,4 +1,5 @@
-import type { ActionContext, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
+import type { JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 
 export function workflowSessionName(input: JsonObject | null | undefined, workId: string): string {
@@ -6,6 +7,6 @@ export function workflowSessionName(input: JsonObject | null | undefined, workId
   return explicit || workId.trim()
 }
 
-export function sessionNameFromContext(context: ActionContext): string {
+export function sessionNameFromContext(context: ActionInvocationContext): string {
   return workflowSessionName(context.with, context.workId)
 }

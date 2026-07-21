@@ -1,4 +1,5 @@
-import type { ActionContext, ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
+import type { ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
@@ -17,7 +18,7 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
 
 interface PiOptions { model?: string; variant?: string; unknownKeys?: readonly string[] }
 
-export async function piAction(context: ActionContext): Promise<ActionResult> {
+export async function piAction(context: ActionInvocationContext): Promise<ActionResult> {
   const parsed = await parseInput(context)
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
@@ -126,7 +127,7 @@ async function reportWithTerminalSignal(report: (facts: readonly PiRuntimeEvent[
   }
 }
 
-async function parseInput(context: ActionContext): Promise<{ kind: "ok"; prompt: string; options: PiOptions } | { kind: "failure"; result: ActionResult }> {
+async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok"; prompt: string; options: PiOptions } | { kind: "failure"; result: ActionResult }> {
   const input = context.with ?? {}
   const allowed = new Set(["prompt", "session", "options", "working-directory"])
   const invalid = Object.keys(input).find((key) => !allowed.has(key))
@@ -156,7 +157,7 @@ async function parseInput(context: ActionContext): Promise<{ kind: "ok"; prompt:
   return { kind: "ok", prompt: composePiPrompt(prompt, context.parentIssueContext), options }
 }
 
-function inputEvent(runtimeSessionId: string, prompt: string, context: ActionContext): PiRuntimeEvent {
+function inputEvent(runtimeSessionId: string, prompt: string, context: ActionInvocationContext): PiRuntimeEvent {
   return { id: `session-input-${context.workId}`, type: "session.input", runtimeSessionId, workDir: context.workDir, payload: { text: prompt, kind: context.workType, source: "workflow", role: "user", runtimeSessionId } }
 }
 
