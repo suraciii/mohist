@@ -89,6 +89,8 @@ Successful Server delivery MUST NOT be a prerequisite for starting or completing
 
 Local outbox persistence is a separate precondition: the originating `session.input` MUST be durably enqueued before a Workflow prompt or follow-up runtime invocation starts. If that local enqueue fails, the runner MUST report the execution as unavailable and MUST NOT invoke the runtime without a durable input record. Local persistence of activity and terminal events produced after runtime start MUST settle before the Workflow result returns, but MUST NOT replace the runtime result with a Server delivery failure.
 
+The follow-up handler MUST resolve the current OpenCode runtime when each command is invoked, not when the SignalR handler is registered. It MUST verify that runtime is ready before locally enqueuing follow-up input, then use the same captured runtime instance for that invocation. If no ready runtime exists, the handler SHALL report `unavailable` without enqueuing input or invoking a stale/null runtime. A runtime initialized or replaced after SignalR client construction MUST be visible to later commands.
+
 A failed pre-execution input enqueue MUST remove that uncommitted input from the in-memory queue so later health recovery cannot deliver an input whose runtime invocation never occurred. A local persistence failure for activity or terminal facts produced after runtime start SHALL retain those facts in memory for autonomous snapshot recovery, mark the outbox unhealthy, and remain observable; after all enqueue promises settle, the Workflow result SHALL remain the original runtime result. Process loss before the recovery snapshot succeeds remains outside restart recovery.
 
 #### Scenario: Workflow event delivery remains unavailable
@@ -109,6 +111,18 @@ A failed pre-execution input enqueue MUST remove that uncommitted input from the
 - **THEN** it SHALL report the follow-up as unavailable
 - **AND** MUST NOT invoke the runtime prompt
 
+#### Scenario: Runtime becomes ready after handler registration
+
+- **WHEN** the SignalR follow-up handler is registered before an OpenCode runtime exists and a runtime becomes ready before a later follow-up command
+- **THEN** that command SHALL resolve the ready runtime at invocation time
+- **AND** SHALL durably enqueue the input and invoke that runtime exactly once
+
+#### Scenario: Runtime remains unavailable at invocation
+
+- **WHEN** a follow-up command arrives while no current OpenCode runtime is ready
+- **THEN** the handler SHALL report `unavailable`
+- **AND** MUST NOT enqueue a follow-up input or invoke a runtime
+
 #### Scenario: Workflow input cannot be persisted locally
 
 - **WHEN** the runner cannot durably enqueue a Workflow turn's initial `session.input`
@@ -125,6 +139,8 @@ A failed pre-execution input enqueue MUST remove that uncommitted input from the
 
 After a transient snapshot read or write failure, the runner SHALL retry local persistence autonomously without requiring another Workflow turn, follow-up, or network delivery. Startup and server reconnection SHALL also trigger an idempotent health-recovery attempt. The outbox MUST remain unhealthy while its durable snapshot is unknown or behind its retained in-memory state, and SHALL become healthy only after a successful load or atomic snapshot containing every retained record. Restored health SHALL re-enable work claims and follow-up acceptance and SHALL resume pending network delivery.
 
+Session target resolution SHALL validate only the persisted binding and ownership fields; it MUST NOT read runtime or outbox readiness. Work claims SHALL require both runtime and outbox health, and follow-up admission SHALL require the invocation-time runtime plus outbox health. Cancel does not create a runtime event and MUST remain available whenever its invocation-time runtime and target binding are valid, even while the outbox is unhealthy.
+
 #### Scenario: Snapshot write recovers while execution is gated
 
 - **WHEN** a post-start snapshot write fails and no new work, follow-up, or event arrives
@@ -136,6 +152,12 @@ After a transient snapshot read or write failure, the runner SHALL retry local p
 - **WHEN** startup cannot read or parse the existing snapshot and a later autonomous or reconnect-triggered load succeeds
 - **THEN** the runner SHALL remain unavailable for new execution until the successful load
 - **AND** SHALL recover and deliver the loaded records without replacing the snapshot with an empty state
+
+#### Scenario: Cancel remains available during outbox recovery
+
+- **WHEN** the outbox is unhealthy but the current runtime is ready and the cancel target binding is valid
+- **THEN** cancel SHALL resolve the current runtime and target without consulting outbox health
+- **AND** SHALL remain eligible to interrupt the current turn
 
 ### Requirement: Existing follow-up terminal delivery remains durable
 
