@@ -128,7 +128,10 @@ task-command     = mo <task> [target] [flags]
 
 ## Workflow Profile
 
-`mo workflow` 管理 Project 范围的 Workflow Profile。它定义未来的 Run 如何推进；修改 Profile 或 Project 默认值，不改变已经开始的 Run。
+`mo workflow` 管理 Project 范围的 Workflow Profile。WorkflowRun 启动时确定使用的 Profile；
+之后修改 Issue 的选择或 Project 默认值，只影响未来的 Run。编辑已选 Profile 的
+Definition 会用于进行中 Run 后续进入的 Stage；已进入的 Stage 和已经开始的 task 不被
+追溯改变，Variables 在每个 task 开始前重新解析。
 
 `workflow` 与 `run` 的分工沿用 GitHub CLI 中 workflow definition 与 run execution 的心智模型，但使用 Mohist 自己的 WorkflowProfile 和 WorkflowRun 语义。
 

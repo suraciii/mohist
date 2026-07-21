@@ -36,7 +36,6 @@ class Issue {
 
 class WorkflowRun {
   workflowProfileId
-  workflowDefinition
 }
 
 Project "1" *-- "1..*" WorkflowProfile : owns
@@ -51,8 +50,8 @@ note right of WorkflowProfile
 end note
 
 note right of WorkflowRun
-  Definition is fixed for this run.
-  Runtime tasks may still be added.
+  Profile identity is fixed for this run.
+  Definition is resolved as stages start.
 end note
 @enduml
 ```
@@ -86,13 +85,15 @@ selectedProfileId =
 - Issue 显式选择也必须引用同一 Project 中的 Profile。
 - 清除 Issue 的显式选择后，Issue 重新继承 Project 默认值。
 - Profile 之间不继承、不 merge；选择结果始终是一个完整 Profile。
-- WorkflowRun 保存启动时选中的 Profile ID 和 Workflow Definition snapshot。之后修改
-  Issue 的选择或 Project 默认值，只影响未来的 WorkflowRun。
+- WorkflowRun 保存启动时选中的 Profile ID。之后修改 Issue 的选择或 Project 默认值，
+  只影响未来的 WorkflowRun，不会把活动 Run 切换到另一个 Profile。
+- 修改同一 Profile ID 的 Definition 后，活动 Run 在后续 Stage 初始化时读取新版本。
 
-Workflow Definition snapshot 对单个 WorkflowRun 固定，但它不是完整的执行计划，也不固定
-`StageRun` 中最终产生的 `TaskRun` 序列。运行时 task 的产生与插入见
-[`definition.md`](definition.md)。Variables 在每次 task dispatch 前重新解析，Prompt 在
-执行时按 key 读取。
+WorkflowRun 不保存完整的 Workflow Definition snapshot。创建 Run 时只物化推进生命周期
+所需的 StageRun 和审批事实；每个 Stage 初始化时，按 `workflowProfileId` 重新读取该
+Profile 当前 Definition 中的 Stage 结构。已经初始化的 Stage 不被 Profile 编辑追溯改写。
+运行时 task 的产生与插入见 [`definition.md`](definition.md)。Variables 在每次 task
+dispatch 前重新解析，Prompt 在执行时按 key 读取；已经派发的输入保持不变。
 
 ## Ownership
 
@@ -102,14 +103,14 @@ Workflow Definition snapshot 对单个 WorkflowRun 固定，但它不是完整�
 ```text
 Issue -> Workflow
 
-WorkflowRun creation -> IWorkflowProfileProvider
-                             ^
-                     ProjectWorkflowProfileProvider
+WorkflowRun stage initialization -> IWorkflowProfileProvider
+                                      ^
+                              ProjectWorkflowProfileProvider
 ```
 
-`IWorkflowProfileProvider` 只在 WorkflowRun 创建时按 Project 与 Profile ID 提供经过校验
-的 `WorkflowDefinition`。WorkflowRun 保存 Definition snapshot 后不再读取 Provider。
-Provider 不读取 Variables 或 Prompts，也不负责 Profile 选择。
+`IWorkflowProfileProvider` 在 WorkflowRun 创建以及每个 Stage 初始化时，按 Project 与
+Profile ID 提供当前、经过校验的 `WorkflowDefinition`。WorkflowRun 不保存 Definition
+body。Provider 不读取 Variables 或 Prompts，也不负责 Profile 选择。
 
 ## API
 
@@ -124,8 +125,9 @@ DELETE /api/projects/{projectRef}/workflow-profiles/{*profileId}
 ```
 
 Project 的 `defaultWorkflowProfileId` 与 Issue 的 `workflowProfileId` 是对该 collection 的
-引用，分别通过 Project 和 Issue resource 修改。删除或替换 Profile 时必须保护仍被默认值
-或 Issue 引用的关系；已启动的 WorkflowRun 使用自己的 definition snapshot。
+引用，分别通过 Project 和 Issue resource 修改。删除 Profile 时必须保护仍被默认值、Issue
+或活动 WorkflowRun 引用的关系；保留同一 ID 更新 Definition 则允许，活动 WorkflowRun
+会在后续 Stage 初始化时读取新版本。
 
 `profileId` 是 terminal catch-all，因此可以无损寻址 `mohist/local` 这类 ID。Variables 与
 Prompts 使用独立 API，不挂在 `/workflow-profiles/{*profileId}` 下。
@@ -144,5 +146,5 @@ Prompts 使用独立 API，不挂在 `/workflow-profiles/{*profileId}` 下。
 - 当前 Issue 还可以保存 inline template；目标模型只允许选择 Project 中已有的 Profile。
 - 当前有活动 WorkflowRun 时，Issue 的 Profile 选择会被锁定；目标模型允许记录新选择，
   但只对下一次新建的 WorkflowRun 生效。
-- 当前 WorkflowRun 主要保存 Profile 身份并实时读取 definition；目标模型要求启动时固定
-  definition，使 Profile 编辑不改变进行中的 WorkflowRun。
+- 当前 WorkflowRun 按 Stage 实时读取 Definition；Profile collection 迁移必须保留该行为，
+  不得把 Definition body 复制进 WorkflowRun。

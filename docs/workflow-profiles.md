@@ -13,16 +13,20 @@ Variables 和 Prompts 是独立资源，不属于 Workflow Profile。Profile 只
 Project 的默认 Profile；清除显式选择后，也会重新继承 Project 默认值。
 
 Issue 启动 Workflow 时确定本次运行使用的 Profile。之后更换 Issue 的 Profile 或 Project
-默认值，只影响下一次运行，不会改变已经开始的运行。
+默认值，只影响下一次运行，不会把进行中的 Workflow 切换到另一个 Profile。
+
+Profile 内容不是运行时快照。编辑本次运行所选 Profile 时，新的 Definition 会用于之后
+进入的 Stage；已经进入的 Stage 和已经开始的 task 不被追溯改变。Variables 在每个 task
+开始前重新解析，Prompt 在实际执行时读取。
 
 Mohist 默认提供：
 
 - `mohist/local`：本地合并，适合不依赖代码托管平台的项目；默认使用。
 - `mohist/github-pr`：通过一个 GitHub PR 完成交付。
 
-`mohist/*` Profile 随 Mohist 版本更新，不能直接编辑或删除。版本更新只影响之后启动的
-Workflow；已经开始的 Workflow 继续使用启动时的 definition。需要修改内置流程时，创建
-一个新的 Project Profile。
+`mohist/*` Profile 随 Mohist 版本更新，不能直接编辑或删除。进行中的 Workflow 在之后
+进入 Stage 时使用更新后的 Definition；已经进入的 Stage 和已经开始的 task 不被追溯
+改变。需要修改内置流程时，创建一个新的 Project Profile。
 
 ## Profile 包含什么
 
@@ -185,11 +189,14 @@ Runner 所在机器需要安装 GitHub CLI，并登录目标仓库。
 的 definition，并指定 Project 默认 Profile。Issue 详情页只负责选择或更换 Profile，不
 直接编辑 Profile definition。
 
+编辑 Definition 会影响使用该 Profile 的进行中 Workflow 的后续 Stage。保存前应确认这些
+变化也适用于当前活动的运行。
+
 CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只需在所属 Project
 内唯一，可以包含 `/`；通过 CLI 传递时仍是一个完整参数。内置 Profile 使用
 `mohist/<name>`，自定义 Profile 使用能稳定表达用途的 ID。
 
-## 实装差距
+## 实装差距与迁移约束
 
 - 当前 Settings 仍把默认 template、Variables 和 Prompts 组合成一份 workflow config；
   目标界面会把三个资源分开。
@@ -197,7 +204,6 @@ CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只�
   目标模型会统一为 Project 的 Workflow Profile collection。
 - 当前有活动 Workflow 时还不能更换 Issue 的 Profile；目标行为允许提前选择下一次运行
   使用的 Profile，同时保持当前运行不变。
-- 当前进行中的 Workflow 还没有完整保存启动时的 Workflow Definition；目标行为是
-  Definition snapshot 固定，运行时仍可产生新的任务，Variables 和 Prompts 继续按各自
-  时机解析。
+- 当前 Definition 已在 Stage 进入时重新读取，Variables 和 Prompts 按各自时机读取；
+  Profile collection 迁移必须保留这些语义，不能为 WorkflowRun 引入 Definition snapshot。
 - 当前部分内置 task 仍使用旧 Action Input；目标接口以 Action 文档为准。
