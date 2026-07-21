@@ -65,6 +65,8 @@ function makeOutbox(options: {
   retryDelayMs?: number
   localRetryDelayMs?: number
   boundedConcurrency?: number
+  deliveryBatchSize?: number
+  maxRetentionEntries?: number
 }) {
   const fileSystem = options.fileSystem ?? new RecordingFileSystem()
   const randomId = options.randomId ?? (() => `evt_${Math.random().toString(36).slice(2, 10)}`)
@@ -78,6 +80,8 @@ function makeOutbox(options: {
     retryDelayMs: options.retryDelayMs ?? 100,
     localRetryDelayMs: options.localRetryDelayMs ?? 100,
     boundedConcurrency: options.boundedConcurrency ?? 2,
+    deliveryBatchSize: options.deliveryBatchSize,
+    maxRetentionEntries: options.maxRetentionEntries,
   })
   return { outbox, fileSystem }
 }
@@ -388,6 +392,167 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
 
     await outbox.stop()
     await drain
+  })
+})
+
+describe("AgentSessionRuntimeEventOutbox — batched streaming deltas", () => {
+  function deltaRecord(overrides: Partial<RuntimeEventRecord> = {}): RuntimeEventRecord {
+    return {
+      id: overrides.id ?? "evt_delta",
+      producerFamily: "workflow-session",
+      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+      runtimeSessionId: "ses_1",
+      work: null,
+      event: { type: "reasoning.delta", payload: { text: "x" } },
+      acknowledgementPolicy: "matching-receipt",
+      ...overrides,
+    }
+  }
+
+  it("enqueueProducedFactBatch persists the whole batch in one atomic write", async () => {
+    const { outbox, fileSystem } = makeOutbox({})
+    await outbox.load()
+    const writesBefore = fileSystem.journal.filter((e) => e.kind === "write").length
+
+    await outbox.enqueueProducedFactBatch(
+      Array.from({ length: 50 }, (_, i) => deltaRecord({ id: `evt_${i}` })),
+    )
+
+    const writesAfter = fileSystem.journal.filter((e) => e.kind === "write").length
+    expect(writesAfter - writesBefore).toBe(1)
+    const parsed = JSON.parse(fileSystem.body(RUNTIME_EVENT_OUTBOX_FILE) ?? "{}") as { entries: Array<{ id: string; sequence: number }> }
+    expect(parsed.entries).toHaveLength(50)
+    // Sequences are monotonic across the batch.
+    const sequences = parsed.entries.map((e) => e.sequence)
+    for (let i = 1; i < sequences.length; i += 1) {
+      expect(sequences[i]).toBeGreaterThan(sequences[i - 1])
+    }
+  })
+
+  it("enqueueProducedFactBatch retains every produced fact in memory and marks the outbox unhealthy when persistence fails", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.failNextWrite = () => new Error("disk full")
+    const { outbox } = makeOutbox({ fileSystem })
+    await outbox.load()
+
+    await expect(outbox.enqueueProducedFactBatch([
+      deltaRecord({ id: "evt_a" }),
+      deltaRecord({ id: "evt_b" }),
+    ])).rejects.toThrow("disk full")
+
+    // Produced facts are retained in memory so the next persistence
+    // recovery can flush them; only their disk snapshot failed.
+    expect(outbox.ready()).toBe(false)
+    expect(outbox.snapshot()).toHaveLength(2)
+  })
+
+  it("drains a batch of same-key deltas in one sendBatch call and one post-ack persist", async () => {
+    const sendBatch = vi.fn(async (_records: readonly RuntimeEventRecord[], _signal: AbortSignal) => Array.from({ length: 64 }, () => [{ type: "reasoning.delta" }]))
+    const { outbox, fileSystem } = makeOutbox({
+      deliver: { send: async () => [{ type: "reasoning.delta" }], sendBatch },
+    })
+    await outbox.load()
+    await outbox.enqueueProducedFactBatch(
+      Array.from({ length: 64 }, (_, i) => deltaRecord({ id: `evt_${i}` })),
+    )
+    const writesAfterEnqueue = fileSystem.journal.filter((e) => e.kind === "write").length
+
+    await outbox.kick()
+
+    expect(sendBatch).toHaveBeenCalledTimes(1)
+    expect(sendBatch.mock.calls[0][0]).toHaveLength(64)
+    expect(outbox.snapshot()).toHaveLength(0)
+    // Only one additional persist for the whole batch's ack.
+    const writesAfterDrain = fileSystem.journal.filter((e) => e.kind === "write").length
+    expect(writesAfterDrain - writesAfterEnqueue).toBe(1)
+  })
+
+  it("retains records whose acknowledgement policy is not met by the batch receipts", async () => {
+    // `evt_0` never receives a matching receipt; the rest always match.
+    // drainAll loops within one kick, so the unmatched record must
+    // survive both the first batch (63 ack) and the second (1 alone).
+    const delta = [{ type: "reasoning.delta" }]
+    const sendBatch = vi.fn(async (records: readonly RuntimeEventRecord[], _signal: AbortSignal) =>
+      records.map((record) => (record.id === "evt_0" ? [] : delta)),
+    )
+    const { outbox } = makeOutbox({ deliver: { send: async () => delta, sendBatch } })
+    await outbox.load()
+    await outbox.enqueueProducedFactBatch(
+      Array.from({ length: 64 }, (_, i) => deltaRecord({ id: `evt_${i}` })),
+    )
+
+    await outbox.kick()
+    // The unmatched record is retained; drainAll stopped after it failed.
+    const retained = outbox.snapshot()
+    expect(retained).toHaveLength(1)
+    expect(retained[0].id).toBe("evt_0")
+    expect(sendBatch).toHaveBeenCalledTimes(2)
+  })
+
+  it("drops the earliest streaming deltas when retention cap is exceeded on load", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const overcap = Array.from({ length: 6 }, (_, i) => ({
+      id: `evt_${i}`,
+      producerFamily: "workflow-session",
+      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+      runtimeSessionId: "ses_1",
+      work: null,
+      event: { type: "reasoning.delta", payload: { text: String(i) } },
+      acknowledgementPolicy: "matching-receipt",
+      sequence: i,
+      enqueuedAt: "2026-07-21T00:00:00.000Z",
+    }))
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({ version: 1, entries: overcap }))
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      const { outbox } = makeOutbox({ fileSystem, maxRetentionEntries: 3 })
+      await outbox.load()
+      const remaining = outbox.snapshot()
+      expect(remaining).toHaveLength(3)
+      // Earliest deltas dropped; the latest three (by sequence) retained.
+      expect(remaining.map((r) => r.id)).toEqual(["evt_3", "evt_4", "evt_5"])
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("never drops non-delta facts even when retention cap is exceeded", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const mixed = [
+      {
+        id: "input",
+        producerFamily: "workflow-session",
+        target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+        runtimeSessionId: "ses_1",
+        work: null,
+        event: { type: "session.input", payload: {} },
+        acknowledgementPolicy: "matching-receipt",
+        sequence: 0,
+        enqueuedAt: "2026-07-21T00:00:00.000Z",
+      },
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `delta_${i}`,
+        producerFamily: "workflow-session" as const,
+        target: { kind: "workflow" as const, projectId: "proj-1", workflowRunId: "wf-1", sessionName: "plan" },
+        runtimeSessionId: "ses_1",
+        work: null,
+        event: { type: "reasoning.delta", payload: { text: String(i) } },
+        acknowledgementPolicy: "matching-receipt" as const,
+        sequence: i + 1,
+        enqueuedAt: "2026-07-21T00:00:00.000Z",
+      })),
+    ]
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({ version: 1, entries: mixed }))
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      const { outbox } = makeOutbox({ fileSystem, maxRetentionEntries: 3 })
+      await outbox.load()
+      const types = outbox.snapshot().map((r) => r.event.type)
+      expect(types).toContain("session.input")
+      expect(types.filter((t) => t === "reasoning.delta")).toHaveLength(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 

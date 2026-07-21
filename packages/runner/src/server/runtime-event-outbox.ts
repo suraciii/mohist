@@ -57,6 +57,21 @@ const DEFAULT_DELIVERY_TIMEOUT_MS = 5_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
 const DEFAULT_LOCAL_RETRY_DELAY_MS = 1_000
 const DEFAULT_BOUNDED_CONCURRENCY = 4
+// Maximum records delivered in one server POST per sequence key per tick.
+// Streaming deltas (reasoning/message tokens) arrive in the thousands per
+// turn; batching them into one HTTP request per batch collapses the
+// O(n) persist amplification that previously drove the runner out of memory.
+const DEFAULT_DELIVERY_BATCH_SIZE = 64
+// Hard cap on retained records. When exceeded, the earliest streaming
+// deltas are dropped (they are reconstructible from later deltas / the
+// final assistant message; non-delta facts are never dropped). This is
+// the last line of defense against a runaway turn exhausting runner memory.
+const DEFAULT_MAX_RETENTION_ENTRIES = 5_000
+// Event types that are pure streaming increments — losing a bounded
+// number of them does not corrupt the transcript, which is rebuilt from
+// later deltas and the final message. These are eligible for batch
+// delivery and are the first to be dropped under retention pressure.
+const STREAMING_DELTA_TYPES = new Set(["reasoning.delta", "message.delta"])
 let temporaryFileSequence = 0
 
 export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful-response"
@@ -95,6 +110,8 @@ export interface AgentSessionRuntimeEventOutboxOptions {
   readonly retryDelayMs?: number
   readonly localRetryDelayMs?: number
   readonly boundedConcurrency?: number
+  readonly deliveryBatchSize?: number
+  readonly maxRetentionEntries?: number
   readonly randomId?: () => string
   readonly monotonicSequence?: () => number
   readonly clock?: () => Date
@@ -135,6 +152,14 @@ export interface RuntimeEventOutboxFileSystem {
 
 export interface RuntimeEventDelivery {
   send(record: RuntimeEventRecord, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]>
+  /**
+   * Deliver a batch of records sharing one sequence key in a single
+   * server call. Default implementation loops `send`; production
+   * overrides it to POST all events in one request. Returns one receipt
+   * per input record, in order, so the outbox can settle each record
+   * independently by its acknowledgement policy.
+   */
+  sendBatch?(records: readonly RuntimeEventRecord[], signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[][]>
 }
 
 export interface AgentSessionRuntimeEventOutbox {
@@ -145,6 +170,15 @@ export interface AgentSessionRuntimeEventOutbox {
     record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
   ): Promise<void>
   enqueueProducedFact(record: RuntimeEventRecord): Promise<void>
+  /**
+   * Enqueue a batch of produced facts sharing one target in one
+   * persistSnapshot write. Used by the Workflow reporter to flush a
+   * turn's worth of streaming deltas without paying one disk snapshot
+   * per token. On persist failure every record of the batch is rolled
+   * back and the outbox goes unhealthy — same semantics as
+   * `enqueueProducedFact`, applied atomically to the whole batch.
+   */
+  enqueueProducedFactBatch(records: readonly RuntimeEventRecord[]): Promise<void>
   kick(): Promise<void>
   stop(): Promise<void>
   /** Snapshot the current ordered records — observable for tests. */
@@ -211,6 +245,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private readonly retryDelayMs: number
   private readonly localRetryDelayMs: number
   private readonly boundedConcurrency: number
+  private readonly deliveryBatchSize: number
+  private readonly maxRetentionEntries: number
   private readonly randomId: () => string
   private readonly monotonicSequence: () => number
   private readonly now: () => Date
@@ -235,6 +271,8 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
     this.localRetryDelayMs = options.localRetryDelayMs ?? DEFAULT_LOCAL_RETRY_DELAY_MS
     this.boundedConcurrency = Math.max(1, options.boundedConcurrency ?? DEFAULT_BOUNDED_CONCURRENCY)
+    this.deliveryBatchSize = Math.max(1, options.deliveryBatchSize ?? DEFAULT_DELIVERY_BATCH_SIZE)
+    this.maxRetentionEntries = Math.max(1, options.maxRetentionEntries ?? DEFAULT_MAX_RETENTION_ENTRIES)
     this.randomId = options.randomId ?? (() => `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`)
     this.monotonicSequence = options.monotonicSequence ?? (() => ++sharedSequenceCounter)
     this.now = options.clock ?? (() => new Date())
@@ -295,6 +333,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     }
     this.lastLoadError = null
     for (const entry of snapshot.entries) this.records.set(entry.id, entry)
+    this.enforceRetentionCap()
     this.healthy = true
     try {
       await this.importLegacyFileIfPresent()
@@ -333,15 +372,22 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   async enqueueProducedFact(record: RuntimeEventRecord): Promise<void> {
+    await this.enqueueProducedFactBatch([record])
+  }
+
+  async enqueueProducedFactBatch(records: readonly RuntimeEventRecord[]): Promise<void> {
     if (this.stopped) throw new Error("runtime-event outbox is stopped; cannot enqueue")
-    this.requireLoaded("enqueueProducedFact")
-    const sequence = this.monotonicSequence()
-    const internal: InternalRecord = {
-      ...record,
-      sequence,
-      enqueuedAt: this.now().toISOString(),
+    this.requireLoaded("enqueueProducedFactBatch")
+    if (records.length === 0) return
+    const enqueuedAt = this.now().toISOString()
+    const staged: InternalRecord[] = []
+    for (const record of records) {
+      const sequence = this.monotonicSequence()
+      const internal: InternalRecord = { ...record, sequence, enqueuedAt }
+      this.records.set(internal.id, internal)
+      staged.push(internal)
     }
-    this.records.set(internal.id, internal)
+    this.enforceRetentionCap()
     try {
       await this.persistSnapshot()
     } catch (error) {
@@ -351,6 +397,30 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       throw error
     }
     void this.kick()
+  }
+
+  // Drop the earliest streaming deltas once the in-memory record map
+  // exceeds the configured retention cap. Non-delta facts (input,
+  // closed, tool lifecycle, usage, model, follow-up terminals) are
+  // never dropped — they carry irreplaceable workflow/session state.
+  // Dropped deltas are reconstructible from later deltas and the final
+  // assistant message on the server side.
+  private enforceRetentionCap(): void {
+    if (this.records.size <= this.maxRetentionEntries) return
+    let overflow = this.records.size - this.maxRetentionEntries
+    const candidates = [...this.records.values()]
+      .filter((record) => STREAMING_DELTA_TYPES.has(record.event.type))
+      .sort(sortBySequence)
+    for (const record of candidates) {
+      if (overflow <= 0) break
+      this.records.delete(record.id)
+      overflow -= 1
+    }
+    if (this.records.size > this.maxRetentionEntries) {
+      console.warn(
+        `runtime-event outbox retention cap ${this.maxRetentionEntries} exceeded; ${this.records.size} records remain after dropping all streaming deltas`,
+      )
+    }
   }
 
   async kick(): Promise<void> {
@@ -410,76 +480,103 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   }
 
   private async drainGroup(label: string, signal: AbortSignal): Promise<boolean> {
-    // One head per managed sequence key per tick. Returns `true` when the head
-    // was acknowledged (removed from `records`); `false` when the receipt was
-    // rejected, the call timed out / failed, or there was no head to begin
-    // with. The caller uses this signal to decide whether to keep draining.
-    const head = this.takeHead(label)
-    if (!head) return false
-    return await this.deliverHead(head, signal)
+    // Drains up to `deliveryBatchSize` records for one sequence key per tick.
+    // Returns `true` when at least one record was acknowledged (removed from
+    // `records`); `false` when the whole batch was rejected, timed out, or
+    // failed transport. Batching collapses the per-ack persistSnapshot that
+    // previously made streaming deltas O(n) in disk writes and heap churn.
+    const batch = this.takeBatch(label, this.deliveryBatchSize)
+    if (batch.length === 0) return false
+    return await this.deliverBatch(batch, signal)
   }
 
-  private takeHead(label: string): InternalRecord | null {
-    let earliest: InternalRecord | null = null
+  private takeBatch(label: string, limit: number): InternalRecord[] {
+    const matching: InternalRecord[] = []
     for (const record of this.records.values()) {
       const recordLabel = sequenceKeyLabel(sequenceKey(record))
       if (recordLabel !== label) continue
-      if (earliest === null || record.sequence < earliest.sequence) earliest = record
+      matching.push(record)
+      if (matching.length >= limit) break
     }
-    return earliest
+    matching.sort(sortBySequence)
+    return matching
   }
 
-  private async deliverHead(head: InternalRecord, signal: AbortSignal): Promise<boolean> {
-    if (signal.aborted) return false
+  private async deliverBatch(batch: InternalRecord[], signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted || batch.length === 0) return false
     const controller = new AbortController()
     const abortFromStop = () => controller.abort(signal.reason)
     signal.addEventListener("abort", abortFromStop, { once: true })
     let timedOut = false
-    const timer = setTimeout(() => {
+    const timer = this.timer.setTimeout(() => {
       if (!controller.signal.aborted) {
         timedOut = true
         controller.abort(new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`))
       }
     }, this.deliveryTimeoutMs)
-    timer.unref?.()
-    let receipts: AgentSessionRuntimeEventReceipt[] | null = null
+    let perRecord: AgentSessionRuntimeEventReceipt[][] | null = null
     let transportError: unknown = null
     try {
-      receipts = await this.deliver.send(head, controller.signal)
+      perRecord = await this.deliverBatchRecords(batch, controller.signal)
     } catch (error) {
       transportError = error
     } finally {
-      clearTimeout(timer)
+      this.timer.clearTimeout(timer)
       signal.removeEventListener("abort", abortFromStop)
     }
     if (timedOut) {
       transportError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
     }
-    if (transportError || receipts === null || !Array.isArray(receipts)) {
+    if (transportError || perRecord === null) {
       this.scheduleNetworkRetry()
       return false
     }
-    if (!recordMeetsPolicy(head.acknowledgementPolicy, head, receipts)) {
+    // Settle each record against its own policy and the receipts returned
+    // for its position in the batch. Only records whose head pointer is
+    // unchanged (not rolled back / replaced mid-flight) are removed.
+    const removed: InternalRecord[] = []
+    let anyAcknowledged = false
+    for (let i = 0; i < batch.length; i += 1) {
+      const record = batch[i]
+      const receipts = perRecord[i] ?? []
+      if (!recordMeetsPolicy(record.acknowledgementPolicy, record, receipts)) continue
+      if (this.records.get(record.id) !== record) continue
+      this.records.delete(record.id)
+      removed.push(record)
+      anyAcknowledged = true
+    }
+    if (!anyAcknowledged) {
       this.scheduleNetworkRetry()
       return false
     }
-    if (this.records.get(head.id) !== head) {
-      // Rolled back / replaced — do not delete an entry that is no
-      // longer the head.
-      return false
-    }
-    this.records.delete(head.id)
+    if (removed.length === 0) return true
     try {
       await this.persistSnapshot()
     } catch (error) {
-      // Roll the head back into memory so the next attempt can retry.
-      this.records.set(head.id, head)
+      // Roll the removed records back so the next attempt retries them.
+      for (const record of removed) this.records.set(record.id, record)
       this.healthy = false
       this.lastLoadError = error instanceof Error ? error : new Error(errorMessage(error))
       this.scheduleLocalRetry()
       return false
     }
     return true
+  }
+
+  private async deliverBatchRecords(
+    batch: InternalRecord[],
+    signal: AbortSignal,
+  ): Promise<AgentSessionRuntimeEventReceipt[][]> {
+    if (this.deliver.sendBatch) {
+      return await this.deliver.sendBatch(batch, signal)
+    }
+    // Default fallback: deliver each record individually. Production wires
+    // `sendBatch` to one server POST per batch.
+    const results: AgentSessionRuntimeEventReceipt[][] = []
+    for (const record of batch) {
+      results.push(await this.deliver.send(record, signal))
+    }
+    return results
   }
 
   private scheduleNetworkRetry(): void {

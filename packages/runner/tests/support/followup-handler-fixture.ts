@@ -276,6 +276,17 @@ export function buildRecordingOutbox(options: BuildOutboxOptions = {}): Recordin
       files.push(filePath)
       bodies.set(filePath, body)
     },
+    async enqueueProducedFactBatch(batch) {
+      for (const record of batch) {
+        const internal: RuntimeEventRecord = { ...record }
+        producedFactCalls.push(internal)
+        records.push(internal)
+      }
+      const body = JSON.stringify({ version: 1, entries: records.map(serialize) }, null, 2)
+      await fileSystem.writeAtomicText(filePath, body)
+      files.push(filePath)
+      bodies.set(filePath, body)
+    },
     async kick() {
       // Drain one head per call (sequential) using `deliver`.
       while (records.length > 0) {

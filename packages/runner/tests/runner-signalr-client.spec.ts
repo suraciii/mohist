@@ -281,6 +281,7 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
       recover,
       enqueueBeforeExecution: async () => {},
       enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
       kick: async () => {},
       stop: async () => {},
       snapshot: () => [],

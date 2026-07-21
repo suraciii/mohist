@@ -86,6 +86,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
         order.push(`before:${record.event.type}`)
       },
       enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
       kick: async () => {},
       stop: async () => {},
       snapshot() { return [] },
@@ -164,6 +165,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       recover: async () => {},
       enqueueBeforeExecution: async () => {},
       enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
       kick: async () => {},
       stop: async () => {},
       snapshot() { return [] },
@@ -185,6 +187,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       recover: async () => {},
       async enqueueBeforeExecution() { throw new Error("disk full") },
       enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
       kick: async () => {},
       stop: async () => {},
       snapshot() { return [] },
