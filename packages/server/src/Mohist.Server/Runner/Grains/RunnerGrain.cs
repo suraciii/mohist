@@ -591,7 +591,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash,
             RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
-            ActionCatalog = info.ActionCatalog ?? _info?.ActionCatalog,
+            ActionCatalog = info.ActionCatalog,
         };
     }
 
@@ -601,7 +601,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash ?? _info?.BuildGitHash,
             RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
-            ActionCatalog = info.ActionCatalog ?? _info?.ActionCatalog,
+            ActionCatalog = info.ActionCatalog,
         };
     }
 

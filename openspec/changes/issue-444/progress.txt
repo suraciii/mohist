@@ -8,6 +8,7 @@
 
 - Added typed ActionCatalog records to RunnerInfo, register/heartbeat request binding, and RunnerWorksState retention.
 - Persisted catalog JSON alongside LastKnownInfo because Orleans persistence did not retain nullable JsonElement defaults reliably through grain reactivation; activation restores the typed catalog from this durable representation.
-- Heartbeat and re-registration with a missing catalog preserve an already retained catalog; a runner with no prior catalog remains readable with null until it reports one.
-- Existing T-001 resolver and check-result tests were updated to assert definition-backed resolution and the specified check aggregate/row error shape.
+- A missing catalog is the current Runner state: re-registration or heartbeat repair from an older Runner clears a previously retained catalog rather than publishing stale capabilities.
+- Check dispatch resolves the engine-owned `working-directory` from rendered input while Actions receive only validated Action-owned input. Invalid successful check output remains an aggregate `unexpected-error`; other malformed check results remain row-level `unexpected-error` with aggregate `check-failed`.
+- ActionRegistry validates every supplied manifest during construction so malformed definitions cannot bypass `defineAction`.
 - Verification passed with `npm test`, `npm run typecheck -w packages/runner`, and `npm run test:ci -w packages/runner`.

@@ -110,6 +110,52 @@ public class RunnerActionCatalogSpecs : WorkflowGrainSpecs
         AssertCatalog(catalog, afterReport!.ActionCatalog);
     }
 
+    [Fact]
+    public async Task MissingCatalogOnHeartbeatRepair_ReplacesPreviouslyReportedCatalog()
+    {
+        var runnerId = $"runner-catalog-cleared-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            null,
+            ActionCatalog: CreateCatalog("reported")));
+        await runner.HeartbeatRepairAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
+
+        var info = await runner.GetInfoAsync();
+        Assert.NotNull(info);
+        Assert.Null(info!.ActionCatalog);
+
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var registered = Assert.Single(await registry.ListRunnersAsync(), item => item.RunnerId == runnerId);
+        Assert.Null(registered.ActionCatalog);
+    }
+
+    [Fact]
+    public async Task MissingCatalogOnReregistration_ReplacesPreviouslyReportedCatalog()
+    {
+        var runnerId = $"runner-catalog-reregistered-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            null,
+            ActionCatalog: CreateCatalog("reported")));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
+
+        var info = await runner.GetInfoAsync();
+        Assert.NotNull(info);
+        Assert.Null(info!.ActionCatalog);
+
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var registered = Assert.Single(await registry.ListRunnersAsync(), item => item.RunnerId == runnerId);
+        Assert.Null(registered.ActionCatalog);
+    }
+
     private static ActionCatalog CreateCatalog(string suffix)
     {
         return new ActionCatalog(
