@@ -251,7 +251,7 @@ public abstract class IssueWorkflowCompletionHandlerTestSupport
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
-        public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
@@ -333,7 +333,7 @@ public abstract class IssueWorkflowCompletionHandlerTestSupport
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
-        public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();

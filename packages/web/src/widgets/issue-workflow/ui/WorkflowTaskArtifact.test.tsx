@@ -429,9 +429,7 @@ describe('Board card stage progress', () => {
       health: IssueHealth.Active,
       workflowStageProgress: { stage: 'Build', total: 0, completed: 0, running: 0, failed: 0 },
     })
-
     render(<IssueCard issue={issue} agentStatus={mockAgentStatus} />)
-
     expect(screen.queryByText('/')).not.toBeInTheDocument()
   })
 

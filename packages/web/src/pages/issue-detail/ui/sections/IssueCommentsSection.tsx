@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from 'react'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
 import { commentAttachmentContentPath, type Comment } from '../../../../entities/issue'
 import { formatTime } from '../../../../shared/lib/format-time'
@@ -13,6 +14,8 @@ export interface IssueCommentsSectionProps {
   issueProjectId: string
   commentText: string
   setCommentText: (value: string) => void
+  commentAuthor: string
+  setCommentAuthor: (value: string) => void
   deletingCommentId: string | null
   setDeletingCommentId: (value: string | null) => void
   deleteCommentError: string | null
@@ -26,6 +29,8 @@ export function IssueCommentsSection({
   issueProjectId,
   commentText,
   setCommentText,
+  commentAuthor,
+  setCommentAuthor,
   deletingCommentId,
   setDeletingCommentId,
   deleteCommentError,
@@ -34,9 +39,10 @@ export function IssueCommentsSection({
 }: IssueCommentsSectionProps) {
   const { addCommentMutation, deleteCommentMutation } = mutations
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
+  const canSubmit = !!commentAuthor.trim() && !!commentText.trim() && !addCommentMutation.isPending
   const submitComment = () => {
-    if (!commentText.trim() || addCommentMutation.isPending) return
-    addCommentMutation.mutate(commentText)
+    if (!canSubmit) return
+    addCommentMutation.mutate({ author: commentAuthor, body: commentText })
   }
   const handleCommentKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || !event.metaKey || event.repeat || event.nativeEvent.isComposing) return
@@ -60,12 +66,19 @@ export function IssueCommentsSection({
           {comments.map((comment) => (
             <div
               key={comment.id}
+              data-testid="issue-comment"
               className="border-b border-border/40 pb-3 last:border-0 last:pb-0"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-muted-foreground mb-1">
-                    {formatTime(comment.createdAt)}
+                  <div
+                    data-testid="comment-metadata"
+                    className="mb-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
+                  >
+                    <span className="min-w-0 break-words font-medium text-foreground/80">
+                      {comment.author?.trim() || 'Unknown author'}
+                    </span>
+                    <time dateTime={comment.createdAt}>{formatTime(comment.createdAt)}</time>
                   </div>
                   <MarkdownReader
                     content={comment.body}
@@ -103,6 +116,18 @@ export function IssueCommentsSection({
       )}
 
       <div className="mt-5 pt-3 border-t border-border/40">
+        <label className="mb-2 block text-xs font-medium text-foreground" htmlFor="comment-author">
+          Author
+        </label>
+        <Input
+          id="comment-author"
+          value={commentAuthor}
+          onChange={(event) => setCommentAuthor(event.target.value)}
+          maxLength={100}
+          required
+          autoComplete="name"
+          className="mb-2"
+        />
         <AttachmentComposer
           projectId={issueProjectId}
           value={commentText}
@@ -121,7 +146,7 @@ export function IssueCommentsSection({
           <div className="ml-auto">
             <Button
               onClick={submitComment}
-              disabled={!commentText.trim() || addCommentMutation.isPending}
+              disabled={!canSubmit}
             >
               {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
             </Button>

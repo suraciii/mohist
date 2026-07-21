@@ -238,6 +238,7 @@ public class IssueCompositeAdvancementApiSpecs
         await AttachChildAsync(projectId, existing, parent.Number);
         await _grains.GetGrain<IIssueGrain>(existing.IssueKey).CancelAsync();
         await _grains.GetGrain<IIssueGrain>(parent.IssueKey).RecomputeCompositeStatusAsync();
+        await DispatchEventsAsync();
 
         using (var response = await _client.PostAsync(
             $"/api/projects/{projectId}/issues/{parent.Number}/reopen", null))

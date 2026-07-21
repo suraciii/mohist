@@ -75,6 +75,7 @@ export function IssueDetailPage({
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
+  const [commentAuthor, setCommentAuthor] = useState('')
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
@@ -82,7 +83,10 @@ export function IssueDetailPage({
     {
       issueNumber,
       projectId,
-      onAddCommentSuccess: () => setCommentText(''),
+      onAddCommentSuccess: () => {
+        setCommentAuthor('')
+        setCommentText('')
+      },
       onDeleteCommentSuccess: () => {
         setDeletingCommentId(null)
         setDeleteCommentError(null)
@@ -511,6 +515,8 @@ export function IssueDetailPage({
                 issueProjectId={issueProjectId}
                 commentText={commentText}
                 setCommentText={setCommentText}
+                commentAuthor={commentAuthor}
+                setCommentAuthor={setCommentAuthor}
                 deletingCommentId={deletingCommentId}
                 setDeletingCommentId={setDeletingCommentId}
                 deleteCommentError={deleteCommentError}

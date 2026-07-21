@@ -99,3 +99,21 @@
 - Collapsed `ArtifactOpener` to one full-list contract by deleting compact mode, compact-only props/type export, slicing, evidence markup, and compact test IDs. The ordinary panel now has one `Artifacts` heading and explicit no-run/empty states.
 - Added MSW-backed issue-detail coverage for exact section cardinality/order, Changes state matrices, available/empty commits, artifact list/open/error/no-run behavior, approval versus non-approval ownership, and absence of old banner/fallback/compact paths. Component coverage locks artifact loading/error/empty behavior.
 - Verification completed: baseline focused tests passed before refactoring (4 files, 63 tests); final `npm run check:fsd -w packages/web`, `npm run typecheck -w packages/web`, and full `npm run test:run -w packages/web` passed (371 files, 5014 tests). Verification left no generated Git-visible changes.
+
+# T-004: Restore truthful attribution in issue history
+
+## Codebase Patterns
+
+- Activity enrichment belongs in `useEventTimeline`: it already joins persisted and live events, so one `(stage, taskId)` title resolver formats both paths without changing workflow event payloads or the generic event API.
+- Workflow task IDs are stage-scoped for presentation. The title lookup key combines the normalized timeline stage and task ID; an unresolved event keeps its stable task ID as the visible subject.
+- Comment attribution is caller-declared audit text, not identity. The grain is the validation authority: trim once, require 1-100 characters, and persist author and body in the same comment row.
+- Historical compatibility is read-only and explicit: `IssueCommentRow.Author` and read DTO author stay nullable, while every new API, Web, and CLI create path requires author. Web renders null, blank, or whitespace historical values as the exact label `Unknown author`.
+- `mo issue comment add` uses the shared body resolver and output pipeline. Author validation happens before project resolution/body loading, and table/JSON modes render the server-returned author rather than deriving a client label.
+
+## Completed implementation
+
+- Added task lifecycle and artifact-recorded live event types, fetched the existing workflow timeline only while Activity is enabled, and resolved task summaries by stage plus task ID. Started/completed/failed and artifact rows now show their title, stable ID fallback, or recorded path directly while preserving classification, detail, deduplication, ordering, filters, and live badges.
+- Added nullable `IssueComments.Author` storage and migration with no backfill. Grain and API validation reject missing, blank, and over-100-character authors before inserting; successful comments return and project the exact trimmed author.
+- Updated Web comment models/client/mutation/composer and CLI inline/file/table/JSON paths to require and transmit author. Comment rows pair author, timestamp, body, attachments, and deletion controls in a wrapping phone-safe layout, with `Unknown author` for historical null/blank data.
+- Added focused formatter/hook/panel, migration/grain/API, Web composer/client, CLI, and production-build phone browser coverage. The large issue-detail spec was split by behavior to remain within the repository test-file budget.
+- Verification completed: focused server (24), CLI (19), and Web (89) tests passed; `npm test` passed 1,372 CLI, 1,268 server unit, 2,947 server spec, 30 architecture, 5,028 Web, and 1,229 runner tests. Web FSD checks, typecheck, the explicit full Web suite (372 files, 5,028 tests), and the focused Chromium phone scenario also passed with no generated Git-visible changes.

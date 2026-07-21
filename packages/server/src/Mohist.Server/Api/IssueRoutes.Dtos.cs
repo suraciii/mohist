@@ -283,7 +283,7 @@ public sealed record RebaseRequest(string? BaseBranch = null);
 
 public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
-public record AddCommentRequest(string Body, string[]? AttachmentIds = null);
+public record AddCommentRequest(string Author, string Body, string[]? AttachmentIds = null);
 
 public sealed record AttachmentUploadResponse(
     string Id,

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
-import type { EventTimelineHistoryHook } from '../useEventTimeline'
+import type { EventTimelineHistoryHook, EventTimelineWorkflowHook } from '../useEventTimeline'
 import { ActivityDialog } from './ActivityDialog'
 import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelinePanel'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
@@ -19,8 +19,10 @@ const historyHook: EventTimelineHistoryHook = () => {
   return { data, isLoading: false }
 }
 
+const workflowHook: EventTimelineWorkflowHook = () => ({ data: undefined })
+
 function TestTimelinePanel(props: EventTimelinePanelProps) {
-  return <EventTimelinePanel {...props} historyHook={historyHook} />
+  return <EventTimelinePanel {...props} historyHook={historyHook} workflowHook={workflowHook} />
 }
 
 const projects: Project[] = [

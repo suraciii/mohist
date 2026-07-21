@@ -305,6 +305,19 @@ internal sealed partial class TableRenderer
             WriteBody(body);
     }
 
+    private void RenderCommentShow(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"id:      {StringOf(data, "id")}");
+        _out.WriteLine($"author:  {Truncate(StringOf(data, "author"), 100)}");
+        _out.WriteLine($"body:    {Truncate(StringOf(data, "body"), BodySoftCap)}");
+    }
+
     private void WriteBody(string body)
     {
         foreach (var line in body.Split('\n'))
