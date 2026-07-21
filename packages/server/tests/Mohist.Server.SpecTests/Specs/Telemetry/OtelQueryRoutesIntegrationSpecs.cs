@@ -175,7 +175,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PostQuery_SelectCount_ReturnsArrayEnvelope()
+    public async Task PostQuery_SelectCount_ReturnsQueryResultEnvelope()
     {
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
         SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
@@ -192,8 +192,48 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.True(doc.RootElement.GetProperty("success").GetBoolean());
         var data = doc.RootElement.GetProperty("data");
-        Assert.Equal(1, data.GetArrayLength());
-        Assert.Equal(2L, data[0].GetProperty("total").GetInt64());
+        var rows = data.GetProperty("rows");
+        Assert.Equal(1, rows.GetArrayLength());
+        Assert.Equal(2L, rows[0].GetProperty("total").GetInt64());
+        Assert.False(data.GetProperty("truncated").GetBoolean());
+        Assert.False(data.TryGetProperty("truncate_reason", out _));
+    }
+
+    [Fact]
+    public async Task PostQuery_ExecutionBudget_ReturnsStructuredErrorAndCancelsExecutor()
+    {
+        var executor = _factory.FakeQueryExecutor;
+        executor.BlockNextExecution();
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1\"}", Encoding.UTF8, "application/json");
+
+        var responseTask = client.PostAsync(QueryPath, content);
+        await executor.BlockStarted.Task;
+        _factory.TimeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
+
+        using var response = await responseTask;
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_execution_budget_exhausted", await ReadCodeAsync(response));
+        Assert.True(executor.CancellationObserved);
+    }
+
+    [Fact]
+    public async Task PostQuery_ClientCancellationCancelsExecutorWithoutResponseBody()
+    {
+        var executor = _factory.FakeQueryExecutor;
+        executor.BlockNextExecution();
+        using var client = _factory.CreateMainApiClient();
+        using var requestCancellation = new CancellationTokenSource();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1\"}", Encoding.UTF8, "application/json");
+
+        var responseTask = client.PostAsync(QueryPath, content, requestCancellation.Token);
+        await executor.BlockStarted.Task;
+        requestCancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await responseTask);
+        Assert.True(executor.CancellationObserved);
     }
 
     [Fact]

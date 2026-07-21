@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using Mohist.Server.SystemInfo;
+using static SQLitePCL.raw;
 
 namespace Mohist.Server.Otel;
 
@@ -15,12 +16,12 @@ namespace Mohist.Server.Otel;
 /// <para>The querier never opens a write transaction — all queries use
 /// <see cref="OtelDb.OpenReadOnlyConnection"/> so the SQLite engine
 /// physically rejects writes regardless of any keyword-level check in
-/// <see cref="ExecuteRawQuery"/>.</para>
+/// <see cref="ExecuteBoundedQuery"/>.</para>
 /// <para>The querier is registered as a singleton (it has no per-request
 /// state) and is the only object that reads <c>otel.db</c> on the main
 /// API port.</para>
 /// </remarks>
-public sealed class TraceQuerier
+public sealed class TraceQuerier : IOtelQueryExecutor
 {
     /// <summary>Default limit for <see cref="ListAsync"/> when the caller doesn't specify one.</summary>
     public const int DefaultListLimit = 50;
@@ -31,21 +32,34 @@ public sealed class TraceQuerier
     /// <summary>Hard upper bound for the <c>POST /otel/api/query</c> body.</summary>
     public const int MaxQueryRequestBodyBytes = 64 * 1024;
 
+    /// <summary>Execution budget in seconds for the free-SQL endpoint.</summary>
+    public const int QueryExecutionBudgetSeconds = 10;
+
     /// <summary>5-second per-query timeout for the free-SQL endpoint.</summary>
     public static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(5);
 
     private readonly OtelDb _db;
     private readonly OtelCollectorStatus _collectorStatus;
     private readonly IFileSystem _fileSystem;
+    private readonly TimeProvider _timeProvider;
+    private readonly Action? _readerStarted;
 
-    public TraceQuerier(OtelDb db, OtelCollectorStatus collectorStatus, IFileSystem fileSystem)
+    public TraceQuerier(
+        OtelDb db,
+        OtelCollectorStatus collectorStatus,
+        IFileSystem fileSystem,
+        TimeProvider timeProvider,
+        Action? readerStarted = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(collectorStatus);
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _db = db;
         _collectorStatus = collectorStatus;
         _fileSystem = fileSystem;
+        _timeProvider = timeProvider;
+        _readerStarted = readerStarted;
     }
 
     /// <summary>
@@ -135,28 +149,44 @@ public sealed class TraceQuerier
 
     /// <summary>
     /// Executes a user-supplied SELECT against <c>otel.db</c> on a
-    /// read-only connection with a 5-second timeout. The
+    /// read-only connection with an execution budget. The
     /// <paramref name="sql"/> must pass <see cref="ValidateSelectOnly"/>
     /// before this call; callers are responsible for that gate.
     /// </summary>
     /// <remarks>
-    /// Three-layer safety net (see design.md Decision 5):
+    /// Four-layer safety net: admission validation, a physically read-only
+    /// connection, an execution-budget interrupt, and response budgets.
     /// <list type="number">
     ///   <item><see cref="OtelDb.OpenReadOnlyConnection"/> — physical isolation.</item>
     ///   <item>Caller's keyword check in <see cref="ValidateSelectOnly"/>.</item>
-    ///   <item><see cref="QueryCommandTimeout"/> — caps runaway queries.</item>
+    ///   <item><see cref="QueryExecutionBudgetSeconds"/> — interrupts active SQLite work.</item>
     /// </list>
     /// </remarks>
-    public async Task<IReadOnlyList<Dictionary<string, object?>>> ExecuteRawQuery(string sql, CancellationToken ct = default)
+    public async Task<QueryResult> ExecuteBoundedQuery(string sql, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sql);
 
+        using var budgetCts = new CancellationTokenSource();
+        using var budgetTimer = _timeProvider.CreateTimer(
+            static state => ((CancellationTokenSource)state!).Cancel(),
+            budgetCts,
+            TimeSpan.FromSeconds(QueryExecutionBudgetSeconds),
+            Timeout.InfiniteTimeSpan);
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCts.Token);
+        var executionToken = executionCts.Token;
         await using var connection = _db.OpenReadOnlyConnection();
+        using var interruptRegistration = executionToken.Register(static state =>
+        {
+            var handle = ((SqliteConnection)state!).Handle;
+            if (handle is not null)
+                sqlite3_interrupt(handle);
+        }, connection);
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var reader = await cmd.ExecuteReaderAsync(executionToken);
+        _readerStarted?.Invoke();
 
         var fieldCount = reader.FieldCount;
         var fieldNames = new string[fieldCount];
@@ -166,7 +196,7 @@ public sealed class TraceQuerier
         }
 
         var rows = new List<Dictionary<string, object?>>();
-        while (await reader.ReadAsync(ct))
+        while (await reader.ReadAsync(executionToken))
         {
             var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
             for (var i = 0; i < fieldCount; i++)
@@ -175,8 +205,11 @@ public sealed class TraceQuerier
             }
             rows.Add(row);
         }
-        return rows;
+        return new QueryResult(rows, Truncated: false, TruncateReason: null);
     }
+
+    public Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default) =>
+        ExecuteBoundedQuery(sql, cancellationToken);
 
     /// <summary>
     /// Validates that <paramref name="sql"/> is a SELECT-only statement
@@ -348,6 +381,16 @@ public sealed class TraceQuerier
             yield return tail;
     }
 }
+
+public interface IOtelQueryExecutor
+{
+    Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default);
+}
+
+public sealed record QueryResult(
+    [property: JsonPropertyName("rows")] IReadOnlyList<Dictionary<string, object?>> Rows,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("truncate_reason")] string? TruncateReason);
 
 /// <summary>Row model for <see cref="TraceQuerier.ListAsync"/>.</summary>
 public sealed record TraceSummary(

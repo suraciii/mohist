@@ -11,3 +11,11 @@
 - Oversize responses use `ApiResults.PayloadTooLarge` and stable code `query_request_too_large`.
 - Admission tests now assert envelope codes for malformed, missing, non-SELECT, SQLite, and ATTACH cases; the ATTACH test name now reflects keyword-layer rejection.
 - Focused OTel route tests: 28 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains an unrelated failure (actual 200).
+
+## T-002
+
+- Added `IOtelQueryExecutor`, `QueryResult`, and `TraceQuerier.ExecuteBoundedQuery`; the route now returns `data.rows` and maps budget cancellation to `query_execution_budget_exhausted`.
+- `TraceQuerier` registers `sqlite3_interrupt` on the linked token and disposes the read-only connection through the existing async disposal scope. `CommandTimeout` remains at five seconds for SQLite busy-lock defense-in-depth.
+- The pinned .NET 11 preview does not provide the design's `TimeProvider.CreateCancellationTokenSource` API. The implementation uses an injected `TimeProvider.CreateTimer` to cancel a parameterless CTS, preserving fake-clock control and avoiding system timers and the banned `CancellationTokenSource(TimeSpan)` overload.
+- `OtlpRoutesWebApplicationFactory` overrides the query executor with a cancellation-blocking fake and installs `FakeTimeProvider`; route tests cover budget rejection and client cancellation, while `TraceQuerierSpecs` cover `Handle` visibility and a large recursive CTE interruption.
+- Focused OTel tests: 69 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains unrelated and fails with actual 200.

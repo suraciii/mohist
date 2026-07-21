@@ -153,6 +153,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<OtelCollectorStatus>();
         services.AddSingleton<TraceIngester>();
         services.AddSingleton<TraceQuerier>();
+        services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
