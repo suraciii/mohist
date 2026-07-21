@@ -181,7 +181,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/create-github-pr", openDraftPr.Uses);
         Assert.Equal("${{ workspace.branch }}", ReadStringWith(openDraftPr, "source"));
         Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(openDraftPr, "target"));
-        Assert.Equal("origin", ReadStringWith(openDraftPr, "remote"));
         Assert.Equal(true, ReadBoolWith(openDraftPr, "draft"));
         Assert.Equal("issue.title", ReadStringWith(openDraftPr, "titleFrom"));
         Assert.Equal("issue.body", ReadStringWith(openDraftPr, "bodyFrom"));
@@ -563,6 +562,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(
             new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "push", "open-draft-pr" },
             planIds);
+        foreach (var stage in definition.Stages)
+        {
+            var prepare = stage.Tasks.Single(t => t.Id == "workspace-prepare");
+            Assert.Equal("${{ workspace.branch }}", prepare.With!["expectedBranch"]?.GetString());
+        }
         Assert.Contains("mohist/create-github-pr", definition.Stages[0].Tasks.Select(t => t.Uses).ToArray());
 
         var checkTasks = JsonSerializer.Serialize(definition.Stages[2].Tasks);

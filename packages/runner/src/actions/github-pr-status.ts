@@ -1,10 +1,10 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { numberInput, stringInput } from "../core/json.js"
-import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { timeoutStepMetadata } from "./github-pr-types.js"
-import { resolveGitHubRepository } from "./delivery-context.js"
+import { parseGitHubRepository } from "./github-pr-repository.js"
 import { fail, succeed } from "./action-result.js"
 
 type GhRunner = typeof runCommand
@@ -117,14 +117,19 @@ function emptyStatusOutput(message: string): GitHubPrStatusOutput {
   }
 }
 
-export async function githubPrStatusAction(context: ActionContext): Promise<ActionResult> {
-  const prNumber = numberInput(context.with, "prNumber") ?? numberFromVariables(context.variables)
-  if (prNumber === null || !Number.isFinite(prNumber)) {
-    return fail("invalid-input", "GitHub PR status check requires 'prNumber' (or vars.github.pr.number)")
+export async function githubPrStatusAction(context: ActionInvocationContext): Promise<ActionResult> {
+  const requestedPrNumber = numberInput(context.with, "prNumber")
+  if (requestedPrNumber === undefined || !Number.isFinite(requestedPrNumber)) {
+    return fail("invalid-input", "GitHub PR status check requires 'prNumber'")
   }
+  const prNumber = requestedPrNumber
+  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+  if (!repositoryUrl) return fail("invalid-input", "GitHub PR status check requires 'repositoryUrl'")
+  const githubRepository = parseGitHubRepository(repositoryUrl)
+  if (!githubRepository) return fail("config-error", "github-pr-status requires a valid GitHub repository URL")
 
   const expect = parseGitHubPrStatusExpectation(stringInput(context.with, "expect"))
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const workDir = context.workDir
 
   const steps: GitHubPrStatusStep[] = []
   const ghOpts = ghLineOptions(context)
@@ -132,16 +137,6 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     steps.push({ name, command, exitCode, output, ...metadata })
   }
   const prViewFields = buildPrViewFields(expect)
-  const githubRepository = resolveGitHubRepository(context)
-  if (githubRepository === null) {
-    return buildOutput({
-      ...emptyStatusOutput("github-pr-status requires an authoritative GitHub repository URL"),
-      prNumber,
-      expectations: expect,
-      missing: expect,
-    })
-  }
-
   const viewResult = await gh(
     "gh",
     withGitHubRepository(["pr", "view", String(prNumber), "--json", prViewFields.join(",")], githubRepository),
@@ -237,7 +232,7 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
   }
 }
 
-function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
@@ -248,21 +243,6 @@ function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {
   return fields
 }
 
-function numberFromVariables(variables: unknown): number | null {
-  if (!variables || typeof variables !== "object") return null
-  const root = variables as Record<string, unknown>
-  const github = root["github"]
-  if (!github || typeof github !== "object") return null
-  const pr = (github as Record<string, unknown>)["pr"]
-  if (!pr || typeof pr !== "object") return null
-  const number = (pr as Record<string, unknown>)["number"]
-  if (typeof number === "number" && Number.isFinite(number)) return number
-  if (typeof number === "string" && number.trim()) {
-    const parsed = Number(number)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
 
 export const __testing = {
   DEFAULT_EXPECTATIONS,

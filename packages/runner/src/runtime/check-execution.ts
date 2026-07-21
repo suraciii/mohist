@@ -1,4 +1,5 @@
-import type { ActionContext, ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
+import type { ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
+import type { ActionInvocationContext, ValidatedActionContext } from "../actions/context.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { validateActionInput } from "../actions/input-validation.js"
@@ -26,7 +27,7 @@ export interface CheckResultRow {
 
 export interface CheckExecutionDeps {
   actions: ActionRegistry
-  context: Omit<ActionContext, "with" | "workDir">
+  context: Omit<ActionInvocationContext, "with" | "workDir">
   formatUnresolved: (unresolved: string[]) => string
   resolveWorkDir: (withInput: JsonObject | null) => Promise<string>
   toCheckStatus: (status: string) => string
@@ -96,14 +97,15 @@ async function runOneCheck(
     const workDir = await deps.resolveWorkDir(renderedWith)
     let rawResult: unknown
     try {
-      rawResult = await definition.run({
+      const actionContext: ActionInvocationContext = {
         ...deps.context,
         workType: "check",
         title: check.title,
         uses: check.uses,
-        with: validation.input as never,
+        with: validation.input,
         workDir,
-      })
+      }
+      rawResult = await definition.run(actionContext as ValidatedActionContext)
     } catch (thrown) {
       rawResult = malformedToUnexpectedError(
         `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,

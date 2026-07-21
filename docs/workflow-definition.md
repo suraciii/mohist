@@ -48,6 +48,7 @@ stages:        # 必填。有序阶段列表
   title: Merge GitHub PR         # 可选。面向使用者的名称
   uses: mohist/merge-github-pr   # 必填。选择 Action
   with:                          # 可选。Action 输入，支持模板表达式
+    repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
   expect: <Expect>               # 可选。本任务的完成要求
   artifacts:                     # 可选。需要采集的产物
@@ -120,6 +121,7 @@ recovery:
   title: Merge verified     # 可选。面向使用者的名称
   uses: mohist/github-pr-status
   with:
+    repositoryUrl: ${{ repository.gitUrl }}
     prNumber: ${{ vars.github.pr.number }}
 ```
 
@@ -199,9 +201,9 @@ stages:
       - id: open-draft-pr
         uses: mohist/create-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
-          remote: origin
           draft: true
           titleFrom: issue.title
           bodyFrom: issue.body
@@ -223,6 +225,7 @@ stages:
       - id: merge-pr
         uses: mohist/merge-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           method: squash
         recovery:
@@ -260,6 +263,7 @@ stages:
       - id: merge-verified
         uses: mohist/github-pr-status
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           expect: merged
 ```

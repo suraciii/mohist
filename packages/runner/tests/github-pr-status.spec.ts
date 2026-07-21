@@ -36,7 +36,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     stage: "check",
     title: "GitHub PR status",
     uses: "mohist/github-pr-status",
-    with: withOverrides,
+     with: { repositoryUrl: "https://github.com/example/repo.git", ...withOverrides },
     variables: {
       project: { id: "proj_1", path: WORKSPACE_PATH },
       issue: { title: "Use GitHub PR workflow", body: "Open, review, and merge a GitHub PR.", number: 248 },
@@ -64,8 +64,9 @@ function withLog(ctx: ActionContext, writes: Array<{ source: string; text: strin
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
   setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
-    ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
-    return await respond(cmd, args, cwd)
+    const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
+    ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+    return await respond(cmd, visibleArgs, cwd)
   })
 }
 
@@ -124,24 +125,24 @@ describe("mohist/github-pr-status action", () => {
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 
-  it("scopes status delivery to the authoritative Issue repository", async () => {
+  it("uses the explicitly declared repository despite different Variables", async () => {
     const commands: string[] = []
     installGh((cmd, args) => {
       commands.push([cmd, ...args].join(" "))
-      if (args.join(" ") === "pr view 42 --json url,state,isDraft --repo github.com/acme/repo") return ghOk(PR_VIEW_OPEN)
+       if (args.join(" ") === "pr view 42 --json url,state,isDraft") return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${[cmd, ...args].join(" ")}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository()))
+    const result = await githubPrStatusAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
-    expect(commands).toEqual(["gh pr view 42 --json url,state,isDraft --repo github.com/acme/repo"])
+    expect(commands).toEqual(["gh pr view 42 --json url,state,isDraft"])
   })
 
-  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
-    const result = await githubPrStatusAction(context({ prNumber: 42 }, authoritativeRepository("not a Git URL")))
+  it("rejects an invalid explicit repository URL", async () => {
+    const result = await githubPrStatusAction(context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
     expect(result.error).toBeDefined()
-    expect(result.error?.message).toContain("authoritative GitHub repository URL")
+    expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {
@@ -156,7 +157,7 @@ describe("mohist/github-pr-status action", () => {
     const result = await githubPrStatusAction(withLog(context({ prNumber: 42 }), writes))
 
     expect(result.error).toBeUndefined()
-    expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft" }])
+    expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft --repo github.com/example/repo" }])
   })
 
   it("rejects a draft PR by default", async () => {
@@ -226,7 +227,7 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.code).toBe("pr-status-failed")
   })
 
-  it("resolves prNumber from vars.github.pr.number when omitted from with", async () => {
+  it("requires prNumber instead of reading vars.github.pr.number", async () => {
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 7")) return ghOk(PR_VIEW_OPEN.replace("42", "7"))
@@ -237,9 +238,7 @@ describe("mohist/github-pr-status action", () => {
       github: { pr: { number: 7, url: "https://github.com/acme/repo/pull/7" } },
     }))
 
-    expect(result.error).toBeUndefined()
-    const parsed = result.output as Record<string, unknown>
-    expect(parsed.prNumber).toBe(7)
+    expect(result.error).toMatchObject({ code: "invalid-input" })
   })
 
   it("returns failure with a clear message when prNumber is missing", async () => {
@@ -312,13 +311,3 @@ describe("mohist/github-pr-status action", () => {
     expect(result.error?.message).toContain("timed out")
   })
 })
-
-function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
-  return {
-    repository: {
-      name: "repo",
-      gitUrl,
-      baseBranch: "master",
-    },
-  }
-}

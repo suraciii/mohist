@@ -1,4 +1,5 @@
-import type { ActionContext, ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
+import type { ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
@@ -65,7 +66,7 @@ type OptionsParse =
  * runtime synthesizes that fact, the Action does NOT synthesize the
  * `{ promise }` output (the executor does, per #408).
  */
-export async function opencodeAction(context: ActionContext): Promise<ActionResult> {
+export async function opencodeAction(context: ActionInvocationContext): Promise<ActionResult> {
   let prompt: string | undefined
   try {
     prompt = await resolvePrompt(context.with?.prompt, buildPromptLoaderContext(context))
@@ -297,7 +298,7 @@ function runtimeErrorCode(kind: string): string {
 }
 
 function createWorkflowReporter(
-  context: ActionContext,
+  context: ActionInvocationContext,
   sessionName: string | undefined,
   runtimeSessionId: string | null,
 ): WorkflowAgentSessionReporter | null {
@@ -332,7 +333,7 @@ function defaultRuntimeEventRecordId(): string {
   return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function resolveTurnDeadlineMs(context: ActionContext): number {
+function resolveTurnDeadlineMs(context: ActionInvocationContext): number {
   const override = numberInput(context.with, "timeout")
   if (typeof override === "number" && Number.isFinite(override) && override > 0) return override
   return DEFAULT_TURN_DEADLINE_MS

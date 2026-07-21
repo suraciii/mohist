@@ -14,7 +14,6 @@ export type PromptSpec = string | StructuredPrompt
 
 export interface PromptLoaderContext {
   with: JsonObject
-  variables: JsonObject
   workDir: string
   workId: string
   title?: string | null

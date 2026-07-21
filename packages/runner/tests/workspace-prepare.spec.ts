@@ -55,7 +55,7 @@ function context(variables: JsonObject = {}): ActionContext {
     stage: "build",
     title: "Prepare workspace",
     uses: "mohist/workspace-prepare",
-    with: {},
+     with: { expectedBranch: EXPECTED_BRANCH },
     variables: {
       workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null },
       ...variables,
@@ -126,6 +126,22 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommand(calls, "clean -fd")).toBe(false)
+  })
+
+  it("UsesHostWorkDirAndExplicitBranchWhenVariablesDisagree", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    const calls = installGit(cleanProbeResponses())
+
+    const contextWithHiddenVariables: ActionContext = {
+      ...context(),
+      workDir: "/host-workspace",
+      with: { expectedBranch: EXPECTED_BRANCH },
+      variables: { workspace: { path: "/hidden-workspace", branch: "hidden-branch" } },
+    }
+    const result = await workspacePrepareAction(contextWithHiddenVariables)
+
+    expect(result.error).toBeUndefined()
+    expect(calls.every((call) => call.workDir === "/host-workspace")).toBe(true)
   })
 
   it("InitialStatusProbeFails_ReportsWorkspaceSetupFailure", async () => {
@@ -561,7 +577,12 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    const result = await workspacePrepareAction(context({ workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null } }))
+    const contextWithHiddenVariables: ActionContext = {
+      ...context(),
+      with: {},
+      variables: { workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null } },
+    }
+    const result = await workspacePrepareAction(contextWithHiddenVariables)
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()

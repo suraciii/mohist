@@ -1,4 +1,3 @@
-import type { ActionContext, ActionResult } from "../core/types.js"
 import { defineAction } from "./define-action.js"
 import type { ActionDefinition } from "./manifest.js"
 import { opencodeAction } from "./opencode.js"
@@ -49,7 +48,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "process-failed", description: "Process exited with a non-zero status" }],
     },
-    run: async (context) => processAction(context as ActionContext),
+    run: processAction,
   }),
   defineAction({
     manifest: {
@@ -70,7 +69,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "script-failed", description: "Script exited with a non-zero status" }],
     },
-    run: async (context) => scriptAction(context as ActionContext),
+    run: scriptAction,
   }),
   defineAction({
     manifest: {
@@ -86,7 +85,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "artifact-missing", description: "Required artifact is absent" }],
     },
-    run: async (context) => artifactExistsAction(context as ActionContext),
+    run: artifactExistsAction,
   }),
   defineAction({
     manifest: {
@@ -108,7 +107,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "marker-missing", description: "Marker text not found in the file" },
       ],
     },
-    run: async (context) => markerAction(context as ActionContext),
+    run: markerAction,
   }),
   defineAction({
     manifest: {
@@ -135,7 +134,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "turn-failed", description: "OpenCode turn failed for an unspecified reason" },
       ],
     },
-    run: async (context) => opencodeAction(context as ActionContext),
+    run: opencodeAction,
   }),
   defineAction({
     manifest: {
@@ -154,7 +153,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "server-unavailable", description: "Server connection is unavailable" },
       ],
     },
-    run: async (context) => openspecTasksAction(context as ActionContext),
+    run: openspecTasksAction,
   }),
   defineAction({
     manifest: {
@@ -171,7 +170,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "artifacts-missing", description: "Required OpenSpec artifacts are absent" }],
     },
-    run: async (context) => openspecArtifactsAction(context as ActionContext),
+    run: openspecArtifactsAction,
   }),
   defineAction({
     manifest: {
@@ -198,15 +197,15 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "config-error", description: "Archive configuration is invalid" },
       ],
     },
-    run: async (context) => archiveChangeAction(context as ActionContext),
+    run: archiveChangeAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/rebase",
       description: "Rebase the current branch onto a base branch with optional squash",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], description: "Git remote name" },
         squash: { types: ["boolean"], default: false, description: "Squash the rebased commits into one" },
         message: { types: ["string"], description: "Literal squash commit message" },
         messageFrom: { types: ["string"], description: "Issue field source for the squash commit message" },
@@ -238,15 +237,15 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "squash-failed", description: "Squash step failed" },
       ],
     },
-    run: async (context) => rebaseAction(context as ActionContext),
+    run: rebaseAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/rebase-status",
       description: "Report the current rebase state of the worktree",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], description: "Git remote name" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -263,16 +262,16 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "rebase-incomplete", description: "Rebase is incomplete or not clean" }],
     },
-    run: async (context) => rebaseStatusAction(context as ActionContext),
+    run: rebaseStatusAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/merge-ready",
       description: "Report whether the worktree can merge into the base branch",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
-        source: { types: ["string"], description: "Source branch name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], required: true, description: "Git remote name" },
+        source: { types: ["string"], required: true, description: "Source branch name" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -287,17 +286,16 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "merge-not-ready", description: "Merge is not ready" }],
     },
-    run: async (context) => mergeReadyAction(context as ActionContext),
+    run: mergeReadyAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/push",
       description: "Push the worktree's source branch to a target branch",
       inputs: {
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        source: { types: ["string"], required: true, description: "Source branch" },
+        target: { types: ["string"], required: true, description: "Target branch" },
+        remote: { types: ["string"], required: true, description: "Git remote name" },
         force: { types: ["boolean"], default: false, description: "Push with --force" },
         forceWithLease: { types: ["boolean"], default: false, description: "Push with --force-with-lease" },
       },
@@ -321,17 +319,16 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "push-failed", description: "Push failed for an unspecified reason" },
       ],
     },
-    run: async (context) => pushAction(context as ActionContext),
+    run: pushAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/create-github-pr",
       description: "Open or update a GitHub pull request for the current branch",
       inputs: {
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
-        remote: { types: ["string"], description: "Git remote name from the delivery profile" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        source: { types: ["string"], required: true, description: "Source branch" },
+        target: { types: ["string"], required: true, description: "Target branch" },
         draft: { types: ["boolean"], default: true, description: "Open the PR as a draft" },
         title: { types: ["string"], description: "Literal PR title" },
         message: { types: ["string"], description: "Alias of title" },
@@ -361,13 +358,14 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "create-pr-failed", description: "Failed to create the PR" },
       ],
     },
-    run: async (context) => createGitHubPrAction(context as ActionContext),
+    run: createGitHubPrAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/mark-github-pr-ready",
       description: "Mark a GitHub pull request ready for review",
       inputs: {
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
         prNumber: { types: ["number"], required: true, description: "Pull request number" },
       },
       outputs: [
@@ -390,18 +388,16 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "mark-ready-failed", description: "Failed to mark the PR ready" },
       ],
     },
-    run: async (context) => markGitHubPrReadyAction(context as ActionContext),
+    run: markGitHubPrReadyAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/merge-github-pr",
       description: "Merge a GitHub pull request via squash",
       inputs: {
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
         method: { types: ["string"], default: "squash", description: "Merge method (only 'squash' is supported)" },
-        prNumber: { types: ["number"], description: "Pull request number; falls back to source branch lookup" },
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
         subject: { types: ["string"], description: "Literal squash commit subject" },
         subjectFrom: { types: ["string"], default: "issue.title", description: "Issue field source for the squash subject" },
       },
@@ -426,14 +422,15 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "merge-failed", description: "Failed to merge the PR" },
       ],
     },
-    run: async (context) => mergeGitHubPrAction(context as ActionContext),
+    run: mergeGitHubPrAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/github-pr-checks",
       description: "Wait for every GitHub pull request check to pass",
       inputs: {
-        prNumber: { types: ["number"], description: "Pull request number; falls back to variables.github.pr.number" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -451,14 +448,15 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "aborted", description: "Polling was cancelled" },
       ],
     },
-    run: async (context) => githubPrChecksAction(context as ActionContext),
+    run: async (context) => githubPrChecksAction(context),
   }),
   defineAction({
     manifest: {
       name: "mohist/github-pr-status",
       description: "Verify a GitHub pull request is in the expected state",
       inputs: {
-        prNumber: { types: ["number"], description: "Pull request number; falls back to variables.github.pr.number" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
         expect: { types: ["string"], default: "open,ready", description: "Comma-separated expected states (open/ready/merged)" },
       },
       outputs: [
@@ -475,13 +473,15 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "pr-status-failed", description: "Pull request status check failed" }],
     },
-    run: async (context) => githubPrStatusAction(context as ActionContext),
+    run: githubPrStatusAction,
   }),
   defineAction({
     manifest: {
       name: "mohist/workspace-prepare",
       description: "Reset the workspace to the expected branch and clean residual state",
-      inputs: {},
+      inputs: {
+        expectedBranch: { types: ["string"], required: true, description: "Expected workspace branch" },
+      },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
         { name: "status", description: "Status discriminator" },
@@ -494,7 +494,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "workspace-setup", description: "Workspace preparation failed" }],
     },
-    run: async (context) => workspacePrepareAction(context as ActionContext),
+    run: workspacePrepareAction,
   }),
 ]
 

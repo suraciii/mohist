@@ -298,11 +298,8 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
 1. **无 manifest 与 defineAction**:registry 是硬编码 name→handler Map,输入靠各
    Action 手写 `stringInput` 解析,无未知键/类型/required 校验,无 catalog 上报,
    profile 保存时无法校验 `uses` 与输入。
-2. **隐式输入通道仍在**:`packages/runner/src/actions/delivery-context.ts` 在
-   `with` 与 `context.variables` 之间混合解析并内嵌 issue-backed 守护规则;多个
-   Action 直接读 `workspace.path` 等。迁移后该模块删除,内置 profile 改为显式传参。
-   随之取消的 authoritative 交叉守护是防呆而非安全边界(边界是 credential),如需
-   保留应作为 server 侧 dispatch 策略另行设计。
+2. **Action 输入边界**:交付类 Action 已通过 manifest 和显式 `with` 输入声明
+   repository、branch、remote 与 PR identity;凭据仍是外部交付的授权边界。
 3. **engine 内按名特判**:executor 的 `PROMISE_PROJECTED_ACTIONS` 与
    `REMOVED_ACTIONS` 名单,目标分别由 `agent-turn` 能力声明与 catalog tombstone
    取代。

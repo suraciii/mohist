@@ -231,22 +231,6 @@ export interface ActionContext {
   title?: string | null
   uses?: string | null
   with?: JsonObject | null
-  /**
-   * Server-top-level-expanded form of the task's `with`, distinct from
-   * the recursively-rendered {@link with}. Placeholders inside nested
-   * sub-trees (e.g. `${{ vars.agent }}` under `task.with.options`)
-   * survive as literal strings. Actions that propagate a sub-tree of
-   * their input to follow-up tasks (via `addTasks`) MUST read that
-   * sub-tree from `rawWith`, never from `with`, so the dispatch-time
-   * variable-expansion contract carries through to every subsequent
-   * dispatch (including retry and rerun). Scalar fields that the action
-   * itself consumes (paths, identifiers) SHOULD continue reading from
-   * the rendered `with`.
-   *
-   * Set by the executor for task dispatches; absent on check contexts
-   * and hand-built test contexts.
-   */
-  rawWith?: JsonObject | null
   variables: JsonObject
   workDir: string
   signal: AbortSignal
