@@ -4,7 +4,6 @@ import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
-import { resolveDeliveryBaseBranch, resolveDeliveryRemote } from "./delivery-context.js"
 import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -56,9 +55,9 @@ export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
 }
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return fail("invalid-input", "Rebase requires the authoritative repository base branch")
-  const remote = resolveDeliveryRemote(context, null)
+  const baseBranch = stringInput(context.with, "baseBranch")
+  if (!baseBranch) return fail("invalid-input", "Rebase requires input 'baseBranch'")
+  const remote = stringInput(context.with, "remote") ?? null
   const squash = booleanInput(context.with, "squash") === true
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const opts = sinkOptions(context)
@@ -350,9 +349,9 @@ export function combinedRebaseGitOutput(outputs: string[]) {
 }
 
 export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return fail("invalid-input", "Rebase status requires the authoritative repository base branch")
-  const remote = resolveDeliveryRemote(context, null)
+  const baseBranch = stringInput(context.with, "baseBranch")
+  if (!baseBranch) return fail("invalid-input", "Rebase status requires input 'baseBranch'")
+  const remote = stringInput(context.with, "remote") ?? null
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const opts = sinkOptions(context)
   const conflicts = await conflictFiles(context, opts)

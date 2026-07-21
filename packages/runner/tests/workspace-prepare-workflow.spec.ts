@@ -97,7 +97,7 @@ function work(workId: string, uses: string, overrides: Partial<RenderedWorkItem>
     stage: "integrate",
     title: workId,
     uses,
-    with: {},
+    with: uses === "mohist/workspace-prepare" ? { expectedBranch: EXPECTED_BRANCH } : {},
     variables: {
       workspace: { path: workspacePath, branch: EXPECTED_BRANCH, changeDir: null },
     },
@@ -131,9 +131,12 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
         },
         errors: [{ code: "conflict" }],
       },
-      "mohist/workspace-prepare": async (ctx) => {
-        dispatched.push(ctx.workId)
-        return await workspacePrepareAction(ctx)
+      "mohist/workspace-prepare": {
+        inputs: { expectedBranch: { types: ["string"], required: true } },
+        run: async (ctx) => {
+          dispatched.push(ctx.workId)
+          return await workspacePrepareAction(ctx)
+        },
       },
       "core/business": async (ctx) => {
         dispatched.push(ctx.workId)

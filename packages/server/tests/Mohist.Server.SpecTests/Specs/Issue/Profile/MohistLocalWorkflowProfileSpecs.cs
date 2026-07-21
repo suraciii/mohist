@@ -58,6 +58,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("mohist/opencode", proposal.Uses);
         Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.Expect));
         Assert.DoesNotContain("\"expect\":", JsonSerializer.Serialize(proposal.With));
+        Assert.Equal("${{ workspace.branch }}", definition.Stages[0].Tasks[0].With!["expectedBranch"]?.GetString());
 
         var build = definition.Stages[1];
         var loadTask = build.Tasks[1];
@@ -91,6 +92,9 @@ public class MohistLocalWorkflowProfileSpecs
         }
 
         var mergeReady = definition.Stages[2].Tasks.Single(t => t.Id == "merge-ready");
+        Assert.Equal("${{ repository.baseBranch }}", mergeReady.With!["baseBranch"]?.GetString());
+        Assert.Equal("${{ workspace.branch }}", mergeReady.With!["source"]?.GetString());
+        Assert.Equal("origin", mergeReady.With!["remote"]?.GetString());
         Assert.NotNull(mergeReady.Recovery);
         var mergeReadyHandler = Assert.Single(mergeReady.Recovery!.Handlers);
         Assert.Equal("canMerge=false", mergeReadyHandler.When);

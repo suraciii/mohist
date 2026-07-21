@@ -26,13 +26,14 @@ Mohist Agent。
   Workflow Session 和 Session 操作语义。
 - [`mohist/pi`](pi.md) —— 通过 Pi 执行一个回合;与 `mohist/opencode` 同层,共享
   模型选项形状与 Session 语义,但安装与信任边界不同。
+- [Git Actions](git.md) —— workspace 准备、rebase、merge readiness 和 push 的显式输入契约。
 
 Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
 
 ## 实装差距
 
 - `mohist/pi` 尚未实装,当前只有产品契约(见 [pi.md](pi.md) 的实装差距小节)。
-- 除 `mohist/opencode` 与 `mohist/pi` 外,其余内置 Action(`mohist/push`、`mohist/rebase`、
-  GitHub PR 系列、openspec 系列、`core/*`)尚无独立契约页,输入输出以实现为准;
-  声明式契约落地后按声明补齐。
-- 保存 Profile 时的输入校验尚未提供,当前未知字段被静默忽略。
+- Git Actions 的输入契约见 [Git Actions](git.md)。GitHub PR、OpenSpec 和 `core/*`
+  的独立产品契约页仍待补齐。
+- Runner 派发时会按 manifest 校验未知字段、必填字段和类型;自定义 Profile 应在 `with`
+  中显式绑定需要的 Variable 值。

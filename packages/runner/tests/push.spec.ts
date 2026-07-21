@@ -43,7 +43,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     stage: "integrate",
     title: "Push prepared commit",
     uses: "mohist/push",
-    with: withOverrides,
+     with: { source: "mo/issue-99", target: "master", remote: "origin", ...withOverrides },
     variables: {
       project: { path: WORKSPACE_PATH },
       issue: { title: "Push action issue", number: 99 },
@@ -76,15 +76,15 @@ describe("mohist/push", () => {
     expect(resolved.kind === "definition" ? resolved.definition.manifest.name : null).toBe("mohist/push")
   })
 
-  it("IssueRunWithoutRepositoryBase_FailsWithoutProjectOrMainFallback", async () => {
+  it("MissingSource_FailsWithoutVariableFallback", async () => {
     const calls = installGit(async () => { throw new Error("git must not run") })
-    const result = await pushAction(context({}, {
+    const result = await pushAction(context({ source: null }, {
       project: { path: WORKSPACE_PATH, defaultBranch: "main" },
       repository: { name: "web", gitUrl: "https://example.com/web.git", baseBranch: null },
     }))
 
     expect(result.error).toBeDefined()
-    expect(result.error?.message).toMatch(/authoritative repository base branch/)
+    expect(result.error?.message).toContain("source")
     expect(calls).toHaveLength(0)
   })
 
@@ -309,8 +309,13 @@ describe("mohist/push", () => {
     })
   })
 
-  it("IssueRun_RejectsConflictingDeliveryOverridesBeforeGit", async () => {
-    const calls = installGit(async () => { throw new Error("git must not run") })
+  it("ExplicitInputs_WinOverConflictingDeliveryVariables", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      if (command === "rev-parse other") return ok("explicit-sha\n")
+      if (command === "push upstream other:release") return ok("pushed")
+      return fail(`unexpected git call: ${command}`)
+    })
     const result = await pushAction(context(
       { remote: "upstream", source: "other", target: "release" },
       {
@@ -323,8 +328,8 @@ describe("mohist/push", () => {
       },
     ))
 
-    expect(result.error).toBeDefined()
-    expect(calls).toEqual([])
+    expect(result.error).toBeUndefined()
+    expect(workspaceCalls(calls)).toEqual(["rev-parse other", "push upstream other:release"])
   })
 
   it("ExplicitSourceOption_PushesThatRefAsSource", async () => {

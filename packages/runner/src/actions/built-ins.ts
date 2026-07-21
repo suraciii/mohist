@@ -205,8 +205,8 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/rebase",
       description: "Rebase the current branch onto a base branch with optional squash",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], description: "Git remote name" },
         squash: { types: ["boolean"], default: false, description: "Squash the rebased commits into one" },
         message: { types: ["string"], description: "Literal squash commit message" },
         messageFrom: { types: ["string"], description: "Issue field source for the squash commit message" },
@@ -245,8 +245,8 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/rebase-status",
       description: "Report the current rebase state of the worktree",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], description: "Git remote name" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -270,9 +270,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/merge-ready",
       description: "Report whether the worktree can merge into the base branch",
       inputs: {
-        baseBranch: { types: ["string"], description: "Base branch name; falls back to delivery context" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
-        source: { types: ["string"], description: "Source branch name; falls back to delivery context" },
+        baseBranch: { types: ["string"], required: true, description: "Base branch name" },
+        remote: { types: ["string"], required: true, description: "Git remote name" },
+        source: { types: ["string"], required: true, description: "Source branch name" },
       },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
@@ -294,10 +294,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/push",
       description: "Push the worktree's source branch to a target branch",
       inputs: {
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
-        remote: { types: ["string"], description: "Git remote name; falls back to delivery context" },
+        source: { types: ["string"], required: true, description: "Source branch" },
+        target: { types: ["string"], required: true, description: "Target branch" },
+        remote: { types: ["string"], required: true, description: "Git remote name" },
         force: { types: ["boolean"], default: false, description: "Push with --force" },
         forceWithLease: { types: ["boolean"], default: false, description: "Push with --force-with-lease" },
       },
@@ -481,7 +480,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
     manifest: {
       name: "mohist/workspace-prepare",
       description: "Reset the workspace to the expected branch and clean residual state",
-      inputs: {},
+      inputs: {
+        expectedBranch: { types: ["string"], required: true, description: "Expected workspace branch" },
+      },
       outputs: [
         { name: "kind", description: "Output kind discriminator" },
         { name: "status", description: "Status discriminator" },

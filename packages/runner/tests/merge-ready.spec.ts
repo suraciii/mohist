@@ -43,7 +43,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     stage: "integrate",
     title: "Merge readiness check",
     uses: "mohist/merge-ready",
-    with: withOverrides,
+     with: { baseBranch: "main", source: "mohist/run-wr-merge-ready-1", remote: "origin", ...withOverrides },
     variables: {
       project: { path: WORKSPACE_PATH },
       issue: { title: "Merge ready issue", number: 217 },
@@ -297,38 +297,15 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
     expect(cmds).not.toContain("rev-parse HEAD")
   })
 
-  it("SourceFallsBackToHeadWhenWorkspaceBranchMissing", async () => {
-    const calls = installGit(async (_call, history) => {
-      const command = history[history.length - 1].args.join(" ")
-      switch (command) {
-        case "rev-parse origin/main":
-          return ok("base-sha\n")
-        case "rev-parse HEAD":
-          return ok("head-sha\n")
-        case "merge-base origin/main HEAD":
-          return ok("merge-base-sha\n")
-        case "merge-base --is-ancestor origin/main HEAD":
-          return ok("")
-        default:
-          return fail(`unexpected git call: ${command}`)
-      }
-    })
+  it("MissingSource_DoesNotUseWorkspaceVariableOrRunGit", async () => {
+    const calls = installGit(async () => { throw new Error("git must not run") })
+    const result = await mergeReadyAction(context({ source: null }, {
+      workspace: { path: WORKSPACE_PATH, branch: "different-branch", changeDir: null },
+    }))
 
-    const result = await mergeReadyAction(
-      context({}, {
-        repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" },
-        workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null },
-      }),
-    )
-    const output = result.output as Record<string, unknown>
-
-    expect(result.error).toBeUndefined()
-    expect(output.canMerge).toBe(true)
-    expect(output.candidateHeadSha).toBe("head-sha")
-
-    const cmds = workspaceCalls(calls)
-    expect(cmds).toContain("rev-parse HEAD")
-    expect(cmds).toContain("merge-base --is-ancestor origin/main HEAD")
+    expect(result.error).toMatchObject({ code: "invalid-input" })
+    expect(result.error?.message).toContain("source")
+    expect(calls).toEqual([])
   })
 
   it("PreflightIsRefOnly_NoWorkingTreeMutation", async () => {

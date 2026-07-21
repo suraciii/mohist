@@ -563,6 +563,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(
             new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "push", "open-draft-pr" },
             planIds);
+        foreach (var stage in definition.Stages)
+        {
+            var prepare = stage.Tasks.Single(t => t.Id == "workspace-prepare");
+            Assert.Equal("${{ workspace.branch }}", prepare.With!["expectedBranch"]?.GetString());
+        }
         Assert.Contains("mohist/create-github-pr", definition.Stages[0].Tasks.Select(t => t.Uses).ToArray());
 
         var checkTasks = JsonSerializer.Serialize(definition.Stages[2].Tasks);

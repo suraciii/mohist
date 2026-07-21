@@ -2,7 +2,6 @@ import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
-import { resolveDeliveryRemote, resolvePushSource, resolvePushTarget } from "./delivery-context.js"
 import { fail, succeed } from "./action-result.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -40,11 +39,12 @@ function networkOptions(context: ActionContext): GitOptions | undefined {
 }
 
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
-  const target = resolvePushTarget(context)
-  const source = target ? resolvePushSource(context, target) : null
-  const remote = resolveDeliveryRemote(context)
-  if (!target) return fail("invalid-input", "Push requires the authoritative repository base branch or workflow branch")
-  if (!source || !remote) return fail("invalid-input", "Push requires the authoritative workspace branch and repository origin")
+  const source = stringInput(context.with, "source")
+  const target = stringInput(context.with, "target")
+  const remote = stringInput(context.with, "remote")
+  if (!source) return fail("invalid-input", "Push requires input 'source'")
+  if (!target) return fail("invalid-input", "Push requires input 'target'")
+  if (!remote) return fail("invalid-input", "Push requires input 'remote'")
   const force = booleanInput(context.with, "force") === true
   const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true
   const refspec = `${source}:${target}`

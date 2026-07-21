@@ -1,7 +1,6 @@
 import { git as defaultGit, type GitOptions } from "./git.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { stringAt } from "../core/json-path.js"
-import { resolveDeliveryBaseBranch, resolveDeliveryRemote, resolveDeliverySource } from "./delivery-context.js"
+import { stringInput } from "../core/json.js"
 import { fail, succeed } from "./action-result.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
@@ -20,14 +19,14 @@ export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
 }
 
 export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
-  const baseBranch = resolveDeliveryBaseBranch(context, "baseBranch")
-  if (!baseBranch) return fail("invalid-input", "Merge readiness requires the authoritative repository base branch")
-  const remote = resolveDeliveryRemote(context)
-  if (!remote) return fail("invalid-input", "Merge readiness requires the authoritative repository origin")
+  const baseBranch = stringInput(context.with, "baseBranch")
+  if (!baseBranch) return fail("invalid-input", "Merge readiness requires input 'baseBranch'")
+  const remote = stringInput(context.with, "remote")
+  if (!remote) return fail("invalid-input", "Merge readiness requires input 'remote'")
   const baseRef = `${remote}/${baseBranch}`
-  const source = resolveDeliverySource(context)
-  if (!source) return fail("invalid-input", "Merge readiness requires the authoritative workspace branch")
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const source = stringInput(context.with, "source")
+  if (!source) return fail("invalid-input", "Merge readiness requires input 'source'")
+  const workDir = context.workDir
   const checkedAt = new Date().toISOString()
   const opts: GitOptions | undefined = context.log ? { sink: { log: context.log, source: "action:merge-ready" } } : undefined
 
