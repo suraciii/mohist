@@ -1,4 +1,5 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
@@ -116,7 +117,7 @@ function emptyStatusOutput(message: string): GitHubPrStatusOutput {
   }
 }
 
-export async function githubPrStatusAction(context: ActionContext): Promise<ActionResult> {
+export async function githubPrStatusAction(context: ActionInvocationContext): Promise<ActionResult> {
   const requestedPrNumber = numberInput(context.with, "prNumber")
   if (requestedPrNumber === undefined || !Number.isFinite(requestedPrNumber)) {
     return fail("invalid-input", "GitHub PR status check requires 'prNumber'")
@@ -231,7 +232,7 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
   }
 }
 
-function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }

@@ -1,6 +1,7 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionInvocationContext } from "../actions/context.js"
 import { isActionFailure } from "../actions/action-result.js"
 import { numberInput, objectInput } from "../core/json.js"
 import { errorMessage, isNotFoundError } from "../core/errors.js"
@@ -46,10 +47,10 @@ export class WorktreeProbeError extends Error {
   }
 }
 
-export type CleanupAgentAction = (context: ActionContext) => Promise<ActionResult>
+export type CleanupAgentAction = (context: ActionInvocationContext) => Promise<ActionResult>
 
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
-type BaseContextFactory = (work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal) => Omit<ActionContext, "with" | "workDir">
+type BaseContextFactory = (work: RenderedWorkItem, signal: AbortSignal) => Omit<ActionInvocationContext, "with" | "workDir" | "rawWith">
 
 export type ContextParts = {
   baseContext: BaseContextFactory
@@ -342,11 +343,12 @@ export async function runAgentCleanupAttempt(
   cleanupAction: CleanupAgentAction,
   contextParts: ContextParts,
 ): Promise<WorkItemResult | "ok"> {
-  const cleanupContext: ActionContext = {
-    ...contextParts.baseContext(work, variables, signal),
+  const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt)
+  const cleanupContext: ActionInvocationContext = {
+    ...contextParts.baseContext(work, signal),
     workDir,
     workType: "task",
-    with: buildCleanupWith(work, renderedWith, snapshot, attempt),
+    with: cleanupWith as ActionInvocationContext["with"],
   }
 
   let result: ActionResult

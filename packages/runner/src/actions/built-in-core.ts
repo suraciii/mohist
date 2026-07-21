@@ -1,13 +1,14 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { timeoutSignal } from "../system/timeout-signal.js"
 import { resolveActionPath } from "./expectations.js"
 import { fail, succeed } from "./action-result.js"
 
-export async function processAction(context: ActionContext): Promise<ActionResult> {
+export async function processAction(context: ActionInvocationContext): Promise<ActionResult> {
   const command = stringInput(context.with, "command")
   if (!command) return fail("invalid-input", "Process action requires command")
   const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
@@ -21,7 +22,7 @@ export async function processAction(context: ActionContext): Promise<ActionResul
   return fail("process-failed", result.stderr.trim() || `Process exited with code ${result.exitCode}`, { exitCode: result.exitCode })
 }
 
-export async function scriptAction(context: ActionContext): Promise<ActionResult> {
+export async function scriptAction(context: ActionInvocationContext): Promise<ActionResult> {
   const run = stringInput(context.with, "run")
   if (!run?.trim()) return fail("invalid-input", "Script action requires 'run'")
   const shell = stringInput(context.with, "shell") || (process.platform === "win32" ? "pwsh" : "bash")
@@ -41,7 +42,7 @@ export async function scriptAction(context: ActionContext): Promise<ActionResult
   }
 }
 
-export async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
+export async function artifactExistsAction(context: ActionInvocationContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return fail("invalid-input", "Artifact check requires 'path'")
   const found = exists(path)
@@ -49,7 +50,7 @@ export async function artifactExistsAction(context: ActionContext): Promise<Acti
   return found ? succeed(output) : fail("artifact-missing", `Artifact missing: ${path}`)
 }
 
-export async function markerAction(context: ActionContext): Promise<ActionResult> {
+export async function markerAction(context: ActionInvocationContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
   if (!path || !expect) return fail("invalid-input", "Marker check requires 'path' and 'expect'")
@@ -81,6 +82,6 @@ function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
 }
 
-function logLineOptions(context: ActionContext, source: string): CommandLineOptions | undefined {
+function logLineOptions(context: ActionInvocationContext, source: string): CommandLineOptions | undefined {
   return context.log ? { onLine: (line) => context.log!.write(source, line) } : undefined
 }

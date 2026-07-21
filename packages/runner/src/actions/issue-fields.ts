@@ -1,5 +1,5 @@
 import { runCommand } from "../system/process.js"
-import type { ActionContext } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 
 type CommandRunner = typeof runCommand
 
@@ -20,12 +20,12 @@ export function isIssueFieldSource(source: string | undefined): source is IssueF
   return source === "issue.title" || source === "issue.body"
 }
 
-export async function resolveIssueField(context: ActionContext, source: IssueFieldSource): Promise<string> {
+export async function resolveIssueField(context: ActionInvocationContext, source: IssueFieldSource): Promise<string> {
   const fields = await resolveIssueFields(context)
   return source === "issue.title" ? fields.title : fields.body
 }
 
-export async function resolveIssueFields(context: ActionContext): Promise<IssueFields> {
+export async function resolveIssueFields(context: ActionInvocationContext): Promise<IssueFields> {
   const issueNumber = resolveIssueNumber(context)
   if (issueNumber === null) {
     throw new Error("issue field source requires an issue number")
@@ -68,12 +68,12 @@ export function parseIssueFields(output: string): IssueFields | null {
   }
 }
 
-function resolveIssueNumber(context: ActionContext): number | null {
+function resolveIssueNumber(context: ActionInvocationContext): number | null {
   if (typeof context.issueNumber === "number" && context.issueNumber > 0) return context.issueNumber
   return null
 }
 
-function resolveProjectId(context: ActionContext): string | null {
+function resolveProjectId(context: ActionInvocationContext): string | null {
   return context.projectId ?? null
 }
 

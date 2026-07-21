@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionError, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionError, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
@@ -20,6 +20,7 @@ import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enfo
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
 import { fail as actionFail, isActionFailure } from "../actions/action-result.js"
 import type { ActionDefinition } from "../actions/manifest.js"
+import type { ActionInvocationContext, ValidatedActionContext } from "../actions/context.js"
 import { validateActionInput } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughTurnFact } from "../actions/result-validation.js"
 import {
@@ -188,9 +189,9 @@ export class WorkExecutor {
       }
       let rawResult: unknown
       try {
-        rawResult = await definition.run({
-          ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
-          with: validatedWith as never,
+        rawResult = await runValidatedAction(definition, {
+          ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
+          with: validatedWith,
           rawWith: work.with,
           workDir,
         })
@@ -237,7 +238,7 @@ export class WorkExecutor {
         variables,
         signal,
         resolveCleanupAgentAction(legacyHandler(definition)),
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
+        { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
         log,
       )
       if (worktreeResult.status !== "completed") {
@@ -260,7 +261,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
+      context: baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -429,14 +430,13 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
 
 export function baseContext(
   work: RenderedWorkItem,
-  variables: JsonObject,
   signal: AbortSignal,
   connection: ServerConnection,
   log: TaskLogger | null = null,
   openCodeRuntime: OpenCodeRuntime | null = null,
   agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
   runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
-): Omit<ActionContext, "with" | "workDir"> {
+): Omit<ActionInvocationContext, "with" | "workDir" | "rawWith"> {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   return {
     workflowRunId: work.workflowRunId,
@@ -445,7 +445,6 @@ export function baseContext(
     stage: work.stage,
     title: work.title,
     uses: work.uses,
-    variables,
     signal,
     recovery: work.recovery,
     projectId: work.projectId,
@@ -510,7 +509,11 @@ function validationFailureResult(work: RenderedWorkItem, error: ActionError): Wo
 }
 
 function legacyHandler(definition: ActionDefinition) {
-  return async (context: ActionContext): Promise<ActionResult> => definition.run(context as never)
+  return async (context: ActionInvocationContext): Promise<ActionResult> => await runValidatedAction(definition, context)
+}
+
+function runValidatedAction(definition: ActionDefinition, context: ActionInvocationContext): Promise<ActionResult> {
+  return definition.run(context as ValidatedActionContext)
 }
 
 function toCheckStatus(status: string) {

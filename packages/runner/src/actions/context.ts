@@ -40,17 +40,10 @@ export type ActionInvocationContext = Omit<ActionContext, "with" | "variables"> 
 /**
  * Manifest-typed variant of {@link ActionInvocationContext}. The Runner
  * substitutes the validated `with` shape for the selected manifest
- * before calling `ActionDefinition.run`. `rawWith` is intentionally
- * excluded from the default property set so the type-level `Omit`
- * stays explicit; the executor passes the opaque raw subtree only
- * when the manifest declares a composite carrier (see T-001 notes
- * for `mohist/openspec-tasks`).
+ * before calling `ActionDefinition.run`.
  */
-export type ValidatedActionContext<M extends ActionManifest = ActionManifest> = Omit<
-  ActionInvocationContext,
-  "with"
-> & {
-  readonly with: ValidatedWith<M>
+export type ValidatedActionContext<M extends ActionManifest = ActionManifest> = Omit<ActionInvocationContext, "with"> & {
+  readonly with: JsonObject & ValidatedWith<M>
 }
 
 export function isVariableFreeActionContext(value: unknown): value is ActionInvocationContext {

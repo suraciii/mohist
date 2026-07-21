@@ -2,7 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { ActionContext, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionInvocationContext } from "../src/actions/context.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
@@ -30,7 +31,7 @@ afterEach(async () => {
 
 describe("WorkExecutor rawWith", () => {
   it("exposes rawWith as server-expanded form and with as recursively-rendered form", async () => {
-    let capturedContext: ActionContext | null = null
+    let capturedContext: ActionInvocationContext | null = null
 
     const registry = new ActionRegistry([
       defineTestAction("test/capture-context", async (ctx) => {
@@ -77,10 +78,11 @@ describe("WorkExecutor rawWith", () => {
 
     expect((rawWith.task as JsonObject).with).toEqual({ options: placeholder })
     expect((renderedWith.task as JsonObject).with).toEqual({ options: agentObject })
+    expect(capturedContext).not.toHaveProperty("variables")
   })
 
-  it("propagates parent issue context only through ActionContext", async () => {
-    let capturedContext: ActionContext | null = null
+  it("preserves parent issue context without exposing Variables", async () => {
+    let capturedContext: ActionInvocationContext | null = null
     const registry = new ActionRegistry([
       defineTestAction("test/capture-parent-context", async (ctx) => {
         capturedContext = ctx
@@ -113,6 +115,6 @@ describe("WorkExecutor rawWith", () => {
     expect(result.status).toBe("completed")
     expect(capturedContext!.parentIssueContext).toEqual({ title: "Parent", body: "Parent body" })
     expect(capturedContext!.with).toEqual({ prompt: "child prompt" })
-    expect(capturedContext!.variables).not.toHaveProperty("parentIssueContext")
+    expect(capturedContext).not.toHaveProperty("variables")
   })
 })

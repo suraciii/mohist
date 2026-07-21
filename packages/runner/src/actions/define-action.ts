@@ -21,17 +21,17 @@ export class ActionDefinitionError extends Error {
   }
 }
 
-interface DefineActionInput {
-  readonly manifest: ActionManifest
-  readonly run: ActionDefinition["run"]
+interface DefineActionInput<M extends ActionManifest> {
+  readonly manifest: M
+  readonly run: ActionDefinition<M>["run"]
 }
 
-export function defineAction<M extends ActionManifest>(input: DefineActionInput): ActionDefinition<M> {
+export function defineAction<M extends ActionManifest>(input: DefineActionInput<M>): ActionDefinition<M> {
   validateManifest(input.manifest)
   if (typeof input.run !== "function") {
     throw new ActionDefinitionError(`Action '${input.manifest.name}' must provide an execution function`)
   }
-  const frozenManifest = deepFreezeManifest(input.manifest)
+  const frozenManifest = deepFreezeManifest(input.manifest) as M
   const definition = {
     manifest: frozenManifest,
     run: async (context: ValidatedActionContext<M>) => input.run(context),

@@ -1,4 +1,5 @@
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
@@ -17,12 +18,12 @@ type GhRunner = typeof runCommand
  */
 const ACTION_SOURCE = "action:create-github-pr"
 
-function networkGhOptions(context: ActionContext): CommandLineOptions | undefined {
+function networkGhOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
-export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
+export async function createGitHubPrAction(context: ActionInvocationContext): Promise<ActionResult> {
   const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
   const source = typeof context.with?.["source"] === "string" ? context.with["source"] : undefined
   const target = typeof context.with?.["target"] === "string" ? context.with["target"] : undefined

@@ -1,4 +1,3 @@
-import type { ActionContext, ActionResult } from "../core/types.js"
 import { defineAction } from "./define-action.js"
 import type { ActionDefinition } from "./manifest.js"
 import { opencodeAction } from "./opencode.js"
@@ -49,7 +48,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "process-failed", description: "Process exited with a non-zero status" }],
     },
-    run: async (context) => processAction(context as ActionContext),
+    run: processAction,
   }),
   defineAction({
     manifest: {
@@ -70,7 +69,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "script-failed", description: "Script exited with a non-zero status" }],
     },
-    run: async (context) => scriptAction(context as ActionContext),
+    run: scriptAction,
   }),
   defineAction({
     manifest: {
@@ -86,7 +85,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "artifact-missing", description: "Required artifact is absent" }],
     },
-    run: async (context) => artifactExistsAction(context as ActionContext),
+    run: artifactExistsAction,
   }),
   defineAction({
     manifest: {
@@ -108,7 +107,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "marker-missing", description: "Marker text not found in the file" },
       ],
     },
-    run: async (context) => markerAction(context as ActionContext),
+    run: markerAction,
   }),
   defineAction({
     manifest: {
@@ -135,7 +134,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "turn-failed", description: "OpenCode turn failed for an unspecified reason" },
       ],
     },
-    run: async (context) => opencodeAction(context as ActionContext),
+    run: opencodeAction,
   }),
   defineAction({
     manifest: {
@@ -154,7 +153,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "server-unavailable", description: "Server connection is unavailable" },
       ],
     },
-    run: async (context) => openspecTasksAction(context as ActionContext),
+    run: openspecTasksAction,
   }),
   defineAction({
     manifest: {
@@ -171,7 +170,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "artifacts-missing", description: "Required OpenSpec artifacts are absent" }],
     },
-    run: async (context) => openspecArtifactsAction(context as ActionContext),
+    run: openspecArtifactsAction,
   }),
   defineAction({
     manifest: {
@@ -198,7 +197,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "config-error", description: "Archive configuration is invalid" },
       ],
     },
-    run: async (context) => archiveChangeAction(context as ActionContext),
+    run: archiveChangeAction,
   }),
   defineAction({
     manifest: {
@@ -238,7 +237,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "squash-failed", description: "Squash step failed" },
       ],
     },
-    run: async (context) => rebaseAction(context as ActionContext),
+    run: rebaseAction,
   }),
   defineAction({
     manifest: {
@@ -263,7 +262,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "rebase-incomplete", description: "Rebase is incomplete or not clean" }],
     },
-    run: async (context) => rebaseStatusAction(context as ActionContext),
+    run: rebaseStatusAction,
   }),
   defineAction({
     manifest: {
@@ -287,7 +286,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "merge-not-ready", description: "Merge is not ready" }],
     },
-    run: async (context) => mergeReadyAction(context as ActionContext),
+    run: mergeReadyAction,
   }),
   defineAction({
     manifest: {
@@ -320,7 +319,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "push-failed", description: "Push failed for an unspecified reason" },
       ],
     },
-    run: async (context) => pushAction(context as ActionContext),
+    run: pushAction,
   }),
   defineAction({
     manifest: {
@@ -359,7 +358,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "create-pr-failed", description: "Failed to create the PR" },
       ],
     },
-    run: async (context) => createGitHubPrAction(context as ActionContext),
+    run: createGitHubPrAction,
   }),
   defineAction({
     manifest: {
@@ -389,7 +388,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "mark-ready-failed", description: "Failed to mark the PR ready" },
       ],
     },
-    run: async (context) => markGitHubPrReadyAction(context as ActionContext),
+    run: markGitHubPrReadyAction,
   }),
   defineAction({
     manifest: {
@@ -423,7 +422,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "merge-failed", description: "Failed to merge the PR" },
       ],
     },
-    run: async (context) => mergeGitHubPrAction(context as ActionContext),
+    run: mergeGitHubPrAction,
   }),
   defineAction({
     manifest: {
@@ -473,7 +472,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "pr-status-failed", description: "Pull request status check failed" }],
     },
-    run: async (context) => githubPrStatusAction(context as ActionContext),
+    run: githubPrStatusAction,
   }),
   defineAction({
     manifest: {
@@ -494,7 +493,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
       errors: [{ code: "workspace-setup", description: "Workspace preparation failed" }],
     },
-    run: async (context) => workspacePrepareAction(context as ActionContext),
+    run: workspacePrepareAction,
   }),
 ]
 

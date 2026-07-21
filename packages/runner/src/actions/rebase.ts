@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { exists } from "../system/process.js"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
@@ -35,11 +36,11 @@ let pathExists: ExistsChecker = exists
  */
 const ACTION_SOURCE = "action:rebase"
 
-function sinkOptions(context: ActionContext): GitOptions | undefined {
+function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
-function networkOptions(context: ActionContext): GitOptions | undefined {
+function networkOptions(context: ActionInvocationContext): GitOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
@@ -54,7 +55,7 @@ export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
   pathExists = checker ?? exists
 }
 
-export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
+export async function rebaseAction(context: ActionInvocationContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch")
   if (!baseBranch) return fail("invalid-input", "Rebase requires input 'baseBranch'")
   const remote = stringInput(context.with, "remote") ?? null
@@ -120,7 +121,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, result.combinedOutput, "conflict", 1, true)
 }
 
-async function resolveSquashMessage(context: ActionContext): Promise<{ kind: "ok"; message: string | undefined } | { kind: "failure"; message: string }> {
+async function resolveSquashMessage(context: ActionInvocationContext): Promise<{ kind: "ok"; message: string | undefined } | { kind: "failure"; message: string }> {
   const literal = stringInput(context.with, "message")
   if (literal !== undefined) return { kind: "ok", message: literal }
   const source = stringInput(context.with, "messageFrom")
@@ -136,7 +137,7 @@ async function resolveSquashMessage(context: ActionContext): Promise<{ kind: "ok
 }
 
 interface SquashRequest {
-  context: ActionContext
+  context: ActionInvocationContext
   baseBranch: string
   remote: string | null
   baseRef: string
@@ -332,15 +333,15 @@ export async function commitRebasePendingChanges(workDir: string, message: strin
   return await commitPendingChanges(workDir, message, signal)
 }
 
-export async function abortRebaseIfInProgressAction(context: ActionContext) {
+export async function abortRebaseIfInProgressAction(context: ActionInvocationContext) {
   return await abortRebaseIfInProgress(context)
 }
 
-export async function rebaseConflictFiles(context: ActionContext) {
+export async function rebaseConflictFiles(context: ActionInvocationContext) {
   return await conflictFiles(context)
 }
 
-export async function verifyRebaseCompleteAction(context: ActionContext, baseBranch: string) {
+export async function verifyRebaseCompleteAction(context: ActionInvocationContext, baseBranch: string) {
   return await verifyRebaseComplete(context, baseBranch)
 }
 
@@ -348,7 +349,7 @@ export function combinedRebaseGitOutput(outputs: string[]) {
   return combinedGitOutput(outputs)
 }
 
-export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
+export async function rebaseStatusAction(context: ActionInvocationContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch")
   if (!baseBranch) return fail("invalid-input", "Rebase status requires input 'baseBranch'")
   const remote = stringInput(context.with, "remote") ?? null
@@ -376,13 +377,13 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
   return verified ? succeed(output) : fail("rebase-incomplete", "Rebase is not complete or not clean")
 }
 
-async function conflictFiles(context: ActionContext, opts?: GitOptions) {
+async function conflictFiles(context: ActionInvocationContext, opts?: GitOptions) {
   const status = await git(context.workDir, ["diff", "--name-only", "--diff-filter=U"], context.signal, opts)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
 }
 
-async function verifyRebaseComplete(context: ActionContext, baseBranch: string) {
+async function verifyRebaseComplete(context: ActionInvocationContext, baseBranch: string) {
   const opts = sinkOptions(context)
   const rebaseInProgress = await isRebaseInProgress(context, opts)
   const conflicts = await conflictFiles(context, opts)
@@ -426,13 +427,13 @@ async function commitPendingChanges(workDir: string, message: string, signal: Ab
   return await git(workDir, ["commit", "-m", message], signal, opts)
 }
 
-async function abortRebaseIfInProgress(context: ActionContext, opts?: GitOptions) {
+async function abortRebaseIfInProgress(context: ActionInvocationContext, opts?: GitOptions) {
   const inProgress = await isRebaseInProgress(context, opts)
   if (!inProgress) return okGitResult()
   return await git(context.workDir, ["rebase", "--abort"], context.signal, opts)
 }
 
-async function isRebaseInProgress(context: ActionContext, opts?: GitOptions) {
+async function isRebaseInProgress(context: ActionInvocationContext, opts?: GitOptions) {
   const merge = await git(context.workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal, opts)
   if (merge.success && pathExists(resolveGitPath(context.workDir, merge.stdout.trim()))) return true
   const apply = await git(context.workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal, opts)

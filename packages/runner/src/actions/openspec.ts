@@ -3,7 +3,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
-import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
+import type { ActionResult, JsonObject, JsonValue } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
@@ -20,7 +21,7 @@ const ARCHIVE_CHECKPOINT_VERSION = 1
  */
 const ACTION_SOURCE = "action:openspec"
 
-function sinkOptions(context: ActionContext): GitOptions | undefined {
+function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
@@ -69,7 +70,7 @@ function isCrossDeviceError(err: unknown): boolean {
 
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
-export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
+export async function openspecTasksAction(context: ActionInvocationContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return fail("invalid-input", "OpenSpec task loader requires 'path'")
   if (!exists(path)) return fail("missing-source", `tasks.json not found: ${path}`)
@@ -98,7 +99,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   return succeed({ loaded: tasks.length })
 }
 
-export async function openspecArtifactsAction(context: ActionContext): Promise<ActionResult> {
+export async function openspecArtifactsAction(context: ActionInvocationContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
   if (!changeDir) return fail("invalid-input", "OpenSpec artifacts check requires 'changeDir'")
 
@@ -129,7 +130,7 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
   return fail("artifacts-missing", `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`)
 }
 
-export async function archiveChangeAction(context: ActionContext): Promise<ActionResult> {
+export async function archiveChangeAction(context: ActionInvocationContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
   if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
@@ -321,7 +322,7 @@ interface ArchiveCheckpoint {
   destination: string
 }
 
-async function resolveArchiveCheckpoint(context: ActionContext, sourceRel: string): Promise<
+async function resolveArchiveCheckpoint(context: ActionInvocationContext, sourceRel: string): Promise<
   | { kind: "ok"; path: string; value: ArchiveCheckpoint | null }
   | { kind: "failure"; result: ActionResult }
 > {
@@ -385,7 +386,7 @@ function validateCheckpointDestination(workDir: string, archiveDir: string, dest
   return { kind: "ok", path }
 }
 
-function resolveChangeDir(context: ActionContext) {
+function resolveChangeDir(context: ActionInvocationContext) {
   const changeDir = stringInput(context.with, "changeDir")
   if (!changeDir?.trim()) return undefined
   return resolveActionPath(context.workDir, changeDir)

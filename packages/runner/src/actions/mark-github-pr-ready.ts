@@ -1,5 +1,6 @@
 import { numberInput } from "../core/json.js"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { combinedGhOutput, parsePrViewWithDraft } from "./github-pr-parse.js"
@@ -12,7 +13,7 @@ import { fail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:mark-github-pr-ready"
 
-export async function markGitHubPrReadyAction(context: ActionContext): Promise<ActionResult> {
+export async function markGitHubPrReadyAction(context: ActionInvocationContext): Promise<ActionResult> {
   const prNumber = numberInput(context.with, "prNumber")
   const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
   if (prNumber === undefined) {
@@ -132,7 +133,7 @@ function createRecorder(steps: GitHubPrStep[]) {
   }
 }
 
-function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
   if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
   return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }

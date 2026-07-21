@@ -1,9 +1,10 @@
 import { git as defaultGit, type GitOptions } from "./git.js"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionResult, JsonObject } from "../core/types.js"
+import type { ActionInvocationContext } from "./context.js"
 import { stringInput } from "../core/json.js"
 import { fail, succeed } from "./action-result.js"
 
-export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
+export type ActionHandler = (context: ActionInvocationContext) => Promise<ActionResult>
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
   stdout: string
@@ -18,7 +19,7 @@ export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
 }
 
-export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
+export async function mergeReadyAction(context: ActionInvocationContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch")
   if (!baseBranch) return fail("invalid-input", "Merge readiness requires input 'baseBranch'")
   const remote = stringInput(context.with, "remote")
