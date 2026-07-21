@@ -189,6 +189,12 @@ AgentSession SHALL persist at most 128 immutable recovery receipts. A receipt SH
 - **THEN** it MAY steer the already-active OpenCode turn under existing behavior
 - **AND** there SHALL be no state in which the Follow-up can start an idle Prompt before the Workflow Prompt is admitted
 
+#### Scenario: Pi Session commands remain outside this issue
+
+- **WHEN** Follow-up, Compact, Reset, or Cancel targets a Pi-bound AgentSession before Pi Session-command routing ships
+- **THEN** the command SHALL return the existing unavailable or not-started result and MUST NOT invoke OpenCode
+- **AND** it MUST NOT mutate the binding, acquire a lasting command lease, or append/fence an Action outbox stream
+
 ### Requirement: Pi turn facts populate the existing Session audit record
 
 The AgentSession authority SHALL issue one opaque stable Action stream identity for each physical Workflow binding and initialize its applied cursor to `0`; the Runner MUST NOT derive or choose this identity. Workflow open SHALL return current stream state and SHALL atomically backfill one stable identity at cursor `0` when a pre-change OpenCode binding has none, without changing binding or lineage. First attach and every successful runtime rebind SHALL return a fresh identity at cursor `0`; idempotent open/attach SHALL return the existing identity. An unbound Session SHALL have no stream until attach. Action events SHALL carry both this identity and the physical binding, use sequence `1` for the first event, and be accepted only while both values identify the current binding.
