@@ -32,9 +32,32 @@ Activity entries for artifact-recorded events SHALL identify the recorded artifa
 - **AND** it SHALL communicate that the identified artifact was recorded
 - **AND** the user SHALL NOT need to expand event detail to discover which artifact the event concerns
 
-### Requirement: Comment rows show truthful author attribution
+### Requirement: New comments record a declared author
 
-Every issue comment row SHALL display its recorded author alongside its creation time when author data is available. When the comment contract provides no author, the row SHALL display the exact fallback `Unknown author`. The UI SHALL NOT infer an author from the current viewer, request channel, client type, or an unauthenticated role. Attribution SHALL remain visible on desktop and phone-width viewports and SHALL be visually associated with the corresponding comment body.
+Every new issue comment SHALL include a nonblank author label declared by the caller. The comment command SHALL trim, validate, persist, and return that label with the comment. Web and CLI comment submission SHALL require the author and SHALL NOT infer it from the current viewer, request channel, client type, or an unauthenticated role.
+
+#### Scenario: Web user submits a comment
+
+- **WHEN** a user submits a comment with a nonblank author label and body in the issue detail page
+- **THEN** the created comment SHALL persist the trimmed author label
+- **AND** the returned comment SHALL contain that author
+- **AND** the comment row SHALL display the author with its body and creation time
+
+#### Scenario: CLI caller submits a comment
+
+- **WHEN** a caller runs the comment-add command with a nonblank author label and body
+- **THEN** the command SHALL send both values to the comment API
+- **AND** the created comment SHALL return and display that recorded author in subsequent reads
+
+#### Scenario: New comment omits author
+
+- **WHEN** a new comment request has a missing or blank author
+- **THEN** the comment SHALL NOT be created
+- **AND** the caller SHALL receive an actionable validation error
+
+### Requirement: Comment rows show recorded or historical attribution
+
+Every issue comment row SHALL display its recorded author alongside its creation time. A historical comment whose persisted author is absent SHALL display the exact fallback `Unknown author`. Attribution SHALL remain visible on desktop and phone-width viewports and SHALL be visually associated with the corresponding comment body.
 
 #### Scenario: Comment has a recorded author
 
@@ -48,12 +71,6 @@ Every issue comment row SHALL display its recorded author alongside its creation
 - **WHEN** a historical comment has no available author identity
 - **THEN** the comment row SHALL display `Unknown author`
 - **AND** it SHALL NOT leave the attribution area blank or show only a timestamp
-
-#### Scenario: Caller has no recorded identity
-
-- **WHEN** a comment was submitted through a caller or transport that did not record an author
-- **THEN** the comment row SHALL display `Unknown author`
-- **AND** it SHALL NOT label the comment as `Operator`, `You`, a client name, or another inferred identity
 
 #### Scenario: Comment renders at phone width
 

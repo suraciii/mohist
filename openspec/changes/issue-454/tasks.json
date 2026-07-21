@@ -77,26 +77,28 @@
     {
       "id": "T-004",
       "title": "Restore truthful attribution in issue history",
-      "spec": "specs/issue-history-attribution/spec.md#requirement-task-activity-names-its-task-subject, specs/issue-history-attribution/spec.md#requirement-artifact-activity-names-its-artifact-subject, specs/issue-history-attribution/spec.md#requirement-comment-rows-show-truthful-author-attribution",
-      "description": "Resolve workflow task and artifact subjects in the Activity presentation while keeping durable event payloads identity-based. Render recorded comment authors when responses provide them and the exact Unknown author fallback for the current actor-free contract, without changing server data or inferring identity from the caller.",
+      "spec": "specs/issue-history-attribution/spec.md#requirement-task-activity-names-its-task-subject, specs/issue-history-attribution/spec.md#requirement-artifact-activity-names-its-artifact-subject, specs/issue-history-attribution/spec.md#requirement-new-comments-record-a-declared-author, specs/issue-history-attribution/spec.md#requirement-comment-rows-show-recorded-or-historical-attribution",
+      "description": "Resolve workflow task and artifact subjects in the Activity presentation while keeping durable event payloads identity-based. Add a complete declared-author contract for new comments across server persistence/API, Web, and CLI, while historical comments retain explicit Unknown author attribution.",
       "acceptanceCriteria": [
         "When Activity is enabled, the widget obtains the existing workflow timeline and builds a stage-plus-task-ID title lookup; task started/completed/failed summaries name the resolved title and fall back to the stable task ID rather than an anonymous Task Started/Completed/Failed label.",
         "Artifact-recorded summaries name the event's displayable path directly, and both task and artifact subjects are visible in the row summary without opening raw event detail.",
         "Historical and live events use the same subject-aware formatter and retain existing classification, attention, detail, deduplication, ordering, filters, and live-status behavior; no task title is added to durable domain event payloads or generic stored-event APIs.",
-        "The Web Comment model accepts an optional nullable author without changing AddCommentRequest, IssueCommentRow, IssueCommentDto, or API serialization; controlled responses with a nonblank recorded author render that exact value.",
-        "IssueCommentsSection renders author and creation time with the matching body, and every missing/blank author renders the exact label Unknown author rather than Operator, You, a client/channel name, blank attribution, or a timestamp-only row.",
+        "A migration adds nullable IssueCommentRow.Author with no fabricated backfill; AddCommentRequest and the grain command require a trimmed nonblank bounded author for every new comment, persist it atomically with body, and reject missing/blank/over-limit values without creating a row.",
+        "IssueCommentDto, IssueCommentResult, add response, and issue read projection expose nullable author; every newly accepted comment round-trips its exact trimmed declared author, while pre-migration null rows serialize safely and render Unknown author.",
+        "The Web Comment model and addComment client carry author, the comment composer requires an Author input before submission, and IssueCommentsSection renders author and creation time with the matching body; historical null/blank data renders the exact label Unknown author.",
+        "mo issue comment add requires --author for inline-body, file-body, table, and JSON paths, sends it to the API, surfaces server validation, and preserves all existing project/body behavior.",
         "Comment author, timestamp, body, attachment rendering, deletion, composition, and Command+Enter behavior remain readable and functional at desktop and phone width.",
-        "Focused describeEvent/useEventTimeline/EventTimelinePanel tests cover title resolution, stage-key disambiguation, ID fallback, artifact path, historical/live parity, and unchanged event behavior; comment component and issue-detail tests cover recorded, missing, blank, and inferred-identity rejection cases.",
+        "Focused describeEvent/useEventTimeline/EventTimelinePanel tests cover title resolution, stage-key disambiguation, ID fallback, artifact path, historical/live parity, and unchanged event behavior; server migration/grain/API specs, Web comment tests, and CLI command specs cover declared-author success, validation, round-trip, and historical fallback.",
         "A focused production-build phone Playwright scenario shows comment author, timestamp, and body without clipping, overlap, or horizontal document overflow.",
-        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
+        "npm test, npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Subject-aware Activity formatting backed by workflow timeline titles, recorded-or-unknown comment attribution, responsive comment metadata, and focused Web/browser coverage.",
+      "output": "Subject-aware Activity formatting, persisted required declared authors for new comments, historical Unknown author fallback, updated server/Web/CLI contracts, and focused cross-package/browser coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep workflow events immutable and enrich only the Web read presentation. Current server comments have no author and therefore render Unknown author; do not modify the server contract, persist spoofable strings, add user accounts, or infer Operator/You/client/channel identities. T-005 may change ActivityDialog control but does not consume this slice's formatter output."
+      "notes": "Keep workflow events immutable. Declared author is persisted attribution text, not authenticated identity: never infer Operator/You/client/channel values or describe it as verified. Existing rows remain null/Unknown author; all new Web/API/CLI commands require author. T-005 may change ActivityDialog control but does not consume this slice's formatter output."
     },
     {
       "id": "T-005",

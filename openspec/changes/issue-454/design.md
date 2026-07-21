@@ -2,7 +2,7 @@
 
 The issue detail route currently composes several independently evolved presentations of the same read data. `WorkflowView` renders stage tasks from the workflow timeline, while `TaskProgressPanel` maps the same timeline again to provide progress and logs. The page also renders diff facts in an inline banner and `IssueDiffFilesSection`, places workspace-unavailable copy after both diff and commit sections, and retains both compact and full modes in `ArtifactOpener` even though approval-specific evidence now has its own presentation.
 
-Inspection is coupled to mutation policy: `IssueDetailPage` passes `readOnly` to `WorkflowView`, which prevents stage selection and task expansion as well as workflow changes. On narrow screens the four fixed stages use a horizontally scrolling row, so later stages are not visibly reachable. Description rendering and editing consume `issue.body` verbatim; the only frontmatter parser lives inside `features/create-issue`, where the detail page and sibling edit feature cannot reuse it without violating slice boundaries. Activity events carry stable task IDs and artifact paths, but the formatter does not resolve those subjects. Comments carry no author in the current server DTO, request, or persisted row, although controlled responses or future read contracts may provide one.
+Inspection is coupled to mutation policy: `IssueDetailPage` passes `readOnly` to `WorkflowView`, which prevents stage selection and task expansion as well as workflow changes. On narrow screens the four fixed stages use a horizontally scrolling row, so later stages are not visibly reachable. Description rendering and editing consume `issue.body` verbatim; the only frontmatter parser lives inside `features/create-issue`, where the detail page and sibling edit feature cannot reuse it without violating slice boundaries. Activity events carry stable task IDs and artifact paths, but the formatter does not resolve those subjects. Comments carry no author in the current server DTO, request, or persisted row, and Mohist has no authenticated user identity from which to derive one.
 
 The change is primarily an issue-detail Web restructuring. It must preserve workflow authority in the server, existing timeline/artifact/diff APIs, approval-specific inline evidence, and the current issue route. React Router 7 location state is the authority for section fragments; URL state is not duplicated into independent component state.
 
@@ -15,14 +15,14 @@ The change is primarily an issue-detail Web restructuring. It must preserve work
 - Partition issue frontmatter from description content once and reuse that result in create, detail, metadata, preview, and edit flows.
 - Make `#workflow`, `#artifacts`, `#activity`, and `#comments` reliable after asynchronous route data renders.
 - Resolve task and artifact subjects in Activity without changing durable workflow event contracts.
-- Show recorded comment authors when available and an explicit unknown attribution otherwise, without inferring identity from the caller.
+- Record a caller-declared author for every new comment and show explicit unknown attribution only for historical comments.
 
 **Non-Goals:**
 
 - Changing workflow state transitions, polling/live-update behavior, task or artifact persistence, artifact content rendering, or the changed-files reader route.
 - Reworking approval-package evidence or decision actions delivered by sibling issues.
 - Introducing user accounts, per-person authentication, or a general actor/audit model.
-- Changing the server comment write/read contract or claiming actor identity that it does not record.
+- Introducing authentication or claiming that a declared author label is a verified user identity.
 - Parsing arbitrary YAML frontmatter or changing the issue-body frontmatter language.
 
 ## Decisions
@@ -78,11 +78,13 @@ Durable task events remain identity-based (`stage` plus `taskId`), and artifact 
 
 Alternative considered: add task titles to domain events. Rejected because titles are display data already available in the workflow read model; changing immutable event payloads would duplicate facts and still leave historical events unenriched. Alternative considered: enrich events in `WorkflowEventQuerier`. Rejected because this is presentation assembly local to one Web widget and does not justify changing the generic stored-event API.
 
-### 7. Render only recorded comment attribution
+### 7. Persist explicit declared comment authorship
 
-The current comment request, persisted row, and server DTO contain no actor identity, so this issue will not manufacture one. The Web `Comment` model will accept an optional nullable `author` for controlled/imported responses that genuinely provide attribution. `IssueCommentsSection` renders a nonblank recorded value beside the timestamp and renders the exact label `Unknown author` when the field is absent or blank. Both states share the same responsive metadata layout.
+Mohist has no authenticated person identity, so authorship will be an explicit declaration rather than a derived or security-verified claim. `AddCommentRequest` and `IIssueGrain.AddCommentAsync` gain a required author string. The API/grain trim it, reject blank or over-limit values, and persist it in a new nullable `IssueCommentRow.Author` column; nullable storage allows existing rows to migrate without fabricated backfill. `IssueCommentDto`, `IssueCommentResult`, and add/list responses expose `author` as nullable for historical compatibility, while every newly accepted command produces a nonnull value.
 
-Alternative considered: derive `Operator`, `You`, Web, or CLI from the request channel. Rejected because channel and current viewer are not author identity. Alternative considered: add a caller-supplied author string in this issue. Rejected because it is spoofable and would violate the Web-only boundary without establishing authenticated identity. Actual actor capture requires a separate product and security design; until then, unknown is the truthful value for current server comments.
+The Web comment composer adds a required Author input and sends it through the entity API with the body and attachments; a successful response/read renders the persisted label. `mo issue comment add` adds a required `--author` option and sends the same contract. Historical null values render `Unknown author`. Both recorded and historical states use the same responsive metadata layout.
+
+Alternative considered: derive `Operator`, `You`, Web, or CLI from the request channel. Rejected because channel and current viewer are not author identity. Alternative considered: introduce authentication and a User aggregate in this issue. Rejected because it expands far beyond comment attribution. Explicit declaration is honest about its trust level, creates a real production data path, and can later be replaced at the command boundary by authenticated identity without changing stored/read comment shape.
 
 ## Risks / Trade-offs
 
@@ -93,7 +95,8 @@ Alternative considered: derive `Operator`, `You`, Web, or CLI from the request c
 - [Opening or closing Activity creates URL/dialog feedback loops] -> Treat the hash as the only controlled state and make callbacks perform idempotent hash navigation.
 - [Frontmatter edits lose unknown keys or line endings] -> Preserve closed envelopes verbatim and replace only the post-envelope description; for unclosed envelopes, make insertion of one closing delimiter the sole repair. Lock BOM, CRLF, block scalar, conflict precedence, bounded malformed, unclosed, empty-description, and unknown-key cases with entity tests.
 - [Task events from invalidated or old attempts cannot resolve a title] -> Use `(stage, taskId)` lookup and visibly fall back to task ID; never return an anonymous `Task Started` label.
-- [Most current comments show `Unknown author`] -> Keep the fallback explicit and truthful; do not imply this issue captures actors. Plan real author recording only with authenticated identity and historical-data semantics.
+- [Declared author labels are not authenticated] -> Label the field Author without claiming verification, validate its shape server-side, and keep identity authentication outside this issue; future authentication replaces command-boundary sourcing while preserving persisted/read shape.
+- [Historical comments have no author] -> Add a nullable column with no fabricated backfill and render `Unknown author`; require nonnull author for every new command after deployment.
 
 ## Migration Plan
 
@@ -101,11 +104,11 @@ Alternative considered: derive `Operator`, `You`, Web, or CLI from the request c
 2. Merge log inspection into the canonical workflow task row, separate inspection from mutation state, make the stage selector responsive, remove `TaskProgressPanel`, and update workflow widget tests.
 3. Consolidate Changes and Artifacts sections and remove duplicate page composition and the unused compact artifact mode.
 4. Add stable section IDs and URL-derived Activity control, then cover direct fragments, in-page hash changes, and asynchronous targets in issue-detail specs.
-5. Add activity subject resolution and optional recorded-or-unknown comment attribution in Web, then update formatter and comment rendering tests without changing the server contract.
+5. Add activity subject resolution; migrate nullable comment-author storage and update server, Web, and CLI comment contracts, then cover declared and historical attribution end to end.
 6. Run Web FSD checks, typecheck, and focused unit/spec suites. Use browser tests for real phone-width stage reachability, title visibility, non-overlap, and fragment landing because those depend on layout and scrolling.
 
-No server contract or persisted-data migration is required. Rollback restores the prior Web composition; repaired unclosed envelopes remain valid issue bodies and require no data rollback.
+The comment migration is additive and nullable, so server-first deployment is safe: old clients receive validation errors only when they attempt the now-breaking authorless create command, while reads remain compatible. Deploy updated Web and CLI with the server. Rollback may ignore the nullable Author column; repaired unclosed envelopes remain valid issue bodies and require no data rollback.
 
 ## Open Questions
 
-- When Mohist gains authenticated user identities, define actor capture at the comment command boundary and whether existing comments remain `Unknown author` or can be migrated from a trustworthy audit source. This does not block the current truthful fallback.
+- When Mohist gains authenticated user identities, replace caller declaration at the comment command boundary and decide whether historical null authors can be migrated from a trustworthy audit source. Existing declared labels remain audit text, not verified identities.
