@@ -1,19 +1,15 @@
 ### Requirement: Live transcript events use the strongest available session identity
 
-The active session page SHALL display realtime transcript events that can be unambiguously associated with the visible logical session. When the current physical runtime identity is available, matching MUST use that identity together with the logical session identity. When the physical identity is temporarily unavailable, matching SHALL fall back to available logical session context, such as the stable AgentSession identity or the workflow session's project, issue, and session name.
+The active session page SHALL display realtime transcript events that can be unambiguously associated with the visible logical session. When the page has a current physical runtime identity, matching MUST require that identity together with the logical session identity. Only when the page has no physical runtime identity and the event carries the visible canonical AgentSession identity SHALL matching fall back to that logical identity.
 
 #### Scenario: Physical and logical identities match
 - **WHEN** a realtime transcript event carries the visible session's logical identity and current physical runtime identity
 - **THEN** the page SHALL apply the event to the visible transcript
 
 #### Scenario: Physical identity is temporarily unavailable
-- **WHEN** the active session page does not yet have a physical runtime identity and a realtime transcript event unambiguously matches the visible logical session context
+- **WHEN** the active session page does not yet have a physical runtime identity and a realtime transcript event carries the visible canonical AgentSession identity
 - **THEN** the page SHALL apply the event to the visible transcript
 - **AND** the transcript MUST NOT remain empty solely because the physical runtime metadata is unavailable
-
-#### Scenario: Logical session ID is unavailable for a workflow event
-- **WHEN** an active workflow session event lacks a logical AgentSession ID but matches the visible project, issue, and workflow session name
-- **THEN** the page SHALL apply the event to that workflow session's visible transcript
 
 ### Requirement: Fallback matching preserves session and runtime isolation
 
@@ -28,6 +24,11 @@ Logical-context fallback MUST NOT apply when an event is known to belong to anot
 - **WHEN** the visible session and realtime event both provide physical runtime identities and those identities differ
 - **THEN** the page MUST ignore the event
 - **AND** logical-context fallback MUST NOT override the physical runtime mismatch
+
+#### Scenario: Event omits a physical runtime identity after binding is known
+- **WHEN** the visible active session has a physical runtime identity and a realtime event for its logical session omits a physical runtime identity
+- **THEN** the page MUST ignore the event
+- **AND** logical-session matching MUST NOT bypass the known physical binding
 
 #### Scenario: Historical runtime is explicitly selected
 - **WHEN** the user is viewing an explicitly selected historical runtime

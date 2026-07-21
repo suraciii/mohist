@@ -42,7 +42,7 @@ The event matcher will apply this precedence:
 
 1. A nonempty event `sessionId` must equal the canonical visible session ID. Any different value rejects the event.
 2. When both page and event physical runtime IDs are known, they must match. When both runtimes are known, they must match as well.
-3. An unanchored current view with a missing physical ID on either side may accept an event after a proven logical match.
+3. An unanchored current view with no page physical runtime ID may accept an event after a proven logical match. If the page has a physical runtime ID, an event that omits one is rejected.
 4. An explicit `?rt=` view never uses logical fallback, even before metadata resolves.
 5. Missing or ambiguous identity rejects the event.
 
@@ -50,19 +50,17 @@ Generic session pages will subscribe using the route's canonical session ID whil
 
 Alternative considered: remove physical runtime matching after canonical session matching. This would be smaller but would append live events from a replacement runtime to a historical transcript and violate the runtime-lineage contract.
 
-### Publish workflow lookup context only on the best-effort transcript envelope
+### Retain the session-scoped realtime envelope
 
-The server will extend the internal `TranscriptEnvelope` with optional workflow-origin fields: `projectId`, `issueNumber`, `workflowRunId`, and `sessionName`. `AgentSessionGrain.FanOutRealtimeAsync` will populate them from workflow-session labels; generic-session envelopes leave them absent. The Web event normalizer and `AgentDetailEventMap` will preserve these optional fields.
+`TranscriptEnvelope` already carries the required canonical `sessionId`, and server fan-out supplies it from the AgentSession. The Web will use that canonical identity for the missing-page-binding fallback; it will not add workflow, project, issue, or session-name fields to the best-effort transcript envelope. A realtime event without a canonical session ID is ambiguous and is rejected.
 
-This permits the spec-required fallback when a workflow realtime event lacks canonical `sessionId`: an active, unanchored workflow page may accept it only when all four origin fields match its resolved context. A present but conflicting canonical ID or physical runtime ID still wins and rejects the event. No origin fallback is available to generic sessions because they already have a stable route `sessionId` and do not have workflow identity.
-
-Alternative considered: rely on `sessionName` or `(projectId, issueNumber)` alone. Neither is unique across workflow runs. Alternative considered: add this context to durable runtime events or server filtering. Both change the authority/persistence surface unnecessarily; the new fields are only ephemeral UI-routing metadata on the existing best-effort channel.
+Alternative considered: enrich the transcript envelope with workflow lookup context to match a missing session ID. This would expose workflow metadata on a channel intentionally scoped to sessions, while no current producer omits the canonical ID. Alternative considered: use `sessionName` or `(projectId, issueNumber)` alone. Those values are not canonical session identity and are insufficient to safely override a missing session ID.
 
 ### Keep diagnosis and event matching in shared Web boundaries
 
 Data-source hooks own acquisition and derivation of session evidence. `SessionDetailShell` owns presentation choice. `useSessionTranscript` owns the one identity-matching predicate used by every realtime event handler. This avoids duplicating cause classification across issue and generic pages or allowing individual event handlers to diverge.
 
-Focused Web tests will cover the derivation and UI states, `useSessionTranscript` identity matrix, both data-source identity wiring paths, and historical view isolation. Server specs will cover optional envelope origin population and ensure generic envelopes do not fabricate workflow fields.
+Focused Web tests will cover the derivation and UI states, `useSessionTranscript` identity matrix, both data-source identity wiring paths, and historical view isolation. The identity matrix includes rejecting an event whose physical runtime ID is absent after the page has resolved one.
 
 Alternative considered: place all logic in `SessionDetailShell`. That would force the view to issue queries and understand session-source differences, and would duplicate the realtime identity rules at rendering call sites.
 
@@ -71,17 +69,16 @@ Alternative considered: place all logic in `SessionDetailShell`. That would forc
 - [The conditional unfiltered read briefly adds one request when an explicit runtime view is empty] -> Enable it only after the filtered response is available and empty; cache it under the existing session transcript query key with a null runtime selector.
 - [A persisted turn can exist without user-visible assistant content] -> Treat only turns with visible transcript content as evidence for a history-switch action; a non-visible part must not produce a misleading historical-content diagnosis.
 - [Best-effort realtime metadata can still be incomplete] -> Require the strongest available identity, reject ambiguity, and rely on normal query refetch for eventual reconciliation.
-- [Adding workflow origin fields exposes more routing metadata to subscribed Web clients] -> Limit fields to existing session labels, omit them for generic sessions, and keep them off durable APIs and domain-event channels.
+- [A late event can omit its physical runtime ID after the page has resolved a binding] -> Reject it rather than using logical fallback, so a replaced runtime cannot contaminate the current view.
 - [A data-source regression could reintroduce route-name-as-ID matching] -> Add a test where workflow session name differs from canonical AgentSession ID and assert realtime events still match the canonical ID.
 
 ## Migration Plan
 
-1. Extend the transient transcript envelope and Web normalization/types, with server and Web contract tests for optional workflow origin fields.
-2. Add the shared matcher inputs and precedence tests, then wire canonical IDs and historical-view flags from both session data sources.
-3. Add conditional unfiltered evidence derivation and the empty-state/history-link presentation, with no API or schema migration.
-4. Run focused Web typecheck/tests and server specs, then deploy as a backward-compatible Web/server pair. Older servers remain functional because canonical-session matching still works; origin fallback is simply unavailable until both sides are deployed.
+1. Add the shared matcher inputs and precedence tests, then wire canonical IDs and historical-view flags from both session data sources.
+2. Add conditional unfiltered evidence derivation and the empty-state/history-link presentation, with no API or schema migration.
+3. Run focused Web typecheck/tests, then deploy as a Web-only backward-compatible change. The existing session-scoped realtime envelope already supplies canonical session identity.
 
-Rollback consists of reverting the Web matcher and presentation changes. The added envelope fields are optional and ignored by older clients; no persisted data, endpoint, or migration requires rollback.
+Rollback consists of reverting the Web matcher and presentation changes. No persisted data, endpoint, envelope, or migration requires rollback.
 
 ## Open Questions
 

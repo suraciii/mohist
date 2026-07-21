@@ -6,22 +6,22 @@
       "id": "T-001",
       "title": "Preserve safe realtime session visibility",
       "spec": "specs/agent-session-live-content-visibility/spec.md#Live transcript events use the strongest available session identity",
-      "description": "Extend the transient workflow transcript envelope with optional origin context and preserve it through Web event normalization. Update shared transcript matching and both session data sources to use canonical logical identity, allow a proven fallback only for an unanchored active view, and retain strict physical-runtime and historical-view isolation.",
+      "description": "Update shared transcript matching and both session data sources to use the canonical logical AgentSession identity already carried by realtime envelopes. Allow fallback only for an unanchored active view whose page binding is unavailable, and retain strict physical-runtime and historical-view isolation.",
       "acceptanceCriteria": [
         "A live event with matching canonical session and runtime identity appears in the active transcript.",
-        "An active session with temporarily missing physical binding metadata accepts a realtime event only when canonical logical identity, or complete workflow origin context when that ID is absent, proves the target session.",
-        "Events with conflicting logical session IDs or physical runtime IDs are rejected, and an explicit ?rt= historical view never accepts fallback live events.",
+        "An active session with temporarily missing physical binding metadata accepts a realtime event only when the existing canonical logical AgentSession ID proves the target session.",
+        "Events with conflicting logical session IDs or physical runtime IDs are rejected; an event that omits its runtime ID after the page binding is known is rejected; and an explicit ?rt= historical view never accepts fallback live events.",
         "Workflow pages use the canonical AgentSession ID from detail or the session list rather than substituting the route session name.",
-        "Focused server specs cover optional workflow envelope origin fields and generic-envelope absence; focused Web hook/data-source tests cover matching, fallback, mismatch rejection, summary-loading subscription, and historical isolation.",
-        "npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused server Session/Event specs pass."
+        "Focused Web hook/data-source tests cover matching, missing-page-binding fallback, missing-event-binding rejection, mismatch rejection, summary-loading subscription, and historical isolation.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Realtime transcript envelopes and shared Web matching safely display provable active-session events without cross-session or historical-runtime leakage.",
+      "output": "Shared Web matching safely displays provable active-session events without cross-session or historical-runtime leakage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Do not change runtime-event HTTP routes, persistence, or server-side binding validation. Workflow-origin fallback requires all project, issue, workflow-run, and session-name fields."
+      "notes": "Do not change the session-scoped realtime envelope, runtime-event HTTP routes, persistence, or server-side binding validation."
     },
     {
       "id": "T-002",

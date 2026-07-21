@@ -6,7 +6,7 @@ Session pages currently collapse distinct content-visibility failures into gener
 
 - Distinguish a session that has started but has never received content from a runtime-specific view whose content is empty because recorded activity belongs to another runtime.
 - Show an actionable empty-state hint for a runtime-specific mismatch, directing users to the available historical runtime view instead of implying that the logical session has no activity.
-- Keep displaying eligible realtime transcript events when physical runtime-binding metadata is temporarily missing by falling back to available logical session context, such as the workflow session name, while continuing to reject events attributable to another session or runtime.
+- Keep displaying eligible realtime transcript events when physical runtime-binding metadata is temporarily missing by falling back to the canonical logical AgentSession identity, while continuing to reject events attributable to another session or runtime.
 - Preserve the existing server-side transcript filtering and runtime-binding validation semantics; this change does not add a full empty-session diagnostics panel.
 
 ## Capabilities
