@@ -90,15 +90,7 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. The Workflow executor SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL retain one task lease through Prompt completion, successful completion checks, any worktree cleanup turn, and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current task lifecycle reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine both the physical Pi Session and the logical serialization key before the current operation leaves the boundary. Later work MUST NOT start a Prompt or runtime rebind on that logical AgentSession until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
-Existing Session commands SHALL NOT be allowed to start idle work on a binding while a Workflow task is preparing, rebinding, between its original and cleanup Prompts, or durably reporting. A guarded bind SHALL reject without mutation when Follow-up, Compact, or Reset command state is pending or active. When the Workflow lease wins first, the owning Runner SHALL reject command admission during preparation; only an existing OpenCode Follow-up MAY steer after the Runtime has synchronously reserved the physical Session for the active Prompt. Compact and Reset SHALL remain idle-only. These admission rules MUST NOT add Pi command routing in this issue.
-
-When an existing Workflow-origin OpenCode idle Follow-up, Compact, or Reset wins admission first, its Runner handler SHALL acquire the same logical-Session coordinator key before Runtime entry and retain that command lease through terminal operation evidence. Idle Follow-up SHALL retain it until `session.closed` or `session.followup_failed`. For Compact and Reset, the Runner SHALL call an idempotent authenticated Server completion operation with the existing operation ID while holding the lease. The AgentSession authority SHALL atomically apply the effect, clear the active reservation, append an immutable recovery receipt, and acknowledge with that receipt; only then SHALL the Runner release and return to the original command dispatch. The waiting public route and duplicate retries SHALL read the receipt without a second completion transition or read acknowledgement. Callback transport failure SHALL retain the lease and retry the same operation ID without claiming success. A later Workflow task, including one reusing the current binding without bind, SHALL queue behind that lease. Definite command preflight failure SHALL release through the existing abandon path, and Runner restart SHALL clear the in-process lease while an unresolved persisted reservation remains authoritative for recovery.
-
-Workflow-origin Follow-up delivery SHALL carry the logical key already. Workflow-origin Compact and Reset command delivery SHALL also carry optional project, WorkflowRun, and session-name identity resolved by the Session authority; generic AgentSession commands SHALL omit it. The owning Runner SHALL use that identity to consult the Workflow coordinator even when no prior Workflow open has populated process-local Session mappings.
-
-After Runner restart clears ended in-process command leases, Workflow open and bind SHALL still reject same-binding or replacement admission while the AgentSession authority has an unresolved Follow-up, Compact, or Reset reservation. A completed recovery receipt SHALL NOT block admission, and open/bind or receipt reads MUST NOT mutate it. Unresolved state MUST remain fenced until idempotent command retry or abandon settles it. The Workflow Action SHALL expose this rejection as actionable `session-binding-failed`.
-
-AgentSession SHALL persist at most 128 immutable recovery receipts. A receipt SHALL contain operation ID, command kind, accepted idempotency keys, outcome, and completion time; it SHALL be replayable for 24 hours using injected time. Reads MUST NOT shorten retention. Only expired receipts MAY be pruned. When all 128 slots contain unexpired receipts, a new Compact/Reset SHALL fail with `recovery-receipt-capacity` before reservation or Runtime work. After expiry, reuse of an old key MAY start new work.
+Session-command coordination is outside this requirement. This issue SHALL NOT add Runtime slot callbacks, command-admission phases, command leases, command completion callbacks, recovery receipts, or command-journal reconciliation. Existing OpenCode Session-command routes and behavior SHALL remain unchanged. Pi Follow-up, Compact, Reset, and Cancel SHALL remain unavailable and MUST NOT fall back to OpenCode. A sister Session-command change MUST integrate with the Workflow lease and Action-stream drain/seal protocol before enabling commands that mutate a Workflow binding.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -141,59 +133,11 @@ AgentSession SHALL persist at most 128 immutable recovery receipts. A receipt SH
 - **THEN** the new PiRuntime and coordinator SHALL start with empty execution-quarantine state
 - **AND** persisted reporting or missing-session state SHALL continue to apply independently
 
-#### Scenario: Restart cannot bypass an unresolved command reservation
-
-- **WHEN** the Runner restarts after Compact or Reset changes Runtime state but before Server completion is acknowledged
-- **THEN** Workflow open and bind SHALL reject same-binding or replacement admission with actionable `session-binding-failed` while the Server reservation is unresolved
-- **AND** admission SHALL resume only after idempotent command retry or abandon settles that reservation
-
-#### Scenario: Workflow admission preserves a completed command receipt
-
-- **WHEN** Compact or Reset completion is persisted and its Runner lease releases before the waiting public route reads the outcome
-- **THEN** a queued Workflow open MAY proceed because the active reservation was cleared but MUST NOT mutate the recovery receipt
-- **AND** the public route and same-key response-loss retry SHALL replay the same outcome throughout the 24-hour retention window
-
-#### Scenario: Recovery receipt capacity rejects before side effects
-
-- **WHEN** an AgentSession has 128 unexpired recovery receipts and another Compact or Reset is requested
-- **THEN** the command SHALL fail with `recovery-receipt-capacity` before reservation, outbox fencing, or Runtime execution
-- **AND** advancing injected time past receipt expiry SHALL permit pruning and later admission
-
-#### Scenario: A command reservation acquired first blocks Workflow bind
-
-- **WHEN** Follow-up, Compact, or Reset reserves or starts work on the current binding before a Workflow runtime bind reaches the AgentSession authority
-- **THEN** the bind SHALL reject without replacing the binding or sealing its Action stream
-- **AND** the Workflow Action MUST NOT submit a Prompt
-
-#### Scenario: An idle command acquired first blocks same-binding reuse
-
-- **WHEN** Workflow-origin OpenCode idle Follow-up, Compact, or Reset acquires the logical command lease before a Workflow task targets the same current binding
-- **THEN** the Workflow task SHALL remain queued until terminal command evidence releases that lease
-- **AND** it MUST NOT restore or submit a Prompt concurrently merely because no bind is required
-
-#### Scenario: Compact and Reset release after acknowledged completion
-
-- **WHEN** a Workflow-origin OpenCode Compact or Reset Runtime operation finishes
-- **THEN** the Runner SHALL complete the existing operation ID through the Server while retaining its command lease
-- **AND** it SHALL release only after acknowledgement, while duplicate completion returns the persisted outcome and callback transport failure retains the lease
-
-#### Scenario: Workflow preparation acquired first blocks idle commands
-
-- **WHEN** a Workflow task holds the logical-Session lease but has not established an active Runtime Prompt slot, or is between work and cleanup Prompts
-- **THEN** Follow-up, Compact, and Reset admission SHALL return a definite not-started or busy result
-- **AND** no command SHALL start against the old or new physical binding
-
-#### Scenario: Active OpenCode Follow-up has no pre-Prompt race
-
-- **WHEN** an existing OpenCode Follow-up arrives after the Runtime has reserved the physical Session and the Workflow lease is in `prompt-active`
-- **THEN** it MAY steer the already-active OpenCode turn under existing behavior
-- **AND** there SHALL be no state in which the Follow-up can start an idle Prompt before the Workflow Prompt is admitted
-
 #### Scenario: Pi Session commands remain outside this issue
 
 - **WHEN** Follow-up, Compact, Reset, or Cancel targets a Pi-bound AgentSession before Pi Session-command routing ships
-- **THEN** the Server SHALL return unavailable before creating a Follow-up/Compact/Reset reservation or dispatching to the Runner, and MUST NOT invoke OpenCode
-- **AND** it MUST NOT mutate the binding, acquire a command lease, or append/fence an Action outbox stream
+- **THEN** the existing command boundary SHALL return unavailable and MUST NOT invoke OpenCode
+- **AND** this issue MUST NOT add command routing, Runtime execution, command coordination, or Action-stream mutation
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
@@ -205,11 +149,9 @@ Before a runtime change, the shared logical-Session serialization boundary SHALL
 
 If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, the pre-created manifest SHALL drive reconciliation from the persisted Pi Session messages through the saved projector fingerprints; required missing final facts SHALL be appended and drained before quarantine clears. A corrupt committed manifest SHALL remain preserved, SHALL quarantine only its logical Session with an actionable diagnostic, and MUST NOT block unrelated Sessions or AgentJob work. Failure to initialize/list the outbox root or provide atomic same-directory rename and file/directory sync SHALL instead make global Action reporting not-ready and SHALL prevent Runner registration or new work claiming. Repair MUST NOT replay the Prompt.
 
-The guarded rebind's expected-current state SHALL include the authority-issued stream identity as well as the physical binding. In the same transition that verifies `drainedThroughSequence`, the authority SHALL remove the old stream from current admission and create the replacement binding's fresh stream at cursor `0`; a current stream with no events is valid at sequence `0` and MUST NOT require a synthetic event. A missing local manifest MAY be created only when the returned Server cursor is `0`, with next sequence `1`. If the cursor is greater than `0`, the Runner SHALL quarantine only that logical Session as `session-reporting-failed` with `outbox-history-missing`; it MUST NOT admit a Prompt, rebind, stream-drained Reset, or reproject retained facts under new sequences until the original manifest state is restored.
+The guarded rebind's expected-current state SHALL include the authority-issued stream identity as well as the physical binding. In the same transition that verifies `drainedThroughSequence`, the authority SHALL remove the old stream from current admission and create the replacement binding's fresh stream at cursor `0`; a current stream with no events is valid at sequence `0` and MUST NOT require a synthetic event. A missing local manifest MAY be created only when the returned Server cursor is `0`, with next sequence `1`. If the cursor is greater than `0`, the Runner SHALL quarantine only that logical Session as `session-reporting-failed` with `outbox-history-missing`; it MUST NOT admit a Prompt, rebind, or reproject retained facts under new sequences until the original manifest state is restored.
 
-For an existing Workflow-origin OpenCode Reset, command preparation SHALL return or bootstrap current Action stream state. The Runner SHALL fence and drain that stream before completing Reset, and the AgentSession authority SHALL verify expected stream identity plus drained sequence while atomically replacing the physical binding and installing a fresh stream at cursor `0`. Drain failure SHALL leave both current binding and stream unchanged. Generic Reset remains outside the Workflow Action stream. Pi Reset routing remains outside this issue and MUST NOT fall back to OpenCode.
-
-Every later idle Prompt or context mutation on a Workflow binding SHALL complete the current Action stream's required drain before Runtime entry. This includes Workflow turns, idle OpenCode Follow-up, Compact, Reset, and runtime rebind. Compact SHALL hold the stream fence through Runtime and Server completion, then release it without replacing the stream. Active OpenCode Follow-up steering inside `prompt-active` belongs to the current turn and does not start a separately drained idle turn.
+Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL complete the current Action stream's required drain before Runtime entry. Rebind SHALL retain the stream fence through its atomic binding/stream transition. Session-command integration with this protocol remains sister-issue work.
 
 #### Scenario: Session view shows a completed Pi turn
 
@@ -240,18 +182,6 @@ Every later idle Prompt or context mutation on a Workflow binding SHALL complete
 - **WHEN** Workflow open returns a nonzero applied cursor but the Runner has no matching local manifest
 - **THEN** the Runner SHALL fail same-Session admission with `session-reporting-failed` and `outbox-history-missing`
 - **AND** it MUST NOT reconstruct the manifest, reproject facts, submit a Prompt, rebind, or claim the stream was drained
-
-#### Scenario: Existing OpenCode Reset replaces its Action stream atomically
-
-- **WHEN** a user resets a Workflow-origin OpenCode Session with a current Action stream
-- **THEN** the owning Runner SHALL fence and drain the stream before Reset completion
-- **AND** the Session authority SHALL replace physical binding and Action stream together only when expected stream identity and drained sequence match
-
-#### Scenario: Existing OpenCode Compact drains pending Action facts
-
-- **WHEN** Workflow-origin OpenCode Compact is requested while its Action stream has locally durable undelivered facts
-- **THEN** the Runner SHALL hold the command lease and stream fence while it drains those facts before Runtime compact
-- **AND** drain failure SHALL leave Session context unchanged and return a definite command failure
 
 #### Scenario: Cache-write usage remains a distinct dimension
 
