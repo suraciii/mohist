@@ -1,138 +1,127 @@
-# Self-Review — issue-456
+# Self-Review — issue-456 (cycle 2)
 
-Reviewing `proposal.md`, `specs/`, `design.md`, `tasks.json` against issue 456 and
-the current code. Reviewer only; no files changed other than this one.
+Reviewing the updated `proposal.md`, `specs/`, `design.md`, `tasks.json` against
+issue 456 and the current code. Reviewer only; no files changed other than this
+one.
+
+This is the second cycle. Cycle 1 found B1/B2/S1/S2/S3; the operative decisions
+(D2, proposal bullet 12, proposal Impact, tasks T-001/T-002) were updated to
+address them. The fixes correctly target the root cause. Two residual issues
+remain: one implementability gap in the B1 fix, and stale framing text that was
+not propagated from the operative decisions to the surrounding paragraphs.
 
 ## Verdict
 
-**FAIL.** The plan contains one material correctness defect that defeats the
-issue's headline acceptance criterion, plus a proposal↔design inconsistency and
-an under-analyzed area. These must be fixed before build.
+**FAIL.** Two bounded problem classes remain, both surgical to fix.
 
-## What is solid
+## What cycle 1 fixed correctly (verified)
 
-- **Scope and capability split are correct.** Two capabilities map 1:1 to the two
-  spec files; the non-goals (no new event types, no server/runner/CLI change, no
-  push notifications, no page restructure) match the issue.
-- **D4 (reading stability) is accurately grounded.** The loading guard is
-  first-load only (`IssueDetailPage.tsx:215` gates on `isLoading || !issue`), and
-  the page-critical lists do use identity-stable keys (`StageBar` `key={stage}`,
-  `WorkflowSessionRow` `key={session.id}`, `InlineApproval` `key={task.taskId}`,
-  `TaskItem` `key={summary.artifactId}`, `FeedbackHistory` `key={item.id}`). The
-  "audit + lock with tests, don't rewrite" posture is justified.
-- **D5 is accurate.** `LiveTaskState` is exactly
-  `{ activeTaskId, activeTaskElapsedMs, rebaseConflict }` (`live-task.tsx:4-8`),
-  `useLiveTask()` exists, and `useEventsConnection` already returns
-  `reconnectVersion` (`events-hub.ts:109,139,171`). Surfacing the reconnect
-  signal through `LiveTaskState` is feasible as described.
-- **D3 (edge-triggered nudge off `decision.summary`) is the right shape.**
-  `RuntimeSummary` includes `'approval-required'` and `'blocked'`
-  (`runtime-types.ts:5-10`; produced by `derive-runtime-decision.ts:87,94,99,105`),
-  and the global toast helpers do suppress for `viewedIssue`
-  (`run-lifecycle-toast.ts:12,29`). The no-fire-on-mount and exactly-once
-  reasoning holds.
-- **Tasks split (one feature module per capability, T-002 depends on T-001) is
-  valid.** DAG is acyclic, priorities are strictly ordered, every task has
-  acceptance criteria including test verification. Spec anchor slugs in
-  `tasks.json` match the actual `### Requirement:` headings.
+- **D2 now wires task/artifact events.** The decision body correctly identifies
+  that `TaskStarted`/`TaskCompleted`/`TaskFailed`/`ArtifactRecorded` are
+  subscribed (`canonical-event-types.ts:15-18,87-91`) but absent from `ROUTE`
+  (`handle-event.ts:237-274`) and `AGENT_ACTIVITY_EVENT_NAMES`
+  (`handle-event.ts:55-71`), and that the page's task UI reads solely from the
+  `useWorkflowTimeline` cache (`StageBar.tsx:48-59`, `WorkflowView.tsx:2,9-16`),
+  so removing the 5 s poll without wiring would leave task completions stale.
+  This is the correct root-cause fix and the local-merge / narrow-spec
+  alternatives are properly rejected. Proposal Impact (line 23) and T-001
+  (description, acceptance criteria, output, notes) are consistent with it.
+- **D7 added the blocked-causes matrix** (S1): run failure / approval / stage are
+  event-driven via D2; drift/convergence ride the retained `useWorkspaceStatus`
+  poll. Honest and testable.
+- **Spec scenario reworded** (S2): `issue-detail-live-updates` Scenario 3 now
+  conditions on "the viewed issue enters an approval-waiting or blocked state".
+- **Nudge-set scope recorded** (S3): proposal capability bullet, design D3, and
+  T-002 (new AC: a `failed`-only transition does not toast) all state the
+  approval+blocked scoping with rationale.
+- **D4 (reading stability), D5 (reconnect signal via `LiveTaskState`), D6
+  (mobile parity), D1 (remove poll)** remain accurately grounded
+  (`IssueDetailPage.tsx:215`, `live-task.tsx:4-8`, `events-hub.ts:109,139,171`).
+- Tasks DAG, priority ordering, spec anchor slugs, and AC test-verification are
+  valid.
 
 ## Blocking problems
 
-### B1. D2's cascade claim is false for task events — the page will not live-update on task completion, breaking the headline AC
+### B1'. The D2 fix is implementability-incomplete: adding task/artifact entries to `ROUTE` requires extending `EventMap` first, which the plan does not mention
 
-Design D2 (`design.md:41-45`) asserts: "The page therefore already receives
-incremental, event-driven updates for every transition the spec names (stage,
-task, approval, blocked) once D1 removes the competing timer. No new invalidation
-keys are introduced." This is incorrect for **task** transitions.
+`ROUTE` is typed `Partial<Record<EventName, DomainHandler>>`
+(`handle-event.ts:237`), and `EventName = keyof EventMap`
+(`entities/issue/@x/events.ts:40`). `EventMap` (`events.ts:5-37`) lists
+`Stage*`, `StageApproval*`, `WorkflowRun*`, `Issue*`, `AgentSession*`, and
+`InboxItemPersisted` — but it does **not** list `TaskStarted`/`TaskCompleted`/
+`TaskFailed`/`ArtifactRecorded`. Those names are in `REVERSE_DNS_EVENT_TYPES`
+and therefore in `EVENT_TYPES` (the subscription list, and the set the
+`_AssertRouteSubscribes` guard checks against), but they are **not** keys of
+`EventMap`, hence not valid `EventName` keys for the `ROUTE` literal.
 
-Evidence:
+Consequence: as written, `[REVERSE_DNS_EVENT_TYPES.TaskCompleted]: taskHandler`
+in the `ROUTE` literal is a **compile error** (the key is not assignable to
+`Partial<Record<EventName, DomainHandler>>`). An autonomous builder following
+D2/T-001 would hit this immediately; the correct resolution is to extend
+`EventMap` with the four entries (with their payload shapes, derived from the
+event contract — task events carry `issueNumber`/`projectId` plus task identity,
+mirroring how `buildTimelineLiveEvent`/`describe.ts` already consume them) and
+*then* add the `ROUTE` entries. The plan must state this prerequisite
+explicitly. Without it, a builder is nudged toward defeating the
+`_AssertRouteSubscribes` guard with a cast rather than the intended typed entry.
 
-- Task events are canonical and subscribed: `TaskStarted`/`TaskCompleted`/`TaskFailed`
-  and `ArtifactRecorded` are defined (`canonical-event-types.ts:15-18`) and included
-  in `EVENT_TYPES` (`canonical-event-types.ts:87-91`), so the hub delivers them and
-  `LiveTaskProvider.handleEvent` receives them.
-- They are **not routed**: the `ROUTE` table (`handle-event.ts:237-274`) has no
-  `Task*` or `ArtifactRecorded` entries, and `AGENT_ACTIVITY_EVENT_NAMES`
-  (`handle-event.ts:55-71`) does not include them. So `routeEvent` runs no domain
-  handler for a task event and **no `['issues']` (or timeline) invalidation fires**.
-- The page's task-progress UI reads **only** from the `useWorkflowTimeline` query
-  cache: `StageBar` maps `timeline.stages[].tasks[].status`
-  (`StageBar.tsx:48-59`); `WorkflowView` consumes the timeline hook
-  (`WorkflowView.tsx:2,9-16`); `TaskItem` renders `task.status`.
+Required fix: D2 and T-001 must include "extend `EventMap` in
+`entities/issue/@x/events.ts` with `TaskStarted`/`TaskCompleted`/`TaskFailed`/
+`ArtifactRecorded` payload shapes, then add the matching `ROUTE` entries."
+T-001's `output`/`notes` should list the `events.ts` change alongside the
+`handle-event.ts` change.
 
-Consequence: under D1 (remove the 5s poll) + D2 (no new invalidations), a
-`TaskCompleted` event does **not** cause the page's task progress to update. The
-page goes stale on task start/completion/failure until some other event that *is*
-routed (a stage/workflow/approval event) happens to fire, or until the reconnect
-catch-up runs. That directly violates:
+### B2'. Stale framing text still asserts the refuted "no changes needed" story (incomplete propagation of the B1/B2 fix)
 
-- AC line 1 — "a task completion … appear without reload".
-- `issue-detail-live-updates` Requirement 1, which lists "task starts, task
-  completions", and its Scenario "A task completion appears without reload or
-  full re-render".
-- The user-voice claim that the page should "update the moment something happens".
+The operative decisions were updated, but several surrounding sentences still
+state the old (incorrect) position and now contradict D2 / the proposal body:
 
-Required fix direction (choose one; the plan must pick and reconcile the
-non-goal — see B3):
+- `design.md:7` (Context) — "the 5 s timer is redundant in steady state: every
+  workflow event that mutates the timeline already invalidates `['issues']`".
+  This is the exact claim B1 refuted: task events mutate the timeline but do not
+  currently invalidate `['issues']`. It directly contradicts D2, which adds the
+  wiring. Should be softened to "redundant for the coarse-grained transitions
+  (stage / run / approval / issue) which already invalidate; task-level
+  transitions require the wiring D2 adds".
+- `design.md:23` (Non-Goals) — "New event types, event-routing changes, or any
+  server/runner/CLI change" lists "event-routing changes" as a flat non-goal.
+  This contradicts D2 (client-side `ROUTE` entries are added) and `proposal.md:12`
+  (which re-scopes the boundary to server-side). It should read "no server-side
+  event-routing/subscription changes and no new event types", matching the
+  proposal's clarified boundary.
+- `design.md:9` (Context) — "no event types, routing, DTOs, or persistence
+  change". The bare "routing" has the same ambiguity and should be qualified to
+  "server-side routing".
+- `proposal.md:31` (Risk) — "Mitigated by reusing the existing event-stream
+  ingestion and query-invalidation path unchanged". "unchanged" is now
+  inaccurate: D2 adds task/artifact `ROUTE` entries to the invalidation path.
+  Drop "unchanged" or note the path gains task/artifact entries per D2.
 
-1. Add client-side `ROUTE` entries for `TaskStarted`/`TaskCompleted`/`TaskFailed`
-   (and likely `ArtifactRecorded`) whose handler invalidates the timeline/issue
-   keys, i.e. **contradicting D2's "no new invalidation keys"**; or
-2. Have the page merge task events locally via the `onTimelineEvent` bus into the
-   task-progress UI (the pattern `useEventTimeline` already uses) — i.e.
-   contradicting D2's "rely on the cascade only"; or
-3. Narrow spec Requirement 1 / AC line 1 to drop task start/completion from the
-   live-update guarantee — i.e. changing the issue's stated acceptance.
+These are the same class of internal inconsistency cycle 1 blocked on (B2); the
+fix updated the operative paragraphs but not the framing around them. They are
+small, surgical edits, but they must be made so the design/proposal read as one
+coherent position rather than two contradictory ones.
 
-D2 must be rewritten whichever path is chosen, and the chosen path must be
-reflected in a spec scenario that is actually achievable.
+## Minor observations (non-blocking)
 
-### B2. Proposal and design are inconsistent on whether new invalidations are allowed
+### M1. Spec Requirement 1 prose vs D7 on "blocked"
 
-The proposal (`proposal.md:23`) says the ingestion path is reused "with any added
-keys needed to refresh issue detail data on stream events" — explicitly hedging
-that new invalidations *may* be required. The design (`design.md:43`) then
-forecloses that hedge: "No new invalidation keys are introduced." The design's
-choice is the one that creates B1. These two artifacts must agree; given B1, the
-proposal's hedge was the correct instinct and the design's blanket "no new keys"
-must be withdrawn or qualified.
+`issue-detail-live-updates` Requirement 1 prose lists "blocked states" among the
+transitions applied "incrementally as those events arrive". D7 clarifies blocked
+is partly poll-driven (drift/convergence), not purely event-driven. The
+requirement's scenario (Scenario 3, reworded in S2) is state-based and
+satisfiable, so this is wording only — but "as those events arrive" could be
+softened to "as those transitions occur" so the prose matches D7 and the
+scenario.
 
-## Secondary observations (not blocking, but should be addressed when B1 is fixed)
+## Summary
 
-### S1. "Blocked" coverage under D2/D3 is under-analyzed
-
-`blocked` is a *derived* summary with several causes (drift needs-attention,
-convergence blocking, rebase conflict, run failure). Only some coincide with
-`['issues']`-invalidating events: run failure routes through `workflowRunHandler`
-(`handle-event.ts:150-168`), but drift is surfaced via `useWorkspaceStatus` (which
-keeps its own `refetchInterval`, `queries.ts:170-180`) and convergence lives on
-the issue object. The nudge (D3) is edge-triggered off `decision.summary`, which
-recomputes only when the underlying query data changes. The plan does not state
-which data feed drives a transition *into* `blocked` in each case, so it is
-unverified that a drift-induced block will both (a) appear live under D1/D2 and
-(b) trip the nudge promptly. The fix for B1 should carry an explicit analysis of
-the blocked-causes matrix and which feed invalidates each.
-
-### S2. Spec wording implies a "blocked-state event" that does not exist
-
-`issue-detail-live-updates` Requirement 1, Scenario 3 conditions on "an
-approval-requested event **or a blocked-state event** … arrives over the live
-event stream". There is no discrete blocked-state event; the design (D3) correctly
-says blocked is derived. The scenario should be reworded to "the issue entering a
-blocked state", consistent with the attention-nudges spec, to avoid
-implementer/test confusion.
-
-### S3. The nudge set excludes `'failed'` — confirm this is intended
-
-`RuntimeSummary` also includes `'failed'` (`runtime-types.ts:9`), distinct from
-`'blocked'`, and a run failure on a non-viewed issue currently raises a global
-"encountered an error" toast (`handle-event.ts:164-167`). The attention-nudges
-spec nudges only approval-waiting and blocked, so **after this change a viewed
-issue that fails while the page is open receives no toast at all** (global path
-stays suppressed for `viewedIssue`; page nudge does not cover `'failed'`). This
-matches the issue's AC literally ("approval-waiting or blocked"), but the user
-voice says "the four moments that need them". If a run failure is one of the
-moments that need the owner, the nudge set is too narrow. Worth an explicit
-product decision recorded in the proposal/design rather than left implicit.
+The plan's operative core is now correct: the headline defect (task completions
+not appearing live) is addressed at the right layer (client-side invalidation
+routing for already-received events), with sound alternatives, an honest
+blocked-causes matrix, a recorded nudge-set scope, and valid tasks. What remains
+is (1) one missing compile prerequisite (`EventMap` extension) without which the
+D2 fix does not typecheck, and (2) a handful of framing sentences that still
+contradict the updated decisions. Both are quick, localized fixes.
 
 <promise>FAIL</promise>
