@@ -65,7 +65,7 @@ export function ArtifactOpener({
   const selectedArtifact = artifacts?.find((a) => a.artifactId === selectedArtifactId)
 
   return (
-    <section className="space-y-3" data-testid="latest-artifacts-panel" aria-label="Artifacts">
+    <section id="artifacts" className="space-y-3 scroll-mt-20" data-testid="latest-artifacts-panel" aria-label="Artifacts">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-foreground">Artifacts</h2>
         {workflowRunId && isLoading && <span className="text-xs text-muted-foreground">Loading...</span>}

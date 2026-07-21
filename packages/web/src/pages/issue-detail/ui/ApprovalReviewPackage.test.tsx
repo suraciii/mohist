@@ -68,6 +68,8 @@ describe('ApprovalReviewPackage', () => {
 
     expect(within(screen.getByTestId('approval-artifact-proposal.md')).getAllByText('proposal.md')).toHaveLength(2)
     expect(screen.getByText('tasks.json')).toBeInTheDocument()
+    expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
+    expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
     expect(screen.getByTestId('approval-mobile-approve')).toBeInTheDocument()
     expect(screen.getByTestId('approval-mobile-send-back')).toBeInTheDocument()
     expect(screen.queryByTestId('mobile-action-sheet-launcher')).not.toBeInTheDocument()
@@ -79,6 +81,43 @@ describe('ApprovalReviewPackage', () => {
     fireEvent.change(screen.getByTestId('send-back-feedback-textarea'), { target: { value: 'Please narrow it.' } })
     fireEvent.click(screen.getByTestId('send-back-feedback-submit'))
     expect(controller.runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'send-back' }), { sendBackBody: 'Category: Scope\n\nPlease narrow it.' })
+  })
+
+  it('keeps the artifacts destination mounted while approval evidence is loading or unavailable', () => {
+    const loadingHook = () => ({ data: undefined, isLoading: true, error: null })
+    const { rerender } = render(
+      <MemoryRouter><ApprovalReviewPackage
+        issueNumber={455}
+        workflowRunId="run-1"
+        approvalStage="plan"
+        actions={[]}
+        controller={controller}
+        rationale="Review the plan."
+        nextAction="Approve or send back"
+        isNarrowViewport={false}
+        artifactListHook={loadingHook}
+        artifactContentHook={artifactContentHook}
+      /></MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
+    expect(screen.getAllByText('Loading artifact list...')).toHaveLength(2)
+
+    rerender(
+      <MemoryRouter><ApprovalReviewPackage
+        issueNumber={455}
+        workflowRunId={null}
+        approvalStage={null}
+        actions={[]}
+        controller={controller}
+        rationale="Review is unavailable."
+        nextAction="Wait"
+        isNarrowViewport={false}
+      /></MemoryRouter>,
+    )
+    expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
+    expect(screen.getByText('No inline evidence is configured for this approval stage.')).toBeInTheDocument()
+    expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
   })
 
   it('keeps every secondary descriptor in ordered non-modal access', () => {

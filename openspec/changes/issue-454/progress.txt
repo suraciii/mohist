@@ -117,3 +117,21 @@
 - Updated Web comment models/client/mutation/composer and CLI inline/file/table/JSON paths to require and transmit author. Comment rows pair author, timestamp, body, attachments, and deletion controls in a wrapping phone-safe layout, with `Unknown author` for historical null/blank data.
 - Added focused formatter/hook/panel, migration/grain/API, Web composer/client, CLI, and production-build phone browser coverage. The large issue-detail spec was split by behavior to remain within the repository test-file budget.
 - Verification completed: focused server (24), CLI (19), and Web (89) tests passed; `npm test` passed 1,372 CLI, 1,268 server unit, 2,947 server spec, 30 architecture, 5,028 Web, and 1,229 runner tests. Web FSD checks, typecheck, the explicit full Web suite (372 files, 5,028 tests), and the focused Chromium phone scenario also passed with no generated Git-visible changes.
+
+# T-005: Make issue detail sections URL-addressable
+
+## Codebase Patterns
+
+- Issue-detail section navigation is route-local. `useIssueDetailSectionNavigation` parses only the four canonical hashes, builds destinations from the current `pathname` and `search`, and derives Activity open state directly from `location.hash`.
+- Async fragment revealing depends on primitive composition readiness, not query payload identity. The effect runs after the final section owner mounts and does not re-scroll on timeline or artifact polling refreshes.
+- Fragment IDs belong to final presentation owners: the page workflow frame owns `workflow`, `ArtifactOpener` owns ordinary `artifacts`, approval evidence owns approval-time `artifacts`, `ActivityDialog` content owns `activity`, and `IssueCommentsSection` owns `comments`.
+- Ordinary and approval artifact owners remain mutually exclusive. Approval evidence keeps `id="artifacts"` for plan/check/unknown stages and loading, missing, content-error, and unavailable states.
+- `ActivityDialog` follows the controlled/uncontrolled component convention: optional `open` and `onOpenChange` compose with URL state, while omitted `open` retains local state and existing reusable behavior.
+
+## Completed implementation
+
+- Added canonical same-document Workflow, Artifacts, Activity, and Comments links that preserve the current project-scoped pathname and search parameters; composite parents expose only destinations they actually provide.
+- Direct and in-page `#workflow`, `#artifacts`, and `#comments` changes reveal mounted targets with sticky-header-safe scroll margins. Unknown hashes and supported hashes whose composite-parent target is absent no-op safely.
+- `#activity` now opens and enables the timeline without a trigger click. The ordinary trigger pushes `#activity`; browser history drives open/close; dialog close idempotently replaces only the current hash while preserving pathname and search.
+- Added route-model DOM tests, controlled/uncontrolled Activity dialog tests, approval evidence ownership/fallback tests, MSW-backed page navigation specs, and a production-build Playwright spec covering all destinations at desktop and phone widths.
+- Verification completed: baseline focused tests passed (4 files, 28 tests); Web FSD boundaries, test boundaries, and typecheck passed; full Web suite passed (374 files, 5,046 tests); focused Chromium fragment coverage passed at desktop and phone widths (2 tests). Verification left no generated Git-visible changes.

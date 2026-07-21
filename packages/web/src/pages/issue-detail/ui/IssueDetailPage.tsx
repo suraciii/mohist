@@ -1,5 +1,5 @@
 import { useMemo, useState, type ComponentType } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, partitionIssueBody } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
@@ -25,6 +25,7 @@ import {
   type IssueDecisionAction,
 } from '../model/issueDecisionActions'
 import { getStopConsequenceCopy, useIssueDecisionActionController } from '../model/useIssueDecisionActions'
+import { useIssueDetailSectionNavigation } from '../model/useIssueDetailSectionNavigation'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
@@ -120,6 +121,11 @@ export function IssueDetailPage({
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber, workflowDataEnabled)
+  const sectionNavigation = useIssueDetailSectionNavigation({
+    workflow: !!issue && !isCompositeParent,
+    artifacts: !!issue && !isCompositeParent,
+    comments: !!issue,
+  })
 
   const isBacklog = issue?.status === IssueStatus.Backlog
   const isArchived = !!issue?.archivedAt
@@ -347,6 +353,8 @@ export function IssueDetailPage({
                     <ActivityDialog
                       issueNumber={issueNumber}
                       workflowStatus={issue?.workflowStatus}
+                      open={sectionNavigation.activityOpen}
+                      onOpenChange={sectionNavigation.onActivityOpenChange}
                       TimelinePanel={components?.EventTimelinePanel}
                     />
                   )}
@@ -408,6 +416,16 @@ export function IssueDetailPage({
               <div className="mt-2 text-xs text-muted-foreground/70">
                 Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
               </div>
+              <nav aria-label="Issue sections" className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                {showWorkflowSections && (
+                  <>
+                    <Link to={sectionNavigation.links.workflow} className="text-muted-foreground hover:text-foreground">Workflow</Link>
+                    <Link to={sectionNavigation.links.artifacts} className="text-muted-foreground hover:text-foreground">Artifacts</Link>
+                    <Link to={sectionNavigation.links.activity} className="text-muted-foreground hover:text-foreground">Activity</Link>
+                  </>
+                )}
+                <Link to={sectionNavigation.links.comments} className="text-muted-foreground hover:text-foreground">Comments</Link>
+              </nav>
             </div>
 
             {isApproval ? (
@@ -457,7 +475,7 @@ export function IssueDetailPage({
               )}
 
               {showWorkflowSections && (
-                <div data-testid="workflow-view-frame">
+                <div id="workflow" className="scroll-mt-20" data-testid="workflow-view-frame">
                   <WorkflowView issue={issue} readOnly />
                 </div>
               )}

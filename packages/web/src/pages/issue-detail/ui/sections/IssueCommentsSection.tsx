@@ -52,7 +52,9 @@ export function IssueCommentsSection({
 
   return (
     <section
+      id="comments"
       data-testid="comments-section"
+      className="scroll-mt-20"
       data-tier-weight="reading-flow"
       aria-label="Issue comments"
     >
