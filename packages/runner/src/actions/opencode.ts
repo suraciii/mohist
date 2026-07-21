@@ -3,8 +3,10 @@ import { isObject, numberInput } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
-import type { OpenCodeRuntime } from "../runtime/opencode/index.js"
+import type { OpenCodeRuntime, RuntimeTurnObserver } from "../runtime/opencode/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
+import { WorkflowAgentSessionReporter } from "./workflow-agent-session-reporter.js"
+import type { WorkflowAgentSessionClosePayload } from "./workflow-agent-session-reporter.js"
 
 export const OPENCODE_USES = "mohist/opencode"
 
@@ -155,7 +157,11 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
   }
 
   const turnRequest = buildTurnRequest(binding, prompt, options, resolveTurnDeadlineMs(context))
-  const result = await runtime.runTurn(turnRequest, context.signal)
+  const reporter = createWorkflowReporter(context, sessionName, binding.runtimeSessionId, prompt)
+  const observer = createWorkflowObserver(reporter)
+  const result = await runtime.runTurn(turnRequest, context.signal, observer)
+  enqueueTerminalClose(reporter, result, binding.runtimeSessionId)
+  await reporter?.settle()
   if (!result.ok) {
     return fail(runtimeErrorCode(result.error.kind), result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   }
@@ -170,6 +176,39 @@ export async function opencodeAction(context: ActionContext): Promise<ActionResu
     diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
   }
   return succeed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
+}
+
+/**
+ * Enqueue exactly one `session.closed` event after all observed and
+ * reconciled runtime events for the current turn have settled.
+ *
+ *   - `result.ok === true`  → `status: "completed"`, `exitCode: 0`
+ *   - `result.ok === false` → `status: "failed"`, `exitCode: 1`,
+ *     `failureReason` is the original runtime error message so the
+ *     AgentSession terminal observation preserves the OpenCode cause
+ *     instead of obscuring it with a transport or upload error.
+ *
+ * The close is enqueued on the same serialized promise chain the input
+ * and projected events used (T-001 reporter), so it always follows the
+ * observed events for that turn. When the initial `session.input` was
+ * rejected the reporter suppresses all later uploads, including this
+ * close, so it cannot attach to a previously persisted turn.
+ *
+ * Upload failure is best-effort and observable; it MUST NOT change the
+ * `result`-driven Action outcome. This helper never awaits the upload
+ * and never throws.
+ */
+function enqueueTerminalClose(
+  reporter: WorkflowAgentSessionReporter | null,
+  result: Awaited<ReturnType<OpenCodeRuntime["runTurn"]>>,
+  runtimeSessionId: string | null,
+): void {
+  if (!reporter) return
+  if (runtimeSessionId === null) return
+  const close: WorkflowAgentSessionClosePayload = result.ok
+    ? { status: "completed", exitCode: 0, runtimeSessionId }
+    : { status: "failed", exitCode: 1, failureReason: result.error.message, runtimeSessionId }
+  reporter.enqueueClose(close)
 }
 
 /**
@@ -246,6 +285,41 @@ function runtimeErrorCode(kind: string): string {
   if (kind === "deadline-exceeded") return "timeout"
   if (kind === "missing-session") return "runtime-session-missing"
   return kind
+}
+
+function createWorkflowReporter(
+  context: ActionContext,
+  sessionName: string | undefined,
+  runtimeSessionId: string | null,
+  composedPrompt: string,
+): WorkflowAgentSessionReporter | null {
+  if (!sessionName) return null
+  if (!context.serverConnection || !context.projectId) return null
+  if (!runtimeSessionId) return null
+  if (typeof context.serverConnection.workflowAgentSessionRuntimeEvents !== "function") return null
+  const reporter = new WorkflowAgentSessionReporter({
+    connection: context.serverConnection,
+    projectId: context.projectId,
+    workflowRunId: context.workflowRunId,
+    sessionName,
+    workMetadata: {
+      workId: context.workId,
+      workType: context.workType,
+      stage: context.stage ?? null,
+    },
+    signal: context.signal,
+  })
+  reporter.enqueueInput(composedPrompt, runtimeSessionId)
+  return reporter
+}
+
+function createWorkflowObserver(reporter: WorkflowAgentSessionReporter | null): RuntimeTurnObserver | undefined {
+  if (!reporter) return undefined
+  return {
+    onEvent: (event) => {
+      reporter.enqueueEvent(event)
+    },
+  }
 }
 
 function resolveTurnDeadlineMs(context: ActionContext): number {

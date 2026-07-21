@@ -1,0 +1,67 @@
+# T-001 progress notes
+
+## Codebase Patterns
+
+- The runner Workflow adapter `opencodeAction` already resolves or attaches a Workflow AgentSession binding before calling `runtime.runTurn`. The new transcript reporter wires in only after the binding has a non-null `runtimeSessionId`, so the `session.input` event always carries the current physical binding.
+- `RuntimeTurnObserver.onEvent` is called synchronously from `turn.ts` `executePrompt`, which means the reporter must accept events synchronously without awaiting HTTP. The existing `agent-job-executor.ts` shows the pattern: chain `eventWrite` via `.then(...)` so a later rejection does not poison later attempts.
+- `session.input` is the canonical cross-source turn delimiter on `AgentSessionGrain`. The grain's `AppendEventsAsync` is the single entry point for both AgentJob (`agentSessionRuntimeEvents`) and Workflow (`workflowAgentSessionRuntimeEvents`) routes, so the persistence fence belongs there, not in the route or in `TranscriptAccumulator`.
+- The TranscriptAccumulator accumulates until `_transcript.HasPending` is true; flushes are driven by `FlushAsync` (state + transcript together). For the input fence we only need the transcript portion — extracted as `FlushPendingTranscriptAsync` so the input-fence path cannot accidentally trigger a state-save round-trip.
+- `AgentSessionGrainFixture` exposes a fake transcript store that supports `NextException`, so failure-during-input-fence coverage can target exactly the input-boundary flush without dirtying other paths.
+
+## Implementation notes
+
+- Reporter lives at `packages/runner/src/actions/workflow-agent-session-reporter.ts` — Workflow-local; not exposed to AgentJob.
+- Input acceptance gate: a single `inputRejected` boolean read by every later upload callback so the chain serializes naturally and rejects later uploads without a separate "skip if rejected" wrapper.
+- `controller.signal` is independent of the runner host signal — bounded by a 30 s timeout (`DEFAULT_REPORT_TIMEOUT_MS`), so a stalled upload cannot retain the Action indefinitely.
+- `createWorkflowReporter` defensively checks `typeof connection.workflowAgentSessionRuntimeEvents === "function"` so older test fakes that only stub `openWorkflowAgentSession`/`attachWorkflowAgentSession` (e.g., `opencode-action-turn.spec.ts`) keep working unchanged.
+- The new Session grain tests use `FakeAgentSessionTranscriptStore.NextException` plus a single explicit `FlushForTestAsync` for observation — no fake-time advance and no scheduler waits, matching the acceptance criterion that correctness does not depend on the 200 ms persistence timer.
+
+## Verification surface
+
+- `npm run typecheck -w packages/runner` — green.
+- `npm test -w packages/runner` — 1183 tests pass (98 files).
+- `npm test` (root) — 1361 cli + 1260 server unit + 30 server arch + 2890 server spec + 4995 web + 1183 runner = 11719 tests pass.
+- `git status` — only the three source/test files I touched and two new files; no generated artifacts.
+
+# T-002 progress notes
+
+## Codebase Patterns
+
+- The same Workflow `WorkflowAgentSessionReporter` chain from T-001 carries the terminal `session.closed` event naturally: `enqueueClose` appends to `tail` after `enqueueInput` / `enqueueEvent`, so one `await reporter.settle()` drains the whole turn. No extra serialization, no separate upload, no coupling to Workflow work.
+- `OpenCodeRuntime.runTurn` failures surface as `{ ok: false, error: { kind, message } }`. The Action only needs the `message` (and the `ok` bit) to map a terminal close; the `kind` value is workflow-side policy, never a Session fact.
+- `TranscriptAccumulator.CaptureInput` stores the prompt onto `_promptText` / `_promptKind` rather than emitting an `input` part. The text+tool+close part count per turn therefore does NOT include a `session.input` part — the prompt is observable only via `Turn.PromptText` and the transcript `User` envelope. Spec coverage must distinguish part counts (persisted parts) from turn boundary counts (turn sequences).
+- `AgentSessionQuerier.LoadTerminalFactsAsync` and `TerminalFact.FromTranscript` previously ordered `session.closed` parts by `part.Sequence` alone. With multiple turns reusing one AgentSession this picks the part with the largest *intra-turn* sequence, which is the FIRST turn's close (because turn N's `tool`/`text` parts shift its close to `Sequence N+1+tool`), not the LATEST accepted close. The reducer must order by `(turn.Sequence, part.Sequence)` so the most recent turn's terminal observation wins.
+
+## Implementation notes
+
+- `enqueueTerminalClose(reporter, result, binding.runtimeSessionId)` in `opencode.ts` enqueues exactly one close after `runtime.runTurn` returns. It is called BEFORE `await reporter.settle()` and never observes the close upload; close rejection can therefore never change the Action result (the Action result is computed from `result.ok` and `result.error` independently of the close).
+- Mapping is symmetric:
+  - `result.ok === true`  → `{ status: "completed", exitCode: 0, runtimeSessionId }`
+  - `result.ok === false` → `{ status: "failed", exitCode: 1, failureReason: result.error.message, runtimeSessionId }`
+- The close's `runtimeSessionId` is `binding.runtimeSessionId` (i.e., the currently-bound physical session), not whatever the assistant mid-turn event projected. If the input was rejected the `reporter` suppresses the close (existing `inputRejected` guard), so the close cannot attach to the previously persisted turn.
+- Fix in `AgentSessionQuerier.cs`: `LoadTerminalFactsAsync` and `FromTranscript` order parts by `(turn.Sequence, part.Sequence, part.Id)` instead of `(part.Sequence, part.Id)`. This is a read-side reducer change (no endpoint, no DTO, no schema, no persisted model). Single-turn sessions see byte-identical behaviour because `(turn.Sequence = 1)` ties; multi-turn sessions see the latest accepted close drive `WorkflowSessionDto.Status`.
+- Runner test stays under the 800-line file-size budget: the new terminal-close describe block moved to a sibling file `opencode-action-workflow-terminal-close.spec.ts`. It reuses the same `buildRuntime` / `makeFakeConnection` / `baseContext` shape but in its own file (no spec cross-imports).
+- Server spec lives in a sibling file `WorkflowSessionTerminalConvergenceSpecs.cs` (Issue-458 / Workflow / Grain). It uses the existing `MohistIntegrationFixture` and `CreateIssueWorkflowAsync` pattern; only one test (one assertion per the T-002 AC) to stay comfortably under the 24,000-byte ratchet.
+
+## Verification surface
+
+- `npm run typecheck -w packages/runner` and `npm run typecheck:tests -w packages/runner` — green.
+- `npm test -w packages/runner` — 1190 tests pass (99 files; +7 from the new spec file).
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~WorkflowSessionTerminalConvergenceSpecs"` — passes.
+- `npm test` (root) — 1361 cli + 1260 server unit + 30 server arch + 2891 server spec + 4995 web + 1190 runner = 11727 tests pass.
+- Architecture ratchets hold: file sizes stay under both budgets.
+- `git status` — only the source changes I touched and two new spec files (`opencode-action-workflow-terminal-close.spec.ts`, `WorkflowSessionTerminalConvergenceSpecs.cs`); no generated artifacts.
+
+# T-003 progress notes
+
+## Review follow-up
+
+- The Workflow runtime-events route returns the grain's accepted-event receipts even when the HTTP status is 200. A rejected `session.input` therefore appears as an empty receipt list when the input persistence fence cannot flush the prior pending turn.
+- `ServerConnection.workflowAgentSessionRuntimeEvents` now returns those receipts. `WorkflowAgentSessionReporter` requires a `session.input` receipt before opening its turn gate; an empty response follows the existing rejected-input path and suppresses all later activity and `session.closed` reports for that turn.
+- The runner regression uses a resolved empty receipt response, rather than a thrown transport error, and verifies the Action still succeeds while making only the input upload attempt.
+
+## Verification surface
+
+- `npm run typecheck -w packages/runner` — green.
+- `npm run typecheck:tests -w packages/runner` — green.
+- `npm test -w packages/runner` — 1191 tests pass (99 files).

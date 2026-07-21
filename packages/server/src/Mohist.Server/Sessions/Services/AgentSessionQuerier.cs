@@ -766,8 +766,12 @@ public class AgentSessionQuerier : IScopedService
         if (loaded.Parts.Count == 0) return [];
 
         var runtimeByTurnId = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.RuntimeSessionId);
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.Sequence);
         var result = new Dictionary<string, TerminalFact>(StringComparer.Ordinal);
-        foreach (var part in loaded.Parts.OrderBy(part => part.Sequence).ThenBy(part => part.Id))
+        foreach (var part in loaded.Parts
+                     .OrderBy(part => turnSequenceByTurnId.GetValueOrDefault(part.TurnId, 0))
+                     .ThenBy(part => part.Sequence)
+                     .ThenBy(part => part.Id))
         {
             if (!loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId)) continue;
             var currentRuntimeSessionId = recordBySessionId[sessionId].Session.Status.AgentRuntimeSessionId;
@@ -814,7 +818,8 @@ internal sealed record TerminalFact(
 {
     public static TerminalFact? FromTranscript(AgentSessionTranscriptData transcript) => transcript.Parts
         .Where(part => part.Type == TranscriptPartTypes.SessionClosed)
-        .OrderBy(part => part.Sequence)
+        .OrderBy(part => transcript.Turns.FirstOrDefault(turn => turn.Id == part.TurnId)?.Sequence ?? 0)
+        .ThenBy(part => part.Sequence)
         .ThenBy(part => part.Id)
         .Select(FromPart)
         .LastOrDefault(fact => fact is not null);
