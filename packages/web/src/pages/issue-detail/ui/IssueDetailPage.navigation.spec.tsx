@@ -131,7 +131,8 @@ describe('IssueDetailPage fragment navigation', () => {
     expect(screen.getByText('Loading...')).toBeInTheDocument()
     expect(scrollIntoView).not.toHaveBeenCalled()
 
-    resolveIssue(HttpResponse.json({ success: true, data: makeIssue() }))
+    await waitFor(() => expect(resolveIssue).toBeTypeOf('function'), { timeout: 5000 })
+    resolveIssue?.(HttpResponse.json({ success: true, data: makeIssue() }))
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
     expect(scrollIntoView.mock.instances[0]).toHaveAttribute('id', 'comments')
   })

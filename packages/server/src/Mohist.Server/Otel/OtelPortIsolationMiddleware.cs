@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Mohist.Server.Otel;
@@ -85,10 +83,7 @@ public sealed class OtelPortIsolationMiddleware
 
     private static int ResolveLocalPort(HttpContext context)
     {
-        var isTesting = context.RequestServices?.GetService<IHostEnvironment>()
-            ?.IsEnvironment(MohistHostEnvironment.Testing) == true;
-        if (isTesting
-            && context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
+        if (context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
             && int.TryParse(value, out var localPort))
             return localPort;
         return context.Connection.LocalPort;
