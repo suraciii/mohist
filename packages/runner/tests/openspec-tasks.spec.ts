@@ -291,7 +291,7 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.prompt).toBe("default-with caller prompt")
   })
 
-  it("OpenSpecTaskWithBuildPromptVariable_EmbedsBaseInLoaderSpec", async () => {
+  it("OpenSpecTaskWithBuildPromptInput_EmbedsBaseInFallbackLoaderSpec", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -303,20 +303,20 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }, {
-      prompts: { build: "<build>build prompt</build>" },
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      buildPrompt: "<build>build prompt</build>",
     }))
     const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toEqual({
-      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
-      with: { file: tasksPath, items: "tasks", taskId: "T-001" },
-    })
+    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
+    expect(loadedWith.prompt.with.base).toBe("<build>build prompt</build>")
+    expect(loadedWith.prompt.with.taskId).toBe("T-001")
   })
 
-  it("OpenSpecTaskWithoutBuildPromptVariable_OmitsBaseInLoaderSpec", async () => {
+  it("OpenSpecTaskWithoutBuildPromptInput_OmitsBaseInFallbackLoaderSpec", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -333,9 +333,12 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toEqual({
-      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
-      with: { file: tasksPath, items: "tasks", taskId: "T-001" },
+    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
+    expect(loadedWith.prompt.with.base).toBeUndefined()
+    expect(loadedWith.prompt.with).toEqual({
+      file: tasksPath,
+      items: "tasks",
+      taskId: "T-001",
     })
   })
 

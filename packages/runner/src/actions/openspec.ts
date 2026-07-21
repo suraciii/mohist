@@ -97,12 +97,13 @@ export async function openspecTasksAction(inputs: JsonObject, host: ActionHost):
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(inputs, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH
+  const buildPrompt = stringInput(inputs, "buildPrompt")
   const tasks: AddTaskInput[] = sourceTasks.flatMap((task) => {
     const id = stringInput(task, "id") ?? stringInput(task, "taskId")
     if (!id?.trim()) return []
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
-    const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath })
+    const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, buildPrompt)
     const expect = mergeTaskExpect(task)
     return [{ id, title, uses, with: mergedWith ?? null, expect }]
   })
@@ -309,12 +310,13 @@ function mergeTaskWith(
   task: JsonObject,
   taskId: string | undefined,
   loaderConfig: { file: string; items: string },
+  buildPrompt: string | undefined,
 ) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
   if (merged.prompt === undefined) {
-    merged.prompt = buildOpenSpecTaskPromptSpec(taskId, loaderConfig)
+    merged.prompt = buildOpenSpecTaskPromptSpec(taskId, loaderConfig, buildPrompt)
   } else {
     merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
   }
@@ -324,11 +326,13 @@ function mergeTaskWith(
 function buildOpenSpecTaskPromptSpec(
   taskId: string | undefined,
   loaderConfig: { file: string; items: string },
+  buildPrompt: string | undefined,
 ): JsonObject {
   const loaderWith: JsonObject = {
     file: loaderConfig.file,
     items: loaderConfig.items,
   }
+  if (buildPrompt && buildPrompt.trim().length > 0) loaderWith["base"] = buildPrompt
   if (taskId?.trim()) loaderWith["taskId"] = taskId
   return {
     uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,

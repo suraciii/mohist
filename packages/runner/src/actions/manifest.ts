@@ -32,6 +32,7 @@ export interface ActionInputDeclaration {
   readonly default?: JsonValue
   readonly description?: string
   readonly render?: InputRenderTiming
+  readonly engineSource?: "prompts.build"
 }
 
 export interface ActionOutputDeclaration {

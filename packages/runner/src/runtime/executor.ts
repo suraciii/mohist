@@ -20,7 +20,7 @@ import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enfo
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
 import { fail as actionFail, isActionFailure, succeed as actionSucceed } from "../actions/action-result.js"
 import type { ActionDefinition, ActionManifest, ActionCapabilitySet } from "../actions/manifest.js"
-import { validateActionInput, deferredInputFields } from "../actions/input-validation.js"
+import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughTurnFact } from "../actions/result-validation.js"
 import {
   evaluateCompletion,
@@ -125,15 +125,16 @@ export class WorkExecutor {
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
       const deferred = deferredInputFields(definition.manifest)
+      const actionWith = injectEngineInputs(definition.manifest, work.with, variables)
       const unresolved = [
-        ...wholeStringUnresolvedReferences(removeDeferredFields(work.with, deferred), variables),
+        ...wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables),
         ...wholeStringUnresolvedReferences(work.expect, variables),
       ]
       if (unresolved.length > 0) {
         return failure(work, formatUnresolvedError(work, unresolved))
       }
 
-      const renderedWith = this.renderWithDeferred(work.with, variables, deferred)
+      const renderedWith = this.renderWithDeferred(actionWith, variables, deferred)
       const validation = validateActionInput(definition.manifest, renderedWith)
       if (validation.kind === "failure") {
         const validationFailure = validationFailureResult(work, validation.error)

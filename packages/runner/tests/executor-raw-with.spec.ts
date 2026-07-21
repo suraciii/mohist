@@ -123,4 +123,42 @@ describe("WorkExecutor action input boundary", () => {
     expect(capturedInputs).not.toHaveProperty("variables")
     expect(capturedHost).not.toHaveProperty("variables")
   })
+
+  it("derives engine-sourced inputs from variables without exposing the variable map", async () => {
+    let capturedInputs: JsonObject | null = null
+    const registry = new ActionRegistry([
+      defineTestAction("test/engine-input", async (inputs) => {
+        capturedInputs = inputs
+        return { output: null }
+      }, {
+        inputs: {
+          buildPrompt: { types: ["string"], engineSource: "prompts.build" },
+        },
+      }),
+    ])
+
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      {} as never,
+      workDir,
+    )
+
+    const result = await executor.execute({
+      workflowRunId: "wf-engine-input",
+      workId: "work-engine-input",
+      workType: "task",
+      title: "Engine input",
+      uses: "test/engine-input",
+      with: {},
+      variables: {
+        workspace: { path: workDir, branch: null, changeDir: null },
+        prompts: { build: "build instructions" },
+      },
+    }, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(capturedInputs).toEqual({ buildPrompt: "build instructions" })
+    expect(capturedInputs).not.toHaveProperty("variables")
+  })
 })

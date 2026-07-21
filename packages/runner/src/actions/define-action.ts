@@ -154,6 +154,12 @@ function validateInputDeclaration(
   if (declaration.description !== undefined && typeof declaration.description !== "string") {
     throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' description must be a string when provided`)
   }
+  if (declaration.engineSource !== undefined && declaration.engineSource !== "prompts.build") {
+    throw new ActionDefinitionError(`Action '${actionName}' input '${inputName}' declares an unsupported engine source '${String(declaration.engineSource)}'`)
+  }
+  if (declaration.engineSource !== undefined && declaration.required === true) {
+    throw new ActionDefinitionError(`Action '${actionName}' engine-sourced input '${inputName}' must not be required`)
+  }
 }
 
 function validateOutputDeclaration(actionName: string, output: ActionOutputDeclaration, seen: Set<string>): void {
@@ -216,6 +222,7 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
       default: clonedDefault,
       description: declaration.description,
       render: declaration.render,
+      engineSource: declaration.engineSource,
     })
   }
   const outputs = manifest.outputs.map((output) =>

@@ -147,6 +147,7 @@ export type { ActionDefinition } from "./manifest.js"
 
 function projectEntry(manifest: ActionManifest): ActionCatalogEntry {
   const inputs: ActionCatalogInput[] = Object.keys(manifest.inputs)
+    .filter((name) => manifest.inputs[name]?.engineSource === undefined)
     .sort()
     .map((name) => {
       const declaration = manifest.inputs[name]!

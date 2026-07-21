@@ -170,6 +170,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         path: { types: ["string"], required: true, description: "Path to tasks.json" },
         task: { types: ["object"], description: "Default task-level fields applied to each entry", render: "deferred" },
         items: { types: ["string"], default: "tasks", description: "Top-level items path inside the JSON document" },
+        buildPrompt: { types: ["string"], engineSource: "prompts.build" },
       },
       outputs: [
         { name: "loaded", description: "Count of tasks loaded into the run" },

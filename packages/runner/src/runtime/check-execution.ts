@@ -1,7 +1,7 @@
 import type { ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
-import { validateActionInput, deferredInputFields } from "../actions/input-validation.js"
+import { validateActionInput, deferredInputFields, injectEngineInputs } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
 import { errorMessage } from "../core/errors.js"
 import type { ActionHost } from "../actions/host.js"
@@ -80,14 +80,15 @@ async function runOneCheck(
       message: `Check uses the removed Action '${check.uses}'. ${resolved.tombstone.guidance}`,
     }
   }
-  const definition = resolved.definition
-  try {
-    const deferred = deferredInputFields(definition.manifest)
-    const unresolved = wholeStringUnresolvedReferences(removeDeferredFields(check.with ?? null, deferred), variables)
+    const definition = resolved.definition
+    try {
+      const deferred = deferredInputFields(definition.manifest)
+      const actionWith = injectEngineInputs(definition.manifest, check.with ?? null, variables)
+      const unresolved = wholeStringUnresolvedReferences(removeDeferredFields(actionWith, deferred), variables)
     if (unresolved.length > 0) {
       return { name: check.name, status: "fail", message: deps.formatUnresolved(unresolved) }
     }
-    const renderedWith = renderDeferred(check.with ?? null, variables, deferred)
+    const renderedWith = renderDeferred(actionWith, variables, deferred)
     const validation = validateActionInput(definition.manifest, renderedWith)
     if (validation.kind === "failure") {
       return {
