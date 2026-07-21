@@ -39,7 +39,7 @@ export function defineTestAction(
     outputs: options.outputs ?? [],
     errors: options.errors ?? [],
   }
-  return defineAction({ manifest, run: handler })
+  return defineAction({ manifest, run: handler as unknown as ActionDefinition["run"] })
 }
 
 /**

@@ -71,11 +71,21 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/actions/registry.js", () => ({
-  createDefaultRegistry: () => ({
-    resolve: (uses?: string | null) => uses === "test/block" ? blockingAction : undefined,
-  }),
-}))
+vi.mock("../src/actions/registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+  return {
+    ...actual,
+    createDefaultRegistry: () => new actual.ActionRegistry([{
+      manifest: {
+        name: "test/block",
+        inputs: {},
+        outputs: [],
+        errors: [{ code: "action-failed", description: "The test Action failed" }],
+      },
+      run: blockingAction,
+    }]),
+  }
+})
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -84,11 +94,11 @@ beforeEach(() => {
   capturedFollowupTargetResolver = null
   uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
-    const aborted = deferred<{ status: string; message: string }>()
+    const aborted = deferred<{ error: { code: string; message: string } }>()
     if (signal.aborted) {
-      aborted.resolve({ status: "failed", message: "aborted" })
+      aborted.resolve({ error: { code: "action-failed", message: "aborted" } })
     } else {
-      signal.addEventListener("abort", () => aborted.resolve({ status: "failed", message: "aborted" }), { once: true })
+      signal.addEventListener("abort", () => aborted.resolve({ error: { code: "action-failed", message: "aborted" } }), { once: true })
     }
     return aborted.promise
   })
@@ -133,7 +143,7 @@ describe("RunnerHost", () => {
       secondPollStarted.resolve()
       return []
     })
-    blockingAction.mockResolvedValue({ status: "success", message: "ok" })
+    blockingAction.mockResolvedValue({ output: { message: "ok" } })
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -207,7 +217,7 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
-    blockingAction.mockResolvedValue({ status: "success", message: "ok" })
+    blockingAction.mockResolvedValue({ output: { message: "ok" } })
     const run = host.run(controller.signal)
 
     try {
@@ -282,7 +292,7 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
-    blockingAction.mockResolvedValue({ status: "success", message: "ok" })
+    blockingAction.mockResolvedValue({ output: { message: "ok" } })
     const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation((message: unknown) => {
       if (message === "first report for work work-retry failed; will retry") firstFailureLogged.resolve()
       if (message === "retry report for work work-retry failed (attempt 2)") secondFailureLogged.resolve()

@@ -99,8 +99,8 @@ describe("Check verdict validation", () => {
 
     const result = await executor.execute(makeCheckWork([{ name: "cyclic", uses: "test/action" }]), new AbortController().signal)
 
-    expect(result).toMatchObject({ status: "fail", error: { code: "unexpected-error" } })
+    expect(result).toMatchObject({ status: "fail", error: { code: "check-failed" } })
     expect(() => JSON.stringify(result)).not.toThrow()
-    expect(result.output).toEqual([{ name: "cyclic", status: "fail", message: expect.any(String) }])
+    expect(result.output).toEqual([{ name: "cyclic", status: "fail", error: { code: "unexpected-error", message: expect.any(String) }, message: expect.any(String) }])
   })
 })

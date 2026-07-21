@@ -55,4 +55,5 @@ public sealed class RunnerWorksState
 {
     [Id(0)] public List<RunnerWork> Works { get; set; } = [];
     [Id(1)] public RunnerInfo? LastKnownInfo { get; set; }
+    [Id(2)] public string? LastKnownActionCatalogJson { get; set; }
 }

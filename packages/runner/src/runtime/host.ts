@@ -1,7 +1,7 @@
 import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import { RunnerSignalRClient } from "../server/runner-signalr.js"
-import { createDefaultRegistry } from "../actions/registry.js"
+import { ActionRegistry, createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
@@ -123,7 +123,10 @@ export class RunnerHost {
   private readonly inFlight = new Map<string, InFlightEntry>()
   private readonly awaitingAck = new Map<string, { work: RenderedWorkItem; entry: AwaitingAckEntry }>()
 
-  constructor(private readonly options: RunnerOptions) {
+  constructor(
+    private readonly options: RunnerOptions,
+    private readonly actions: ActionRegistry = createDefaultRegistry(),
+  ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
@@ -336,7 +339,7 @@ export class RunnerHost {
       console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
     }
     this.workExecutor = new WorkExecutor(
-      createDefaultRegistry(),
+      this.actions,
       this.workspace,
       this.connection,
       undefined,
@@ -737,6 +740,7 @@ export class RunnerHost {
   private registrationState(): RunnerRegistration {
     return {
       capabilities: [],
+      actionCatalog: this.actions.catalog(),
       projectId: this.options.projectId,
       coderModels: this.coderModels,
       coderModelVariants: this.coderModelVariants,

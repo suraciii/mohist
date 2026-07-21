@@ -74,7 +74,9 @@ function installGh(respond: (command: string, args: string[], cwd: string) => Co
 describe("mohist/mark-github-pr-ready registry", () => {
   it("registers mark-github-pr-ready under its new id", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/mark-github-pr-ready")).toBe(markGitHubPrReadyAction)
+    const resolved = registry.resolve("mohist/mark-github-pr-ready")
+    expect(resolved.kind).toBe("definition")
+    expect(resolved.kind === "definition" ? resolved.definition.manifest.name : null).toBe("mohist/mark-github-pr-ready")
   })
 })
 

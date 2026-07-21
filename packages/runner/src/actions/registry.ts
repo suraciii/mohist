@@ -23,7 +23,7 @@ export class ActionRegistryConstructionError extends Error {
 export class ActionRegistry {
   private readonly byName = new Map<string, ActionDefinition>()
   private readonly tombstonesByName = new Map<string, ActionTombstone>()
-  private readonly catalog: ActionCatalog
+  private readonly catalogValue: ActionCatalog
 
   constructor(definitions: ReadonlyArray<ActionDefinition>, tombstones: ReadonlyArray<ActionTombstone> = []) {
     for (const definition of definitions) {
@@ -32,7 +32,7 @@ export class ActionRegistry {
     for (const tombstone of tombstones) {
       this.addTombstone(tombstone)
     }
-    this.catalog = buildCatalog(definitions, tombstones)
+    this.catalogValue = buildCatalog(definitions, tombstones)
   }
 
   resolve(uses?: string | null): ResolvedAction {
@@ -68,8 +68,8 @@ export class ActionRegistry {
     return [...this.tombstonesByName.values()]
   }
 
-  getActionCatalog(): ActionCatalog {
-    return this.catalog
+  catalog(): ActionCatalog {
+    return this.catalogValue
   }
 
   private addDefinition(definition: ActionDefinition): void {
@@ -136,6 +136,7 @@ function buildCatalog(definitions: ReadonlyArray<ActionDefinition>, tombstones: 
 }
 
 export { createDefaultRegistry } from "./index.js"
+export type { ActionDefinition } from "./manifest.js"
 
 function projectEntry(manifest: ActionManifest): ActionCatalogEntry {
   const inputs: ActionCatalogInput[] = Object.keys(manifest.inputs)

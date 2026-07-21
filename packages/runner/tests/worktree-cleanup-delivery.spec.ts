@@ -7,7 +7,7 @@ import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
-import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
+import { defineTestActions, type ActionRegistry, type TestActionDefinition } from "./support/action-registry-test.js"
 
 interface FakeWorktree {
   workDir: string
@@ -87,7 +87,7 @@ function commitCleanup(state: FakeWorktree, files: string[], sha: string) {
   state.cleanupCommits.push({ files, sha })
 }
 
-function buildRegistry(handlers: Record<string, (ctx: ActionContext) => Promise<ActionResult>>): ActionRegistry {
+function buildRegistry(handlers: Record<string, TestActionDefinition | ((ctx: ActionContext) => Promise<ActionResult>)>): ActionRegistry {
   return defineTestActions(handlers)
 }
 
