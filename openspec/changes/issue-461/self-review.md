@@ -2,25 +2,19 @@
 
 ## Findings
 
-### 1. High: generic follow-up delivery is outside the FIFO used by AgentJob events
+### 1. High: production follow-up handling resolves the runtime before it exists
 
-The spec promises production-order delivery per logical AgentSession (`specs/agent-session-runtime-event-delivery/spec.md:60-68`), and the design keys every generic queue by `(projectId, sessionId)` (`design.md:46`). The atomic task switches Workflow reporting and follow-up input/outcomes to the shared outbox (`tasks.json:9`, `tasks.json:25-29`) but does not migrate AgentJob transcript production.
+The plan requires follow-up input to be durably enqueued and then invoked exactly once through the current OpenCode runtime (`specs/agent-session-runtime-event-delivery/spec.md:100-110`, `tasks.json:26-28`). It does not address a current composition defect on that path.
 
-AgentJob input and activity currently continue through an independent direct-upload chain (`packages/runner/src/runtime/agent-job-executor.ts:98-149`). A generic follow-up can therefore drain from the outbox while an earlier AgentJob event for the same AgentSession is still in flight, violating the stated FIFO and transcript-boundary guarantees.
+`RunnerHost` constructs `RunnerSignalRClient` with a runtime accessor while `openCodeRuntime` is still null (`packages/runner/src/runtime/host.ts:156-168`); the runtime is created later in `initializeSharedConnection` (`packages/runner/src/runtime/host.ts:325-337`). `RunnerSignalRClient` registers handlers in its constructor and immediately calls `resolveOpenCodeRuntime()`, passing the resulting value into the follow-up and cancel handlers (`packages/runner/src/server/runner-signalr.ts:90-105`, `packages/runner/src/server/runner-signalr.ts:139-161`). The accessor is therefore resolved once to null rather than at command invocation time.
 
-The plan must either include AgentJob input/activity reporting in the shared ordering mechanism, or explicitly narrow the FIFO contract to source-local sequences and define the ordering boundary between AgentJob and generic follow-up producers. The current design claims one logical Session FIFO without controlling all of its producers.
-
-### 2. High: verification omits runner test-boundary and test-typecheck guards
-
-The task requires only `npm run typecheck -w packages/runner` and `npm test -w packages/runner` (`tasks.json:31`). The runner's `test:ci` script additionally runs `typecheck:tests` and `check:test-boundaries` before Vitest (`packages/runner/package.json:14-20`). Those guards are directly relevant because this change adds a recording filesystem, fake-time recovery, and many new runner tests while repository policy prohibits real filesystem and wall-clock dependencies.
-
-T-001 must require `npm run test:ci -w packages/runner`, or explicitly run `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and the test suite. Production typecheck plus Vitest alone does not verify the plan's stated test constraints.
+Without an explicit correction, production follow-ups remain `unavailable` before durable enqueue or runtime invocation, so the issue's follow-up-input guarantee cannot be delivered. The plan must require follow-up/cancel handlers to resolve the runtime at invocation time (or receive an updated live handle) and add a real `RunnerSignalRClient` regression test where the client is constructed before the runtime becomes ready and a later follow-up uses the initialized runtime. A host test that only inspects an accessor through a mocked client is insufficient.
 
 ## Review Summary
 
-- The plan covers the issue's upload-failure recovery, restart recovery, and non-blocking Server-delivery requirements without adding Server deduplication or cross-runner transfer.
-- Matching-receipt versus successful-response semantics, stale-binding scope, local enqueue failure dispositions, autonomous health recovery, migration, and the one-task atomic outbox replacement are now internally consistent and testable.
-- The remaining blockers are the uncontrolled AgentJob producer in the claimed generic Session FIFO and incomplete verification commands for the repository's runner test rules.
+- The proposal and specs cover upload retry, restart recovery, non-blocking Server delivery, and the issue's Server/cross-runner non-goals.
+- Managed producer-sequence ordering, AgentJob scope, acknowledgement policies, stale-binding behavior, local persistence failure handling, autonomous health recovery, migration, atomic switchover, and runner `test:ci` verification are internally consistent.
+- The remaining blocker is the live runtime composition required for the follow-up feature to function in production.
 
 ## Verdict
 
