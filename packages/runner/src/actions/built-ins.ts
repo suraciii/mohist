@@ -327,10 +327,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/create-github-pr",
       description: "Open or update a GitHub pull request for the current branch",
       inputs: {
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
-        remote: { types: ["string"], description: "Git remote name from the delivery profile" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        source: { types: ["string"], required: true, description: "Source branch" },
+        target: { types: ["string"], required: true, description: "Target branch" },
         draft: { types: ["boolean"], default: true, description: "Open the PR as a draft" },
         title: { types: ["string"], description: "Literal PR title" },
         message: { types: ["string"], description: "Alias of title" },
@@ -367,6 +366,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/mark-github-pr-ready",
       description: "Mark a GitHub pull request ready for review",
       inputs: {
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
         prNumber: { types: ["number"], required: true, description: "Pull request number" },
       },
       outputs: [
@@ -396,11 +396,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/merge-github-pr",
       description: "Merge a GitHub pull request via squash",
       inputs: {
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
         method: { types: ["string"], default: "squash", description: "Merge method (only 'squash' is supported)" },
-        prNumber: { types: ["number"], description: "Pull request number; falls back to source branch lookup" },
-        source: { types: ["string"], description: "Source branch; falls back to delivery context" },
-        target: { types: ["string"], description: "Target branch; falls back to delivery context" },
-        baseBranch: { types: ["string"], description: "Alias of target" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
         subject: { types: ["string"], description: "Literal squash commit subject" },
         subjectFrom: { types: ["string"], default: "issue.title", description: "Issue field source for the squash subject" },
       },
@@ -457,7 +455,8 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       name: "mohist/github-pr-status",
       description: "Verify a GitHub pull request is in the expected state",
       inputs: {
-        prNumber: { types: ["number"], description: "Pull request number; falls back to variables.github.pr.number" },
+        repositoryUrl: { types: ["string"], required: true, description: "Git repository URL used to select the GitHub repository" },
+        prNumber: { types: ["number"], required: true, description: "Pull request number" },
         expect: { types: ["string"], default: "open,ready", description: "Comma-separated expected states (open/ready/merged)" },
       },
       outputs: [

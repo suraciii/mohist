@@ -49,7 +49,12 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     stage: "plan",
     title: "Open or reuse GitHub draft PR",
     uses: "mohist/create-github-pr",
-    with: withOverrides,
+     with: {
+       repositoryUrl: "https://github.com/example/repo.git",
+       source: "mohist/run-wr-gh-pr-1",
+       target: "master",
+       ...withOverrides,
+     },
     variables: {
       project: { id: "proj_1", path: WORKSPACE_PATH },
       issue: { title: "Use GitHub PR workflow", body: "Open, review, and merge a GitHub PR.", number: 248 },
@@ -88,9 +93,10 @@ function installGit(respond: (workDir: string, args: string[], signal: AbortSign
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
   setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
-    const recorded: GhCall = { command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs }
+    const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
+    const recorded: GhCall = { command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs }
     ghCalls.push(recorded)
-    return await respond(cmd, args, cwd)
+    return await respond(cmd, visibleArgs, cwd)
   })
 }
 
@@ -105,16 +111,6 @@ function installMoIssueShow(title = "Use GitHub PR workflow", body = "Open, revi
     }
   })
   return calls
-}
-
-function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
-  return {
-    repository: {
-      name: "repo",
-      gitUrl,
-      baseBranch: "master",
-    },
-  }
 }
 
 describe("mohist/create-github-pr registry", () => {
@@ -201,7 +197,7 @@ describe("mohist/create-github-pr action", () => {
     })
   })
 
-  it("scopes GitHub PR delivery to the authoritative Issue repository", async () => {
+  it("uses the explicitly declared repository despite different Variables", async () => {
     const prArguments: string[][] = []
     installGit((_workDir, args) => {
       if (args.join(" ") === "fetch origin master") return ok("")
@@ -217,18 +213,18 @@ describe("mohist/create-github-pr action", () => {
       return ghFail(`unexpected gh call: ${args.join(" ")}`)
     })
 
-    const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository()))
+    const result = await createGitHubPrAction(context({ repositoryUrl: "https://github.com/acme/repo.git", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }, { repository: { gitUrl: "https://example.com/other.git", baseBranch: "other" } }))
 
     expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
-    expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
+    expect(prArguments.every((args) => args[0] === "pr")).toBe(true)
   })
 
-  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
-    const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository("not a Git URL")))
+  it("rejects an invalid explicit repository URL", async () => {
+    const result = await createGitHubPrAction(context({ repositoryUrl: "not a Git URL", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
-    expect(result.error?.message).toContain("authoritative GitHub repository URL")
+    expect(result.error?.message).toContain("valid GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {

@@ -23,3 +23,10 @@
 - Both bundled profiles bind every workspace-prepare task explicitly. Local merge-ready now binds base, source, and remote; shared Git recovery and publish tasks retain explicit bindings.
 - Added manifest, handler, profile, and Server parsed-profile regressions for missing inputs, Variable disagreement, host workDir, and local flow routing. Added `docs/actions/git.md` for the final Git Action contracts.
 - Verification: `npm run test:ci -w packages/runner` passed (103 files, 1,212 tests); `npm test` passed (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, and 1,212 Runner tests).
+
+## T-003
+
+- GitHub PR Actions now require explicit `repositoryUrl` plus source/target or `prNumber` inputs. The parsed repository selector is derived only from that URL; all `gh` operations use the host `workDir`.
+- Deleted `delivery-context.ts`; merge no longer discovers PRs by source/target, status no longer reads `vars.github.pr.number`, and issue field selectors use only dispatch `projectId`/`issueNumber`.
+- Updated the GitHub PR profile, manifest catalog, action documentation, workflow examples, and explicit-input regressions. The profile passes `${{ repository.gitUrl }}` to every GitHub Action and keeps `${{ vars.github.pr.number }}` as an explicit binding.
+- Focused GitHub tests pass (72 tests), Runner CI passes (103 files, 1,212 tests), and the full Server/CLI/Web/Runner test command passes after keeping the ratcheted profile spec file within its byte allowance.

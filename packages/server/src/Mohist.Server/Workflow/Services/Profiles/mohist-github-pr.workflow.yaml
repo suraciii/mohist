@@ -134,9 +134,9 @@ stages:
         title: Open draft GitHub PR
         uses: mohist/create-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
-          remote: origin
           draft: true
           titleFrom: issue.title
           bodyFrom: issue.body
@@ -253,6 +253,7 @@ stages:
         title: Mark GitHub PR ready
         uses: mohist/mark-github-pr-ready
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
 
       - id: verify-pr-checks
@@ -287,6 +288,7 @@ stages:
         title: GitHub PR status
         uses: mohist/github-pr-status
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
 
   - stage: integrate
@@ -323,6 +325,7 @@ stages:
         title: Merge GitHub PR
         uses: mohist/merge-github-pr
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           method: squash
         recovery:
@@ -384,5 +387,6 @@ stages:
         title: Merge verified
         uses: mohist/github-pr-status
         with:
+          repositoryUrl: ${{ repository.gitUrl }}
           prNumber: ${{ vars.github.pr.number }}
           expect: merged

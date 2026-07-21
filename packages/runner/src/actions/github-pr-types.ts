@@ -1,4 +1,5 @@
 export type GitHubPrErrorCode =
+  | "invalid-input"
   | "timeout"
   | "base-moved"
   | "retry-safe"

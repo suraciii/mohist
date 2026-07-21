@@ -6,7 +6,7 @@ import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
 import { timeoutStepMetadata, type CreateGitHubPrOutput, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata } from "./github-pr-types.js"
-import { resolveDeliveryBaseBranch, resolveDeliverySource, resolveGitHubRepository } from "./delivery-context.js"
+import { parseGitHubRepository } from "./github-pr-repository.js"
 import { fail as actionFail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 
@@ -23,9 +23,12 @@ function networkGhOptions(context: ActionContext): CommandLineOptions | undefine
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
-  const source = resolveDeliverySource(context)
-  const target = resolveDeliveryBaseBranch(context)
-  if (!source || !target) return actionFail("invalid-input", "create-github-pr requires the authoritative repository branch and source")
+  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+  const source = typeof context.with?.["source"] === "string" ? context.with["source"] : undefined
+  const target = typeof context.with?.["target"] === "string" ? context.with["target"] : undefined
+  if (!repositoryUrl || !source || !target) return actionFail("invalid-input", "create-github-pr requires 'repositoryUrl', 'source', and 'target'")
+  const githubRepository = parseGitHubRepository(repositoryUrl)
+  if (!githubRepository) return actionFail("config-error", "create-github-pr requires a valid GitHub repository URL")
   const draft = context.with?.["draft"] !== false
   const workDir = context.workDir
 
@@ -53,9 +56,6 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     output: payload.output ?? message,
     steps,
   })
-  const githubRepository = resolveGitHubRepository(context)
-  if (githubRepository === null) return fail("config-error", "create-github-pr requires an authoritative GitHub repository URL")
-
   const ghOpts = networkGhOptions(context)
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))

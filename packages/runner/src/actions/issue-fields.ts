@@ -1,6 +1,5 @@
 import { runCommand } from "../system/process.js"
 import type { ActionContext } from "../core/types.js"
-import { getSegments, stringAt } from "../core/json-path.js"
 
 type CommandRunner = typeof runCommand
 
@@ -71,15 +70,11 @@ export function parseIssueFields(output: string): IssueFields | null {
 
 function resolveIssueNumber(context: ActionContext): number | null {
   if (typeof context.issueNumber === "number" && context.issueNumber > 0) return context.issueNumber
-  const variableNumber = getSegments(context.variables, ["issue", "number"])
-  if (typeof variableNumber === "number" && Number.isInteger(variableNumber) && variableNumber > 0) return variableNumber
-  if (typeof variableNumber !== "string" || !variableNumber) return null
-  const parsed = Number(variableNumber)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  return null
 }
 
 function resolveProjectId(context: ActionContext): string | null {
-  return context.projectId ?? stringAt(context.variables, ["project", "id"]) ?? null
+  return context.projectId ?? null
 }
 
 function objectProperty(value: unknown, key: string): unknown {

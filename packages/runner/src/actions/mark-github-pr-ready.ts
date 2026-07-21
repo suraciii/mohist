@@ -1,12 +1,11 @@
 import { numberInput } from "../core/json.js"
-import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { combinedGhOutput, parsePrViewWithDraft } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
-import { resolveGitHubRepository } from "./delivery-context.js"
+import { parseGitHubRepository } from "./github-pr-repository.js"
 import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MarkGitHubPrReadyOutput } from "./github-pr-types.js"
 import { fail, succeed } from "./action-result.js"
 
@@ -15,6 +14,7 @@ const ACTION_SOURCE = "action:mark-github-pr-ready"
 
 export async function markGitHubPrReadyAction(context: ActionContext): Promise<ActionResult> {
   const prNumber = numberInput(context.with, "prNumber")
+  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
   if (prNumber === undefined) {
     return markReadyOutput({
       kind: "mark-github-pr-ready",
@@ -30,10 +30,6 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
       steps: [],
     })
   }
-
-  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
-  const gh = getGitHubPrGh()
-  const ghOpts = ghLineOptions(context)
   const steps: GitHubPrStep[] = []
   const record = createRecorder(steps)
 
@@ -54,9 +50,13 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
     output: payload.output ?? message,
     steps,
   })
-  const githubRepository = resolveGitHubRepository(context)
-  if (githubRepository === null) return fail("config-error", "mark-github-pr-ready requires an authoritative GitHub repository URL")
+  if (!repositoryUrl) return fail("invalid-input", "mark-github-pr-ready requires 'repositoryUrl'")
+  const githubRepository = parseGitHubRepository(repositoryUrl)
+  if (!githubRepository) return fail("config-error", "mark-github-pr-ready requires a valid GitHub repository URL")
 
+  const workDir = context.workDir
+  const gh = getGitHubPrGh()
+  const ghOpts = ghLineOptions(context)
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {

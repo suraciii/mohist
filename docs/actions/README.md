@@ -27,13 +27,14 @@ Mohist Agent。
 - [`mohist/pi`](pi.md) —— 通过 Pi 执行一个回合;与 `mohist/opencode` 同层,共享
   模型选项形状与 Session 语义,但安装与信任边界不同。
 - [Git Actions](git.md) —— workspace 准备、rebase、merge readiness 和 push 的显式输入契约。
+- [GitHub PR Actions](github-pr.md) —— PR 创建、ready、状态检查和 squash merge 的显式输入契约。
 
 Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
 
 ## 实装差距
 
 - `mohist/pi` 尚未实装,当前只有产品契约(见 [pi.md](pi.md) 的实装差距小节)。
-- Git Actions 的输入契约见 [Git Actions](git.md)。GitHub PR、OpenSpec 和 `core/*`
+- Git Actions 和 GitHub PR Actions 的输入契约见对应产品契约页。OpenSpec 和 `core/*`
   的独立产品契约页仍待补齐。
 - Runner 派发时会按 manifest 校验未知字段、必填字段和类型;自定义 Profile 应在 `with`
   中显式绑定需要的 Variable 值。

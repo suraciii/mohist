@@ -181,7 +181,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/create-github-pr", openDraftPr.Uses);
         Assert.Equal("${{ workspace.branch }}", ReadStringWith(openDraftPr, "source"));
         Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(openDraftPr, "target"));
-        Assert.Equal("origin", ReadStringWith(openDraftPr, "remote"));
         Assert.Equal(true, ReadBoolWith(openDraftPr, "draft"));
         Assert.Equal("issue.title", ReadStringWith(openDraftPr, "titleFrom"));
         Assert.Equal("issue.body", ReadStringWith(openDraftPr, "bodyFrom"));
