@@ -2,18 +2,21 @@
 
 ## Findings
 
-### 1. High: The approval-specific phone bar can drop applicable secondary actions
-
-The issue says this review package mounts onto issue 453's unified decision surface. That prerequisite guarantees that a narrow viewport exposes the complete applicable action list, not only the primary action. Current `deriveIssueDecisionActions` appends Ask Agent for an active issue and View transcript when a workflow session exists, including while approval is pending.
-
-The revised design replaces the approval-mode `MobileActionBar` with a fixed bar containing only direct Approve and Send back controls and explicitly removes the generic action sheet (`design.md:34`). The capability spec only requires “every authorized approval action” (`specs/issue-decision-surface/spec.md:3`), and T-001 likewise specifies a two-column bar with those two controls and no sheet (`tasks.json:16`). Neither artifact says where other applicable descriptors remain reachable. The phone Playwright criteria verify only Approve and Send back (`tasks.json:23-24`).
-
-The plan can therefore satisfy every new criterion while making Ask Agent or View transcript disappear during approval on a phone. The proposal and spec must preserve the complete applicable action list while keeping Approve and Send back direct. The design must define a non-blocking location for secondary descriptors that does not add a disclosure before either approval action, and T-001 must cover secondary action reachability and navigation in approval mode at phone width.
+No build-blocking findings.
 
 ## Confirmed
 
-- The earlier one-tap mobile action finding is fixed: approval no longer uses the generic action drawer, and Send back opens an inline form.
-- The earlier browser coverage finding is fixed: T-001 now requires phone-width Plan and Check evidence plus real Approve and Send back completion.
-- The artifact/API boundaries, structured feedback contract, keyboard requirements, two-task split, and `T-001 -> T-002` dependency remain coherent.
+- Plan and Check evidence, independent unavailable states, and current-run artifact cache scoping are specified and covered by T-001.
+- Phone approval keeps Approve and Send back direct and drawer-free while preserving every secondary descriptor through a non-modal More actions control.
+- Browser criteria cover phone-width Plan and Check layout, long-token overflow, safe areas, real Approve and structured Send back requests, and Ask Agent/transcript navigation.
+- Structured feedback preserves the existing `{ stage, body }` contract and remains visible in feedback history.
+- Desktop `a`, `m`, and Command+Enter behavior includes authorization, editable-target, pending, repeat, composition, cleanup, and discoverability requirements.
+- Non-approval states retain the existing unified decision behavior, and no Server, persistence, workflow, Runner, CLI, or dependency change is introduced.
+- The two tasks are complete vertical slices; `T-001 -> T-002` is valid and acyclic, all dependencies point to lower priorities, and each task includes its own verification.
 
-<promise>FAIL</promise>
+## Residual Risks
+
+- T-001 is a broad vertical slice, so build review must verify every acceptance criterion rather than accepting a partial responsive implementation.
+- Layout and browser behavior remain unproven until the required focused Playwright scenarios run against the production Web build.
+
+<promise>PASS</promise>
