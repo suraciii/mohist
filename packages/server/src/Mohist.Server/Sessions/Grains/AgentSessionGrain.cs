@@ -749,6 +749,165 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return AppendEventsAsync(command.RuntimeEvents, null, requireCurrentRuntimeBinding: false);
     }
 
+    /// <summary>
+    /// Idempotent AgentJob-owned close command (issue-449 design decision 2).
+    /// Synchronously persists the <c>session.closed</c> transcript fact with
+    /// the stable AgentJob delivery id as the correlation key, then returns
+    /// success only after the state and the transcript row are durable.
+    /// The AgentJob uses this acknowledgement to clear its pending payload
+    /// and unregister its recovery reminder; any failure throws so the
+    /// AgentJob reminder / activation / report replay retries the same
+    /// delivery until it succeeds.
+    /// </summary>
+    /// <remarks>
+    /// The AgentJob owns the canonical terminal delivery; a second call with
+    /// the same <see cref="AppendTerminalCloseCommand.DeliveryId"/> is a
+    /// no-op and reports <see cref="AppendTerminalCloseResult.AlreadyPersisted"/>
+    /// = true so callers can distinguish "durable" from "first write".
+    /// Throws on persistence failure to drive AgentJob retry; on success
+    /// the durable transcript row is the observable close fact for any
+    /// downstream projection (generic-session summary, CLI, issue-feed).
+    /// </remarks>
+    public async Task<AppendTerminalCloseResult> AppendTerminalCloseAsync(AppendTerminalCloseCommand command)
+    {
+        RejectIfReloadRequired();
+        if (command is null) throw new ArgumentNullException(nameof(command));
+        if (!string.Equals(command.SessionId, SessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"AppendTerminalCloseAsync delivery id {command.DeliveryId} targets session {command.SessionId}; this grain owns {SessionId}.");
+
+        var session = await GetRequiredAsync();
+
+        if (await CloseAlreadyPersistedAsync(command.DeliveryId, default))
+        {
+            _log.LogDebug(
+                "AgentSession {SessionId} acknowledged duplicate terminal delivery {DeliveryId} (already durable)",
+                SessionId, command.DeliveryId);
+            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
+        }
+
+        // Runtime binding gate: when the AgentJob's bound runtime has
+        // been superseded by a reset, the new runtime owns the session
+        // and the old AgentJob's close is dropped on the floor (the
+        // replacement runtime never asked for it). Acknowledging the
+        // delivery with AlreadyPersisted=true lets the AgentJob clear its
+        // pending payload without retrying forever — this matches the
+        // previous fire-and-forget semantics where the runner-bound
+        // AppendRuntimeEventsAsync silently returned [].
+        var currentRuntime = session.Status.AgentRuntimeSessionId;
+        if (!string.IsNullOrWhiteSpace(command.RuntimeSessionId)
+            && !string.Equals(command.RuntimeSessionId, currentRuntime, StringComparison.Ordinal))
+        {
+            _log.LogDebug(
+                "AgentSession {SessionId} dropped terminal delivery {DeliveryId}: bound runtime {Bound} superseded by {Current}",
+                SessionId, command.DeliveryId, command.RuntimeSessionId, currentRuntime ?? "(none)");
+            return new AppendTerminalCloseResult(SessionId, command.DeliveryId, true);
+        }
+
+        var recordedAt = command.RecordedAt.UtcDateTime;
+        if (session.Status.CurrentTurnEndedAt is null
+            || session.Status.CurrentTurnEndedAt < recordedAt)
+        {
+            session.Status = session.Status with { CurrentTurnEndedAt = recordedAt };
+            _stateDirty = true;
+        }
+
+        // When the AgentJob is unbound to a runtime (e.g. an AgentJob
+        // that failed pre-execution before the runner opened the
+        // Session) the close is recorded as a system event with no
+        // runtime binding. When the AgentJob is bound, the close goes
+        // onto that runtime's turn so the transcript store's
+        // (sessionId, runtimeSessionId) lookup routes it correctly.
+        var runtimeSessionId = string.IsNullOrWhiteSpace(command.RuntimeSessionId)
+            ? null
+            : command.RuntimeSessionId;
+        var turn = new AgentSessionTranscriptTurnUpsert(
+            SessionId: session.Id,
+            Sequence: 0,
+            PromptText: string.Empty,
+            PromptKind: AgentSessionJsonHelper.NormalizePromptKind("task"),
+            StartedAt: recordedAt,
+            UpdatedAt: recordedAt,
+            RuntimeSessionId: runtimeSessionId);
+        var part = new AgentSessionTranscriptPartDelta(
+            Type: TranscriptPartTypes.SessionClosed,
+            CorrelationKey: command.DeliveryId,
+            CorrelationId: command.DeliveryId,
+            TextDelta: null,
+            PayloadJson: command.PayloadJson,
+            FirstSeenAt: recordedAt,
+            LastSeenAt: recordedAt,
+            RawEventCount: 1,
+            IsIdempotent: true);
+        var flush = new AgentSessionTranscriptFlush(
+            StartNewTurn: true,
+            Turn: turn,
+            Parts: [part]);
+
+        var pendingEvents = _pendingDomainEvents.Count == 0
+            ? Array.Empty<AgentSessionEvent>()
+            : _pendingDomainEvents.ToArray();
+        try
+        {
+            await _stateStore.SaveAsync(SessionId, session, pendingEvents, default);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentSession {SessionId} failed to persist state for terminal delivery {DeliveryId}",
+                SessionId, command.DeliveryId);
+            _sessionReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
+        _pendingDomainEvents.Clear();
+        _stateDirty = false;
+        _session = session;
+
+        try
+        {
+            await _transcriptStore.SaveAsync(flush, default);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentSession {SessionId} failed to persist transcript for terminal delivery {DeliveryId}",
+                SessionId, command.DeliveryId);
+            // State already durable; the next retry must not duplicate
+            // the close row. The idempotency check at the top of this
+            // method will short-circuit a retry that finds the part
+            // already saved.
+            throw;
+        }
+
+        _cachedSummary = null;
+        _log.LogInformation(
+            "AgentSession {SessionId} persisted terminal delivery {DeliveryId} (status={Status})",
+            SessionId, command.DeliveryId, command.Status);
+
+        return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
+    }
+
+    private async Task<bool> CloseAlreadyPersistedAsync(string deliveryId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == SessionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnIds.Count == 0) return false;
+
+        // Match by correlation key (the durable identity AgentJob wrote
+        // on the part). The same payload is also embedded into the part
+        // for backward compatibility, but the correlation key is the
+        // authoritative dedup key — every retry reuses it.
+        return await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId)
+                && p.Type == TranscriptPartTypes.SessionClosed
+                && p.CorrelationKey == deliveryId)
+            .AnyAsync(ct);
+    }
+
     private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendEventsAsync(
         IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents,
         string? runtimeSessionId,
@@ -1389,12 +1548,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return _cachedSummary;
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
             .Where(t => t.SessionId == sessionId)
-            .Select(t => t.Id)
             .ToListAsync();
-        if (turnIds.Count == 0)
+        if (turns.Count == 0)
             return _cachedSummary = AgentSessionTranscriptSummary.Empty;
+        var turnSequenceByTurnId = turns.ToDictionary(t => t.Id, t => t.Sequence);
+        var turnIds = turns.Select(t => t.Id).ToList();
+        var currentRuntimeSessionId = _session?.Status.AgentRuntimeSessionId;
 
         var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => turnIds.Contains(e.TurnId))
@@ -1403,7 +1564,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .ToListAsync();
 
         var events = parts
-            .Select(part => new TranscriptSummaryEvent(part.Sequence, part.Type, part.PayloadJson));
+            .Where(part => string.IsNullOrWhiteSpace(currentRuntimeSessionId)
+                || turns.FirstOrDefault(t => t.Id == part.TurnId) is { } t
+                    && string.Equals(t.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal))
+            .Select(part => new TranscriptSummaryEvent(
+                TurnSequence: turnSequenceByTurnId.GetValueOrDefault(part.TurnId, 0),
+                Sequence: part.Sequence,
+                PartId: part.Id.ToString(),
+                Type: part.Type,
+                PayloadJson: part.PayloadJson));
         return _cachedSummary = TranscriptEventSummaryProjector.Summarize(events);
     }
 

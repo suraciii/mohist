@@ -187,7 +187,17 @@ public record WorkResult(
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null,
-    [property: Id(6)] ExecutionError? Error = null);
+    [property: Id(6)] ExecutionError? Error = null)
+{
+    /// <summary>
+    /// Flattened <c>Error.Code</c> for cross-domain readers (issue-449
+    /// T-001): AgentJobGrain projects the runner failure category
+    /// without depending on the Workflow domain's
+    /// <c>ExecutionError</c> type. Returns <c>null</c> when the
+    /// dispatcher payload omitted the <c>Error</c> block.
+    /// </summary>
+    public string? ErrorCode => Error?.Code;
+}
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

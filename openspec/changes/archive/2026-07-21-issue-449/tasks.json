@@ -1,0 +1,92 @@
+{
+  "project": "mohist-local",
+  "description": "Make routing-triggered Named Agents execute in the triggering workflow workspace, record unresolved workspaces as explicit AgentJob failures, expose actionable failure reasons in generic session reads, and trace routed failures from the associated issue event feed.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Make AgentJob terminal visibility durable and expose failure details",
+      "spec": "specs/agent-session-visibility/spec.md#generic-agentsession-summaries-expose-the-agentjob-failure-reason, specs/agent-session-visibility/spec.md#the-generic-agentsession-api-preserves-failure-details, specs/agent-session-visibility/spec.md#agentjob-terminal-facts-are-durably-delivered-to-agentsession, specs/agent-session-visibility/spec.md#mo-agent-session-show-renders-the-failure-reason",
+      "description": "Implement a durable AgentJob-to-AgentSession terminal protocol: persist a pending close payload and reminder with every terminal transition, and add an idempotent AgentSession command that acknowledges only after the terminal transcript fact is durable. Preserve runner failure category with output-category -> `WorkResult.Error.Code` -> status precedence, then project reason/category from the same latest turn-ordered terminal fact and render both through the generic API and CLI.",
+      "acceptanceCriteria": [
+        "A runner-reported failed AgentJob produces a generic AgentSession summary with status `failed`, the exact persisted `failureReason`, and a separate `failureCategory`",
+        "Runner category precedence is output JSON `failureCategory`, then `WorkResult.Error.Code`, then report status; an actual runner-shaped missing-workspace result persists `invalid-input` rather than generic `failed`",
+        "Runner-reported completion/failure, preflight failure, dispatch exhaustion, report timeout, and forced failure persist a stable pending Session-close delivery and durable reminder before terminal acknowledgement",
+        "The AgentSession terminal command persists the stable AgentJob delivery id in payload and transcript correlation, deduplicates it across Session turns, and returns success only after state/events and transcript are durably flushed",
+        "If the first Session close fails after AgentJob terminal save, reminder/activation/report replay retries the original payload and eventually persists exactly one close fact",
+        "Activation loss before transcript flush does not lose the pending delivery; a fake persistence failure and forced reactivation prove convergence without wall-clock polling",
+        "A successful generic AgentSession has no non-empty failure reason and no fabricated failure category",
+        "When multiple Runtime Session terminal facts exist, current-runtime filtering plus `(turn sequence, part sequence, part id)` ordering selects reason and category from the same latest close even when part-local sequences restart",
+        "The generic AgentSession HTTP response serializes `failureReason` and `failureCategory` as separate fields when present and omits nullable values according to the existing JSON policy",
+        "`mo agent session show <sessionId>` table output prints distinct failure-reason and failure-category rows, while `-o json` preserves both server fields unchanged",
+        "Focused server specs cover terminal projection, API serialization, success omission, all terminal sources, close persistence failure, activation loss, report replay repair, and idempotency; CLI command specs cover table and JSON output",
+        "`npm test` completes successfully after the server and CLI changes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Durable PendingSessionClose/reminder handling in AgentJob, synchronously durable idempotent AgentSession terminal command, failure-reason/category projection, additive generic AgentSession API output, separate CLI failure rendering, and focused server/CLI tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implement design decisions 2 and 4's terminal protocol before T-002 consumes it. Use an Orleans reminder plus persisted pending payload; do not rely on in-memory timers, swallowed close exceptions, or a Session append that returns before flush. Tests use injected failures/signals and explicit reactivation, never wall-clock waits."
+    },
+    {
+      "id": "T-002",
+      "title": "Make routed Named Agent launches workspace-complete and idempotently fail preflight",
+      "spec": "specs/routing-dispatch/spec.md#a-routed-agent-launch-uses-the-triggering-workflow-workspace, specs/routing-dispatch/spec.md#missing-routed-workspace-fails-explicitly, specs/routing-dispatch/spec.md#routed-launch-preparation-is-first-writer-fenced, specs/routing-dispatch/spec.md#matching-and-prompt-rendering-remain-envelope-only, specs/routing-dispatch/spec.md#existing-non-routing-workspace-behavior-is-preserved",
+      "description": "Add post-match routing execution-context resolution that validates WorkflowRun project/issue/epic ownership, prefers explicit run lineage, and uses an issue's currently bound nonterminal run only when workflow lineage is absent. Persist a canonical prepared AgentJob plan with a durable recovery reminder before Session open; AgentJob idempotently opens Session, keeps recovery through pending dispatch until Runner acceptance, or enters durable preflight failure without rereading mutable routing or Agent state.",
+      "acceptanceCriteria": [
+        "A matched `com.mohist.workflow.run.failed` event with `workflowrunid` launches one AgentSession and AgentJob whose work directory and dispatched `workspace.path` both equal the persisted WorkflowRun workspace",
+        "An event with issue lineage but no workflow run id resolves only that issue's currently bound nonterminal WorkflowRun and dispatches its non-empty path",
+        "An explicit workflow run id is authoritative: a missing workspace fails visibly and never falls forward to a newer issue WorkflowRun; an issue-only terminal/stale binding is not reused",
+        "A WorkflowRun whose project, issue, or epic conflicts with event lineage, or whose workspace path is null/blank, produces a workspace-unavailable preflight failure and no Runner assignment",
+        "A hit with no resolvable workspace creates one stable failed AgentJob and AgentSession carrying an actionable `workspace-unavailable` reason plus trigger event/rule correlation, and creates no Runner assignment or workspace-less WorkDispatch",
+        "EnsurePreparedAsync registers AgentJob recovery before persisting one canonical executable-or-failed plan; orphan reminders self-remove and prepared jobs remain non-dispatchable until Session acknowledgement",
+        "Immediate, OnActivate, and reminder recovery idempotently open Session from the persisted plan, persist launch-ready, and keep the reminder while Pending until Runner acceptance is saved; preflight failure enters durable terminal delivery",
+        "A crash after plan persistence followed by rule edit/archive and Agent deactivation still completes the original executable or failed plan without routing reevaluation",
+        "Redelivery, when present, reuses the canonical AgentJob plan rather than newly resolved caller values, producing one job/session/close and preventing later workspace or lineage overwrite",
+        "Routed AgentSession metadata retains issue number, epic number when present, trigger event id, trigger rule id, and workspace path for normal and failed launches",
+        "`mo routing test` and real dispatch select the same rules and Agents for identical inputs; workspace and Issue/Workflow reads occur only after selection and never affect match, ordering, `continue`, or prompt rendering",
+        "Manual Named Agent launch with an explicit workspace and Inline Agent `mohist/opencode` workspace behavior remain unchanged in regression specs",
+        "The runner's existing missing-workspace rejection remains covered as a defensive contract, while routing composition specs prove the normal routed path no longer reaches it",
+        "Crash-injection specs cover process loss after preparation, after Session open, and after launch-ready but before first/accepted assignment; mutable rule/Agent changes, dispatch backoff, orphan reminder cleanup, and executable plus preflight-failed dispositions use no wall-clock polling",
+        "Focused AgentJob grain, AgentLauncher, routing dispatch, and runner contract tests pass; `npm test`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner` complete successfully"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Ownership-validating routing context resolver, AgentJob-owned reminder across prepared and pending-dispatch recovery, immutable routed Session open, launch-ready/Runner-accepted/terminal transitions, handler integration, and focused crash-recovery tests, with no runner production-code change",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Implement design decisions 1-3. Keep Agent as a leaf and add a narrow Workflow routing-context read that returns ownership lineage, status, and workspace. Register recovery before plan persistence and retain it through Pending dispatch until Runner acceptance is persisted; do not hand off at LaunchReady, depend on event redelivery/in-memory timers alone, derive paths from layout, inspect runner-local files, merge replay metadata, submit then race `FailAsync`, or change manual launch semantics."
+    },
+    {
+      "id": "T-003",
+      "title": "Expose routed Agent failures in the associated issue event feed",
+      "spec": "specs/routing-dispatch/spec.md#routed-failures-are-traceable-from-their-triggering-issue, specs/routing-dispatch/spec.md#routed-failure-events-have-stable-envelope-and-ordering-semantics",
+      "description": "Add an issue-scoped AgentOps assembler that merges complete issue-scoped Issue events, the complete invalidation-filtered WorkflowRun sequence, and exactly one AgentJob-owned failed terminal fact per routed AgentSession. Project a fully specified stable event envelope, apply one cross-store total key before selecting the newest global N, return ascending, and switch the issue events API while preserving raw CLI consumption.",
+      "acceptanceCriteria": [
+        "`GET /api/projects/{project}/issues/{number}/events` and `mo issue events <number>` include a routed failed `session.closed` outcome for the associated issue",
+        "The projected outcome uses transcript-part id as source-local `id`, `{sessionId}:closed:{terminalDeliveryId}` as stable eventId, canonical AgentSession source/subject, terminal LastSeenAt, specVersion 1.0, application/json, project/issue extensions, and complete delivery/terminal/Agent/trigger data",
+        "Issue and WorkflowRun events remain present and Workflow invalidated-control-event filtering is preserved",
+        "The assembler gathers complete valid candidates from all three sources before selecting newest global N and returning ascending by `(time, origin rank, source, source-local id, eventId)`",
+        "Workflow exposes an unbounded invalidation-filtered read (or reusable filter) for AgentOps; a test where event-id and timestamp order disagree proves source-local truncation cannot discard a globally newer event",
+        "A routed Session with AgentJob, Runtime, and follow-up close parts produces exactly one feed entry selected by `agent-job:{jobKey}:terminal`; unrelated closes, manual sessions, successes, missing trigger labels, and other project/issues are excluded",
+        "The implementation lives in AgentOps and introduces no Session/Agent dependency into Workflow and no copied Issue domain event or correlation table",
+        "Focused AgentOps assembler specs cover canonical delivery selection, multiple unrelated closes, inclusion/exclusion, full envelope fields, non-monotonic timestamps, equal-time ordering, global newest-N limiting, and correlation; API specs verify serialization and a CLI command spec verifies `mo issue events` preserves it",
+        "Server architecture tests continue to enforce Workflow's dependency boundary and `npm test` completes successfully"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue-scoped event-feed assembler under packages/server/src/Mohist.Server/AgentOps/Services, issue events API composition update, and AgentOps/API/CLI contract tests",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Implement design decision 5. Consume T-002's routed issue/trigger labels and T-001's terminal failure facts. Keep this a read projection; do not append synthetic Issue events, filter the project-wide feed after its limit, or call a Workflow read that truncates by event id before the global time-first key. Complete per-issue reads are intentional for correctness; future optimization stays behind AgentOps."
+    }
+  ]
+}

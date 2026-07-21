@@ -179,10 +179,13 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input) => Task.CompletedTask;
     public Task EnsureSubmittedAsync(AgentJobInput input) => Task.CompletedTask;
+    public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
+    public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
     public Task FailAsync(string reason) => Task.CompletedTask;
+    public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
 internal sealed class PendingAgentJobGrain : IAgentJobGrain
@@ -204,6 +207,8 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         return Task.CompletedTask;
     }
     public Task EnsureSubmittedAsync(AgentJobInput input) => SubmitAsync(input);
+    public Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan) => Task.FromResult(plan);
+    public Task AdvancePreparedLaunchAsync() => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));
@@ -212,6 +217,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         _failureReason = reason;
         return Task.CompletedTask;
     }
+    public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
 }
 
 internal sealed class SingleAgentJobGrainFactory : IGrainFactory

@@ -200,6 +200,132 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task Summary_CarriesFailureReason_FromSameLatestTerminalFact_AsFailureCategory()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(
+            fixture,
+            SessionId,
+            hasTranscript: true,
+            terminalStatus: "failed",
+            failureReason: "AgentJob requires 'workspace.path' in dispatch variables");
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        Assert.Equal("failed", result!.Status);
+        Assert.Equal("rate_limited", result.FailureCategory);
+        Assert.Equal(
+            "AgentJob requires 'workspace.path' in dispatch variables",
+            result.FailureReason);
+    }
+
+    [Fact]
+    public async Task Summary_OmitsFailureReasonAndCategory_OnSuccessfulSession()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(
+            fixture,
+            SessionId,
+            hasTranscript: true,
+            terminalStatus: "completed",
+            failureReason: null);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        Assert.Equal("completed", result!.Status);
+        Assert.Null(result.FailureReason);
+        Assert.Null(result.FailureCategory);
+    }
+
+    [Fact]
+    public async Task Summary_LatestTerminalFact_AcrossMultipleTurns_PicksNewestTurn()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
+        await SeedMultiTurnClosedFactsAsync(fixture, SessionId);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        // The newer Runtime Session's turn (sequence 2) restarts part
+        // sequences at 1 but the AgentJob-owned close on turn 2 is
+        // authoritative; the older turn-1 close is ignored.
+        Assert.Equal("newest-run-reason", result!.FailureReason);
+        Assert.Equal("newest-run-category", result.FailureCategory);
+    }
+
+    [Fact]
+    public async Task Summary_LatestTerminalFact_OnSameTurn_PicksLatestPartSequence()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
+        await SeedMultipleClosedPartsSameTurnAsync(fixture, SessionId);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        Assert.Equal("latest-part-reason", result!.FailureReason);
+        Assert.Equal("latest-part-category", result.FailureCategory);
+    }
+
+    [Fact]
+    public async Task Summary_OmitsNullableFailureFields_InJsonSerialization()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        var json = JsonSerializer.Serialize(result, JSON.Options);
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.TryGetProperty("failureReason", out _),
+            "Successful session omits nullable failureReason from the wire");
+        Assert.False(doc.RootElement.TryGetProperty("failureCategory", out _),
+            "Successful session omits nullable failureCategory from the wire");
+    }
+
+    [Fact]
+    public async Task Summary_IncludesFailureReasonAndCategory_AsSeparateFields_WhenPresent()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        await SeedGenericSessionAsync(
+            fixture,
+            SessionId,
+            hasTranscript: true,
+            terminalStatus: "failed",
+            failureReason: "AgentJob requires 'workspace.path' in dispatch variables");
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        var json = JsonSerializer.Serialize(result, JSON.Options);
+        using var doc = JsonDocument.Parse(json);
+        Assert.True(doc.RootElement.TryGetProperty("failureReason", out var reason),
+            "Failed session exposes failureReason as a separate field");
+        Assert.Equal(
+            "AgentJob requires 'workspace.path' in dispatch variables",
+            reason.GetString());
+        Assert.True(doc.RootElement.TryGetProperty("failureCategory", out var category),
+            "Failed session exposes failureCategory as a separate field");
+        Assert.Equal("rate_limited", category.GetString());
+    }
+
     private static AgentSessionQuerier CreateQuerier(IDbContextFactory<MohistDbContext> factory)
     {
         var sessionQuery = new AgentSessionQuery(factory, TimeProvider);
@@ -212,7 +338,8 @@ public class GenericAgentSessionSummarySpecs
         bool hasTranscript,
         bool withContextRefs = false,
         string? terminalStatus = null,
-        bool active = false)
+        bool active = false,
+        string? failureReason = null)
     {
         await using var db = factory.CreateDbContext();
 
@@ -315,6 +442,7 @@ public class GenericAgentSessionSummarySpecs
                     PayloadJson = JsonSerializer.Serialize(new
                     {
                         status = terminalStatus,
+                        failureReason = failureReason,
                         failureCategory = terminalStatus == "failed" ? "rate_limited" : null,
                     }, JSON.Options),
                     LastSeenAt = CreatedAt.AddMinutes(10),
@@ -322,6 +450,125 @@ public class GenericAgentSessionSummarySpecs
             }
         }
 
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedMultiTurnClosedFactsAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    {
+        await using var db = factory.CreateDbContext();
+
+        // Two Runtime Sessions (turns): turn 1 has the older failure
+        // context, turn 2 carries the AgentJob-owned close on the
+        // current runtime. The session's current runtime session id is
+        // runtime-2 so the current-runtime filter narrows the candidate
+        // set to the turn-2 close.
+        var turn1 = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            RuntimeSessionId = "runtime-1",
+            Sequence = 1,
+            StartedAt = CreatedAt,
+            UpdatedAt = CreatedAt.AddMinutes(5),
+        };
+        var turn2 = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            RuntimeSessionId = "runtime-2",
+            Sequence = 2,
+            StartedAt = CreatedAt.AddMinutes(10),
+            UpdatedAt = CreatedAt.AddMinutes(15),
+        };
+        db.AgentSessionTranscriptTurns.AddRange(turn1, turn2);
+        await db.SaveChangesAsync();
+
+        db.AgentSessionTranscriptParts.AddRange(
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn1.Id,
+                Sequence = 50,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "agent-job:old:terminal",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    status = "failed",
+                    failureReason = "older-turn-reason",
+                    failureCategory = "older-turn-category",
+                }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(7),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn2.Id,
+                Sequence = 1,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "agent-job:newest:terminal",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    status = "failed",
+                    failureReason = "newest-run-reason",
+                    failureCategory = "newest-run-category",
+                }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(15),
+            });
+        await db.SaveChangesAsync();
+
+        // Point the session at the current runtime so the
+        // current-runtime filter selects turn 2's close.
+        var row = await db.AgentSessions.FindAsync(sessionId);
+        Assert.NotNull(row);
+        row!.AgentSessionId = "runtime-2";
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedMultipleClosedPartsSameTurnAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    {
+        await using var db = factory.CreateDbContext();
+
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            RuntimeSessionId = "runtime-current",
+            Sequence = 1,
+            StartedAt = CreatedAt,
+            UpdatedAt = CreatedAt.AddMinutes(15),
+        };
+        db.AgentSessionTranscriptTurns.Add(turn);
+        await db.SaveChangesAsync();
+
+        db.AgentSessionTranscriptParts.AddRange(
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 5,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "agent-job:earlier:terminal",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    status = "failed",
+                    failureReason = "earlier-part-reason",
+                    failureCategory = "earlier-part-category",
+                }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(5),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 20,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "agent-job:latest:terminal",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    status = "failed",
+                    failureReason = "latest-part-reason",
+                    failureCategory = "latest-part-category",
+                }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(15),
+            });
+        await db.SaveChangesAsync();
+
+        var row = await db.AgentSessions.FindAsync(sessionId);
+        Assert.NotNull(row);
+        row!.AgentSessionId = "runtime-current";
         await db.SaveChangesAsync();
     }
 

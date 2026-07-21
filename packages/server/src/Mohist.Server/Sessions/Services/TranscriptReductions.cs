@@ -14,6 +14,8 @@ internal static class TranscriptReductions
         var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
         if (loaded.Parts.Count == 0) return [];
 
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
+
         return loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
@@ -22,7 +24,12 @@ internal static class TranscriptReductions
             .ToDictionary(
                 group => group.Key,
                 group => TranscriptEventSummaryProjector.Summarize(
-                    group.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))),
+                    group.Select(e => new TranscriptSummaryEvent(
+                        TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
+                        Sequence: e.Sequence,
+                        PartId: e.Id.ToString(),
+                        Type: e.Type,
+                        PayloadJson: e.PayloadJson))),
                 StringComparer.Ordinal);
     }
 }

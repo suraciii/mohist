@@ -148,10 +148,15 @@ internal static class AgentSessionDtoMapper
     /// rewritten to a serialized <c>{ text }</c> object so both callers
     /// observe identical projected events; all other part types pass
     /// through verbatim (issue-327 T-002, issue-370 T-001 / design D1).
+    /// <see cref="TranscriptEventProjection.TurnId"/> is propagated so the
+    /// latest-fact reducer can apply the (turn sequence, part sequence,
+    /// part id) total order the AgentJob-owned close contract depends on
+    /// (issue-449 design decision 4).
     /// </summary>
     internal static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
     {
         Id = part.Id,
+        TurnId = part.TurnId,
         SessionId = sessionId,
         Sequence = part.Sequence,
         Type = part.Type,

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
@@ -41,8 +42,12 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         var agentQuerier = services.GetRequiredService<AgentQuerier>();
         var evaluator = services.GetRequiredService<RoutingTableEvaluator>();
         var probe = new DispatchRuleExecutionProbe(projectId, agentQuerier);
+        // Envelope-only matching + prompt rendering: workspace / Workflow /
+        // Issue state does not affect rule selection (issue-449 design
+        // decision 4). The resolver runs AFTER the evaluator picks a hit.
         var outcomes = evaluator.Evaluate(new CloudEventEventMatchInput(evt), rules, probe);
         var launcher = services.GetRequiredService<IAgentLauncher>();
+        var resolver = services.GetRequiredService<RoutedAgentLaunchContextResolver>();
 
         foreach (var outcome in outcomes)
         {
@@ -59,13 +64,113 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             if (agent is null || !string.Equals(agent.Status, AgentStatus.Active, StringComparison.Ordinal))
                 continue;
 
-            var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+            var execution = await resolver.ResolveAsync(evt, ct);
+            if (!execution.IsReady)
             {
-                [GenericAgentSessionMetadata.TriggerEventId] = evt.Id,
-                [GenericAgentSessionMetadata.TriggerRuleId] = outcome.Rule.Id,
-            };
-            await launcher.LaunchAsync(agent, outcome.RenderedPromptPreview!, new AgentLaunchContext(projectId), labels, ct);
+                await RecordPreflightFailureAsync(
+                    services,
+                    agent,
+                    outcome,
+                    evt,
+                    execution,
+                    ct);
+                continue;
+            }
+
+            await launcher.LaunchRoutedAsync(
+                agent,
+                outcome.RenderedPromptPreview!,
+                execution.Context!,
+                evt,
+                outcome.Rule.Id,
+                ct);
         }
+    }
+
+    /// <summary>
+    /// Record a routed-launch preflight failure as a failed AgentJob +
+    /// AgentSession without dispatching a Runner. The grain's
+    /// preflight-failed terminal-delivery protocol (issue-449 design
+    /// decision 2) handles the durable close fact.
+    /// </summary>
+    private async Task RecordPreflightFailureAsync(
+        IServiceProvider services,
+        AgentInfo agent,
+        RuleOutcome outcome,
+        CloudEvent evt,
+        RoutedExecutionContextResolution resolution,
+        CancellationToken ct)
+    {
+        var detail = resolution.FailureMessage ?? "routed launch preflight failed";
+        var reason = $"{AgentJobFailureReasons.WorkspaceUnavailable}: {detail}";
+        var category = AgentJobFailureReasons.WorkspaceUnavailable;
+
+        var triggerIdentity = ResolvePreflightTriggerIdentity(evt, outcome, services);
+        if (triggerIdentity is null)
+        {
+            _log.LogWarning(
+                "Routing rule {RuleId} preflight failure for event {EventId} could not mint trigger identity; outcome not recorded",
+                outcome.Rule.Id, evt.Id);
+            return;
+        }
+
+        var (sessionId, jobKey) = triggerIdentity.Value;
+        var jobGrain = services.GetRequiredService<IGrainFactory>().GetGrain<IAgentJobGrain>(jobKey);
+        var (issueNumber, epicNumber) = PreflightLineage(evt, resolution);
+        var preflightPlan = new RoutedAgentLaunchPlan(
+            ProjectId: CloudEventLineage.TryReadProjectId(evt.Extensions, out var pid) ? pid : string.Empty,
+            EventId: evt.Id,
+            RuleId: outcome.Rule.Id,
+            SessionId: sessionId,
+            JobKey: jobKey,
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber,
+            WorkspacePath: null,
+            Disposition: RoutedLaunchDisposition.PreflightFailed,
+            PreflightReason: reason,
+            PreflightCategory: category,
+            PreparedAt: services.GetRequiredService<TimeProvider>().GetUtcNow(),
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
+            Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
+            Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
+            Prompt: outcome.RenderedPromptPreview);
+        await jobGrain.EnsurePreparedAsync(preflightPlan);
+        await jobGrain.AdvancePreparedLaunchAsync();
+    }
+
+    internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(
+        CloudEvent evt,
+        RoutedExecutionContextResolution resolution)
+    {
+        var issueNumber = CloudEventLineage.TryReadPositiveNumber(
+            evt.Extensions, EventCatalog.Lineage.Issue, out var issue)
+            ? issue
+            : resolution.IssueNumber;
+        var epicNumber = CloudEventLineage.TryReadPositiveNumber(
+            evt.Extensions, EventCatalog.Lineage.Epic, out var epic)
+            ? epic
+            : resolution.EpicNumber;
+        return (issueNumber, epicNumber);
+    }
+
+    private static (string SessionId, string JobKey)? ResolvePreflightTriggerIdentity(
+        CloudEvent evt,
+        RuleOutcome outcome,
+        IServiceProvider services)
+    {
+        if (!CloudEventLineage.TryReadProjectId(evt.Extensions, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId))
+        {
+            return null;
+        }
+
+        var sessionResolver = services.GetRequiredService<AgentSessionResolver>();
+        var sessionId = sessionResolver.StableSessionId(projectId, evt.Id, outcome.Rule.Id);
+        var jobKey = sessionResolver.StableJobKey(projectId, evt.Id, outcome.Rule.Id);
+        return (sessionId, jobKey);
     }
 
     private sealed class DispatchRuleExecutionProbe : IRuleExecutionProbe
