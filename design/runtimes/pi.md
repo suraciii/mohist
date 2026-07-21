@@ -67,21 +67,22 @@ type PiActionOutput = null | {
 
 | 能力 | SDK operation |
 |---|---|
-| 创建物理 Session | `SessionManager.create(cwd)` 后 `createAgentSession({ sessionManager, ... })` |
-| 恢复物理 Session | `SessionManager.open(sessionFile)` 后 `createAgentSession({ sessionManager, ... })` |
-| 执行并等待 Workflow / AgentJob 回合 | `await session.prompt(text)` |
+| 创建物理 Session | `SessionManager.create(cwd, sessionDir?)`，配合 `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
+| 恢复物理 Session | `SessionManager.open(sessionFile)`，配合同一组显式服务创建 `AgentSession` |
+| 执行并等待 Workflow / AgentJob 回合 | `await session.prompt(text, { expandPromptTemplates: false })` |
 | 回合中注入收尾警告 | `session.steer(text)` |
 | 提交用户 Follow-up（回合执行中） | `session.steer(text)` |
 | 提交用户 Follow-up（Session 空闲） | `session.prompt(text)`，不等待其完成 |
-| 中断执行 | `session.abort()` |
+| 中断执行 | `await session.abort()`；停止确认读取 `session.isStreaming`，不是 abort 返回值 |
 | 压缩 context | `session.compact()` |
 | 应用回合模型与推理档位 | `session.setModel()`、`session.setThinkingLevel()` |
 | 读取 Session 状态与消息 | `session.sessionId`、`session.sessionFile`、`session.messages`、`session.isStreaming` |
 | 接收实时事件 | `session.subscribe(listener)` |
-| 读取 model catalog | `ModelRuntime.create()` 后 `modelRuntime.getAvailable()`（或 `getModels()` / `getProviders()`） |
+| 读取 model catalog | `ModelRuntime.create({ ... })` 后 `await modelRuntime.getAvailable()` |
 
 实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 Pi 上做一次冒烟
-验证（含事件载荷形状）；发现漂移时先修订本表，再进入实现。冒烟记录参照
+验证（含事件载荷形状）；发现漂移时先修订本表，再进入实现。0.80.10 的真实验证记录在
+`openspec/changes/issue-450/sdk-smoke-verification.json`，冒烟记录参照
 [`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)
 的做法留存。
 
@@ -108,8 +109,9 @@ error 解释全部封装在该模块内。
 Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力。
 
 回合输入按纯文本提交：`PiRuntime` 不加载 prompt templates，也不做斜杠命令展开——
-以 `/` 开头的工作流 prompt 仍须原样进入模型。`expandPromptTemplates` 等具体开关随
-冒烟验证落表。
+以 `/` 开头的工作流 prompt 仍须原样进入模型。0.80.10 的 `prompt()` 默认会展开
+文件型 prompt template，因此每次 Workflow 调用必须显式传入
+`{ expandPromptTemplates: false }`。
 
 ## 进程拓扑与就绪
 
@@ -207,8 +209,11 @@ in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明�
 - 警告注入使用 `session.steer(text)`。steer 消息在运行中回合的迭代边界（当前模型
   调用及其工具调用完成后）被拾取，语义与 OpenCode 的 `promptAsync` 注入一致；
   正在执行的长工具调用会延迟拾取，期限到达仍 abort。
-- 终止使用 `session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
+- 终止使用 `await session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
   无法确认时返回中断未确认诊断，不声称回合已经安全停止。
+
+0.80.10 没有独立的 stop-confirmation operation，也没有布尔型 `abort()` 返回值；
+`abort()` 的 Promise 只表示中断请求已处理，停止确认必须观察 `isStreaming` 与事件序列。
 
 ## 事件与状态核对
 
@@ -299,7 +304,9 @@ reply 路径在 Pi 侧不存在，对应的 `permission-required` 错误也不�
 
 Pi 唯一的「批准」概念是 project trust：是否加载工作目录项目级 `.pi/` 资源
 （settings、extensions、skills、prompts 等）。`PiRuntime` 固定以
-`projectTrusted: false` 装配 `SettingsManager`：项目级 `.pi/` 内的可执行资源不进入
+`SettingsManager.create(cwd, agentDir, { projectTrusted: false })` 装配 `SettingsManager`，
+并把同一个 manager、显式 `cwd` / `agentDir` 传给 `DefaultResourceLoader` 和
+`createAgentSession`：项目级 `.pi/` 内的可执行资源不进入
 执行，工作仓库无法通过携带 Pi 配置改变 Runner 的执行行为。仓库根部的 `AGENTS.md` /
 `CLAUDE.md` 与 project trust 无关，仍作为上下文提供给模型——这与 OpenCode 的行为
 一致：它们影响提示词上下文，不改变 Runner 的执行配置。Runner 用户的全局配置

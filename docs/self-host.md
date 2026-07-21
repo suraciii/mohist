@@ -71,7 +71,7 @@ mo install runner
 
 ### 步骤
 
-1. **装系统依赖**：.NET 11 SDK、Node 22、opencode（按官方文档）
+1. **装系统依赖**：.NET 11 SDK、Node.js 22.19.0 或更高版本、opencode（按官方文档）
 2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm install && npm run build`
 3. **创建专用用户**（推荐）：`sudo useradd -m -s /bin/bash mohist`
 4. **装为 systemd user service**（在专用用户下运行）：

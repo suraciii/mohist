@@ -1,0 +1,17 @@
+## Codebase Patterns
+
+- T-001 is the only task permitted to import or construct the real Pi SDK. Product runtime code must remain absent until this gate is complete.
+- The Runner workspace uses the root lockfile; dependency changes are made with `npm install -w packages/runner`.
+- Pi SDK 0.80.10 requires Node >=22.19.0. The repository uses Node 22.19.0 as its concrete supported release.
+- SDK project trust is fixed with `SettingsManager.create(cwd, agentDir, { projectTrusted: false })`; the same settings manager and explicit `cwd` / `agentDir` are passed to `DefaultResourceLoader` and `createAgentSession`.
+- SDK `prompt()` expands file prompt templates by default. Literal Workflow input requires `{ expandPromptTemplates: false }`.
+- SDK `abort()` returns `Promise<void>` and has no separate stop-confirmation operation; stop confirmation observes `isStreaming` and session events.
+- `SessionManager.create(cwd, sessionDir?)` and `SessionManager.open(sessionFile)` expose the persisted absolute session path through `session.sessionFile` / `getSessionFile()`.
+- SDK custom tools can run headlessly with `noTools: "builtin"`; no per-tool approval callback or confirmation state is involved.
+
+## T-001 Notes
+
+- Baseline Runner typecheck and 1,159 Runner tests passed after dependencies were installed. The initial workspace had no `node_modules`, so the first baseline command reported missing `tsc`/`vitest` before installation.
+- `ModelRuntime.getAvailable()` succeeded in an isolated temporary home with an empty catalog and network disabled. No user auth files, credentials, prompts, messages, or provider response content entered the artifact.
+- The smoke creates temporary `.pi` settings/extensions/skills/prompts and verifies project-local resources are absent from effective project resources while SDK non-project defaults may remain available; context files remain loadable. It runs a separate CLAUDE-only context check because the loader selects the applicable instruction file for a given project hierarchy.
+- Clean verification passed with Node `v22.23.1`: `npm ci`, Runner typecheck, Runner test CI (97 files / 1,159 tests), and the smoke script. The checked-in Node release remains the concrete `22.19.0` minimum pin.

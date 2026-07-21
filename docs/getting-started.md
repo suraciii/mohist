@@ -7,7 +7,7 @@
 | 工具 | 版本 | 检查命令 |
 |---|---|---|
 | .NET SDK | 11.0+ | `dotnet --version` |
-| Node.js | 22+ | `node --version` |
+| Node.js | 22.19.0+ | `node --version` |
 | npm | 10+ | `npm --version` |
 | opencode CLI | 可正常启动 | `opencode --version` |
 
