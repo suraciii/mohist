@@ -42,6 +42,7 @@
 
 - Added a CLI command spec with 1001 local rows. It verifies the direct executor renders every row, emits no HTTP truncation metadata, makes no server request, and remains successful.
 - Focused CLI OTel tests: 18 passed.
+- Updated the server spec-file size baseline for the additional response-size assertion helper; ArchTests reported the exact new size of 27947 bytes.
 
 ## Review fix 2: prove SQLite interruption and release
 
