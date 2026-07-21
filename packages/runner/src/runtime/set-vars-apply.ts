@@ -10,16 +10,17 @@ export async function applySetVarsForWork(
   work: RenderedWorkItem,
   result: WorkItemResult,
   signal: AbortSignal,
+  effectVars: JsonObject = {},
 ): Promise<WorkItemResult> {
   if (result.status !== "completed") return result
-  if (!work.setVars || Object.keys(work.setVars).length === 0) return result
 
-  const extraction = extractSetVars(work.setVars, result.output)
+  const extraction = work.setVars ? extractSetVars(work.setVars, result.output) : { vars: {}, error: null }
   if (extraction.error) return { ...result, status: "failed", message: `setVars: ${extraction.error}` }
-  if (!extraction.vars) return result
+  const vars = { ...effectVars, ...(extraction.vars ?? {}) }
+  if (Object.keys(vars).length === 0) return result
 
   try {
-    await patcher.patchRunVars(work.workflowRunId, extraction.vars, signal)
+    await patcher.patchRunVars(work.workflowRunId, vars, signal)
     return result
   } catch (error) {
     return {

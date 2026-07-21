@@ -3,6 +3,7 @@ import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.j
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
+import { callAction } from "./support/call-action.js"
 
 afterEach(() => {
   setRebaseGitRunnerForTest(null)
@@ -34,7 +35,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context())
+    const result = await callAction(rebaseAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -91,7 +92,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -154,7 +155,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       baseBranch: "master",
       remote: "origin",
       squash: false,
@@ -199,7 +200,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       baseBranch: "master",
       remote: "origin",
       squash: true,
@@ -279,7 +280,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       baseBranch: "master",
       remote: "origin",
       squash: true,
@@ -308,7 +309,7 @@ describe("mohist/rebase", () => {
       return fail(`unexpected git call: ${args.join(" ")}`)
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       baseBranch: "master",
       remote: "origin",
       squash: true,
@@ -344,7 +345,7 @@ describe("mohist/rebase", () => {
       return fail(`unexpected git call: ${args.join(" ")}`)
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       baseBranch: "master",
       remote: "origin",
       squash: true,
@@ -383,7 +384,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ baseBranch: "master", squash: true }))
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", squash: true }))
     expect(result.error).toBeDefined()
     expect(calls).not.toContain("reset --soft")
     expect(calls).not.toContain("commit -m")
@@ -408,7 +409,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
     expect(result.error).toBeDefined()
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
@@ -439,7 +440,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
     expect(result.error).toBeDefined()
     expect(calls).not.toContain("rebase origin/master")
     expect(result.error).toMatchObject({ code: "fetch-failed" })
@@ -472,7 +473,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context())
+    const result = await callAction(rebaseAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -519,7 +520,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context())
+    const result = await callAction(rebaseAction, context())
 
     expect(result.error).toBeUndefined()
     expect(calls).toContain("rebase --abort")
@@ -553,7 +554,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context())
+    const result = await callAction(rebaseAction, context())
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "conflict" })
     expect(calls).not.toContain("rebase --abort")
@@ -585,7 +586,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
+    const result = await callAction(rebaseAction, context({}, {}, { budget: 1, handlers: [] }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "conflict" })
     expect(calls).not.toContain("rebase --abort")
@@ -618,7 +619,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({
+    const result = await callAction(rebaseAction, context({
       recovery: { budget: 1, handlers: [] },
     }))
     expect(result.error).toBeDefined()
@@ -657,7 +658,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
+    const result = await callAction(rebaseAction, context({}, {}, { budget: 1, handlers: [] }))
     expect(result.error).toBeDefined()
     expect(calls).toContain("rebase --abort")
     expect(result.error).toMatchObject({ code: "conflict" })
@@ -686,7 +687,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
+    const result = await callAction(rebaseAction, context({}, {}, { budget: 1, handlers: [] }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -723,7 +724,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
 
     const fetchCall = calls.find((c) => c.command === "fetch origin master")
     const revParseBase = calls.find((c) => c.command === "rev-parse origin/master")
@@ -761,7 +762,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    const result = await callAction(rebaseAction, context({ baseBranch: "master", remote: "origin" }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toMatchObject({ code: "timeout" })
@@ -793,7 +794,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    await rebaseAction(context())
+    await callAction(rebaseAction, context())
 
     for (const call of calls) {
       expect(call.timeoutMs).toBeUndefined()

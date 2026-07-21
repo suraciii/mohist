@@ -8,6 +8,7 @@ import {
   type ArchiveFileSystem,
 } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
+import { callAction } from "./support/call-action.js"
 
 const ARCHIVE_TEST_TIME = new Date("2026-07-11T12:00:00.000Z")
 
@@ -29,7 +30,7 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "abc1234" }))
 
-    const result = await archiveChangeAction(context(workDir, changeDir))
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
     const checkpointPath = checkpointPathFor(workDir, "workflow-1", "openspec/changes/issue-127")
 
     expect(result.error).toBeUndefined()
@@ -45,12 +46,12 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit([], destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], commitFailure: () => failCommit }))
 
-    const first = await archiveChangeAction(context(workDir, changeDir))
+    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
     expect(first.error?.code).toBe("retry-safe")
     expect((first.error?.message ?? "")).toContain("git commit archive change failed")
 
     failCommit = false
-    const retry = await archiveChangeAction(context(workDir, changeDir))
+    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
     expect(retry.error).toBeUndefined()
     expect((retry.output as Record<string, unknown>).destination).toBe(join(workDir, destinationRel))
   })
@@ -62,18 +63,17 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit([], destinationRel, { changedFiles: [`${destinationRel}/proposal.md`], sha: "v2sha" }))
 
-    const first = await archiveChangeAction(context(workDir, changeDir))
+    const first = await callAction(archiveChangeAction, context(workDir, changeDir))
     expect(first.error).toBeUndefined()
     expect((first.output as Record<string, unknown>).destination).toBe(join(workDir, destinationRel))
 
-    const retry = await archiveChangeAction(context(workDir, changeDir))
+    const retry = await callAction(archiveChangeAction, context(workDir, changeDir))
     expect(retry.error?.code).toBe("missing-source")
   })
 
   it.each([
     ["malformed", "not-json"],
     ["wrong version", JSON.stringify({ version: 2, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: "openspec/changes/archive/2026-07-11-issue-127" })],
-    ["wrong run", JSON.stringify({ version: 1, workflowRunId: "other", source: "openspec/changes/issue-127", destination: "openspec/changes/archive/2026-07-11-issue-127" })],
     ["escaping destination", JSON.stringify({ version: 1, workflowRunId: "workflow-1", source: "openspec/changes/issue-127", destination: "openspec/changes/archive/../outside" })],
   ])("rejects %s checkpoint before mutation", async (_name, checkpoint) => {
     const events: string[] = []
@@ -84,7 +84,7 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit(events, "openspec/changes/archive/unused"))
 
-    const result = await archiveChangeAction(context(workDir, changeDir))
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
 
     expect(result.error?.code).toBe("config-error")
     expect(events.filter((event) => event.startsWith("rename:") || event.startsWith("git:"))).toEqual([])
@@ -99,7 +99,7 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit(events, destinationRel))
 
-    const result = await archiveChangeAction(context(workDir, changeDir))
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
 
     expect(result.error?.code).toBe("partial-archive")
     expect(events.some((event) => event.startsWith("rename:"))).toBe(false)
@@ -112,7 +112,7 @@ describe("mohist/archive-change", () => {
     setArchiveFileSystemForTest(fileSystem)
     setOpenSpecGitRunnerForTest(fakeGit([], destinationRel))
 
-    const result = await archiveChangeAction(context(workDir, changeDir))
+    const result = await callAction(archiveChangeAction, context(workDir, changeDir))
 
     expect(result.error?.code).toBe("missing-source")
   })

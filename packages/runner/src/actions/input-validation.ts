@@ -8,6 +8,14 @@ import {
 
 export const ENGINE_RESERVED_INPUT_KEY = "working-directory"
 
+export function deferredInputFields(manifest: ActionManifest): Set<string> {
+  const deferred = new Set<string>()
+  for (const [name, declaration] of Object.entries(manifest.inputs)) {
+    if (declaration.render === "deferred") deferred.add(name)
+  }
+  return deferred
+}
+
 export function validateActionInput(
   manifest: ActionManifest,
   renderedWith: JsonObject | null | undefined,

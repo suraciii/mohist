@@ -4,6 +4,7 @@ import type { ActionRegistry, ActionDefinition } from "../src/actions/registry.j
 import { defineAction } from "../src/actions/define-action.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionHost } from "../src/actions/host.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const mockFallbackWorkDir = "/tmp"
@@ -11,7 +12,7 @@ const mockFallbackWorkDir = "/tmp"
 describe("Check verdict validation", () => {
   let executor: WorkExecutor
   let mockActionRegistry: ActionRegistry
-  let capturedHandler: ((context: unknown) => Promise<ActionResult>) | null
+    let capturedHandler: ((inputs: unknown, host: ActionHost) => Promise<ActionResult>) | null
 
   beforeEach(async () => {
     const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" })
@@ -29,8 +30,8 @@ describe("Check verdict validation", () => {
         outputs: [],
         errors: [{ code: "marker-failed" }],
       },
-      run: async (ctx) => {
-        if (capturedHandler) return await capturedHandler(ctx)
+       run: async (inputs, host) => {
+         if (capturedHandler) return await capturedHandler(inputs, host)
         return { output: null }
       },
     })
@@ -106,8 +107,8 @@ describe("Check verdict validation", () => {
 
   it("resolves a check working directory from the engine-owned input", async () => {
     let workDir = ""
-    capturedHandler = async (context) => {
-      workDir = (context as { workDir: string }).workDir
+    capturedHandler = async (_inputs, host) => {
+      workDir = host.workDir
       return { output: null }
     }
     const work = makeCheckWork([{

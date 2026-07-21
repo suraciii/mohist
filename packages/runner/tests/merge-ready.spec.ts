@@ -4,6 +4,7 @@ import {
   setDeliveryGitRunnerForTest,
 } from "../src/actions/merge-ready.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
+import { callAction } from "./support/call-action.js"
 
 type WorkspaceCall = { workDir: string; args: string[] }
 
@@ -85,7 +86,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context())
+    const result = await callAction(mergeReadyAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -127,7 +128,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context())
+    const result = await callAction(mergeReadyAction, context())
     expect(result.error).toMatchObject({ code: "merge-not-ready" })
     expect(result.error?.message).toContain("does not contain the latest 'origin/main' tip")
     expect(result.error?.message).toContain("rebase is required")
@@ -153,7 +154,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    await mergeReadyAction(context())
+    await callAction(mergeReadyAction, context())
 
     const cmds = new Set(workspaceCalls(calls))
     expect(cmds.has("checkout main")).toBe(false)
@@ -175,7 +176,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context())
+    const result = await callAction(mergeReadyAction, context())
     expect(result.error).toMatchObject({ code: "merge-not-ready" })
     expect(result.error?.message).toContain("Could not resolve base branch 'origin/main'")
 
@@ -196,7 +197,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context())
+    const result = await callAction(mergeReadyAction, context())
     expect(result.error).toMatchObject({ code: "merge-not-ready", message: "Could not resolve source" })
 
     const cmds = workspaceCalls(calls)
@@ -221,7 +222,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context(
+    const result = await callAction(mergeReadyAction, context(
       { source: "custom-source" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
     ))
@@ -256,7 +257,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    const result = await mergeReadyAction(context(
+    const result = await callAction(mergeReadyAction, context(
       { remote: "upstream" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" } },
     ))
@@ -289,7 +290,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    await mergeReadyAction(context())
+    await callAction(mergeReadyAction, context())
 
     const cmds = workspaceCalls(calls)
     expect(cmds).toContain("rev-parse mohist/run-wr-merge-ready-1")
@@ -299,7 +300,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
 
   it("MissingSource_DoesNotUseWorkspaceVariableOrRunGit", async () => {
     const calls = installGit(async () => { throw new Error("git must not run") })
-    const result = await mergeReadyAction(context({ source: null }, {
+    const result = await callAction(mergeReadyAction, context({ source: null }, {
       workspace: { path: WORKSPACE_PATH, branch: "different-branch", changeDir: null },
     }))
 
@@ -325,7 +326,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    await mergeReadyAction(context())
+    await callAction(mergeReadyAction, context())
 
     const cmds = workspaceCalls(calls)
     for (const cmd of cmds) {
@@ -357,7 +358,7 @@ describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
       }
     })
 
-    await mergeReadyAction(context())
+    await callAction(mergeReadyAction, context())
 
     const workDirs = new Set(calls.map((c) => c.workDir))
     expect(workDirs.size).toBe(1)

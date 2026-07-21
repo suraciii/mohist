@@ -1,7 +1,8 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
-import type { ActionInvocationContext } from "../actions/context.js"
+import type { ActionHost } from "../actions/host.js"
+import type { ActionCapabilitySet } from "../actions/manifest.js"
 import { isActionFailure } from "../actions/action-result.js"
 import { numberInput, objectInput } from "../core/json.js"
 import { errorMessage, isNotFoundError } from "../core/errors.js"
@@ -15,11 +16,6 @@ import {
 import { git } from "./git-probe.js"
 import type { TaskLogger } from "./task-log.js"
 
-/**
- * `source` tag recorded against every captured clean-worktree line.
- * Distinct from the action body's `action:*` tag so the web viewer
- * can phase-distinguish the cleanup probe from the action itself.
- */
 export const CLEANUP_SOURCE = "cleanup"
 
 function cleanupSink(log: TaskLogger | null | undefined) {
@@ -47,13 +43,12 @@ export class WorktreeProbeError extends Error {
   }
 }
 
-export type CleanupAgentAction = (context: ActionInvocationContext) => Promise<ActionResult>
+export type CleanupAgentAction = (host: ActionHost, withInput: JsonObject) => Promise<ActionResult>
 
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
-type BaseContextFactory = (work: RenderedWorkItem, signal: AbortSignal) => Omit<ActionInvocationContext, "with" | "workDir">
 
 export type ContextParts = {
-  baseContext: BaseContextFactory
+  buildHost: (work: RenderedWorkItem, signal: AbortSignal, workDir: string) => ActionHost
 }
 
 let cleanupAgentActionOverride: CleanupAgentAction | null = null
@@ -344,16 +339,11 @@ export async function runAgentCleanupAttempt(
   contextParts: ContextParts,
 ): Promise<WorkItemResult | "ok"> {
   const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt)
-  const cleanupContext: ActionInvocationContext = {
-    ...contextParts.baseContext(work, signal),
-    workDir,
-    workType: "task",
-    with: cleanupWith as ActionInvocationContext["with"],
-  }
+  const host = contextParts.buildHost(work, signal, workDir)
 
   let result: ActionResult
   try {
-    result = await cleanupAction(cleanupContext)
+    result = await cleanupAction(host, cleanupWith)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} threw: ${message}`)

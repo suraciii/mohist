@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
 import { githubPrChecksAction } from "../src/actions/github-pr-checks-action.js"
-import type { ActionInvocationContext } from "../src/actions/context.js"
-import type { JsonObject } from "../src/core/types.js"
+import type { ActionContext, JsonObject } from "../src/core/types.js"
 import {
   checksRollup,
   createMergeGhTestHarness,
@@ -20,7 +20,7 @@ afterEach(() => {
 
 const WORKSPACE_PATH = "/workspace"
 
-function prChecksContext(withOverrides: JsonObject = {}): ActionInvocationContext {
+function prChecksContext(withOverrides: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wr-check-1",
     workId: "verify-pr-checks",
@@ -29,6 +29,7 @@ function prChecksContext(withOverrides: JsonObject = {}): ActionInvocationContex
     title: "Verify GitHub PR checks",
     uses: "mohist/github-pr-checks",
     with: { repositoryUrl: "https://github.com/acme/repo.git", ...withOverrides },
+    variables: {},
     workDir: WORKSPACE_PATH,
     projectId: "proj_1",
     issueNumber: 460,
@@ -70,7 +71,7 @@ describe("mohist/github-pr-checks action", () => {
         ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }])),
     })
 
-    const result = await githubPrChecksAction(prChecksContext({ prNumber: 42 }))
+    const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -92,7 +93,7 @@ describe("mohist/github-pr-checks action", () => {
           ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion }])),
       })
 
-      const result = await githubPrChecksAction(prChecksContext({ prNumber: 42 }))
+      const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
 
       expect(result.error).toMatchObject({ code: "pr-checks-failed" })
       expect(result.error?.message).toContain("PR #42 checks failed")
@@ -113,7 +114,7 @@ describe("mohist/github-pr-checks action", () => {
       },
     })
 
-    const result = await githubPrChecksAction(prChecksContext({ prNumber: 42 }))
+    const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -122,7 +123,7 @@ describe("mohist/github-pr-checks action", () => {
   })
 
   it("fails with invalid-input when prNumber is missing", async () => {
-    const result = await githubPrChecksAction(prChecksContext({}))
+    const result = await callAction(githubPrChecksAction, prChecksContext({}))
     expect(result.error).toMatchObject({ code: "invalid-input" })
   })
 
@@ -132,13 +133,13 @@ describe("mohist/github-pr-checks action", () => {
       "gh auth status": () => ghFail("not logged in"),
     })
 
-    const result = await githubPrChecksAction(prChecksContext({ prNumber: 42 }))
+    const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
     expect(result.error).toMatchObject({ code: "config-error" })
   })
 
   it("fails with config-error when authoritative repository URL is unparseable", async () => {
     const ctx = prChecksContext({ repositoryUrl: "not-a-url", prNumber: 42 })
-    const result = await githubPrChecksAction(ctx)
+    const result = await callAction(githubPrChecksAction, ctx)
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })

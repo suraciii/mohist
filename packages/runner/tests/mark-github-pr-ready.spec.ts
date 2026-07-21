@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
+import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
@@ -85,7 +86,7 @@ describe("mohist/mark-github-pr-ready action", () => {
   it("requires prNumber and reports config-error when missing", async () => {
     installGh(() => ghOk("never called"))
 
-    const result = await markGitHubPrReadyAction(context({}))
+    const result = await callAction(markGitHubPrReadyAction, context({}))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("requires prNumber")
@@ -108,7 +109,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -138,7 +139,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await markGitHubPrReadyAction(withLog(context({ prNumber: 42 }), writes))
+    const result = await callAction(markGitHubPrReadyAction, withLog(context({ prNumber: 42 }), writes))
 
     expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:mark-github-pr-ready" && write.text.includes("gh pr ready 42"))).toBe(true)
@@ -163,7 +164,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -190,7 +191,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       return ghFail(`unexpected gh call: ${args.join(" ")}`)
     })
 
-    const result = await markGitHubPrReadyAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
+    const result = await callAction(markGitHubPrReadyAction, context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
@@ -198,7 +199,7 @@ describe("mohist/mark-github-pr-ready action", () => {
   })
 
   it("rejects an invalid explicit repository URL", async () => {
-    const result = await markGitHubPrReadyAction(context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("valid GitHub repository URL")
@@ -223,7 +224,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
 
     const forbiddenStarts = ["gh pr edit", "gh pr create", "gh pr merge", "gh pr close", "gh pr reopen"]
     for (const call of ghCalls) {
@@ -242,7 +243,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("gh CLI is not installed")
@@ -262,7 +263,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "pr-state-conflict" })
     expect(result.error?.message).toContain("in state CLOSED")
@@ -284,7 +285,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "retry-safe" })
     expect(result.error?.message).toContain("gh pr ready 42 failed")
@@ -304,7 +305,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "retry-safe" })
   })
@@ -326,7 +327,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
 
     for (const command of ["gh --version", "gh auth status", "gh pr view 42 --json state,isDraft,url", "gh pr ready 42"]) {
       const call = ghCalls.find((c) => c.command === command)
@@ -357,7 +358,7 @@ describe("mohist/mark-github-pr-ready action", () => {
       }
     })
 
-    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const result = await callAction(markGitHubPrReadyAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("timed out")

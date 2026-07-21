@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
-import { WorkExecutor, baseContext } from "../src/runtime/executor.js"
+import type { ActionResult, RenderedWorkItem } from "../src/core/types.js"
+import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
@@ -10,6 +10,7 @@ import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/types.js"
 import { createTestTempDir } from "./support/temp-dir.js"
 import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -85,23 +86,24 @@ describe("workspace preparation across stages", () => {
   })
 })
 
-describe("execution context runtime wiring", () => {
-  it("passes the OpenCode runtime to AgentJob contexts", () => {
-    const runtime = fakeRuntime()
-    const context = baseContext(
-      {
-        workflowRunId: "",
-        workId: "agent-work",
-        workType: "task",
-        ownerKind: "agent-job",
-      },
-      new AbortController().signal,
-      {} as never,
-      null,
-      runtime,
-    )
-
-    expect(context.openCodeRuntime).toBe(runtime)
+describe("execution host boundary", () => {
+  it("does not expose the runtime through an Action host", async () => {
+    let observed: Record<string, unknown> | null = null
+    const registry = buildRegistry(async (_inputs, host) => {
+      observed = host as unknown as Record<string, unknown>
+      return { output: null }
+    })
+    const definition = registry.resolve("core/script")
+    if (definition.kind !== "definition") throw new Error("test action missing")
+    await definition.definition.run({ run: "echo ok" }, {
+      workDir: "/tmp/agent-host",
+      signal: new AbortController().signal,
+      log: null,
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    })
+    expect(observed).not.toBeNull()
+    expect(observed).not.toHaveProperty("openCodeRuntime")
+    expect(observed).not.toHaveProperty("serverConnection")
   })
 })
 

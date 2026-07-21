@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- Action execution now uses `(validatedInputs, host)`; the default host contains only `workDir`, `signal`, `log`, and `exec`. Capability operations are attached by `WorkExecutor` only from the selected manifest.
+- `agent-turn` owns OpenCode runtime/session/reporting behavior and private turn facts. Promise projection is selected from the manifest capability set.
+- `issue-fields` and `workflow-checkpoint` resolve private dispatch context through closures. Checkpoint tokens hash workflow-run identity plus scope and are opaque to Actions.
+- Deferred input rendering is field-specific. Unresolved-template checks must exclude deferred fields so nested OpenSpec templates survive parent dispatch.
+- Action effects are normalized privately and applied after completion/postconditions. Variable effects and declarative `setVars` use one patch, with `setVars` merged last; task additions are attached only after that patch succeeds.
+- Checks normalize and reject effects as `unexpected-error`; they never deliver effects.
+
+## T-001
+
+- Migrated built-in Action call sites and test adapters away from the old Action invocation surface. Removed raw OpenSpec task injection and the name-based promise projection branch.
+- Existing Runner regressions initially exposed stale tests asserting runtime/context exposure or immediate `writeVars`; those tests now assert the capability boundary and result-effect behavior.
+- Verification so far: `npm run typecheck -w packages/runner`, focused capability/executor tests, and the full Runner suite passed before final test additions.

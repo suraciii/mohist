@@ -298,6 +298,10 @@ export type ActionResult = (
   | { output: JsonObject | null; error?: never }
   | { output?: never; error: ActionError }
 ) & {
+  effects?: {
+    addTasks?: AddTaskInput[]
+    writeVars?: JsonObject
+  }
   exitCode?: number | null
   /**
    * Runner-private Action-result facts that must never be serialized

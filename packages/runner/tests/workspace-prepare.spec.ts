@@ -5,6 +5,7 @@ import {
   setWorkspacePrepareGitRunnerForTest,
   workspacePrepareAction,
 } from "../src/actions/workspace-prepare.js"
+import { callAction } from "./support/call-action.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 type GitCall = { workDir: string; args: string[] }
@@ -106,7 +107,7 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -138,7 +139,7 @@ describe("mohist/workspace-prepare", () => {
       with: { expectedBranch: EXPECTED_BRANCH },
       variables: { workspace: { path: "/hidden-workspace", branch: "hidden-branch" } },
     }
-    const result = await workspacePrepareAction(contextWithHiddenVariables)
+    const result = await callAction(workspacePrepareAction, contextWithHiddenVariables)
 
     expect(result.error).toBeUndefined()
     expect(calls.every((call) => call.workDir === "/host-workspace")).toBe(true)
@@ -151,7 +152,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -167,7 +168,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -183,7 +184,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -199,7 +200,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -219,7 +220,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -246,7 +247,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -265,7 +266,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -284,7 +285,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -305,7 +306,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -322,7 +323,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -337,7 +338,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -358,7 +359,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -383,7 +384,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
 
     expect(result.error).toBeUndefined()
     expect(hasCommand(calls, `checkout ${EXPECTED_BRANCH}`)).toBe(true)
@@ -398,7 +399,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -427,7 +428,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -458,7 +459,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -481,7 +482,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -498,7 +499,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -520,7 +521,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -535,7 +536,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -554,7 +555,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -565,7 +566,7 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    await workspacePrepareAction(context())
+    await callAction(workspacePrepareAction, context())
 
     for (const forbidden of ["fetch", "pull", "push", "clone", "remote", "ls-remote"]) {
       const hasNetwork = calls.some((call) => call.args[0] === forbidden)
@@ -582,7 +583,7 @@ describe("mohist/workspace-prepare", () => {
       with: {},
       variables: { workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null } },
     }
-    const result = await workspacePrepareAction(contextWithHiddenVariables)
+    const result = await callAction(workspacePrepareAction, contextWithHiddenVariables)
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()
@@ -613,7 +614,7 @@ describe("mohist/workspace-prepare", () => {
       return null
     }))
 
-    const result = await workspacePrepareAction(context())
+    const result = await callAction(workspacePrepareAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -663,7 +664,7 @@ describe("mohist/workspace-prepare", () => {
       }
     })
 
-    await workspacePrepareAction(context())
+    await callAction(workspacePrepareAction, context())
 
     // All local-only git probes must keep no per-command timeout —
     // they cannot hang on the network and so run under the work-level

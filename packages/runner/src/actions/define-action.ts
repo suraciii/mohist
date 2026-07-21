@@ -1,4 +1,5 @@
 import type {
+  ActionCapability,
   ActionDefinition,
   ActionErrorDeclaration,
   ActionInputDeclaration,
@@ -6,8 +7,7 @@ import type {
   ActionManifest,
   ActionOutputDeclaration,
 } from "./manifest.js"
-import { RESERVED_PLATFORM_ERROR_CODES, canonicalKindOrder } from "./manifest.js"
-import type { ValidatedActionContext } from "./context.js"
+import { RESERVED_PLATFORM_ERROR_CODES, canonicalKindOrder, validCapabilities } from "./manifest.js"
 import type { JsonValue } from "../core/types.js"
 
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -34,7 +34,7 @@ export function defineAction<M extends ActionManifest>(input: DefineActionInput<
   const frozenManifest = deepFreezeManifest(input.manifest) as M
   const definition = {
     manifest: frozenManifest,
-    run: async (context: ValidatedActionContext<M>) => input.run(context),
+    run: input.run,
   } as ActionDefinition<M>
   Object.freeze(definition)
   return definition
@@ -77,6 +77,29 @@ export function validateManifest(manifest: ActionManifest): void {
   const errorCodes = new Set<string>()
   for (const error of manifest.errors) {
     validateErrorDeclaration(manifest.name, error, errorCodes)
+  }
+  if (manifest.capabilities !== undefined) {
+    if (!Array.isArray(manifest.capabilities)) {
+      throw new ActionDefinitionError(`Action '${manifest.name}' capabilities must be an array when present`)
+    }
+    const allValid = validCapabilities()
+    const seen = new Set<ActionCapability>()
+    for (const capability of manifest.capabilities) {
+      if (!allValid.includes(capability as ActionCapability)) {
+        throw new ActionDefinitionError(
+          `Action '${manifest.name}' declares unknown capability '${String(capability)}'; supported: ${allValid.join(", ")}`,
+        )
+      }
+      if (seen.has(capability as ActionCapability)) {
+        throw new ActionDefinitionError(`Action '${manifest.name}' declares duplicate capability '${String(capability)}'`)
+      }
+      seen.add(capability as ActionCapability)
+    }
+  }
+  for (const [name, declaration] of Object.entries(manifest.inputs)) {
+    if (declaration.render !== undefined && declaration.render !== "immediate" && declaration.render !== "deferred") {
+      throw new ActionDefinitionError(`Action '${manifest.name}' input '${name}' render timing must be 'immediate' or 'deferred'`)
+    }
   }
 }
 
@@ -192,6 +215,7 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
       required: declaration.required,
       default: clonedDefault,
       description: declaration.description,
+      render: declaration.render,
     })
   }
   const outputs = manifest.outputs.map((output) =>
@@ -200,12 +224,14 @@ function deepFreezeManifest(manifest: ActionManifest): ActionManifest {
   const errors = manifest.errors.map((error) =>
     Object.freeze({ code: error.code, description: error.description }) as ActionErrorDeclaration,
   )
+  const capabilities = manifest.capabilities ? Object.freeze([...manifest.capabilities] as ReadonlyArray<ActionCapability>) : undefined
   const frozen = Object.freeze({
     name: manifest.name,
     description: manifest.description,
     inputs: Object.freeze(inputs) as Readonly<Record<string, ActionInputDeclaration>>,
     outputs: Object.freeze(outputs),
     errors: Object.freeze(errors),
+    capabilities,
   } as ActionManifest)
   return frozen
 }

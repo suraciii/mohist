@@ -1,6 +1,6 @@
 import { numberInput, stringInput } from "../core/json.js"
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveMergeSubject } from "./github-pr-issue-fields.js"
@@ -15,17 +15,17 @@ import { fail as actionFail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:merge-github-pr"
 
-export async function mergeGitHubPrAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const method = stringInput(context.with, "method") ?? "squash"
-  const prNumber = numberInput(context.with, "prNumber")
-  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+export async function mergeGitHubPrAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const method = stringInput(inputs, "method") ?? "squash"
+  const prNumber = numberInput(inputs, "prNumber")
+  const repositoryUrl = typeof inputs["repositoryUrl"] === "string" ? inputs["repositoryUrl"] : undefined
   if (prNumber === undefined || !repositoryUrl) return actionFail("invalid-input", "merge-github-pr requires 'repositoryUrl' and 'prNumber'")
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return actionFail("config-error", "merge-github-pr requires a valid GitHub repository URL")
-  const workDir = context.workDir
+  const workDir = host.workDir
 
   const gh = getGitHubPrGh()
-  const ghOpts = ghLineOptions(context)
+  const ghOpts = ghLineOptions(host)
 
   const steps: GitHubPrStep[] = []
   const record = createRecorder(steps)
@@ -42,18 +42,18 @@ export async function mergeGitHubPrAction(context: ActionInvocationContext): Pro
     return fail("config-error", `Unsupported merge method '${method}'. Supported method: squash.`)
   }
 
-  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
+  const ghPrecheck = await runGhPrecheck(gh, workDir, host.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
 
-  const subject = await resolveMergeSubject(context)
+  const subject = await resolveMergeSubject(inputs, host)
   if (subject.kind === "failure") {
     return fail("config-error", subject.message, { output: subject.message })
   }
 
-  const merged = await waitChecksAndMergePr(gh, workDir, prNumber, subject.subject, context.signal, record, ghOpts, githubRepository)
+  const merged = await waitChecksAndMergePr(gh, workDir, prNumber, subject.subject, host.signal, record, ghOpts, githubRepository)
   if (merged.kind === "failure") {
     return fail(merged.errorCode, merged.message, {
       output: merged.output,
@@ -82,9 +82,9 @@ function createRecorder(steps: GitHubPrStep[]) {
   }
 }
 
-function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function ghLineOptions(host: ActionHost): CommandLineOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => host.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 export function buildMergeGitHubPrOutput(output: MergeGitHubPrOutput): ActionResult {

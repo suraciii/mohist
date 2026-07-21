@@ -10,7 +10,6 @@ import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
-import type { PiRuntime } from "./pi/index.js"
 import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
 import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
@@ -19,10 +18,9 @@ import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.j
 import { tryRecovery } from "./recovery.js"
 import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
-import { fail as actionFail, isActionFailure } from "../actions/action-result.js"
-import type { ActionDefinition } from "../actions/manifest.js"
-import type { ActionInvocationContext, ValidatedActionContext } from "../actions/context.js"
-import { validateActionInput } from "../actions/input-validation.js"
+import { fail as actionFail, isActionFailure, succeed as actionSucceed } from "../actions/action-result.js"
+import type { ActionDefinition, ActionManifest, ActionCapabilitySet } from "../actions/manifest.js"
+import { validateActionInput, deferredInputFields } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughTurnFact } from "../actions/result-validation.js"
 import {
   evaluateCompletion,
@@ -30,8 +28,13 @@ import {
   type CompletionEvaluation,
 } from "../actions/expectations.js"
 import type { AgentJobExecutor } from "./agent-job-executor.js"
-import type { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
-import { workflowSessionName } from "../actions/workflow-session-name.js"
+import type { ActionHost, ActionEffects, AgentTurnRequest } from "../actions/host.js"
+import { capabilitySet } from "../actions/host.js"
+import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../actions/opencode.js"
+import { WorkflowAgentSessionReporter } from "../actions/workflow-agent-session-reporter.js"
+import { parseModelIdentifier } from "./opencode/index.js"
+import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js"
+import { createHash } from "node:crypto"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -44,53 +47,17 @@ const CHECK_STATUS_BY_ACTION_STATUS = new Map([
 ])
 const CHECK_WORK_TYPES = new Set(["check", "checks"])
 
-/**
- * Action identifiers whose public Action Output is the minimal
- * `null | { promise }` shape defined by `mohist/opencode`'s contract
- * (opencode-action-contract spec). Every other Action preserves its
- * handler's own output unchanged through completion evaluation
- * (design D5).
- */
-const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode", "mohist/pi"])
-
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
     private readonly workspaceManager: WorkspaceManager,
     private readonly connection: ServerConnection,
     private readonly fallbackWorkDir = process.cwd(),
-    /**
-     * Injected clock for {@link TaskLogCollector} timestamps. Defaults
-     * to `Date.now` (real wall clock). Tests override it so the per-work
-     * log timestamps are deterministic without `vi.useFakeTimers`
-     * bleeding into other modules. Hosts do not typically override —
-     * the existing `n` convention threads this from the executor's
-     * constructor so the value is per-host, not per-work.
-     */
     private readonly now: () => Date = () => new Date(),
-    /**
-     * Shared OpenCode runtime handle. Set by the runner host after
-     * `OpenCodeRuntime.start()` passes readiness; cleared when the
-     * runtime exits and rebuilds. Both Workflow and AgentJob work
-     * receive this handle through `ActionContext.openCodeRuntime`.
-     * The AgentJob path additionally dispatches through
-     * {@link agentJobExecutor} so it never reaches the Action
-     * registry. Hosts may swap it through {@link updateOpenCodeRuntime}
-     * when the runtime rebuilds after a server exit.
-     */
     private openCodeRuntime: OpenCodeRuntime | null = null,
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
-    /**
-     * Shared AgentSession runtime-event outbox (issue-461). Wired from
-     * `RunnerHost` so the Workflow reporter and generic follow-up handler
-     * route through one host-owned durable queue. The outbox replaces
-     * the prior `FollowupFailureOutbox` and absorbs the direct upload
-     * paths. Hosts may swap it via {@link updateRuntimeEventOutbox}.
-     */
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
-    private readonly workflowSessionTurnCoordinator: WorkflowSessionTurnCoordinator | null = null,
-    private piRuntime: PiRuntime | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -101,21 +68,10 @@ export class WorkExecutor {
     this.agentSessionRuntimeEventOutbox = outbox
   }
 
-  updatePiRuntime(runtime: PiRuntime | null) {
-    this.piRuntime = runtime
-  }
-
   async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     return this.executeWithLog(work, signal, null).then((exec) => exec.result)
   }
 
-  /**
-   * Per-work execution that exposes the buffered
-   * {@link TaskLogCollector} so the host can flush it as a terminal
-   * batch via the independent task-log channel (design D6). Callers
-   * that do not care about the collector (tests, ad-hoc CLI usage) can
-   * keep calling {@link execute}.
-   */
   async executeWithLog(work: RenderedWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
     const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
@@ -146,13 +102,6 @@ export class WorkExecutor {
   }
 
   private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
-    // The AgentJob path is owned by the AgentJobExecutor: it drives the
-    // shared OpenCodeRuntime directly and never resolves an Action
-    // (no inline-agent contract and no removed or synthetic Action).
-    // Branch BEFORE Action resolution so the
-    // registry never sees the dispatch, and so a future refactor
-    // that strips the `Uses` field from AgentJob dispatches doesn't
-    // surface as "No action found".
     if (work.ownerKind === "agent-job") {
       if (!this.agentJobExecutor) {
         return failure(work, "AgentJob dispatch received without an AgentJobExecutor wired on the WorkExecutor")
@@ -175,11 +124,16 @@ export class WorkExecutor {
 
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
-      const unresolved = [...wholeStringUnresolvedReferences(work.with, variables), ...wholeStringUnresolvedReferences(work.expect, variables)]
+      const deferred = deferredInputFields(definition.manifest)
+      const unresolved = [
+        ...wholeStringUnresolvedReferences(removeDeferredFields(work.with, deferred), variables),
+        ...wholeStringUnresolvedReferences(work.expect, variables),
+      ]
       if (unresolved.length > 0) {
         return failure(work, formatUnresolvedError(work, unresolved))
       }
-      const renderedWith = renderTemplate(work.with, variables)
+
+      const renderedWith = this.renderWithDeferred(work.with, variables, deferred)
       const validation = validateActionInput(definition.manifest, renderedWith)
       if (validation.kind === "failure") {
         const validationFailure = validationFailureResult(work, validation.error)
@@ -188,7 +142,7 @@ export class WorkExecutor {
         return validationFailure
       }
       const validatedWith = validation.input
-      const renderedExpect = renderTemplate(work.expect, variables)
+      const renderedExpect = work.expect != null ? renderTemplate(work.expect, variables) : null
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const expectedBranch = expectedWorkspaceBranch(variables)
@@ -196,85 +150,294 @@ export class WorkExecutor {
       if (startCheck.kind === "violation") {
         return startCheck.result
       }
-      const executeInlineWork = async () => {
-        let rawResult: unknown
-        try {
-          const actionContext = {
-            ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime),
-            with: validatedWith,
-            workDir,
-            ...(definition.manifest.name === "mohist/openspec-tasks"
-              ? { rawTask: isObject(work.with?.task) ? work.with.task : null }
-              : {}),
-          }
-          rawResult = await runValidatedAction(definition, actionContext)
-        } catch (thrown) {
-          rawResult = malformedToUnexpectedError(
-            `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
-          )
-        }
-        // stripRunnerPrivateFacts drops ActionResult.turnFact from the wire.
-        // The fact is consumed only by completion evaluation below; it MUST
-        // never be serialized into WorkItemResult.output, recovery matching,
-        // setVars projections, captured outputs, or artifacts (design D4).
-        const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
-        const normalized = normalizeActionResult(rawResult, definition.manifest)
-        const validatedResult: ActionResult = normalized.kind === "malformed"
-          ? (malformedToUnexpectedError(normalized.message) as ActionResult)
-          : normalized.kind === "ok"
-            ? ({ output: normalized.output } as ActionResult)
-            : ({ error: normalized.error } as ActionResult)
-        const exitCode = passThroughExitCode(rawResult)
-        if (exitCode !== undefined && exitCode !== null) {
-          ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
-        }
-        const actionSucceeded = !isActionFailure(validatedResult)
-        const completion = actionSucceeded
-          ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
-          : null
-        const projected = projectTaskOutput(work, validatedResult, completion)
-        const resultForRecovery = projected
-        const recoveryResult = tryRecovery(work, resultForRecovery, variables)
-        if (recoveryResult) return recoveryResult
-        if (resultForRecovery.status !== "completed") {
-          return resultForRecovery
-        }
-        const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
-        if (endCheck.kind === "violation") {
-          return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
-        }
-        const worktreeResult = await enforceCleanWorktree(
-          work,
-          workDir,
-          resultForRecovery,
-          renderedWith,
-          variables,
-          signal,
-          resolveCleanupAgentAction(legacyHandler(definition)),
-          { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime) },
-          log,
+      const caps = capabilitySet(definition.manifest)
+      const host = this.buildActionHost(work, workDir, signal, log, caps)
+      let rawResult: unknown
+      try {
+        rawResult = await definition.run(validatedWith, host)
+      } catch (thrown) {
+        rawResult = malformedToUnexpectedError(
+          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
         )
-        if (worktreeResult.status !== "completed") {
-          const recoveryResult = tryRecovery(work, worktreeResult, variables)
-          if (recoveryResult) return recoveryResult
-          return worktreeResult
-        }
-        const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
-        const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
-        return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
       }
-      return isInlineAgentAction(work.uses) && this.workflowSessionTurnCoordinator
-        ? await this.workflowSessionTurnCoordinator.withTurn(
-          {
-            projectId: work.projectId ?? "",
-            workflowRunId: work.workflowRunId,
-            sessionName: workflowSessionName(renderedWith, work.workId),
-          },
-          executeInlineWork,
-        )
-        : await executeInlineWork()
+      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+      const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
+      let effects: ActionEffects = {}
+      let validatedResult: ActionResult
+      if (normalized.kind === "malformed") {
+        validatedResult = malformedToUnexpectedError(normalized.message) as ActionResult
+      } else if (normalized.kind === "ok") {
+        validatedResult = { output: normalized.output } as ActionResult
+        effects = normalized.effects
+      } else {
+        validatedResult = { error: normalized.error } as ActionResult
+      }
+      const exitCode = passThroughExitCode(rawResult)
+      if (exitCode !== undefined && exitCode !== null) {
+        ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
+      }
+      const actionSucceeded = !isActionFailure(validatedResult)
+      const completion = actionSucceeded
+        ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
+        : null
+      const projected = projectTaskOutput(work, validatedResult, completion, caps)
+      const resultForRecovery = projected
+      const recoveryResult = tryRecovery(work, resultForRecovery, variables)
+      if (recoveryResult) return recoveryResult
+      if (resultForRecovery.status !== "completed") {
+        return resultForRecovery
+      }
+      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
+      if (endCheck.kind === "violation") {
+        return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
+      }
+      const worktreeHostBuilder = (cleanupWork: RenderedWorkItem, cleanupSignal: AbortSignal, cleanupWorkDir: string) =>
+        this.buildActionHost(cleanupWork, cleanupWorkDir, cleanupSignal, log, caps)
+      const worktreeResult = await enforceCleanWorktree(
+        work,
+        workDir,
+        resultForRecovery,
+        renderedWith,
+        variables,
+        signal,
+        resolveCleanupAgentAction((host, withInput) => definition.run(withInput, host)),
+        { buildHost: worktreeHostBuilder },
+        log,
+      )
+      if (worktreeResult.status !== "completed") {
+        const recoveryResult = tryRecovery(work, worktreeResult, variables)
+        if (recoveryResult) return recoveryResult
+        return worktreeResult
+      }
+      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
+      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
+      const withVarsResult = await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal, effects.writeVars ?? {})
+      if (withVarsResult.status !== "completed") return withVarsResult
+      return effects.addTasks && effects.addTasks.length > 0
+        ? { ...withVarsResult, addTasks: effects.addTasks }
+        : withVarsResult
     } catch (error) {
       return failure(work, errorMessage(error))
+    }
+  }
+
+  private renderWithDeferred(
+    withInput: JsonObject | null | undefined,
+    variables: JsonObject,
+    deferred: Set<string>,
+  ): JsonObject | null {
+    if (!withInput) return null
+    if (deferred.size === 0) return renderTemplate(withInput, variables)
+    const rendered: JsonObject = {}
+    for (const [key, value] of Object.entries(withInput)) {
+      if (!deferred.has(key)) {
+        rendered[key] = renderTemplate(value as JsonObject | null, variables)
+      } else {
+        rendered[key] = value
+      }
+    }
+    return rendered
+  }
+
+  private buildActionHost(
+    work: RenderedWorkItem,
+    workDir: string,
+    signal: AbortSignal,
+    log: TaskLogger,
+    caps: ActionCapabilitySet,
+  ): ActionHost {
+    const host: ActionHost = {
+      workDir,
+      signal,
+      log,
+      exec: async (command, args) => {
+        const { runCommand } = await import("../system/process.js")
+        const result = await runCommand(command, args?.map(String) ?? [], workDir, signal)
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }
+      },
+    }
+
+    if (caps.has("agent-turn")) {
+      host.agent = this.buildAgentTurnCapability(work, workDir, signal)
+    }
+
+    if (caps.has("issue-fields")) {
+      host.issue = this.buildIssueFieldsCapability(work, workDir, signal)
+    }
+
+    if (caps.has("workflow-checkpoint")) {
+      host.checkpoint = this.buildCheckpointCapability(work)
+    }
+
+    return host
+  }
+
+  private buildAgentTurnCapability(work: RenderedWorkItem, workDir: string, signal: AbortSignal) {
+    const self = this
+    return {
+      async turn(request: AgentTurnRequest): Promise<ActionResult> {
+        const prompt = composeOpencodePrompt(request.prompt, work.parentIssueContext)
+
+        const runtime = self.openCodeRuntime
+        if (!runtime) {
+          return actionFail("runtime-unavailable", "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
+        }
+        if (!runtime.ready()) {
+          const diagnostic = runtime.diagnostic()
+          return actionFail("runtime-unavailable", `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+        }
+
+        const sessionName = request.session ?? work.workId
+        let binding: { runtimeSessionId: string | null; workDir: string } | null = null
+        if (self.connection && work.projectId) {
+          try {
+            const opened = await self.connection.openWorkflowAgentSession(
+              work.projectId,
+              work.workflowRunId,
+              sessionName,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                title: work.title,
+                issueNumber: work.issueNumber,
+                epicNumber: work.epicNumber,
+                workDir,
+              },
+              signal,
+            )
+            if (opened.workDir && opened.workDir !== workDir) {
+              return actionFail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+            }
+            binding = {
+              runtimeSessionId: opened.runtimeSessionId ?? null,
+              workDir: opened.workDir || "",
+            }
+          } catch (error) {
+            return actionFail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+        if (!binding) {
+          binding = { runtimeSessionId: null, workDir }
+        }
+
+        if (binding.runtimeSessionId === null && sessionName && self.connection && work.projectId) {
+          const modelResult = request.options?.model ? parseModelIdentifier(request.options.model) : null
+          const model = modelResult?.kind === "ok" ? { providerID: modelResult.value.providerID, modelID: modelResult.value.modelID } : null
+          const created = await runtime.createSession({
+            target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
+            model,
+          })
+          if (!created.ok) {
+            const kind = created.error.kind
+            const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+            return actionFail(code, created.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          }
+          try {
+            await self.connection.attachWorkflowAgentSession(
+              work.projectId,
+              work.workflowRunId,
+              sessionName,
+              {
+                runtimeSessionId: created.value.runtimeSessionId,
+                workDir: created.value.workDir,
+                processPid: null,
+                model: request.options?.model ?? null,
+                workId: work.workId,
+              },
+              signal,
+            )
+          } catch (error) {
+            return actionFail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          }
+          binding = {
+            runtimeSessionId: created.value.runtimeSessionId,
+            workDir: created.value.workDir,
+          }
+        }
+
+        const deadlineMs = request.deadlineMs ?? DEFAULT_TURN_DEADLINE_MS
+        const modelOptions = request.options?.model ? parseModelIdentifier(request.options.model) : null
+        const runtimeRequest = {
+          target: {
+            runtime: "opencode" as const,
+            runtimeSessionId: binding.runtimeSessionId,
+            workDir: binding.workDir,
+          },
+          prompt,
+          deadlineMs,
+          options: {
+            model: modelOptions?.kind === "ok" ? { providerID: modelOptions.value.providerID, modelID: modelOptions.value.modelID } : null,
+            variant: request.options?.variant ?? null,
+            unknownKeys: undefined as readonly string[] | undefined,
+          },
+        }
+
+        const reporter = createWorkflowReporter(
+          work.projectId ?? null,
+          work.workflowRunId,
+          sessionName,
+          { workId: work.workId, workType: work.workType, stage: work.stage ?? null },
+          binding.runtimeSessionId,
+          self.agentSessionRuntimeEventOutbox,
+          self.runtimeEventRecordId,
+        )
+
+        if (reporter && binding.runtimeSessionId) {
+          try {
+            await reporter.awaitInput(prompt, binding.runtimeSessionId)
+          } catch (error) {
+            return actionFail("execution-unavailable", `failed to durably enqueue the Workflow AgentSession input: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+
+        const observer = createWorkflowObserver(reporter)
+        const result = await runtime.runTurn(runtimeRequest, signal, observer)
+
+        enqueueTerminalClose(reporter, result, binding.runtimeSessionId)
+        await reporter?.settle()
+
+        if (!result.ok) {
+          const kind = result.error.kind
+          const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
+          return actionFail(code, result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+        }
+
+        const facts = result.value.facts
+        const output: JsonObject = {
+          kind: "opencode",
+          status: "success",
+          runtimeSessionId: facts.runtimeSessionId,
+          model: request.options?.model ?? null,
+          variant: request.options?.variant ?? null,
+          text: facts.finalAssistantText,
+          diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
+        }
+        return actionSucceed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
+      },
+    }
+  }
+
+  private buildIssueFieldsCapability(work: RenderedWorkItem, workDir: string, signal: AbortSignal) {
+    const issueNumber = typeof work.issueNumber === "number" && work.issueNumber > 0 ? work.issueNumber : null
+    const projectId = work.projectId ?? null
+    return {
+      async fields(): Promise<IssueFields> {
+        return resolveIssueFields({
+          workDir,
+          signal,
+          issueNumber,
+          projectId,
+        } as any)
+      },
+    }
+  }
+
+  private buildCheckpointCapability(work: RenderedWorkItem) {
+    return {
+      async token(scope: string): Promise<string> {
+        return `cp_${createHash("sha256").update(`${work.workflowRunId}\0${scope}`).digest("hex").slice(0, 32)}`
+      },
     }
   }
 
@@ -283,14 +446,19 @@ export class WorkExecutor {
     const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
     const checks = rawChecks.filter(isCheck)
     const workspaceRoot = this.workspaceRoot(variables)
+    const builder = this.buildCheckHost.bind(this)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      coordinator: this.workflowSessionTurnCoordinator ?? undefined,
-      context: baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId, this.piRuntime),
+      buildHost: (checkWork: RenderedWorkItem, checkSignal: AbortSignal, checkWorkDir: string, caps: ActionCapabilitySet) =>
+        this.buildActionHost(checkWork, checkWorkDir, checkSignal, log, caps),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
     })
+  }
+
+  private buildCheckHost(caps: ActionCapabilitySet) {
+    return {}
   }
 
   private async variables(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
@@ -304,8 +472,6 @@ export class WorkExecutor {
     return { ...userVariables, runner: mergedRunner, workspace }
   }
 
-  // Read the workspace triple from dispatch variables (agent-job: caller-owned,
-  // not re-cloned/verified by the runner — issue #126 standalone-workspace).
   private workspaceFromVariables(work: RenderedWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
@@ -338,30 +504,6 @@ export class WorkExecutor {
   }
 }
 
-function isInlineAgentAction(uses?: string | null): boolean {
-  const normalized = uses?.trim().toLowerCase()
-  return normalized === "mohist/opencode" || normalized === "mohist/pi"
-}
-
-/**
- * Drop ActionResult.turnFact from the Action result that crosses the
- * Action → Work boundary. The private fact channel is runner-internal
- * only; passing it through would surface runtime Session identity,
- * model observations, usage, transcript text, diagnostics, and the
- * final assistant text to the server, recovery matching, setVars
- * projections, captured outputs, and artifacts.
- *
- * The boundary is the canonical place to enforce this invariant — see
- * `AcpSessionResult`, `ActionResult.turnFact` (core/types.ts), and
- * design D4.
- *
- * The current pipeline keeps the fact attached to the validated
- * `ActionResult` until the executor's completion evaluator reads it,
- * then discards it via `passThroughTurnFact` while building the wire
- * result. The function is retained here so any future call site that
- * receives a raw ActionResult can strip the fact with the documented
- * invariant.
- */
 export function stripRunnerPrivateFacts(result: ActionResult): {
   publicActionResult: ActionResult
   turnFact: { finalAssistantText?: string | null } | null
@@ -374,30 +516,11 @@ export function stripRunnerPrivateFacts(result: ActionResult): {
   return { publicActionResult: rest as ActionResult, turnFact }
 }
 
-/**
- * Project the public task output AFTER completion evaluation so a
- * matched promise marker can drive `recovery when: output.promise=FAIL`
- * matching. This is the Action-to-Task boundary: an Action error becomes a
- * failed work result with the same error object, while Task-owned completion
- * checks may add an error after a successful Action output.
- *
- * Behavior (design D5):
- *  - `mohist/opencode`: handler output is discarded. If completion
- *    matched a promise marker, output becomes `{ "promise": "<value>" }`;
- *    otherwise output is `null`. Other Action-owned fields do NOT
- *    appear.
- *  - Every other Action: successful output is preserved unchanged.
- *
- * A successful Action with unsatisfied expectations (missing files,
- * missing markers, failIf matched) becomes an ordinary failed
- * completion — that is the spec scenario "An unmet expectation does
- * not trigger an implicit repair turn". A separate Action failure is
- * preserved as-is: completion is not a recovery mechanism.
- */
 function projectTaskOutput(
   work: RenderedWorkItem,
   result: ActionResult,
   completion: CompletionEvaluation | null,
+  caps: ActionCapabilitySet,
 ): WorkItemResult {
   if (isActionFailure(result)) {
     return {
@@ -407,8 +530,7 @@ function projectTaskOutput(
       exitCode: result.exitCode,
     }
   }
-  const uses = work.uses?.trim().toLowerCase() ?? ""
-  if (PROMISE_PROJECTED_ACTIONS.has(uses)) {
+  if (caps.has("agent-turn")) {
     if (completion === null) return { status: "completed", output: null, exitCode: result.exitCode }
     const value = promiseValue(completion.matched ?? null)
     const projectedOutput: JsonObject | null = value !== null ? { promise: value } : null
@@ -436,13 +558,6 @@ function projectTaskOutput(
   return { status: "completed", output: result.output, exitCode: result.exitCode }
 }
 
-/**
- * Per-work execution outcome. The {@link TaskLogCollector} is returned
- * alongside the {@link WorkItemResult} so the host (`RunnerHost`) can
- * flush it as a terminal batch via the independent task-log channel
- * even when the work failed (best-effort: flush never blocks or fails
- * the report). Design D6.
- */
 export interface WorkExecution {
   result: WorkItemResult
   collector: TaskLogCollector
@@ -456,43 +571,6 @@ function infoToResolved(info: { path: string, branch?: string | null, changeDir?
 
 function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
-}
-
-export function baseContext(
-  work: RenderedWorkItem,
-  signal: AbortSignal,
-  connection: ServerConnection,
-  log: TaskLogger | null = null,
-  openCodeRuntime: OpenCodeRuntime | null = null,
-  agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
-  runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
-  piRuntime: PiRuntime | null = null,
-): Omit<ActionInvocationContext, "with" | "workDir"> {
-  const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-  return {
-    workflowRunId: work.workflowRunId,
-    workId: work.workId,
-    workType: work.workType,
-    stage: work.stage,
-    title: work.title,
-    uses: work.uses,
-    signal,
-    recovery: work.recovery,
-    projectId: work.projectId,
-    issueNumber: work.issueNumber,
-    epicNumber: work.epicNumber,
-    parentIssueContext: work.parentIssueContext,
-    ownerKind,
-    agentJobId: work.agentJobId,
-    agentSessionId: work.agentSessionId,
-    serverConnection: connection,
-    openCodeRuntime,
-    agentSessionRuntimeEventOutbox,
-    runtimeEventRecordId,
-    piRuntime,
-    log,
-    writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
-  }
 }
 
 function defaultRuntimeEventRecordId(): string {
@@ -512,16 +590,17 @@ function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItem
   }
 }
 
-function normalize(work: RenderedWorkItem, result: WorkItemResult): WorkItemResult {
-  const status = result.status.toLowerCase()
-  if (work.workType === "check") {
-    return { ...result, status: toCheckStatus(status) }
-  }
-  return { ...result, status: COMPLETED_STATUSES.has(status) ? "completed" : "failed" }
-}
-
 function failure(work: RenderedWorkItem, message: string): WorkItemResult {
   return { status: failureStatus(work), message, error: { code: "runner-failed", message } }
+}
+
+function removeDeferredFields(withInput: JsonObject | null | undefined, deferred: Set<string>): JsonObject | null {
+  if (!withInput) return null
+  const immediate: JsonObject = {}
+  for (const [key, value] of Object.entries(withInput)) {
+    if (!deferred.has(key)) immediate[key] = value
+  }
+  return immediate
 }
 
 function failureStatus(work: RenderedWorkItem): "fail" | "failed" {
@@ -538,14 +617,6 @@ function validationFailureResult(work: RenderedWorkItem, error: ActionError): Wo
     message: error.message,
     error,
   }
-}
-
-function legacyHandler(definition: ActionDefinition) {
-  return async (context: ActionInvocationContext): Promise<ActionResult> => await runValidatedAction(definition, context)
-}
-
-function runValidatedAction(definition: ActionDefinition, context: ActionInvocationContext): Promise<ActionResult> {
-  return definition.run(context as ValidatedActionContext)
 }
 
 function toCheckStatus(status: string) {
@@ -581,4 +652,55 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
   return typeof value === "string" ? value : null
+}
+
+function createWorkflowReporter(
+  projectId: string | null,
+  workflowRunId: string,
+  sessionName: string,
+  workMetadata: { workId: string; workType: string; stage: string | null },
+  runtimeSessionId: string | null,
+  outbox: AgentSessionRuntimeEventOutbox | null,
+  runtimeEventRecordId: () => string,
+): WorkflowAgentSessionReporter | null {
+  if (!projectId) return null
+  if (!outbox) return null
+  if (!runtimeSessionId) return null
+  return new WorkflowAgentSessionReporter({
+    outbox,
+    projectId,
+    workflowRunId,
+    sessionName,
+    workMetadata,
+    randomId: runtimeEventRecordId,
+  })
+}
+
+function createWorkflowObserver(reporter: WorkflowAgentSessionReporter | null) {
+  if (!reporter) return undefined
+  return {
+    onEvent: (event: any) => {
+      reporter.registerEvent(event)
+    },
+  }
+}
+
+function enqueueTerminalClose(
+  reporter: WorkflowAgentSessionReporter | null,
+  result: any,
+  runtimeSessionId: string | null,
+): void {
+  if (!reporter) return
+  if (reporter.inputWasRejected()) return
+  if (runtimeSessionId === null) return
+  if (result.ok) {
+    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId })
+    return
+  }
+  reporter.registerClose({
+    status: "failed",
+    exitCode: 1,
+    failureReason: result.error.message,
+    runtimeSessionId,
+  })
 }

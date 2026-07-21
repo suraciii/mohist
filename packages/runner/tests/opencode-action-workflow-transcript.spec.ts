@@ -11,6 +11,7 @@ import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
 import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
 import { makeRecordingOutbox, type OutboxHandles } from "./support/outbox-test-helpers.js"
+import { callAction } from "./support/call-action.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -223,7 +224,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       agentSessionRuntimeEventOutbox: handles.outbox,
     })
 
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
 
     expect(result.error).toBeUndefined()
     const types = handles.eventTypeList()
@@ -276,7 +277,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       serverConnection: handles.connection,
       agentSessionRuntimeEventOutbox: handles.outbox,
     })
-    await opencodeAction(context)
+    await callAction(opencodeAction, context)
 
     const started = handles.eventsByType("tool_call.started")[0]
     const failed = handles.eventsByType("tool_call.completed")[0]
@@ -322,7 +323,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       serverConnection: handles.connection,
       agentSessionRuntimeEventOutbox: handles.outbox,
     })
-    await opencodeAction(context)
+    await callAction(opencodeAction, context)
 
     expect(handles.eventTypeList()).toEqual([
       "session.input",
@@ -354,7 +355,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     })
 
     try {
-      const result = await opencodeAction(context)
+      const result = await callAction(opencodeAction, context)
       expect(result.error?.code).toBe("execution-unavailable")
       expect(client.sessionPrompt).not.toHaveBeenCalled()
     } finally {
@@ -400,7 +401,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       agentSessionRuntimeEventOutbox: outbox,
     })
     try {
-      const result = await opencodeAction(context)
+      const result = await callAction(opencodeAction, context)
       expect(result.error).toBeUndefined()
     } finally {
       errorSpy.mockRestore()
@@ -430,7 +431,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       agentSessionRuntimeEventOutbox: outbox,
     })
     try {
-      const result = await opencodeAction(context)
+      const result = await callAction(opencodeAction, context)
       expect(result.error?.code).toBe("turn-failed")
       expect(result.error?.message).toBe("opencode crashed")
     } finally {
@@ -446,7 +447,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     expect(handles.records).toHaveLength(0)
   })

@@ -1,13 +1,12 @@
 import type { ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
-import type { ActionInvocationContext, ValidatedActionContext } from "../actions/context.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
-import { validateActionInput } from "../actions/input-validation.js"
+import { validateActionInput, deferredInputFields } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
 import { errorMessage } from "../core/errors.js"
-import { isActionFailure } from "../actions/action-result.js"
-import { workflowSessionName } from "../actions/workflow-session-name.js"
-import type { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
+import type { ActionHost } from "../actions/host.js"
+import { capabilitySet } from "../actions/host.js"
+import type { ActionCapabilitySet } from "../actions/manifest.js"
 
 function rowToJsonValue(row: CheckResultRow & { invalidOutputReason?: string }): JsonValue {
   return { ...row } as unknown as JsonValue
@@ -30,8 +29,7 @@ export interface CheckResultRow {
 
 export interface CheckExecutionDeps {
   actions: ActionRegistry
-  context: Omit<ActionInvocationContext, "with" | "workDir">
-  coordinator?: WorkflowSessionTurnCoordinator
+  buildHost: (work: any, signal: AbortSignal, workDir: string, caps: ActionCapabilitySet) => ActionHost
   formatUnresolved: (unresolved: string[]) => string
   resolveWorkDir: (withInput: JsonObject | null) => Promise<string>
   toCheckStatus: (status: string) => string
@@ -84,11 +82,12 @@ async function runOneCheck(
   }
   const definition = resolved.definition
   try {
-    const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
+    const deferred = deferredInputFields(definition.manifest)
+    const unresolved = wholeStringUnresolvedReferences(removeDeferredFields(check.with ?? null, deferred), variables)
     if (unresolved.length > 0) {
       return { name: check.name, status: "fail", message: deps.formatUnresolved(unresolved) }
     }
-    const renderedWith = renderTemplate(check.with ?? null, variables)
+    const renderedWith = renderDeferred(check.with ?? null, variables, deferred)
     const validation = validateActionInput(definition.manifest, renderedWith)
     if (validation.kind === "failure") {
       return {
@@ -99,62 +98,51 @@ async function runOneCheck(
       }
     }
     const workDir = await deps.resolveWorkDir(renderedWith)
-    const runAction = async (): Promise<CheckResultRow & { invalidOutputReason?: string }> => {
-      let rawResult: unknown
-      try {
-        const actionContext: ActionInvocationContext = {
-          ...deps.context,
-          workType: "check",
-          title: check.title,
-          uses: check.uses,
-          with: validation.input,
-          workDir,
-        }
-        rawResult = await definition.run(actionContext as ValidatedActionContext)
-      } catch (thrown) {
-        rawResult = malformedToUnexpectedError(
-          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
-        )
-      }
-      const normalized = normalizeActionResult(rawResult, definition.manifest)
-      if (normalized.kind === "malformed") {
-        if (normalized.reason === "output") {
-          return {
-            name: check.name,
-            status: "fail",
-            message: normalized.message,
-            invalidOutputReason: normalized.message,
-          }
-        }
-        const result = malformedToUnexpectedError(normalized.message)
-        return {
-          name: check.name,
-          status: "fail",
-          message: result.error?.message ?? normalized.message,
-          error: result.error ?? { code: "unexpected-error", message: normalized.message },
-        }
-      }
-      if (normalized.kind === "error") {
-        return {
-          name: check.name,
-          status: "fail",
-          message: normalized.error.message,
-          error: normalized.error,
-        }
-      }
-      return { name: check.name, status: "pass", output: normalized.output }
-    }
-    const result = isInlineAgentAction(check.uses) && deps.coordinator
-      ? await deps.coordinator.withTurn(
-        {
-          projectId: deps.context.projectId ?? "",
-          workflowRunId: deps.context.workflowRunId,
-          sessionName: workflowSessionName(renderedWith, deps.context.workId),
-        },
-        runAction,
+    const caps = capabilitySet(definition.manifest)
+    const host = deps.buildHost({ workId: "check", workType: "check" }, new AbortController().signal, workDir, caps)
+    let rawResult: unknown
+    try {
+      rawResult = await definition.run(validation.input, host)
+    } catch (thrown) {
+      rawResult = malformedToUnexpectedError(
+        `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
       )
-      : await runAction()
-    return result
+    }
+    const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
+    if (normalized.kind === "malformed") {
+      if (normalized.reason === "output") {
+        return {
+          name: check.name,
+          status: "fail",
+          message: normalized.message,
+          invalidOutputReason: normalized.message,
+        }
+      }
+      const result = malformedToUnexpectedError(normalized.message)
+      return {
+        name: check.name,
+        status: "fail",
+        message: result.error?.message ?? normalized.message,
+        error: result.error ?? { code: "unexpected-error", message: normalized.message },
+      }
+    }
+    if (normalized.kind === "error") {
+      return {
+        name: check.name,
+        status: "fail",
+        message: normalized.error.message,
+        error: normalized.error,
+      }
+    }
+    if ((normalized.effects.addTasks?.length ?? 0) > 0 || Object.keys(normalized.effects.writeVars ?? {}).length > 0) {
+      return {
+        name: check.name,
+        status: "fail",
+        message: `Check produced unauthorized effects: effects are not permitted in checks`,
+        error: { code: "unexpected-error", message: `Check produced unauthorized effects: effects are not permitted in checks` },
+      }
+    }
+    return { name: check.name, status: "pass", output: normalized.output }
   } catch (error) {
     return {
       name: check.name,
@@ -165,9 +153,31 @@ async function runOneCheck(
   }
 }
 
-function isInlineAgentAction(uses: string): boolean {
-  const normalized = uses.trim().toLowerCase()
-  return normalized === "mohist/opencode" || normalized === "mohist/pi"
+function removeDeferredFields(withInput: JsonObject | null | undefined, deferred: Set<string>): JsonObject | null {
+  if (!withInput) return null
+  const immediate: JsonObject = {}
+  for (const [key, value] of Object.entries(withInput)) {
+    if (!deferred.has(key)) immediate[key] = value
+  }
+  return immediate
+}
+
+function renderDeferred(
+  withInput: JsonObject | null | undefined,
+  variables: JsonObject,
+  deferred: Set<string>,
+): JsonObject | null {
+  if (!withInput) return null
+  if (deferred.size === 0) return renderTemplate(withInput, variables)
+  const rendered: JsonObject = {}
+  for (const [key, value] of Object.entries(withInput)) {
+    if (!deferred.has(key)) {
+      rendered[key] = renderTemplate(value as JsonObject | null, variables)
+    } else {
+      rendered[key] = value
+    }
+  }
+  return rendered
 }
 
 function checkFailureDetails(
