@@ -253,6 +253,7 @@ public sealed record GenericAgentSessionSummaryDto(
     string? LastActivityAt,
     string? ResolvedModel,
     string? FailureCategory,
+    string? FailureReason,
     int? ToolCallCount,
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,

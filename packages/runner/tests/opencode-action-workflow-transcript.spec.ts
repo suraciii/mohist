@@ -488,10 +488,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       expect(result.error).toBeDefined()
       // The Action error must come from the OpenCode runtime, not
       // from the upload rejections.
-      expect(result.error?.message).not.toMatch(/rejected/)
-      expect(result.error?.message).not.toMatch(/upload/)
-      expect(result.error?.message).toMatch(/OpenCode/)
-      // The diagnostics carry the original runtime cause.
+      expect(result.error?.message).toBe("opencode-runtime-explosion")
       const diagnostics = (result as unknown as { output?: unknown }).output
       expect(diagnostics).toBeUndefined()
       const exitCode = (result as unknown as { exitCode?: number | null }).exitCode

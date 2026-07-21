@@ -1,3 +1,6 @@
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Agent.Services;
@@ -55,6 +58,25 @@ public interface IAgentLauncher
         AgentLaunchContext context,
         IReadOnlyDictionary<string, string>? triggerLabels = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Routed-launch path (issue-449 design decisions 1-3). Builds the
+    /// canonical <see cref="RoutedAgentLaunchPlan"/> from the resolved
+    /// routing execution context, calls <c>EnsurePreparedAsync</c> on
+    /// the AgentJob grain, and advances the prepared launch to Session
+    /// open + LaunchReady + dispatch (or preflight-failed terminal
+    /// delivery). Redelivery reuses the persisted canonical plan — the
+    /// caller's <paramref name="executionContext"/> is only consulted to
+    /// mint the very first plan; subsequent calls observe the persisted
+    /// workspace and lineage, never newly resolved caller values.
+    /// </summary>
+    Task<RoutedAgentLaunchOutcome> LaunchRoutedAsync(
+        AgentInfo agent,
+        string prompt,
+        RoutedExecutionContext executionContext,
+        CloudEvent triggeringEvent,
+        string ruleId,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -68,6 +90,24 @@ public sealed record AgentLaunchResult(
     string SessionId,
     string AgentId,
     string AgentName);
+
+/// <summary>
+/// Outcome of a routed launch. Carries the session id the AgentJob
+/// opened (the stable <c>projectId/eventId/ruleId</c>-derived id), the
+/// agent identity, and the disposition the canonical plan decided
+/// (executable or preflight-failed with reason and category).
+/// </summary>
+public sealed record RoutedAgentLaunchOutcome(
+    string SessionId,
+    string JobKey,
+    string AgentId,
+    string AgentName,
+    RoutedLaunchDisposition Disposition,
+    string? PreflightReason = null,
+    string? PreflightCategory = null)
+{
+    public bool IsPreflightFailed => Disposition == RoutedLaunchDisposition.PreflightFailed;
+}
 
 /// <summary>
 /// Launch inputs the Agent-side caller hands to <see cref="IAgentLauncher"/>.

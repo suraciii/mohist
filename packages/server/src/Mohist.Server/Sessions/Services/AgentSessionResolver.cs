@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Grains;
 
@@ -41,4 +43,32 @@ public sealed class AgentSessionResolver : IScopedService
         _grains.GetGrain<IAgentSessionGrain>(sessionId);
 
     public string NewSessionId() => Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// Stable AgentSession id derived from the routing trigger identity
+    /// (project id, triggering event id, routing rule id). Identical
+    /// inputs always produce the same id; the AgentLauncher and the
+    /// routed preflight-failure path both rely on this so redelivery
+    /// reuses one session grain.
+    /// </summary>
+    public string StableSessionId(string projectId, string eventId, string ruleId) =>
+        StableId("agent-session", BuildTriggerIdentity(projectId, eventId, ruleId));
+
+    /// <summary>
+    /// Stable AgentJob grain key derived from the same trigger identity
+    /// as <see cref="StableSessionId"/>. Routed preflight-failure paths
+    /// mint this so the durable AgentJob grain owns the canonical
+    /// preflight-failed plan.
+    /// </summary>
+    public string StableJobKey(string projectId, string eventId, string ruleId) =>
+        StableId("agent-job-trigger", BuildTriggerIdentity(projectId, eventId, ruleId));
+
+    private static string BuildTriggerIdentity(string projectId, string eventId, string ruleId) =>
+        $"{projectId}\n{eventId}\n{ruleId}";
+
+    private static string StableId(string prefix, string identity)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return $"{prefix}-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
+    }
 }

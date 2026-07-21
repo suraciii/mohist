@@ -1,6 +1,7 @@
 {
   "Mohist.Server.ArchTests/ArchitectureRules.cs": 26461,
-  "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 24516,
+  "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 25068,
+  "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobTerminalDeliverySpecs.cs": 30862,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 33354,
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 33599,
   "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicLifecycleSpecs.cs": 32966,
@@ -21,6 +22,7 @@
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsStageDurationsSpecs.cs": 45941,
   "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 30791,
   "Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs": 30462,
+  "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs": 27070,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionTranscriptAxisSpecs.cs": 31206,
   "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 31304,
   "Mohist.Server.SpecTests/Specs/Workflow/Artifacts/WorkflowArtifactUploadServiceSpecs.cs": 34116,

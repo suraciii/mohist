@@ -1,7 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -40,13 +40,16 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 {
     private readonly AgentSessionResolver _sessions;
     private readonly IGrainFactory _grains;
+    private readonly TimeProvider _timeProvider;
 
     public AgentLauncher(
         AgentSessionResolver sessions,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        TimeProvider timeProvider)
     {
         _sessions = sessions;
         _grains = grains;
+        _timeProvider = timeProvider;
     }
 
     public async Task<AgentLaunchResult> LaunchAsync(
@@ -68,15 +71,12 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        var triggerIdentity = BuildTriggerIdentity(context.ProjectId, triggerLabels);
-        var sessionId = triggerIdentity is null
-            ? _sessions.NewSessionId()
-            : StableId("agent-session", triggerIdentity);
+        var (sessionId, jobKey) = ResolveSessionAndJobKeys(context.ProjectId, triggerLabels);
         var sessionContext = BuildContext(context, agent);
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
-        var durableMetadata = triggerIdentity is null
+        var durableMetadata = triggerLabels is null
             ? metadata
-            : WithTriggerLabels(metadata, triggerLabels!);
+            : WithTriggerLabels(metadata, triggerLabels);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -86,9 +86,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 WorkDir: context.WorkspacePath,
                 Metadata: durableMetadata));
 
-        var jobKey = triggerIdentity is null
-            ? $"agent-job-launch-{Guid.NewGuid():N}"
-            : StableId("agent-job-trigger", triggerIdentity);
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
         var jobInput = new AgentJobInput(
@@ -101,7 +98,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
             Variant: resolvedVariant);
-        if (triggerIdentity is null)
+        if (triggerLabels is null)
             await jobGrain.SubmitAsync(jobInput);
         else
             await jobGrain.EnsureSubmittedAsync(jobInput);
@@ -110,6 +107,107 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             SessionId: sessionId,
             AgentId: agent.Id,
             AgentName: agent.Name);
+    }
+
+    private (string SessionId, string JobKey) ResolveSessionAndJobKeys(
+        string projectId,
+        IReadOnlyDictionary<string, string>? triggerLabels)
+    {
+        if (triggerLabels is null || triggerLabels.Count == 0)
+        {
+            var sessionId = _sessions.NewSessionId();
+            return (sessionId, $"agent-job-launch-{Guid.NewGuid():N}");
+        }
+
+        if (!triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerEventId, out var eventId)
+            || string.IsNullOrWhiteSpace(eventId)
+            || !triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerRuleId, out var ruleId)
+            || string.IsNullOrWhiteSpace(ruleId))
+        {
+            throw new ArgumentException(
+                "Trigger labels must include non-empty event and rule ids.",
+                nameof(triggerLabels));
+        }
+
+        return (_sessions.StableSessionId(projectId, eventId, ruleId),
+            _sessions.StableJobKey(projectId, eventId, ruleId));
+    }
+
+    /// <summary>
+    /// Routed-launch path (issue-449 design decisions 1-3). The
+    /// resolver's <see cref="RoutedExecutionContext"/> is the
+    /// ownership-validated workspace + lineage for this event/rule hit;
+    /// the launcher mints the stable session id + job key from the
+    /// trigger identity and asks the grain to claim the canonical plan
+    /// via <c>EnsurePreparedAsync</c>. The grain returns the canonical
+    /// plan — never the caller's newly resolved values on replay —
+    /// which the launcher advances through Session open, launch-ready,
+    /// and dispatch in a single chain.
+    /// </summary>
+    public async Task<RoutedAgentLaunchOutcome> LaunchRoutedAsync(
+        AgentInfo agent,
+        string prompt,
+        RoutedExecutionContext executionContext,
+        CloudEvent triggeringEvent,
+        string ruleId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(executionContext);
+        ArgumentNullException.ThrowIfNull(triggeringEvent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
+
+        var trimmedPrompt = prompt.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+        {
+            throw new ArgumentException(
+                "Prompt must not be empty or whitespace.",
+                nameof(prompt));
+        }
+
+        var triggerIdentity = $"{executionContext.ProjectId}\n{triggeringEvent.Id}\n{ruleId}";
+        var sessionId = _sessions.StableSessionId(executionContext.ProjectId, triggeringEvent.Id, ruleId);
+        var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
+
+        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
+            ? agent.AgentConfig.Value.GetRawText()
+            : null;
+
+        var resolvedPlan = new RoutedAgentLaunchPlan(
+            ProjectId: executionContext.ProjectId,
+            EventId: triggeringEvent.Id,
+            RuleId: ruleId,
+            SessionId: sessionId,
+            JobKey: jobKey,
+            IssueNumber: executionContext.IssueNumber,
+            EpicNumber: executionContext.EpicNumber,
+            WorkspacePath: executionContext.WorkspacePath,
+            Disposition: RoutedLaunchDisposition.Executable,
+            PreflightReason: null,
+            PreflightCategory: null,
+            PreparedAt: _timeProvider.GetUtcNow(),
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfigJson: agentConfigJson,
+            Model: resolvedModel,
+            Variant: resolvedVariant,
+            Prompt: trimmedPrompt);
+
+        var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
+        var canonical = await jobGrain.EnsurePreparedAsync(resolvedPlan);
+        await jobGrain.AdvancePreparedLaunchAsync();
+
+        return new RoutedAgentLaunchOutcome(
+            SessionId: canonical.SessionId,
+            JobKey: canonical.JobKey,
+            AgentId: canonical.AgentId ?? agent.Id,
+            AgentName: canonical.AgentName ?? agent.Name,
+            Disposition: canonical.Disposition,
+            PreflightReason: canonical.PreflightReason,
+            PreflightCategory: canonical.PreflightCategory);
     }
 
     private static GenericAgentSessionContext BuildContext(AgentLaunchContext context, AgentInfo agent) =>
@@ -141,12 +239,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         }
 
         return $"{projectId}\n{eventId}\n{ruleId}";
-    }
-
-    private static string StableId(string prefix, string identity)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
-        return $"{prefix}-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
     }
 
     /// <summary>

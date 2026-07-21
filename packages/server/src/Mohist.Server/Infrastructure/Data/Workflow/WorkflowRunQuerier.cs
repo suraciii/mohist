@@ -34,6 +34,31 @@ public sealed class WorkflowRunQuerier
         return run;
     }
 
+    public async Task<WorkflowRunRoutingContext?> LoadRoutingContextAsync(
+        string workflowRunId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId))
+            return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId, ct);
+        if (row is null)
+            return null;
+
+        var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
+        if (run is null)
+            return null;
+
+        WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
+        return new WorkflowRunRoutingContext(
+            run,
+            row.MetadataProjectId,
+            row.IssueNumber,
+            row.EpicNumber);
+    }
+
     /// <summary>
     /// Epic #44: returns workflow runs bound to <paramref name="workerId"/>
     /// and sitting in <c>Ready</c> (assigned, dispatchable work, no in-flight
@@ -145,3 +170,9 @@ public sealed class WorkflowRunQuerier
     private static string StatusString(WorkflowRunStatus status) =>
         status.ToString().ToLowerInvariant();
 }
+
+public sealed record WorkflowRunRoutingContext(
+    WorkflowRun Run,
+    string? ProjectId,
+    int? IssueNumber,
+    int? EpicNumber);

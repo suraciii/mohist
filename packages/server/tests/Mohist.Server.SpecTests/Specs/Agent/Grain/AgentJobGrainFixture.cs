@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -24,6 +26,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
     public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
     public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
+    public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
 
     private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -50,6 +53,12 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
             siloBuilder.Services.AddSingleton<IRunnerGrainAssignmentObserver>(RunnerAssignmentObserver);
             siloBuilder.Services.AddSingleton<IRunnerGrainCloseoutObserver>(CloseoutObserver);
+            siloBuilder.Services.AddSingleton(SessionPersistence);
+            siloBuilder.Services.RemoveAll<IAgentSessionTranscriptStore>();
+            siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore>(provider =>
+                new FailingAgentSessionTranscriptStore(
+                    provider.GetRequiredService<IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>(),
+                    SessionPersistence));
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
@@ -60,6 +69,68 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         Cluster?.Dispose();
         _database?.Dispose();
         return Task.CompletedTask;
+    }
+}
+
+public sealed class ControllableAgentSessionTranscriptPersistence
+{
+    private int _failuresRemaining;
+
+    /// <summary>
+    /// Adds <paramref name="count"/> pending failures to the queue. Each
+    /// AgentSession transcript save consumes one failure until the
+    /// counter is back to zero. Setting <see cref="FailNext"/> = true
+    /// adds a single failure; clearing it does nothing (use
+    /// <see cref="ResetFailures"/> when you want to allow saves again).
+    /// </summary>
+    public bool FailNext
+    {
+        get => _failuresRemaining > 0;
+        set
+        {
+            if (value) Interlocked.Increment(ref _failuresRemaining);
+        }
+    }
+
+    public void QueueFailures(int count)
+    {
+        if (count > 0) Interlocked.Add(ref _failuresRemaining, count);
+    }
+
+    public void ResetFailures()
+    {
+        Interlocked.Exchange(ref _failuresRemaining, 0);
+    }
+
+    public void ConsumeFailure()
+    {
+        if (_failuresRemaining > 0)
+            Interlocked.Decrement(ref _failuresRemaining);
+    }
+}
+
+internal sealed class FailingAgentSessionTranscriptStore : IAgentSessionTranscriptStore
+{
+    private readonly IAgentSessionTranscriptStore _inner;
+    private readonly ControllableAgentSessionTranscriptPersistence _control;
+
+    public FailingAgentSessionTranscriptStore(
+        IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext> dbFactory,
+        ControllableAgentSessionTranscriptPersistence control)
+    {
+        _inner = new AgentSessionTranscriptStore(dbFactory);
+        _control = control;
+    }
+
+    public async Task SaveAsync(AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
+    {
+        if (_control.FailNext)
+        {
+            _control.ConsumeFailure();
+            throw new InvalidOperationException(
+                "simulated AgentSession transcript-store failure for terminal-delivery retry test");
+        }
+        await _inner.SaveAsync(transcript, ct);
     }
 }
 
