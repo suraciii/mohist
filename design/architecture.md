@@ -81,6 +81,15 @@ UI disconnect → self-reconcile. Never depend on UI for workflow progress.
 
 Events append in same transaction as state save. Dispatcher is the sole notifier.
 
+## 运行保障
+
+- 日志、指标、Trace、通知和状态页面都不是业务权威。它们失败时，核心工作继续运行。
+- 后台任务、队列和诊断数据都有资源上限。达到上限时先降级辅助能力，不挤占业务资源。
+- 轮询和状态查询的成本只随当前相关数据增长，不能随无关历史数据增长。
+- 健康检查不只判断进程是否存活，还要暴露延迟、资源压力和辅助能力降级。
+
+具体规则见[可观测性](observability.md)。
+
 ## 聚合与事务
 
 聚合是强一致性边界，也是数据库事务边界。

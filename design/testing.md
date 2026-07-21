@@ -97,6 +97,16 @@ Extract shared setup. One product ability = one test file. Migration splits: del
 
 The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 
+### 5. 成本只随相关数据增长
+
+轮询、心跳、状态、看板和清理路径读取存储或调用其他组件时，要测试执行成本。
+
+- 当前工作相同，分别加入少量和大量无关历史数据。
+- 用测试拦截器或测试替身统计数据库命令、反序列化记录或下游调用。
+- 无关历史数据增加时，只依赖当前状态的工作量不能增加。
+- 断言操作次数或明确上限，不断言墙钟耗时。
+- 正确性测试与成本测试共用准备数据时，放在同一个测试文件。
+
 ## Spec parallelism (server)
 
 xUnit collection = scheduling unit; classes inside a collection run serially, so wall time = the longest class chain.
