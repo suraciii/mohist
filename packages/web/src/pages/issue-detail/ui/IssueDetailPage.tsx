@@ -1,7 +1,7 @@
-import { useMemo, useState, type ComponentType } from 'react'
+import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus, partitionIssueBody } from '../../../entities/issue'
+import { IssueStatus, partitionIssueBody, useLiveTask } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -106,10 +106,15 @@ export function IssueDetailPage({
   const { data: agentStatus } = useAgentStatus()
   const diffQuery = useIssueDiff(issueNumber, workflowDataEnabled)
   const { data: diffData } = diffQuery
-  const { data: workflowTimeline } = useWorkflowTimeline(
+  const { data: workflowTimeline, refetch: refetchWorkflowTimeline } = useWorkflowTimeline(
     issueNumber,
     workflowDataEnabled && !!issue && issue.status !== IssueStatus.Backlog,
   )
+  const { eventsReconnectVersion } = useLiveTask()
+  useEffect(() => {
+    if (eventsReconnectVersion === 0 || !workflowDataEnabled) return
+    void refetchWorkflowTimeline()
+  }, [eventsReconnectVersion, refetchWorkflowTimeline, workflowDataEnabled])
   const isNarrowViewport = useNarrowViewport()
 
   const activeAgents = agentStatus?.activeAgents ?? []

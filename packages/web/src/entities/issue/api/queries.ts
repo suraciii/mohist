@@ -155,7 +155,7 @@ export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true
     queryKey: ['issues', issueNumber, projectId, 'workflow-timeline'],
     queryFn: () => getWorkflowTimeline(issueNumber, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
-    refetchInterval: enabled ? 5000 : false,
+    refetchInterval: false,
   })
 }
 
