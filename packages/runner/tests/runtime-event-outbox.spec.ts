@@ -344,6 +344,44 @@ describe("AgentSessionRuntimeEventOutbox — managed-sequence FIFO", () => {
     expect(outbox.snapshot()).toHaveLength(0)
     expect(sendCalls).toEqual(["rec_0", "rec_1", "rec_2", "rec_3"])
   })
+
+  it("concurrent sequences receive independent timeout cancellation signals", async () => {
+    const fileSystem = new RecordingFileSystem()
+    const first = inputRecord({ id: "wf-1" }) as RuntimeEventRecord & { sequence: number; enqueuedAt: string }
+    const second = inputRecord({
+      id: "wf-2",
+      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wf-2", sessionName: "plan" },
+    }) as RuntimeEventRecord & { sequence: number; enqueuedAt: string }
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({
+      version: 1,
+      entries: [
+        { ...first, sequence: 1, enqueuedAt: "2026-01-01T00:00:00.000Z" },
+        { ...second, sequence: 2, enqueuedAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    }))
+    const signals: AbortSignal[] = []
+    const { outbox } = makeOutbox({
+      fileSystem,
+      deliver: {
+        async send(_record, signal) {
+          signals.push(signal)
+          return await new Promise<AgentSessionRuntimeEventReceipt[]>((_, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+          })
+        },
+      },
+    })
+    await outbox.load()
+
+    const drain = outbox.kick()
+    await flushMicrotasks()
+
+    expect(signals).toHaveLength(2)
+    expect(signals[0]).not.toBe(signals[1])
+
+    await outbox.stop()
+    await drain
+  })
 })
 
 describe("AgentSessionRuntimeEventOutbox — enqueue semantics", () => {

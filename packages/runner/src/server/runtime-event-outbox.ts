@@ -216,11 +216,9 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private localRetry: { unref(): void } | null = null
   private stopped = false
   private snapshotInFlight: Promise<void> | null = null
-  private readonly inflightDelivery = new Set<Promise<void>>()
-  private deliveryAbort: AbortController | null = null
+  private readonly deliveryStop = new AbortController()
   private recoveryRequiresLoad = false
   private loadAttempts = 0
-  private readonly bootstrapSignal: AbortController = new AbortController()
 
   constructor(options: AgentSessionRuntimeEventOutboxOptions) {
     this.fileSystem = options.fileSystem ?? new NodeRuntimeEventOutboxFileSystem()
@@ -361,7 +359,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   async stop(): Promise<void> {
     this.stopped = true
-    this.bootstrapSignal.abort()
+    this.deliveryStop.abort()
     if (this.networkRetry) {
       this.timer.clearTimeout(this.networkRetry)
       this.networkRetry = null
@@ -370,26 +368,16 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       this.timer.clearTimeout(this.localRetry)
       this.localRetry = null
     }
-    if (this.deliveryAbort) {
-      this.deliveryAbort.abort()
-    }
     if (this.snapshotInFlight) {
       try { await this.snapshotInFlight } catch { /* best effort */ }
     }
-    if (this.inflightDelivery.size > 0) {
-      await Promise.allSettled([...this.inflightDelivery])
-    }
-    this.inflightDelivery.clear()
   }
 
   private lastLoadError: Error | null = null
 
   private async drainAll(): Promise<void> {
     if (!this.healthy || this.stopped) return
-    if (!this.deliveryAbort || this.deliveryAbort.signal.aborted) {
-      this.deliveryAbort = new AbortController()
-    }
-    const signal = this.deliveryAbort.signal
+    const signal = this.deliveryStop.signal
     // Each tick drains one head per managed sequence, capped by
     // `boundedConcurrency`. The tick continues only when at least one head was
     // acknowledged this round; otherwise the network-retry timer picks up the
@@ -408,7 +396,6 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       const acknowledged = outcomes.some((r) => r.status === "fulfilled" && r.value === true)
       if (!acknowledged) break
     }
-    this.inflightDelivery.clear()
     if (!signal.aborted && this.healthy && this.records.size > 0) {
       this.scheduleNetworkRetry()
     }
@@ -436,23 +423,26 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
 
   private async deliverHead(head: InternalRecord, signal: AbortSignal): Promise<boolean> {
     if (signal.aborted) return false
+    const controller = new AbortController()
+    const abortFromStop = () => controller.abort(signal.reason)
+    signal.addEventListener("abort", abortFromStop, { once: true })
     let timedOut = false
     const timer = setTimeout(() => {
-      if (!signal.aborted) {
+      if (!controller.signal.aborted) {
         timedOut = true
-        const controller = this.deliveryAbort
-        if (controller) controller.abort(new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`))
+        controller.abort(new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`))
       }
     }, this.deliveryTimeoutMs)
     timer.unref?.()
     let receipts: AgentSessionRuntimeEventReceipt[] | null = null
     let transportError: unknown = null
     try {
-      receipts = await this.deliver.send(head, signal)
+      receipts = await this.deliver.send(head, controller.signal)
     } catch (error) {
       transportError = error
     } finally {
       clearTimeout(timer)
+      signal.removeEventListener("abort", abortFromStop)
     }
     if (timedOut) {
       transportError = new Error(`runtime-event delivery timeout after ${this.deliveryTimeoutMs}ms`)
