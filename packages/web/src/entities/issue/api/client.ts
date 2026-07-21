@@ -205,10 +205,15 @@ export type WorkflowArtifactContentResult =
   | { kind: 'text'; content: string; contentType: string | null }
   | { kind: 'directory'; entries: WorkflowArtifactDirectoryEntry[]; totalSize: number }
 
+export interface IssueWorkflowArtifactContentOptions {
+  file?: string
+  artifactKind?: WorkflowArtifact['kind']
+}
+
 export async function getIssueWorkflowArtifactContent(
   number: number,
   artifactId: string,
-  options: { file?: string } = {},
+  options: IssueWorkflowArtifactContentOptions = {},
   projectId?: string | null,
 ): Promise<WorkflowArtifactContentResult> {
   const path = issueWorkflowArtifactContentPath(number, artifactId, projectId)
@@ -222,12 +227,12 @@ export async function getIssueWorkflowArtifactContent(
   }
 
   const contentType = res.headers.get('content-type')
-  if (!options.file && contentType?.includes('application/json')) {
-    const directory = await res.json() as WorkflowArtifactDirectory
+  const content = await res.text()
+  if (!options.file && options.artifactKind === 'directory') {
+    const directory = JSON.parse(content) as WorkflowArtifactDirectory
     return { kind: 'directory', entries: directory.entries ?? [], totalSize: directory.totalSize ?? 0 }
   }
 
-  const content = await res.text()
   return { kind: 'text', content, contentType }
 }
 

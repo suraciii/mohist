@@ -15,6 +15,7 @@ public sealed class EventDispatcherService
     private readonly EventDispatcherOptions _options;
     private readonly ILogger<EventDispatcherService> _log;
     private readonly Dictionary<EventKey, Dictionary<int, HandlerState>> _states = [];
+    private readonly SemaphoreSlim _dispatchGate = new(1, 1);
 
     public EventDispatcherService(
         IEventStore events,
@@ -43,16 +44,24 @@ public sealed class EventDispatcherService
 
     public async Task DispatchAsync(CancellationToken ct)
     {
-        var batch = await _events.ListUndeliveredAsync(_options.BatchSize, ct).ConfigureAwait(false);
-        var blockedSources = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var evt in batch)
+        await _dispatchGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            if (blockedSources.Contains(evt.Source))
-                continue;
-            var settled = await DispatchOneAsync(evt, ct).ConfigureAwait(false);
-            if (!settled)
-                blockedSources.Add(evt.Source);
+            var batch = await _events.ListUndeliveredAsync(_options.BatchSize, ct).ConfigureAwait(false);
+            var blockedSources = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var evt in batch)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (blockedSources.Contains(evt.Source))
+                    continue;
+                var settled = await DispatchOneAsync(evt, ct).ConfigureAwait(false);
+                if (!settled)
+                    blockedSources.Add(evt.Source);
+            }
+        }
+        finally
+        {
+            _dispatchGate.Release();
         }
     }
 

@@ -155,11 +155,12 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
     const sendBack = await within(surface).findByTestId('decision-action-send-back')
     fireEvent.click(sendBack)
 
-    const form = await within(surface).findByTestId('decision-send-back-form')
+    const form = await within(surface).findByTestId('send-back-feedback-form')
     expect(form).toBeInTheDocument()
-    const textarea = within(form).getByTestId('decision-send-back-textarea')
+    const textarea = within(form).getByTestId('send-back-feedback-textarea')
     fireEvent.change(textarea, { target: { value: 'Tighten the failing test' } })
-    const submit = within(form).getByTestId('decision-send-back-confirm')
+    fireEvent.click(within(form).getByRole('radio', { name: 'Detail' }))
+    const submit = within(form).getByTestId('send-back-feedback-submit')
     expect(submit).not.toBeDisabled()
   })
 

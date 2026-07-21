@@ -1,4 +1,5 @@
 export { ArtifactContentViewer } from './ui/ArtifactContentViewer'
+export { ArtifactTextContent } from './ui/ArtifactTextContent'
 export { ArtifactOpener } from './ui/ArtifactOpener'
 export type {
   ArtifactOpenerArtifactsHook,

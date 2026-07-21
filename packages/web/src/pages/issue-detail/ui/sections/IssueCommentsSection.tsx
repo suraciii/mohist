@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
@@ -34,6 +34,15 @@ export function IssueCommentsSection({
 }: IssueCommentsSectionProps) {
   const { addCommentMutation, deleteCommentMutation } = mutations
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
+  const submitComment = () => {
+    if (!commentText.trim() || addCommentMutation.isPending) return
+    addCommentMutation.mutate(commentText)
+  }
+  const handleCommentKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || !event.metaKey || event.repeat || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    submitComment()
+  }
 
   return (
     <section
@@ -101,6 +110,7 @@ export function IssueCommentsSection({
           placeholder="Add a comment..."
           rows={2}
           className="resize-none"
+          onKeyDown={handleCommentKeyDown}
         />
         <div className="flex items-center justify-between mt-2">
           {addCommentMutation.error && (
@@ -110,11 +120,12 @@ export function IssueCommentsSection({
           )}
           <div className="ml-auto">
             <Button
-              onClick={() => addCommentMutation.mutate(commentText)}
+              onClick={submitComment}
               disabled={!commentText.trim() || addCommentMutation.isPending}
             >
               {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
             </Button>
+            <div className="mt-1 text-right text-xs text-muted-foreground">Use <kbd className="rounded border border-border bg-card px-1 py-0.5 font-mono">Command+Enter</kbd></div>
           </div>
         </div>
       </div>

@@ -109,7 +109,7 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
     expect(within(sheet).getByTestId('mobile-sheet-action-ask-agent')).toBeInTheDocument()
   })
 
-  it('approval-required surfaces both approve and send-back in the mobile sheet', async () => {
+  it('approval-required surfaces direct approve and send-back without the mobile sheet', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'check',
@@ -130,10 +130,9 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
-    const sheet = screen.getByTestId('mobile-action-sheet')
-    expect(within(sheet).getByTestId('mobile-sheet-action-approve')).toBeInTheDocument()
-    expect(within(sheet).getByTestId('mobile-sheet-action-send-back')).toBeInTheDocument()
+    expect(screen.getByTestId('approval-mobile-approve')).toBeInTheDocument()
+    expect(screen.getByTestId('approval-mobile-send-back')).toBeInTheDocument()
+    expect(screen.queryByTestId('mobile-action-sheet-launcher')).not.toBeInTheDocument()
   })
 
   it('failed state exposes retry, resume, rerun, and ask agent in the mobile sheet', async () => {
