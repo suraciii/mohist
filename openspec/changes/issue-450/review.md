@@ -2,43 +2,39 @@
 
 ## Scope
 
-Reviewed all changed files against the issue's seven acceptance criteria, the three spec files under `openspec/changes/issue-450/specs/`, the design document (`openspec/changes/issue-450/design.md`), and the documented product/design specs (`docs/actions/pi.md`, `design/runtimes/pi.md`).
+Reviewed the final product change against issue 450's seven acceptance criteria, `openspec/changes/issue-450/design.md`, the three issue specs, `docs/actions/pi.md`, and `design/runtimes/pi.md`. Files under `openspec/changes/issue-450/` were treated as workflow artifacts.
 
 ## Findings
 
-### F1. Invalid provider policy configuration still allows the Runner to claim work
+### F1. Unexpected `runTurn` failures lose terminal-reporting failure diagnostics
 
-**What**: `RunnerHost.initializeSharedConnection()` now calls `parseProviderErrorPolicy()` and passes a valid policy to both runtimes, but the invalid branch at `packages/runner/src/runtime/host.ts:318-320` only logs the diagnostic. It then constructs both runtimes without `providerErrorPolicy`, so they silently use their defaults and the normal readiness gate can become ready.
+**What**: The catch around `runtime.runTurn()` in `packages/runner/src/actions/pi.ts:84-93` now attempts to report the buffered events plus `session.closed`, but catches any failure from `reportWithTerminalSignal()` with an empty handler (`catch { /* best effort */ }`). It then returns `fail("turn-failed", actionErrorMessage(error), ...)` without recording that terminal reporting failed.
 
-**Where**: `packages/runner/src/runtime/host.ts:317-330`
+**Impact**: If an unexpected runtime/SDK exception occurs after `session.input` was accepted and the terminal batch is rejected, times out, or returns malformed acceptance data, the Action result contains only the original `turn-failed` message. The Session may not be terminal, but the caller receives no sanitized `session-reporting-failed` diagnostic. This violates design D7 and the session spec requirement that terminal-reporting failure preserve the original runtime error while attaching an observable, sanitized reporting-failure diagnostic.
 
-**Impact**: Invalid `MOHIST_PROVIDER_ERROR_PATTERNS` JSON/regex or invalid `MOHIST_PROVIDER_RETRY_THRESHOLD` does not fail before work claim. The documented operator configuration is accepted with a warning while the requested policy is ignored, and work can execute under different defaults. This violates design D2 and T-002 acceptance criterion 9, which require invalid configuration to be rejected before work claim with an actionable diagnostic.
+**Where to fix**: Preserve the original `turn-failed` code/message as the primary result, but include a stable sanitized indication that terminal reporting failed in the returned error/diagnostic contract. Keep the best-effort terminal attempt and do not claim that the Session became terminal.
 
-**Severity**: Blocking — malformed operator configuration must not be silently replaced by defaults.
+**Severity**: Blocking — this is an explicitly specified failure semantic for a submitted turn.
 
 ## Coverage
 
-- **AC 1** (end-to-end Pi turn): `mohist/pi` is registered in `ActionRegistry`, `piAction` handles full lifecycle, `WorkExecutor` passes `piRuntime` through `baseContext`. Tests in `pi.test.ts` cover the full flow.
-- **AC 2** (same-name session reuse): `sessionNameFromContext` resolves to Work ID for omitted session, `piAction` reuses `runtimeSessionId` from the opened session.
-- **AC 3** (Runner restart reuse): `PiRuntime` opens sessions by exact path, `AgentSession` stores the absolute path as `runtimeSessionId`, `piAction` passes it to `runTurn`.
-- **AC 4** (missing session file): `PiRuntime.runTurn` returns `missing-session` with Reset guidance on open failure, `piAction` maps to `runtime-session-missing` with Reset hint.
-- **AC 5** (deadline and provider exhaustion): `PI_TURN_DURATION_MS` = 60 min, `fixAndAbort` fixes result before abort, `isRetryFailure` checks policy patterns and threshold.
-- **AC 6** (project-level Pi config excluded): `sdk.ts` fixes `projectTrusted: false`, `DefaultResourceLoader` with the same `settingsManager` excludes project resources.
-- **AC 7** (Session audit visibility): Pi events flow through `workflowAgentSessionRuntimeEvents`, Web chat/timeline views handle `provider.retry`, `SessionUsageSummary` shows `cachedWriteTokens`, milestone classifier recognizes `mohist/pi`.
-
-All seven product acceptance criteria are addressed. The remaining F1 violates the design/task contract for invalid provider-policy configuration and is independent of the normal Pi turn path.
+- **AC 1**: `mohist/pi` is registered and task/check execution uses the shared Action path; final text reaches existing completion evaluation through the private turn fact.
+- **AC 2**: Logical Session names are normalized and persisted Pi bindings are reused across same-name turns and model/variant changes.
+- **AC 3**: Runner restart restoration uses the persisted absolute Pi session-file path.
+- **AC 4**: Missing/corrupt bound files return `runtime-session-missing` with Reset guidance and no implicit replacement.
+- **AC 5**: Fixed 60-minute deadlines, provider exhaustion policy, and invalid policy readiness gating are implemented; invalid policy configuration prevents polling/claiming.
+- **AC 6**: Pi project trust is fixed false and repository-local `.pi/` execution resources are excluded.
+- **AC 7**: Pi transcript, tool, retry, compaction, usage, cache-write, cost, and terminal facts flow through existing Session contracts and views.
 
 ## Structural Checks
 
-- All tests pass: Runner (101 files, 1,176 tests), Web (368 files, 4,997 tests), Server (unit 101, spec 260, binding 7), CLI (64). No generated changes remain.
-- `tasks.json` is acyclic and all six tasks reference valid spec anchors.
-- All Pi SDK imports are confined to `packages/runner/src/runtime/pi/`.
-- The EF migration for unbounded physical IDs is a no-op (SQLite TEXT columns already support unbounded length).
-- `OpenCode` and `Pi` wire changes are atomic: both adapters now pass `runtime`/`expectedRuntime`/`expectedRuntimeSessionId` in open/attach requests.
-- The `WorkflowSessionTurnCoordinator` is process-local and stores no runtime binding or durable state.
+- Runner typecheck and tests pass: 101 files, 1,177 tests.
+- Full `npm test` passes for CLI, Server, Web, and Runner suites.
+- Pi SDK imports remain confined to `packages/runner/src/runtime/pi/`.
+- The process-local Workflow Session coordinator remains runtime-neutral and non-durable.
 
 ## Verdict
 
-F1 remains a blocking startup/readiness gap. The valid provider-policy path is wired, but invalid configuration falls back to defaults instead of preventing work claim.
+F1 is a remaining blocking failure-path gap.
 
 <promise>FAIL</promise>
