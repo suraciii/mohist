@@ -17,6 +17,7 @@ internal static class RuntimeEventTypes
     public const string Compaction = "compaction";
     public const string CompactionEvent = "compaction_event";
     public const string ContextHealthUpdate = "context_health_update";
+    public const string ProviderRetry = "provider.retry";
 }
 
 internal static class TranscriptPartTypes
@@ -30,4 +31,5 @@ internal static class TranscriptPartTypes
     public const string Model = "model";
     public const string SessionClosed = "session.closed";
     public const string Compaction = "compaction";
+    public const string ProviderRetry = "provider.retry";
 }

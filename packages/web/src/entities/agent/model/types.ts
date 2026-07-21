@@ -93,6 +93,7 @@ export type AgentDetailEventMap = {
     outputTokens?: number
     totalTokens?: number
     cachedReadTokens?: number
+    cachedWriteTokens?: number
     thoughtTokens?: number
     costAmount?: number
     costCurrency?: string
@@ -124,6 +125,13 @@ export type AgentDetailEventMap = {
     contextWindowUsed?: number | null
     contextUsagePercent?: number | null
     recordedAt?: string
+  }
+  'provider.retry': SessionRuntimeBase & {
+    phase?: string
+    attempt?: number
+    maxAttempts?: number
+    delayMs?: number
+    message?: string
   }
   'com.mohist.agent-session.runtime-bound': { issueNumber: number; projectId: string }
   'com.mohist.agent-session.usage-recorded': { issueNumber: number; projectId: string }

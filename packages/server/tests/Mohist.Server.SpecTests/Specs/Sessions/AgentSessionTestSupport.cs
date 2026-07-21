@@ -101,7 +101,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         return (project, issue, work, session);
     }
 
@@ -122,7 +122,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             workType = work.WorkType,
             stage = work.Stage,
             title,
-            issueNumber
+            issueNumber,
+            runtime = "opencode"
         });
 
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);

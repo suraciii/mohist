@@ -275,6 +275,7 @@ public sealed record AgentUsageSummary(
     long? OutputTokens = null,
     long? TotalTokens = null,
     long? CachedReadTokens = null,
+    long? CachedWriteTokens = null,
     long? ThoughtTokens = null,
     double? CostAmount = null,
     string? CostCurrency = null,

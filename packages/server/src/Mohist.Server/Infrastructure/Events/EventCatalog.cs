@@ -100,6 +100,7 @@ public static class EventCatalog
         "compaction",
         "compaction_event",
         "context_health_update",
+        "provider.retry",
     };
 
     // Canonical envelope extension names.

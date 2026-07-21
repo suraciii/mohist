@@ -129,6 +129,18 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
+    public void ApplyUsage_KeepsCacheWriteSeparateFromCacheRead()
+    {
+        var session = CreateSession();
+
+        session.ApplyUsage(10, 5, 15, 2, 1, 0.001, "USD", null, null, TestTime.UtcDateTime, cachedWriteTokens: 7);
+        session.ApplyUsage(null, null, null, 3, null, null, null, null, null, TestTime.UtcDateTime.AddSeconds(1), cachedWriteTokens: 11);
+
+        Assert.Equal(5, Usage(session).CachedReadTokens);
+        Assert.Equal(18, Usage(session).CachedWriteTokens);
+    }
+
+    [Fact]
     public void AttachPhysicalSession_FirstBinding_ReturnsStartedAndModelChangedEvents()
     {
         var session = CreateSession();
@@ -146,9 +158,10 @@ public class AgentSessionDomainTests
         var session = CreateSession();
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, TestTime.UtcDateTime);
 
-        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/other", null, null, TestTime.UtcDateTime);
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-1", "model-a", "/other", null, null, TestTime.UtcDateTime));
 
-        Assert.Empty(events);
+        Assert.Contains("work directory", exception.Message, StringComparison.Ordinal);
         Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
         Assert.Equal("/work", session.Runtime.WorkDir);
     }

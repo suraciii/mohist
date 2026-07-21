@@ -24,3 +24,11 @@
 - Deadline and interruption outcomes are fixed before abort. The prompt is raced only against that fixed result so a late prompt resolution cannot turn timeout/interruption/provider failure into success; abort diagnostics share the returned diagnostic array.
 - Provider policy parsing is pure: defaults are frozen, configured regexes append to defaults, threshold must be positive, and invalid configuration returns an actionable diagnostic. SDK/provider strings are masked before normalized event and diagnostic sinks.
 - Verification after T-002 implementation: Runner typecheck, test typecheck, focused Pi tests (7), and full Runner tests (98 files / 1,166 tests) passed.
+
+## T-003 Notes
+
+- Workflow Session open now requires an explicit `opencode` or `pi` runtime; attach carries the target runtime and the observed runtime/physical ID guard. Generic AgentJob routes remain hard-coded to OpenCode.
+- AgentSession attach rejects work-directory changes before mutation, allows guarded cross-runtime replacement with one lineage entry, keeps identical attaches idempotent, and recognizes Pi as a registered runtime. Pi Follow-up, Compact, Reset, and Cancel admission fails before reservation; unknown historical Reset fallback remains OpenCode.
+- Physical AgentSession and transcript runtime IDs are unbounded in the EF model and snapshot. SQLite stores both as TEXT already, so the migration is an explicit no-op rather than an unsupported SQLite AlterColumn operation.
+- Runtime-event acceptance is now parsed by `ServerConnection`; non-empty submissions require an array with one accepted entry per fact. `cachedWriteTokens` and `provider.retry` are carried through Server and Web contracts without merging cache counters.
+- T-003 verification: focused Server unit tests passed (101), binding specs passed (7), Web typecheck passed, Runner typecheck passed, and Runner tests passed (99 files / 1,168 tests). Final `npm test` passed: CLI 1,361, Server unit 1,259, architecture 30, Server specs 2,872, Web 4,993, and Runner 1,168.

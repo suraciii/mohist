@@ -34,24 +34,41 @@ public static partial class AgentSessionExtensions
             string? changeDir,
             int? processPid,
             DateTime now,
-            string? runtime = null)
+            string? runtime = null,
+            string? expectedRuntime = null,
+            string? expectedAgentSessionId = null)
         {
             _ = changeDir;
             _ = processPid;
             var oldModel = session.Settings.Model;
             var existingAgentSessionId = session.Status.AgentRuntimeSessionId;
+            var existingRuntime = NormalizeRuntime(session.Runtime.Runtime);
+            var nextRuntime = NormalizeRuntime(runtime) ?? existingRuntime ?? "opencode";
+            if (string.IsNullOrWhiteSpace(nextRuntime))
+                throw new InvalidOperationException("AgentSession attach requires a registered runtime.");
+            if ((expectedRuntime is not null
+                    && !string.Equals(expectedRuntime, existingRuntime, StringComparison.OrdinalIgnoreCase))
+                || (expectedAgentSessionId is not null
+                    && !string.Equals(expectedAgentSessionId, existingAgentSessionId, StringComparison.Ordinal)))
+                throw new StaleRuntimeSessionBindingException(session.Id, expectedAgentSessionId, existingAgentSessionId);
+            if (!string.IsNullOrWhiteSpace(session.Runtime.WorkDir)
+                && !string.IsNullOrWhiteSpace(workDir)
+                && !string.Equals(session.Runtime.WorkDir, workDir, StringComparison.Ordinal))
+                throw new InvalidOperationException($"AgentSession {session.Id} is bound to work directory '{session.Runtime.WorkDir}', not '{workDir}'.");
             if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} is already bound to runtime session {existingAgentSessionId}; use Reset to replace the binding.");
             }
-            var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal);
+            var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal)
+                || !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase);
 
             session.Runtime = session.Runtime with
             {
                 WorkDir = string.IsNullOrWhiteSpace(session.Runtime.WorkDir) ? workDir : session.Runtime.WorkDir,
-                Runtime = string.IsNullOrWhiteSpace(session.Runtime.Runtime) ? NormalizeRuntime(runtime) : session.Runtime.Runtime,
+                Runtime = nextRuntime,
             };
             session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
             session.Status = session.Status with
@@ -61,7 +78,7 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 RuntimeSessionLineage = isNewRuntimeBinding
                     ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now,
-                         runtime: session.Runtime.Runtime)
+                         runtime: nextRuntime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
@@ -99,7 +116,8 @@ public static partial class AgentSessionExtensions
             string? costCurrency,
             long? contextWindowUsed,
             long? contextWindowSize,
-            DateTime now)
+            DateTime now,
+            long? cachedWriteTokens = null)
         {
             var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
             var newUsed = contextWindowUsed ?? usage.ContextWindowUsed;
@@ -112,6 +130,7 @@ public static partial class AgentSessionExtensions
                     OutputTokens = AddNonNegative(usage.OutputTokens, outputTokens),
                     TotalTokens = AddNonNegative(usage.TotalTokens, totalTokens),
                     CachedReadTokens = AddNonNegative(usage.CachedReadTokens, cachedReadTokens),
+                    CachedWriteTokens = AddNonNegative(usage.CachedWriteTokens, cachedWriteTokens),
                     ThoughtTokens = AddNonNegative(usage.ThoughtTokens, thoughtTokens),
                     CostAmount = AddNonNegative(usage.CostAmount, costAmount),
                     CostCurrency = costCurrency ?? usage.CostCurrency,
@@ -308,6 +327,10 @@ public static partial class AgentSessionExtensions
 
         private static string? NormalizeRuntime(string? runtime) =>
             string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
+
+        private static bool IsRegisteredRuntime(string runtime) =>
+            string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(runtime, "pi", StringComparison.OrdinalIgnoreCase);
 
         public bool IsRuntimeSessionMissing(Func<string, bool> isRuntimeRegistered)
         {

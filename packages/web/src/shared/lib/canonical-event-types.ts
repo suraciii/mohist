@@ -63,6 +63,7 @@ export const TRANSCRIPT_EVENT_TYPES = [
   'compaction',
   'compaction_event',
   'context_health_update',
+  'provider.retry',
 ] as const
 
 export type TranscriptEventType = (typeof TRANSCRIPT_EVENT_TYPES)[number]

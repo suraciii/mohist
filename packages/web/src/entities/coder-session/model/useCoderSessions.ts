@@ -159,6 +159,7 @@ export function useCoderSessions(
               ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
               ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
               ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
+              ...(detail.cachedWriteTokens !== undefined && { cachedWriteTokens: detail.cachedWriteTokens }),
               ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
               ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
               ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
