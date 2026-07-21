@@ -9,6 +9,7 @@ The Session context owns session lookup and transcript projection. Web and CLI c
 **Goals:**
 
 - Keep issue-scoped metadata and transcript reads available after the issue has no active workflow run.
+- Resolve the most recently created matching historical session when candidates have different creation times.
 - Preserve exact active-run resolution and not-found behavior for in-progress issues.
 - Preserve project and issue isolation and existing runtime-session transcript filtering.
 - Reuse persisted session labels and current indexes without a schema migration or backfill.
@@ -32,7 +33,7 @@ Alternative considered: change `FindCurrentSessionAsync` in place. This is small
 
 The read resolver first loads the requested issue's current workflow-run reference. When present, it performs the existing exact label lookup using project ID, issue number, workflow run ID, and session name. It does not fall back if the requested name is absent from that active run.
 
-When the active reference is absent, the resolver queries persisted sessions by project ID, issue number, `source-kind = workflow`, and session name, ordered by creation time descending with a limit of one. The source-kind predicate prevents an issue-associated generic Agent launch from being treated as a Workflow session. The resulting record's stable `sessionId` remains the canonical identity used to load metadata and transcript content.
+When the active reference is absent, the resolver queries persisted sessions by project ID, issue number, `source-kind = workflow`, and session name, ordered by creation time descending with a limit of one. This implements the specified newest-session rule when creation times differ. The source-kind predicate prevents an issue-associated generic Agent launch from being treated as a Workflow session. The resulting record's stable `sessionId` remains the canonical identity used to load metadata and transcript content.
 
 Alternative considered: preserve the terminal WorkflowRun ID on the Issue. That changes Issue lifecycle semantics and risks treating history as an active binding. Another alternative is to reconstruct run history from WorkflowRun records before querying sessions; the session already carries the required issue correlation labels, so that adds cross-context coupling without improving correctness.
 
@@ -44,7 +45,7 @@ Alternative considered: add a dedicated historical-session table or a new Issue 
 
 ### Verify behavior through the issue-scoped API
 
-Add focused server specs for completed and cancelled issue history, active-run precedence, a genuinely missing session, and runtime-session filtering on a historical transcript. The tests should seed or drive persisted sessions through in-memory test infrastructure and exercise the metadata/transcript HTTP routes; no Web change or browser test is required because routing and response rendering are unchanged.
+Add focused server specs for completed and cancelled issue history, newest selection across same-name sessions with different creation times, active-run precedence, a genuinely missing session, and runtime-session filtering on a historical transcript. The tests should seed or drive persisted sessions through in-memory test infrastructure and exercise the metadata/transcript HTTP routes; no Web change or browser test is required because routing and response rendering are unchanged.
 
 Alternative considered: test only the private resolver through a new abstraction. That would add an interface solely for testing and would not verify the user-visible route that currently returns 404.
 
@@ -52,7 +53,7 @@ Alternative considered: test only the private resolver through a new abstraction
 
 - [Historical lookup could accidentally expose a session from another issue or source] -> Require project ID, issue number, workflow source kind, and session name in the fallback query.
 - [Changing a shared resolver could enable commands on terminal history] -> Keep historical fallback in a read-specific resolver and retain active-run-only command resolution.
-- [Multiple matching sessions can share the same creation time] -> Accept the existing creation-order limitation; deterministic tie-breaking remains outside this issue.
+- [Multiple matching sessions can share the same creation time] -> Apply newest-by-creation-time only when timestamps differ; deterministic selection for equal timestamps remains outside this issue.
 - [Historical lookup scans more candidates than run-scoped lookup] -> Use the existing project/issue/creation index, descending order, and `LIMIT 1`; add an index only if measured data shows a real regression.
 - [Older or malformed records without correlation labels remain unreachable] -> Treat missing required labels as not found rather than weakening project/issue isolation; no compatibility backfill is part of this change.
 
@@ -64,4 +65,4 @@ Alternative considered: test only the private resolver through a new abstraction
 
 ## Open Questions
 
-No blocking questions remain. A deterministic policy for same-name historical sessions with identical creation times is intentionally deferred to the separate backlog item identified by issue 459.
+No blocking questions remain. The spec defines newest-by-creation-time selection when timestamps differ; a deterministic policy for identical timestamps is intentionally deferred to the separate backlog item identified by issue 459.

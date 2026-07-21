@@ -5,7 +5,7 @@ Completed or cancelled issues lose their active workflow-run reference, so their
 ## What Changes
 
 - Allow an issue-scoped session read to fall back to the issue's historical workflow sessions when the issue has no active workflow run.
-- Resolve the historical workflow session with the requested name so its metadata and transcript remain viewable from `/issues/<number>/workflow/sessions/<name>`.
+- Resolve the most recently created historical workflow session with the requested name so its metadata and transcript remain viewable from `/issues/<number>/workflow/sessions/<name>`; deterministic selection when candidates have identical creation times remains out of scope.
 - Preserve the current active-workflow-run lookup behavior while an issue is in progress.
 - Continue returning "not found" when the issue has no matching session record.
 - Preserve runtime-session filtering when reading transcript content.
@@ -18,5 +18,5 @@ Completed or cancelled issues lose their active workflow-run reference, so their
 
 - Server Session query behavior for issue-scoped workflow session metadata and transcripts.
 - Issue-scoped session API reads consumed by the AgentSession page and `mo issue session transcript`.
-- Server behavior specifications covering terminal issues, active-run precedence, missing sessions, and runtime-session transcript filtering.
+- Server behavior specifications covering terminal issues, newest historical-session selection, active-run precedence, missing sessions, and runtime-session transcript filtering.
 - No API shape, database schema, external dependency, or Workflow execution behavior changes are expected.

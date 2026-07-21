@@ -9,12 +9,12 @@
       "description": "Implement a read-specific issue session resolver that preserves exact active-run lookup and falls back to the latest matching persisted Workflow session only when the issue has no active workflow run. Use it for issue-scoped metadata and transcript reads while keeping follow-up, compact, reset, and cancel resolution active-run-only, and add focused server specs for the complete behavior matrix.",
       "acceptanceCriteria": [
         "Completed and cancelled issues with no active workflow run return persisted same-name Workflow session metadata and transcript content through the existing issue-scoped API routes.",
-        "Historical fallback matches project ID, issue number, Workflow source kind, and session name, orders candidates by creation time descending, and does not expose sessions associated with another issue, project, or source.",
+        "Historical fallback matches project ID, issue number, Workflow source kind, and session name, returns the most recently created candidate when timestamps differ, and does not expose sessions associated with another issue, project, or source.",
         "An issue with an active workflow run resolves only a same-name session from that run and returns not found instead of falling back when the name exists only in an earlier run.",
         "Issue-scoped metadata and transcript reads return not found when no matching session exists.",
         "Supplying runtimeSessionId to a historical transcript read returns only content associated with that runtime session within the resolved logical AgentSession.",
         "Issue-scoped follow-up, compact, reset, and cancel routes remain active-run-only and cannot target a session solely through historical fallback.",
-        "Focused server specs cover completed and cancelled history, active-run precedence, missing and cross-boundary sessions, command isolation, and runtime-session filtering; the server test suite passes with no real external dependencies or wall-clock timing."
+        "Focused server specs cover completed and cancelled history, newest selection across same-name sessions with different creation times, active-run precedence, missing and cross-boundary sessions, command isolation, and runtime-session filtering; the server test suite passes with no real external dependencies or wall-clock timing."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -22,7 +22,7 @@
       "output": "Updated Session read resolution and passing server specifications for historical issue workflow sessions.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Covers all requirements in the issue-workflow-session-history capability. Reuse AgentSessionQuery and existing computed label indexes; do not add a schema migration or change API response shapes."
+      "notes": "Covers all requirements in the issue-workflow-session-history capability. Reuse AgentSessionQuery and existing computed label indexes; do not add a schema migration or change API response shapes. Equal-creation-time tie-breaking remains out of scope."
     }
   ]
 }
