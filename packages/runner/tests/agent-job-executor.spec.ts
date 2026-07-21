@@ -54,7 +54,7 @@ function makeFakeRuntime(): FakeRuntimeHandles {
           ok: false,
           error: {
             kind: "turn-failed",
-            message: "OpenCode turn failed",
+            message,
             diagnostics: [{ severity: "error", code: "turn-failed", message }],
           },
           diagnostics: [{ severity: "error", code: "turn-failed", message }],
@@ -452,7 +452,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
-    expect(result.message).toBe("OpenCode turn failed")
+    expect(result.message).toBe("attach endpoint offline")
     const diagnostics = (result.output as Record<string, unknown>).diagnostics as Array<{ code: string; message: string }>
     expect(diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "turn-failed", message: "attach endpoint offline" }),

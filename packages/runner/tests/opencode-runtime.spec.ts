@@ -201,10 +201,10 @@ describe("error normalization", () => {
     expect(error.diagnostics.length).toBeGreaterThan(0)
   })
 
-  it("normalizeTurnFailed carries the provider message as a diagnostic, not as the error message", () => {
+  it("normalizeTurnFailed surfaces the provider message as the error message", () => {
     const error = normalizeTurnFailed({ message: "OpenAI quota exceeded" })
     expect(error.kind).toBe("turn-failed")
-    expect(error.message).toBe("OpenCode turn failed")
+    expect(error.message).toBe("OpenAI quota exceeded")
     expect(error.diagnostics.some((d) => d.message.includes("OpenAI quota"))).toBe(true)
   })
 
