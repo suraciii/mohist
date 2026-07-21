@@ -25,9 +25,8 @@ interface AgentTaskIdentity {
 
 /**
  * Returns true when the task is an inline-agent task for the web
- * milestone classifier. The `mohist/opencode` Action is the only
- * inline-agent Action the runner registers; agent-job tasks are not
- * routed through this classifier.
+ * milestone classifier. Agent-job tasks are not routed through this
+ * classifier.
  */
 export function isInlineAgentTask(input: AgentTaskIdentity | null | undefined): boolean {
   if (!input) return false
@@ -35,7 +34,7 @@ export function isInlineAgentTask(input: AgentTaskIdentity | null | undefined): 
   const sessionName = input.sessionName
   if (typeof sessionName !== 'string') return false
   if (sessionName.trim().length === 0) return false
-  return uses === 'mohist/opencode'
+  return uses === 'mohist/opencode' || uses === 'mohist/pi'
 }
 
 function readResolvedModel(session: WorkflowRunSession): string | null {

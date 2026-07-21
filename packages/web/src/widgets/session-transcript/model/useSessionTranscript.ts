@@ -505,6 +505,29 @@ export function useSessionTranscript({
       }),
     )
 
+    unsubs.push(
+      onAgentEvent('provider.retry', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        const now = new Date().toISOString()
+        const progress = detail.attempt != null && detail.maxAttempts != null
+          ? ` (${detail.attempt}/${detail.maxAttempts})`
+          : ''
+        const message = `Provider retry${detail.phase ? `: ${detail.phase}` : ''}${progress}${detail.message ? ` - ${detail.message}` : ''}`
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, createErrorPart(message, 'recovery', now)],
+          }
+          return next
+        })
+        markNewContentRef.current()
+      }),
+    )
+
     return () => {
       mountedRef.current = false
       if (streamingTimerRef.current !== null) {

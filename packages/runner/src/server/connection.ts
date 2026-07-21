@@ -288,19 +288,25 @@ export class ServerConnection {
     if (!response.ok) throw new Error(`patchRunVars failed: ${response.status} ${await response.text()}`)
   }
 
-  async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
+  async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`session attach failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<WorkflowAgentSession>
   }
 
-  async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal,
-    })
-    if (!response.ok) throw new Error(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
+  async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventAcceptance[]> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`session runtime events failed: ${response.status} ${await response.text()}`)
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error("session runtime events returned malformed JSON")
+    }
+    if (!Array.isArray(payload)) throw new Error("session runtime events returned a malformed acceptance response")
+    const submitted = isObjectRecord(body) && Array.isArray(body.runtimeEvents) ? body.runtimeEvents.length : 0
+    if (submitted > 0 && payload.length !== submitted) throw new Error(`session runtime events acceptance mismatch: submitted ${submitted}, accepted ${payload.length}`)
+    return payload as AgentSessionRuntimeEventAcceptance[]
   }
 
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
@@ -351,6 +357,12 @@ export interface WorkflowAgentSession {
 
 export interface AgentSessionRuntimeEventReceipt {
   type: string
+}
+
+export interface AgentSessionRuntimeEventAcceptance {
+  id?: string
+  type?: string
+  sequence?: number
 }
 
 export type AgentSession = WorkflowAgentSession
@@ -414,6 +426,10 @@ export interface TaskLogUploadResult {
 function readObject(value: unknown, path: string[]): Record<string, unknown> | null {
     const found = getSegments(value, path)
   return found && typeof found === "object" && !Array.isArray(found) ? (found as Record<string, unknown>) : null
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function readString(value: unknown, path: string[]): string | null {

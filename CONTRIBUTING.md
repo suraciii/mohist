@@ -6,7 +6,7 @@
 
 ### 前置条件
 
-- Node.js >= 22.0.0
+- Node.js >= 22.19.0 (the repository pins 22.19.0 in `.nvmrc`)
 - npm >= 10.0.0
 - opencode CLI
 

@@ -1,0 +1,162 @@
+{
+  "project": "mohist-local",
+  "description": "Deliver the direct Workflow mohist/pi path on the existing Action and AgentSession contracts: pin and verify Pi, implement PiRuntime, make Workflow bindings runtime-aware, serialize logical Session turns in process, report Pi facts through the current binding-validated route, and expose them in existing Session views.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Pin Pi SDK and verify its runtime contract",
+      "spec": "specs/pi-runtime/spec.md",
+      "description": "Pin the Pi SDK and supported Node release, then verify the real integration surface before product implementation. Record a sanitized smoke artifact and reconcile any API drift into the canonical Pi design.",
+      "acceptanceCriteria": [
+        "packages/runner/package.json pins @earendil-works/pi-coding-agent to an exact version and package-lock.json is updated through the Runner workspace npm command; no ACP/RPC dependency is added",
+        "Root and Runner engines require Node >=22.19; .nvmrc pins a concrete compatible release; CONTRIBUTING.md and docs/self-host.md name the supported minimum; every setup-node workflow and Docker build path uses an explicit compatible version",
+        "sdk-smoke-verification.json records the pinned package/Node versions and sanitized results for service/catalog setup, project-untrusted resources, Session create/open, absolute sessionFile, agent-session creation, literal prompt/messages/events, stable message/tool identities, setModel, setThinkingLevel, steer, abort, and stop confirmation",
+        "The smoke proves repository .pi execution resources are excluded while global Pi configuration and repository instruction context retain their specified roles",
+        "The smoke proves an allowed tool call can complete headlessly without a per-tool approval wait",
+        "Any verified SDK drift is reflected in design/runtimes/pi.md and openspec/changes/issue-450/design.md before T-002 begins",
+        "A repository-wide Node-version search accounts for every active manifest, version pin, source-install document, CI workflow, and Docker declaration, and none can select a pre-22.19 release",
+        "A clean npm ci on the supported Node release and npm run typecheck -w packages/runner pass without leaving Git-visible changes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "Pinned Runner dependency, repository-wide Node toolchain/documentation updates, sdk-smoke-verification.json, and any evidence-driven Pi call-map correction",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the only real-SDK task. Do not begin runtime product code from an unverified 0.x API. The artifact must never include credentials, prompts, messages, auth-file content, or raw provider responses. AgentJob, Session commands, and catalog reporting remain out of scope."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement the in-process PiRuntime module",
+      "spec": "specs/pi-runtime/spec.md",
+      "description": "Create the deep runtime/pi module with SDK isolation, readiness, untrusted project resources, physical Session create/open/cache/dispose, literal prompt completion, unattended tools, per-turn model/thinking, normalized events, deterministic deadline/cancellation, and provider failure policy.",
+      "acceptanceCriteria": [
+        "All Pi SDK imports and upstream event shapes are confined to packages/runner/src/runtime/pi; callers and tests use Mohist-owned request/result/event/error types",
+        "start/ready/diagnostic gate readiness on service and catalog initialization; an empty catalog is ready with a warning, while failure is not-ready and retryable",
+        "The SDK factory fixes project trust false, excludes repository .pi execution resources, preserves repository instruction context, and offers no caller override",
+        "Sentinel-credential tests prove SDK/provider values do not enter Mohist request/result types, registration, runtime events, task logs, diagnostics, Action output, or smoke-shaped evidence; existing credential masking is applied before text sinks",
+        "createSession returns a normalized absolute session-file path; restore opens the exact bound path; missing/corrupt paths return missing-session without implicit creation",
+        "runTurn applies model/thinking on the existing Session, submits slash-prefixed text literally, awaits prompt() as the sole completion authority, reconciles final messages, and never performs a second wait or automatic replay",
+        "Tool-loop tests prove no approval callback or confirmation state blocks unattended completion",
+        "The event projector covers assistant/reasoning, tools, model/status, automatic compaction, provider-retry start/end, input/output/cache-read/cache-write/thought usage, cost/currency, stable-ID idempotency, final-message reconciliation, and diagnostic-only unknown events; compaction/retry remain audit facts and never complete Workflow work",
+        "Fake-clock tests cover the one wrap-up steer exactly at minute 55 of a running 60-minute turn, no steer after early completion, immediate warning for a runtime-level duration of at most five minutes, deadline result fixation before abort, late completion, external interruption, and stop-unconfirmed diagnostics",
+        "A pure startup parser validates MOHIST_PROVIDER_ERROR_PATTERNS as a JSON array of regex sources and MOHIST_PROVIDER_RETRY_THRESHOLD as a positive integer, appends configured patterns to defaults, freezes one runtime-neutral policy for OpenCode and Pi, rejects invalid configuration before work claim, and docs/self-host.md records both settings",
+        "Provider tests cover defaults, configured additional patterns and threshold, direct test injection, invalid JSON/regex/threshold rejection, immediate quota/billing failure, retries below threshold, threshold failure, Pi terminal errors, binding preservation, and no replay",
+        "npm run typecheck -w packages/runner and npm test -w packages/runner pass using fake SDK services and fake time only"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/pi deep module with deterministic fake-backed tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Do not add a generic AgentRuntime, AgentJob execution, Session commands, Action reporting/outbox code, or Pi catalog publication."
+    },
+    {
+      "id": "T-003",
+      "title": "Make Workflow AgentSession binding runtime-aware",
+      "spec": "specs/pi-workflow-session/spec.md",
+      "description": "Extend only Workflow Session open/attach with explicit runtime and guarded expected-current binding semantics. Register Pi for persistence/events, preserve unbounded physical identity and lineage, expose event acceptance, carry provider-retry/cache-write facts, and keep current command and historical Reset behavior intact.",
+      "acceptanceCriteria": [
+        "Workflow Session open requires runtime opencode or pi, returns observed runtime/physical binding/workDir, and generic AgentJob open routes remain OpenCode-only",
+        "Workflow attach carries target runtime plus expected current runtime and physical ID; first attach and identical repeat succeed idempotently",
+        "The required Workflow wire change atomically migrates the existing mohist/opencode open/attach caller and regression-tests OpenCode reuse plus OpenCode-to-Pi and Pi-to-OpenCode guarded transitions",
+        "An expected cross-runtime attach preserves logical ID/source/workDir and appends one lineage entry, while stale expected state and same-runtime different IDs are rejected atomically",
+        "Work-directory mismatch is rejected before binding change, and stale runtime-event batches are rejected by current physical ID before Session state changes",
+        "AgentSession recognizes pi for storage and event admission; a normal EF migration/model snapshot removes the 256-character maximum from AgentSessions.AgentSessionId and transcript-turn RuntimeSessionId without encoding or truncating the absolute path; Pi-bound Follow-up, Compact, Reset, and Cancel admission returns unavailable without reservation, Runner dispatch, OpenCode invocation, or binding mutation, while the existing Reset fallback for unregistered historical runtimes remains unchanged",
+        "ServerConnection parses the existing runtime-event response and requires one accepted entry per submitted fact; HTTP, malformed, empty, or count-mismatched responses are observable failures, while the existing asynchronous AgentSession store flush remains outside the Action acknowledgement",
+        "cachedWriteTokens is added append-only through Session domain state/surrogates, runtime-event parsing, API/read contracts, and shared generated/manual types without merging it into cachedReadTokens",
+        "Existing costAmount/costCurrency and compaction_event fields accept Pi facts without parallel models; provider.retry is added as one runtime-neutral status/transcript event with shared Server/Web contracts",
+        "Server unit/spec coverage includes first/idempotent attach, guarded runtime change and lineage, stale race, same-runtime replacement rejection, workDir mismatch, missing defaults, Pi registration, command admission, historical Reset fallback, stale event acceptance, provider retry, compaction, cache-write, cost, and a session-file path longer than 256 characters through binding, event persistence, transcript query, and reactivation",
+        "npm test, npm run typecheck -w packages/runner, and npm test -w packages/runner pass with no real external dependency or wall clock in new tests"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runtime-aware Workflow AgentSession API/domain transitions, atomic OpenCode caller migration, and Pi-compatible usage contracts with Server/Runner coverage",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This SDK-independent task may run beside T-001, but it must migrate the currently working OpenCode wire atomically. Do not add Runner authentication, Action streams, event sequence/cursor state, AgentJob Pi routing, or Pi command handlers. Preserve the existing unknown-runtime Reset fallback exactly."
+    },
+    {
+      "id": "T-004",
+      "title": "Serialize logical Workflow Session turns in task and check hosts",
+      "spec": "specs/pi-workflow-session/spec.md#one-workflow-work-turn-executes-per-logical-agentsession",
+      "description": "Add one RunnerHost-owned process-local coordinator and acquire it from both Workflow task and check hosts around the complete Inline Agent Action turn, including task cleanup. The key is logical Session identity and is shared by OpenCode and Pi.",
+      "acceptanceCriteria": [
+        "One WorkflowSessionTurnCoordinator instance is shared by WorkExecutor task and check execution paths and keyed by projectId, workflowRunId, and normalized session name; one runtime-neutral helper supplies exactly the same name to coordinator and Action binding",
+        "The task lease spans initial Action invocation and any worktree-cleanup reinvocation; the check lease spans its complete Action invocation",
+        "Concurrent task/check or OpenCode/Pi calls for one key execute sequentially, while different keys execute concurrently",
+        "Queue tails are removed after settlement and failures do not poison later work",
+        "The coordinator stores no runtime binding, Session command, event, credential, authentication, durable recovery, or cross-process state",
+        "Runner tests cover same-session ordering across task/check and runtimes, cleanup exclusion, different-session concurrency, rejection/failure cleanup, and omitted-session Work ID keys with controllable promises rather than wall time",
+        "npm run typecheck -w packages/runner and npm test -w packages/runner pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Process-local Workflow Session turn coordinator integrated with task, check, and cleanup hosts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This SDK-independent task may run beside T-001. It is deliberately a narrow in-process concurrency boundary, not a distributed lock or recovery protocol. Do not move Session lifecycle or runtime-specific state into it."
+    },
+    {
+      "id": "T-005",
+      "title": "Deliver mohist/pi through Workflow completion and Session reporting",
+      "spec": "specs/pi-workflow-action/spec.md, specs/pi-workflow-session/spec.md",
+      "description": "Wire PiRuntime into RunnerHost and ActionContext, register mohist/pi, connect runtime-aware Session binding and the existing runtime-event route, and carry successful final text through the existing task/check, promise, recovery, and cleanup paths.",
+      "acceptanceCriteria": [
+        "RunnerHost starts/shuts down PiRuntime, retries failed startup, gates new polling on OpenCode and Pi readiness, and does not publish Pi models in the OpenCode catalog payload",
+        "mohist/pi is registered for tasks and checks, permits only prompt/session/options after engine-reserved working-directory is consumed, rejects every other top-level input including timeout/deadline/agent/kind/type as invalid-input before Session or Prompt side effects, consumes options.model/options.variant while ignoring unknown option keys with diagnostics, defaults omitted session to Work ID, fixes the Runner-private Prompt duration at 60 minutes with no Action override, and has no hidden vars.agent or named-Agent lookup",
+        "TaskRun/dispatch/YAML/parent-context classification uses an explicit Inline Agent Action set containing mohist/opencode and mohist/pi rather than substring matching",
+        "A first turn opens the logical Session, rejects workDir mismatch, creates Pi, persists its absolute path with the expected-current guard, reports session.input, and only then submits the prompt",
+        "Same-name task/check/retry/restart/model-change turns reuse the binding; missing files fail with runtime-session-missing and Reset guidance; cleanup reuses the same path under the original task lease",
+        "Pi facts are buffered only in memory for the current turn and sent in order through workflowAgentSessionRuntimeEvents with the current physical ID; input receives entry-for-entry acceptance before prompt submission, and successful final assistant/reasoning/tool/model/compaction/provider-retry/status/usage/cost facts plus session.closed receive acceptance before completion evaluation",
+        "Every submitted success or failure turn attempts reconciled final facts plus exactly one session.closed using a dedicated 30-second fake-timer-compatible reporting signal; runtime failures retain their original code, and a concurrent terminal-reporting failure is attached only as a sanitized diagnostic without claiming terminal state",
+        "Any HTTP, malformed-response, empty-response, or accepted-count-mismatch reporting failure on an otherwise successful turn returns session-reporting-failed and bypasses completion evaluation; acknowledgement means AgentSession activation acceptance rather than synchronous database flush, and no outbox, stream, cursor, inventory, checkpoint, background success, or prompt replay is introduced",
+        "Successful final text reaches task _output evaluation only through private turnFact; task output is null or exactly {promise}; checks use the same Action and normal host pass/fail mapping without Pi-specific output interpretation",
+        "Until issue #447 replaces current Action plumbing, runtime-bearing ActionContext and name-based promise/cleanup classification are extended only as an explicitly documented temporary gap; no competing Action host abstraction is introduced",
+        "Runtime error mapping covers invalid input, unavailable runtime, missing Session, workspace/binding failure, incompatible runtime, timeout, interruption, provider turn failure, and reporting failure while preserving binding",
+        "Product-path specs prove OpenCode-to-Pi and Pi-to-OpenCode each guarded-attach the target runtime's own physical Session and never pass the previous runtime's physical ID to the wrong adapter",
+        "Fake-backed end-to-end specs cover task and check dispatch, engine-reserved working-directory, each rejected unknown top-level input, diagnostic-only unknown options, open/create/bind/input/prompt/events/final acceptance, expectation/promise, same-session serialization, retry/restart reuse, model changes, missing file, cleanup, timeout, provider failure, reporting failure, stale acceptance-count mismatch, and no replay; success and each submitted failure path report terminal session.closed, while terminal-reporting failure preserves the original timeout/interrupted/turn-failed result with a sanitized diagnostic",
+        "npm run typecheck -w packages/runner, npm test -w packages/runner, and npm test pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "End-to-end direct Workflow mohist/pi Action across Runner and Server with fake-backed product-path coverage",
+      "dependsOn": [
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Use the existing binding-validated AgentSession event route. The manifest agent-turn target remains owned by issue #447. AgentJob, Pi Session commands, runtime-aware model catalog/UI, ACP/RPC, durable event replay, and broad transport security are not part of this task."
+    },
+    {
+      "id": "T-006",
+      "title": "Expose Pi facts in existing Web Session views and close gaps",
+      "spec": "specs/pi-workflow-session/spec.md#pi-turn-facts-populate-the-existing-session-audit-record",
+      "description": "Recognize Pi Workflow work in the existing milestone classifier, verify runtime-neutral Session components render Pi transcript/tool/status/compaction/model/usage/lineage facts including provider retry, cache-write, and cost, then update only implementation-gap footnotes and run final verification.",
+      "acceptanceCriteria": [
+        "Web isInlineAgentTask recognizes mohist/pi with a non-empty Session name and does not classify unrelated Actions or AgentJob work as Inline Agent tasks",
+        "A Pi fixture renders assistant/reasoning content, tool lifecycle, provider retry status, automatic compaction, model, input/output/cache-read/cache-write/thought usage, cost/currency, terminal status, and Pi lineage through existing Session components",
+        "No Pi-specific Session view, reporting-diagnostic field, model selector, credential form, Agent runtime selector, or Session-command control is added",
+        "docs/actions/pi.md and design/runtimes/pi.md implementation-gap sections mark only the delivered direct Workflow path complete and retain AgentJob, Session-command, and runtime-aware catalog/UI gaps",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass",
+        "Final verification passes for Runner typecheck/tests, npm test, and Web typecheck/tests, and leaves no Git-visible generated changes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pi-aware classification and runtime-neutral Session presentation coverage, accurate gap footnotes, and clean full verification",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Use existing Session DTOs/components wherever possible. Operator/task-log diagnostics are not a new Session-page data contract."
+    }
+  ]
+}

@@ -72,12 +72,13 @@ Effective Variables 只放在 `vars` 下，不把变量 key 复制成顶层裸�
 ### 子 Issue Plan 的父背景
 
 API poll route 在把内部 `WorkDispatch` 映射为 HTTP 响应时，可以附加父 issue 当前标题与
-body。只有 `workType = task`、`stage = plan`、`uses = mohist/opencode` 且当前 issue 仍有
-可解析父 issue 时才附加；checks、其它 stage、其它 Action、AgentJob 与普通 issue 均不附加。
+body。只有 `workType = task`、`stage = plan`、`uses` 属于明确的 Inline Agent Action 集合
+（当前为 `mohist/opencode`、`mohist/pi`），且当前 issue 仍有可解析父 issue 时才附加；
+checks、其它 stage、其它 Action、AgentJob 与普通 issue 均不附加。
 
 父背景是 HTTP 派发响应的可选执行上下文，不进入 Workflow `WorkDispatch`、WorkflowRun
 metadata/state、task `with`、Variables 或 Prompts，也不新增模板表达式命名空间。Runner 只
-负责透传；`mohist/opencode` Action 在每次适用 turn 中，把 JSON 编码的父标题与 body 作为
+负责透传；所选 Inline Agent Action 在每次适用 turn 中，把 JSON 编码的父标题与 body 作为
 只读背景置于已解析 task prompt 之前，并明确当前子 issue body 是交付范围权威。无父背景时，
 已解析 prompt 保持不变。
 

@@ -1,0 +1,122 @@
+{
+  "sdk": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "0.80.10"
+  },
+  "node": {
+    "version": "v22.23.1",
+    "pinned": "22.19.0",
+    "required": ">=22.19.0"
+  },
+  "operations": {
+    "service.setup": {
+      "ok": true,
+      "types": [
+        "ModelRuntime",
+        "SettingsManager",
+        "DefaultResourceLoader"
+      ]
+    },
+    "catalog.getAvailable": {
+      "ok": true,
+      "count": 0,
+      "network": false
+    },
+    "project.untrusted": {
+      "ok": true,
+      "projectTrusted": false,
+      "projectResources": {
+        "projectExtensions": 0,
+        "projectPrompts": 0,
+        "projectSkills": 0,
+        "effectiveNonProjectSkills": 6
+      }
+    },
+    "global.configuration": {
+      "ok": true,
+      "source": "explicit agentDir"
+    },
+    "repository.instructions": {
+      "ok": true,
+      "fields": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "loaded": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ]
+    },
+    "session.create": {
+      "ok": true,
+      "sessionFile": "absolute-path"
+    },
+    "session.open": {
+      "ok": true,
+      "sessionFile": "absolute-path"
+    },
+    "agent-session.create": {
+      "ok": true,
+      "fields": [
+        "sessionId",
+        "sessionFile",
+        "messages",
+        "isStreaming"
+      ]
+    },
+    "prompt.literal": {
+      "ok": true,
+      "operation": "session.prompt",
+      "options": {
+        "expandPromptTemplates": false
+      }
+    },
+    "messages.events": {
+      "ok": true,
+      "messages": "array",
+      "subscribe": "function",
+      "unsubscribe": "function"
+    },
+    "stable.identities": {
+      "ok": true,
+      "message": "id",
+      "tool": "toolCallId",
+      "session": "sessionId"
+    },
+    "setModel": {
+      "ok": true
+    },
+    "setThinkingLevel": {
+      "ok": true
+    },
+    "steer": {
+      "ok": true,
+      "operation": "session.steer"
+    },
+    "abort": {
+      "ok": true,
+      "operation": "session.abort",
+      "returnType": "Promise<void>"
+    },
+    "stop.confirmation": {
+      "ok": true,
+      "signal": "session.isStreaming",
+      "separateOperation": false
+    },
+    "tool.headless": {
+      "ok": true,
+      "allowedTool": true,
+      "registeredTools": 8,
+      "approvalCallback": false,
+      "confirmationState": false
+    }
+  },
+  "sanitized": {
+    "credentials": false,
+    "promptText": false,
+    "messageText": false,
+    "providerResponses": false,
+    "rawSdkObjects": false,
+    "paths": "type-only"
+  }
+}

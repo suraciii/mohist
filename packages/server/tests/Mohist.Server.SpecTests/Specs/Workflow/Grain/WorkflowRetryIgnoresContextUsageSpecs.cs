@@ -187,6 +187,7 @@ public class WorkflowRetryIgnoresContextUsageSpecs
                 stage = work.Stage,
                 title = work.Title ?? "Task 1",
                 issueNumber = 1,
+                runtime = "opencode",
             });
 
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
@@ -196,6 +197,9 @@ public class WorkflowRetryIgnoresContextUsageSpecs
             new
             {
                 runtimeSessionId = RuntimeSessionId,
+                runtime = "opencode",
+                expectedRuntime = "opencode",
+                expectedRuntimeSessionId = (string?)null,
                 workDir = "/tmp/retry-guard",
                 processPid = 4321,
             });

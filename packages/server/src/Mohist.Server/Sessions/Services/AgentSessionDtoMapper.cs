@@ -45,7 +45,8 @@ internal static class AgentSessionDtoMapper
         new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
             u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
             AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
-            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)));
+            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)),
+            CachedWriteTokens: u.CachedWriteTokens);
 
     /// <summary>
     /// Projects an <see cref="AgentUsageSummary"/> together with an
@@ -58,7 +59,8 @@ internal static class AgentSessionDtoMapper
             u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
             AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
             ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)),
-            history);
+            history,
+            u.CachedWriteTokens);
 
     /// <summary>
     /// Builds the <see cref="ContextUsageHistoryEntryDto"/> projection

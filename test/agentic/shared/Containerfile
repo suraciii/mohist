@@ -9,11 +9,15 @@
 #   cp $(which opencode) test/agentic/shared/bin/opencode
 #   podman build -t mohist-walkthrough -f test/agentic/shared/Containerfile.layer2 test/agentic/
 
+FROM node:22.19.0-bookworm AS node-toolchain
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0-preview
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl nodejs npm python3 make g++ && \
+    apt-get install -y --no-install-recommends git curl python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-toolchain /usr/local/ /usr/local/
 
 RUN groupadd -g 1001 motest && useradd -m -u 1001 -g motest motest
 

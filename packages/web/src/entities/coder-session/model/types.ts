@@ -28,6 +28,7 @@ export interface AgentSessionUsage {
   outputTokens?: number | null
   totalTokens?: number | null
   cachedReadTokens?: number | null
+  cachedWriteTokens?: number | null
   thoughtTokens?: number | null
   costAmount?: number | null
   costCurrency?: string | null

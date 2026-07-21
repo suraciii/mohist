@@ -253,6 +253,7 @@ export interface ActionContext {
    * for the runner to re-publish the handle).
    */
   openCodeRuntime?: import("../runtime/opencode/index.js").OpenCodeRuntime | null
+  piRuntime?: import("../runtime/pi/index.js").PiRuntime | null
   /**
    * Host-owned shared AgentSession runtime-event outbox (issue-461).
    * The Workflow reporter and the SignalR follow-up handler route

@@ -122,8 +122,9 @@ AgentSession ID 是逻辑对话的稳定身份。Runtime Session 身份是外部
 }
 ```
 
-Runtime 变化、工作目录变化和 Reset 可以替换物理绑定并追加 lineage，但不能改变
-AgentSession 身份或来源。Compact 和 model / variant 选择变化不会替换物理绑定。
+Runtime 变化和 Reset 可以替换物理绑定并追加 lineage，但不能改变 AgentSession 身份或
+来源。工作目录是逻辑 AgentSession 的不可变属性；变化时必须使用新的逻辑 Session 身份，
+不能替换原 Session 的物理绑定。Compact 和 model / variant 选择变化不会替换物理绑定。
 
 持久化的当前绑定只保留 Runner 重启后继续控制所需的最小数据：`runtime`、
 `runtimeSessionId`、`runnerId` 与 `workDir`。Lineage 记录 `runtime`、

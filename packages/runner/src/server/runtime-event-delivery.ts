@@ -5,7 +5,7 @@
 // Workflow and generic endpoints already return
 // `AgentSessionRuntimeEventReceipt[]`.
 
-import type { ServerConnection } from "./connection.js"
+import type { ServerConnection, AgentSessionRuntimeEventReceipt } from "./connection.js"
 import type { RuntimeEventDelivery, RuntimeEventRecord } from "./runtime-event-outbox.js"
 
 export interface RuntimeEventDeliveryOptions {
@@ -15,15 +15,16 @@ export interface RuntimeEventDeliveryOptions {
 export function createServerRuntimeEventDelivery(options: RuntimeEventDeliveryOptions): RuntimeEventDelivery {
   const { connection } = options
   return {
-    async send(record: RuntimeEventRecord, signal: AbortSignal) {
+    async send(record: RuntimeEventRecord, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
       if (record.producerFamily === "workflow-session" && record.target.kind === "workflow") {
-        return await connection.workflowAgentSessionRuntimeEvents(
+        const accepted = await connection.workflowAgentSessionRuntimeEvents(
           record.target.projectId,
           record.target.workflowRunId,
           record.target.sessionName,
           envelope(record),
           signal,
         )
+        return accepted.map<AgentSessionRuntimeEventReceipt>((a) => ({ type: a.type ?? "" }))
       }
       if (record.producerFamily === "generic-followup" && record.target.kind === "generic") {
         return await connection.agentSessionRuntimeEvents(

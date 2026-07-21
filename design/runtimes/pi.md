@@ -25,7 +25,8 @@ Action。它与 Agent / Session 的所有权模型（Inline Agent、工作所有
 
 与 OpenCode 的责任边界差异：Pi 是 Runner 的 npm 依赖，随 Runner 发布并锁定版本，
 安装者不需要提供 Pi CLI。provider 凭证走 Pi 自己的机制（环境变量与 Pi auth
-存储），Mohist 不管理 API key。
+存储），Mohist 不管理 API key。SDK authentication manager 是凭证值的唯一读取者；
+Mohist 自有 request/result、事件、注册和 smoke artifact 都不携带凭证字段。
 
 ## Action 输入输出契约
 
@@ -66,21 +67,22 @@ type PiActionOutput = null | {
 
 | 能力 | SDK operation |
 |---|---|
-| 创建物理 Session | `SessionManager.create(cwd)` 后 `createAgentSession({ sessionManager, ... })` |
-| 恢复物理 Session | `SessionManager.open(sessionFile)` 后 `createAgentSession({ sessionManager, ... })` |
-| 执行并等待 Workflow / AgentJob 回合 | `await session.prompt(text)` |
+| 创建物理 Session | `SessionManager.create(cwd, sessionDir?)`，配合 `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
+| 恢复物理 Session | `SessionManager.open(sessionFile)`，配合同一组显式服务创建 `AgentSession` |
+| 执行并等待 Workflow / AgentJob 回合 | `await session.prompt(text, { expandPromptTemplates: false })` |
 | 回合中注入收尾警告 | `session.steer(text)` |
 | 提交用户 Follow-up（回合执行中） | `session.steer(text)` |
 | 提交用户 Follow-up（Session 空闲） | `session.prompt(text)`，不等待其完成 |
-| 中断执行 | `session.abort()` |
+| 中断执行 | `await session.abort()`；停止确认读取 `session.isStreaming`，不是 abort 返回值 |
 | 压缩 context | `session.compact()` |
 | 应用回合模型与推理档位 | `session.setModel()`、`session.setThinkingLevel()` |
 | 读取 Session 状态与消息 | `session.sessionId`、`session.sessionFile`、`session.messages`、`session.isStreaming` |
 | 接收实时事件 | `session.subscribe(listener)` |
-| 读取 model catalog | `ModelRuntime.create()` 后 `modelRuntime.getAvailable()`（或 `getModels()` / `getProviders()`） |
+| 读取 model catalog | `ModelRuntime.create({ ... })` 后 `await modelRuntime.getAvailable()` |
 
 实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 Pi 上做一次冒烟
-验证（含事件载荷形状）；发现漂移时先修订本表，再进入实现。冒烟记录参照
+验证（含事件载荷形状）；发现漂移时先修订本表，再进入实现。0.80.10 的真实验证记录在
+`openspec/changes/issue-450/sdk-smoke-verification.json`，冒烟记录参照
 [`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)
 的做法留存。
 
@@ -107,8 +109,9 @@ error 解释全部封装在该模块内。
 Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力。
 
 回合输入按纯文本提交：`PiRuntime` 不加载 prompt templates，也不做斜杠命令展开——
-以 `/` 开头的工作流 prompt 仍须原样进入模型。`expandPromptTemplates` 等具体开关随
-冒烟验证落表。
+以 `/` 开头的工作流 prompt 仍须原样进入模型。0.80.10 的 `prompt()` 默认会展开
+文件型 prompt template，因此每次 Workflow 调用必须显式传入
+`{ expandPromptTemplates: false }`。
 
 ## 进程拓扑与就绪
 
@@ -117,8 +120,9 @@ Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力�
 持久化绑定 lazy 恢复。不为每个 Action 创建独立进程，也不为每个回合重建 Session
 实例。
 
-Mohist 认为物理 Session 的 directory 不可变。工作目录变化时创建新的物理 Session，
-不移动现有 Session。Pi 的 session 文件按 cwd 分目录存放（默认
+Mohist 认为逻辑 AgentSession 的 workDir 与物理 Session 的 directory 都不可变。工作目录
+变化时拒绝本次执行；调用者必须使用新的逻辑 Session 身份，不能在原 AgentSession 上创建
+替代绑定。Pi 的 session 文件按 cwd 分目录存放（默认
 `~/.pi/agent/sessions/<cwd 编码>/`），与目录不可变语义天然一致；Mohist 不引入独立
 的 session-dir 配置。
 
@@ -182,9 +186,13 @@ Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执�
 
 `session.prompt()` resolve 即整个 agent run（含工具循环与自动重试）结束，它就是
 唯一完成判据，不存在第二次 wait；`agent_end` 事件只用于投影，不作为完成权威。
-`PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。工作回合的执行
-期限由 Workflow task executor 与 AgentJob executor 各自声明：未显式指定时默认 60
-分钟，显式期限可以覆盖。
+`PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。调用者必须声明工作
+回合的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
+固定提供 60 分钟，`mohist/pi` Action Input 不可见也不能覆盖。Action 完成 open/bind、输入
+报告与 model/thinking 应用后，把 duration 交给 `runTurn`；Runtime 在调用
+`session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与输入报告不占 Prompt
+预算；cleanup Prompt 是独立回合并取得新的 60 分钟。AgentJob executor 的期限由其所属
+issue 单独定义。
 
 in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明的期限是单一
 回合期限权威。期限到达时 Runtime 将回合结果固定为 `deadline-exceeded`，随后调用
@@ -201,8 +209,11 @@ in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明�
 - 警告注入使用 `session.steer(text)`。steer 消息在运行中回合的迭代边界（当前模型
   调用及其工具调用完成后）被拾取，语义与 OpenCode 的 `promptAsync` 注入一致；
   正在执行的长工具调用会延迟拾取，期限到达仍 abort。
-- 终止使用 `session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
+- 终止使用 `await session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
   无法确认时返回中断未确认诊断，不声称回合已经安全停止。
+
+0.80.10 没有独立的 stop-confirmation operation，也没有布尔型 `abort()` 返回值；
+`abort()` 的 Promise 只表示中断请求已处理，停止确认必须观察 `isStreaming` 与事件序列。
 
 ## 事件与状态核对
 
@@ -213,7 +224,7 @@ compaction 事实：
 - `message_start` / `message_update`（`text_delta`、`thinking_delta`、
   `toolcall_start` / `delta` / `end`）/ `message_end` → transcript 与 tool 事实；
 - `tool_execution_start` / `update` / `end` → 工具执行事实（按 `toolCallId` 关联）；
-- assistant message 上的 `usage`（input / output / cacheRead / cacheWrite / cost）
+- assistant message 上的 `usage`（input / output / cacheRead / cacheWrite / thought / cost）
   → usage 事实；
 - `compaction_start` / `compaction_end` → compaction 事实；
 - `auto_retry_start` / `auto_retry_end` → provider 重试事实（见下节）。
@@ -293,11 +304,19 @@ reply 路径在 Pi 侧不存在，对应的 `permission-required` 错误也不�
 
 Pi 唯一的「批准」概念是 project trust：是否加载工作目录项目级 `.pi/` 资源
 （settings、extensions、skills、prompts 等）。`PiRuntime` 固定以
-`projectTrusted: false` 装配 `SettingsManager`：项目级 `.pi/` 内的可执行资源不进入
+`SettingsManager.create(cwd, agentDir, { projectTrusted: false })` 装配 `SettingsManager`，
+并把同一个 manager、显式 `cwd` / `agentDir` 传给 `DefaultResourceLoader` 和
+`createAgentSession`：项目级 `.pi/` 内的可执行资源不进入
 执行，工作仓库无法通过携带 Pi 配置改变 Runner 的执行行为。仓库根部的 `AGENTS.md` /
 `CLAUDE.md` 与 project trust 无关，仍作为上下文提供给模型——这与 OpenCode 的行为
 一致：它们影响提示词上下文，不改变 Runner 的执行配置。Runner 用户的全局配置
 （`~/.pi/agent`）正常加载。该取值不提供配置项，是无人值守执行的确定性保证。
+
+Pi 边界复用 Runner 现有的 credential masking：SDK/provider 文本进入 task log、
+diagnostic 或 runtime event 前统一脱敏，结构化 request/result 与 Runner registration
+使用 Mohist 字段白名单而非序列化 SDK 对象。Action output 不含 diagnostic。真实 smoke
+只记录版本、operation 名、布尔结果和脱敏后的字段名/类型摘要；不记录环境值、auth 文件、
+原始 provider 响应、Prompt 或消息正文。
 
 在 `PiRuntime` 边界把 SDK error 规范化为少量 Mohist result（kebab-case，与 wire 值
 一致）：`invalid-input`、`unavailable-runtime`、`missing-session`、
@@ -323,12 +342,17 @@ Pi 是第二个 Runtime，以下既有单 Runtime 假设需要泛化（均不改
 - AgentJob executor：按 dispatch 携带的 runtime 分派到 `OpenCodeRuntime` 或
   `PiRuntime`，两条路径共享 Session 基础设施但不共享 Runtime 实例。
 - Runner 的 open / attach 回写：runtime 值来自调用方解析结果，不再写死。
+- Session usage：`AgentUsageSummary`、grain state/surrogate、runtime-event parser、API/read
+  model 与 Web 共用类型新增独立 `cachedWriteTokens`；新增 Orleans field id 只追加不重排，
+  缺省为 null/0 语义并与 `cachedReadTokens` 分别累加。
 - TaskRun 分类：`mohist/pi` 与 `mohist/opencode` 同样归为 UserFacing。
 - 模型 catalog API：opencode 专属路由泛化为按 runtime 查询，或并列新增 Pi 路由。
 - Session 命令 handler（Follow-up / Cancel / Compact / Reset）：按 AgentSession 当前
   绑定的 runtime 路由到对应 Runtime。
-- Runner host：构造并启动 `PiRuntime`，注入 `WorkExecutor` 与 `AgentJobExecutor`；
-  `ActionContext` 增加 `piRuntime`；promise 投影规则把 `mohist/pi` 纳入。
+- Runner host：构造并启动 `PiRuntime`，由 manifest 声明的 `agent-turn` capability 向
+  Workflow Action 注入回合能力，并向 `AgentJobExecutor` 注入 Runtime；promise 投影按
+  capability 驱动。#450 若先于能力收窄 issue #447 落地，会暂时沿用当前 runtime-bearing
+  `ActionContext` 与按名投影机制；这是 #447 明确拥有的实现差距，不是本设计的目标接口。
 - Web：Mohist Agent 编辑与 issue 模型选择增加执行后端维度；模型列表按所选后端
   出（OpenCode catalog / Pi catalog）。
 
@@ -371,6 +395,10 @@ Pi 是 0.x 快速演进的依赖（约每周一个 minor），SDK 的 breaking c
 
 ## 实装差距
 
-`PiRuntime`、`mohist/pi` Action 与「Server 与 Web 触及面」列出的泛化全部未实装；
-当前 `uses: mohist/pi` 的 task 以未知 Action 失败，Mohist Agent 固定使用 OpenCode
-执行。
+直接 Workflow 路径已经实装：`PiRuntime`、`mohist/pi` Action、runtime-aware Workflow
+Session binding，以及现有 Session transcript/tool/status/compaction/model/usage/cost/
+lineage 展示均已落地。以下设计触及面仍是实现差距：
+
+- AgentJob executor 与 Agent 配置中的 runtime 选择仍未接入，Mohist Agent 固定使用 OpenCode。
+- Follow-up、Cancel、Compact、Reset 等 Pi Session command handler 仍未接入。
+- runtime-aware model catalog API 与 Web 模型选择 UI 仍未接入。

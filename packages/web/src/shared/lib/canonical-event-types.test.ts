@@ -20,7 +20,7 @@ describe('canonical event types', () => {
     }
   })
 
-  it('includes the 8 transcript event types', () => {
+  it('includes the transcript event types', () => {
     expect(TRANSCRIPT_EVENT_TYPES).toEqual([
       'session.input',
       'message.delta',
@@ -35,6 +35,7 @@ describe('canonical event types', () => {
       'compaction',
       'compaction_event',
       'context_health_update',
+      'provider.retry',
     ])
     for (const name of TRANSCRIPT_EVENT_TYPES) {
       expect(EVENT_TYPES).toContain(name)

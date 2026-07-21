@@ -80,6 +80,7 @@ function buildSessionMetadata(
           outputTokens: meta.usage.outputTokens ?? null,
           totalTokens: meta.usage.totalTokens ?? null,
           cachedReadTokens: meta.usage.cachedReadTokens ?? null,
+          cachedWriteTokens: meta.usage.cachedWriteTokens ?? null,
           thoughtTokens: meta.usage.thoughtTokens ?? null,
           costAmount: meta.usage.costAmount ?? null,
           costCurrency: meta.usage.costCurrency ?? null,

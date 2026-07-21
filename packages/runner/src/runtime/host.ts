@@ -26,9 +26,11 @@ import {
   opencodeModelSetsEqual,
   type DiscoveredOpencodeModels,
 } from "./opencode-models.js"
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
+import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 import {
   type FollowupTarget,
   type FollowupTargetResolution,
@@ -97,6 +99,7 @@ export class RunnerHost {
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
   private readonly modelRediscoveryIntervalMs: number
+  private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
@@ -109,6 +112,8 @@ export class RunnerHost {
    * and the runner emits the runtime's actionable diagnostic.
    */
   private openCodeRuntime: OpenCodeRuntime | null = null
+  private piRuntime: PiRuntime | null = null
+  private providerPolicyDiagnostic: string | null = null
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -344,16 +349,29 @@ export class RunnerHost {
     // Construct the shared OpenCode runtime. The factory seam returns a
     // real `OpenCodeRuntime` (production) or a fake the test injected
     // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
-    // check and establishes the global event subscription before it
-    // flips `ready()` true; until then the host's `pollOnce` gate keeps
-    // the runner from claiming work.
+    // check + catalog load and only flips `ready()` true after both
+    // pass; until then the host's `pollOnce` gate keeps the runner
+    // from claiming work.
+    const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
+    if (!policy.ok) {
+      this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
+      console.error(this.providerPolicyDiagnostic)
+    } else {
+      this.providerPolicyDiagnostic = null
+    }
     const factory = getOpenCodeRuntimeFactory()
     this.openCodeRuntime = factory({
       directory: process.cwd(),
+      ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
     if (!startResult.ok) {
       console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
+    }
+    this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot, ...(policy.ok ? { providerErrorPolicy: policy.value } : {}) })
+    const piStart = await this.piRuntime.start()
+    if (!piStart.ok) {
+      console.error("pi runtime not ready at startup; claiming gated until it recovers:", piStart.error.message)
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
@@ -364,6 +382,9 @@ export class RunnerHost {
       this.openCodeRuntime,
       new AgentJobExecutor(this.connection, this.openCodeRuntime),
       this.agentSessionRuntimeEventOutbox,
+      undefined,
+      this.workflowSessionTurnCoordinator,
+      this.piRuntime,
     )
   }
 
@@ -391,6 +412,10 @@ export class RunnerHost {
       } catch { /* best effort */ }
       this.openCodeRuntime = null
     }
+    if (this.piRuntime !== null) {
+      try { await this.piRuntime.shutdown() } catch { /* best effort */ }
+      this.piRuntime = null
+    }
   }
 
   private async runWorkerPool(signal: AbortSignal) {
@@ -409,8 +434,9 @@ export class RunnerHost {
       // reports (the line above) and respects the existing poll
       // cadence so a recovered runtime resumes claiming on the next
       // tick.
-      if (!this.isOpenCodeReadyForClaim()) {
-        const diagnostic = this.openCodeReadinessDiagnostic()
+      if (!this.isReadyForClaim()) {
+        if (this.piRuntime && !this.piRuntime.ready()) await this.piRuntime.start().catch(() => {})
+        const diagnostic = this.readinessDiagnostic()
         const now = Date.now()
         const diagnosticChanged = diagnostic !== lastReadinessDiagnostic
         const reLogDue = now - lastReadinessLoggedAt > READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS
@@ -473,6 +499,13 @@ export class RunnerHost {
     return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
   }
 
+  private isReadyForClaim(): boolean {
+    return this.providerPolicyDiagnostic === null
+      && this.isOpenCodeReadyForClaim()
+      && this.piRuntime !== null
+      && this.piRuntime.ready()
+  }
+
   /**
    * Produce the user-visible, actionable readiness diagnostic emitted
    * when the runner pauses claiming. The OpenCode runtime's own
@@ -488,6 +521,13 @@ export class RunnerHost {
     const diagnostic = runtime.diagnostic()
     if (diagnostic === null) return null
     return `opencode runtime not ready (${diagnostic.code}): ${diagnostic.message}`
+  }
+
+  private readinessDiagnostic(): string | null {
+    if (this.providerPolicyDiagnostic !== null) return this.providerPolicyDiagnostic
+    if (!this.isOpenCodeReadyForClaim()) return this.openCodeReadinessDiagnostic()
+    const diagnostic = this.piRuntime?.diagnostic()
+    return diagnostic ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}` : "pi runtime not ready; skipping poll"
   }
 
   private async pollOnce(signal: AbortSignal): Promise<RenderedWorkItem[]> {

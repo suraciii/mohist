@@ -1,0 +1,55 @@
+## Codebase Patterns
+
+- T-001 is the only task permitted to import or construct the real Pi SDK. Product runtime code must remain absent until this gate is complete.
+- The Runner workspace uses the root lockfile; dependency changes are made with `npm install -w packages/runner`.
+- Pi SDK 0.80.10 requires Node >=22.19.0. The repository uses Node 22.19.0 as its concrete supported release.
+- SDK project trust is fixed with `SettingsManager.create(cwd, agentDir, { projectTrusted: false })`; the same settings manager and explicit `cwd` / `agentDir` are passed to `DefaultResourceLoader` and `createAgentSession`.
+- SDK `prompt()` expands file prompt templates by default. Literal Workflow input requires `{ expandPromptTemplates: false }`.
+- SDK `abort()` returns `Promise<void>` and has no separate stop-confirmation operation; stop confirmation observes `isStreaming` and session events.
+- `SessionManager.create(cwd, sessionDir?)` and `SessionManager.open(sessionFile)` expose the persisted absolute session path through `session.sessionFile` / `getSessionFile()`.
+- SDK custom tools can run headlessly with `noTools: "builtin"`; no per-tool approval callback or confirmation state is involved.
+
+## T-001 Notes
+
+- Baseline Runner typecheck and 1,159 Runner tests passed after dependencies were installed. The initial workspace had no `node_modules`, so the first baseline command reported missing `tsc`/`vitest` before installation.
+- `ModelRuntime.getAvailable()` succeeded in an isolated temporary home with an empty catalog and network disabled. No user auth files, credentials, prompts, messages, or provider response content entered the artifact.
+- The smoke creates temporary `.pi` settings/extensions/skills/prompts and verifies project-local resources are absent from effective project resources while SDK non-project defaults may remain available; context files remain loadable. It runs a separate CLAUDE-only context check because the loader selects the applicable instruction file for a given project hierarchy.
+- Clean verification passed with Node `v22.23.1`: `npm ci`, Runner typecheck, Runner test CI (97 files / 1,159 tests), and the smoke script. The checked-in Node release remains the concrete `22.19.0` minimum pin.
+
+## T-002 Notes
+
+- `packages/runner/src/runtime/pi` is the only module importing `@earendil-works/pi-coding-agent`; its public index exposes only Mohist-owned request, result, diagnostic, event, catalog, and policy types.
+- The SDK factory fixes `projectTrusted: false`, reloads an explicit `DefaultResourceLoader` with the same cwd/agentDir, and creates sessions with `noTools: "builtin"`. Tests use the injectable factory and never load user configuration or contact a provider.
+- Pi physical bindings are normalized absolute session-file paths and are cached by path. Cache misses call `openSession` with the exact bound path; open failures return `missing-session` with Reset guidance and never fall back to create.
+- Deadline and interruption outcomes are fixed before abort. The prompt is raced only against that fixed result so a late prompt resolution cannot turn timeout/interruption/provider failure into success; abort diagnostics share the returned diagnostic array.
+- Provider policy parsing is pure: defaults are frozen, configured regexes append to defaults, threshold must be positive, and invalid configuration returns an actionable diagnostic. SDK/provider strings are masked before normalized event and diagnostic sinks.
+- Verification after T-002 implementation: Runner typecheck, test typecheck, focused Pi tests (7), and full Runner tests (98 files / 1,166 tests) passed.
+
+## T-003 Notes
+
+- Workflow Session open now requires an explicit `opencode` or `pi` runtime; attach carries the target runtime and the observed runtime/physical ID guard. Generic AgentJob routes remain hard-coded to OpenCode.
+- AgentSession attach rejects work-directory changes before mutation, allows guarded cross-runtime replacement with one lineage entry, keeps identical attaches idempotent, and recognizes Pi as a registered runtime. Pi Follow-up, Compact, Reset, and Cancel admission fails before reservation; unknown historical Reset fallback remains OpenCode.
+- Physical AgentSession and transcript runtime IDs are unbounded in the EF model and snapshot. SQLite stores both as TEXT already, so the migration is an explicit no-op rather than an unsupported SQLite AlterColumn operation.
+- Runtime-event acceptance is now parsed by `ServerConnection`; non-empty submissions require an array with one accepted entry per fact. `cachedWriteTokens` and `provider.retry` are carried through Server and Web contracts without merging cache counters.
+- T-003 verification: focused Server unit tests passed (101), binding specs passed (7), Web typecheck passed, Runner typecheck passed, and Runner tests passed (99 files / 1,168 tests). Final `npm test` passed: CLI 1,361, Server unit 1,259, architecture 30, Server specs 2,872, Web 4,993, and Runner 1,168.
+
+## T-004 Notes
+
+- `WorkflowSessionTurnCoordinator` is RunnerHost-owned and process-local. Its queue key is a JSON tuple of project ID, WorkflowRun ID, and normalized logical Session name; it stores only promise tails and conditionally removes the current tail after settlement.
+- `workflowSessionName` trims explicit names and falls back to the Work ID for omitted/null/blank names. OpenCode binding and task/check coordinator keys use this same helper and the same rendered Action input.
+- WorkExecutor holds the task lease across the complete Inline Agent segment, including completion checks, worktree enforcement, and cleanup reinvocation. Check execution acquires the shared coordinator per Inline Agent Action while retaining independent Sessions' concurrency.
+- T-004 verification: baseline focused tests passed (18), coordinator/focused regression tests passed (9), Runner typecheck passed, and the full Runner suite passed (100 files / 1,173 tests).
+
+## T-005 Notes
+
+- `mohist/pi` is registered through the existing ActionRegistry and shares the task/check completion path through the private `turnFact.finalAssistantText`; public task output remains the existing promise projection.
+- Pi binding creation is explicit in the Action: open logical Session, create absolute Pi path, guarded attach, accepted `session.input`, then `PiRuntime.runTurn`. Runtime switches create the target runtime's own physical Session; the previous runtime ID is never passed to the target adapter.
+- Pi runtime readiness is owned by RunnerHost alongside OpenCode. Failed Pi startup is retried from the existing work-claim readiness loop, while registration continues to project only the OpenCode catalog.
+- Pi runtime events are buffered for one turn and sent in order. Successful and submitted failure turns append one `session.closed`; terminal reporting uses an independent 30-second signal and preserves the runtime error when terminal acceptance fails.
+- Existing Runner host tests need the default test setup to inject a no-network Pi runtime because real Pi catalog initialization is provider/network backed; product Pi tests use the explicit runtime factory seam.
+
+## T-006 Notes
+
+- The Web milestone classifier now accepts exactly `mohist/opencode` and `mohist/pi` when a non-blank logical Session name is present; unrelated Action and AgentJob work remains excluded.
+- The existing Session path carries Pi cache-write usage from metadata to the generic usage summary, and generic chat/timeline projections render `provider.retry` as recovery/status facts alongside assistant, reasoning, tools, compaction, and terminal events.
+- T-006 documentation footnotes now mark only the direct Workflow path and existing Session presentation as delivered; AgentJob runtime selection, Pi Session commands, and runtime-aware catalog/UI remain gaps.

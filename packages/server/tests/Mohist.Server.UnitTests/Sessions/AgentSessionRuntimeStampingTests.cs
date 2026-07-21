@@ -129,6 +129,48 @@ public class AgentSessionRuntimeStampingTests
         Assert.False(availableRuntime.IsRuntimeSessionMissing(IsRegistered));
     }
 
+    [Fact]
+    public void AttachPhysicalSession_GuardedRuntimeChange_AppendsLineageAndPreservesIdentity()
+    {
+        var session = CreateSession("opencode");
+        session.AttachPhysicalSession("oc-session", null, "/work", null, null, CreatedAt.AddMinutes(1), "opencode", "opencode", null);
+
+        var events = session.AttachPhysicalSession(
+            "pi-session-file",
+            null,
+            "/work",
+            null,
+            null,
+            CreatedAt.AddMinutes(2),
+            "pi",
+            "opencode",
+            "oc-session");
+
+        Assert.Equal("pi", session.Runtime.Runtime);
+        Assert.Equal("pi-session-file", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("project-1", session.Metadata.Label("mohist.io/project-id"));
+        Assert.Equal("workflow-1", session.Metadata.Label("mohist.io/source-id"));
+        Assert.Equal("/work", session.Runtime.WorkDir);
+        Assert.Equal(2, session.Status.RuntimeSessionLineage!.Count);
+        Assert.Equal("oc-session", session.Status.RuntimeSessionLineage[0].AgentRuntimeSessionId);
+        Assert.Equal("pi-session-file", session.Status.RuntimeSessionLineage[1].AgentRuntimeSessionId);
+        Assert.Single(events);
+    }
+
+    [Fact]
+    public void AttachPhysicalSession_StaleExpectedBindingDoesNotMutate()
+    {
+        var session = CreateSession("opencode");
+        session.AttachPhysicalSession("oc-session", null, "/work", null, null, CreatedAt.AddMinutes(1), "opencode", "opencode", null);
+
+        Assert.Throws<StaleRuntimeSessionBindingException>(() => session.AttachPhysicalSession(
+            "pi-session-file", null, "/work", null, null, CreatedAt.AddMinutes(2), "pi", "opencode", "stale"));
+
+        Assert.Equal("oc-session", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("opencode", session.Runtime.Runtime);
+        Assert.Single(session.Status.RuntimeSessionLineage!);
+    }
+
     private static AgentSession CreateSession(string? runtime) =>
         AgentSession.Create(
             "session-1",

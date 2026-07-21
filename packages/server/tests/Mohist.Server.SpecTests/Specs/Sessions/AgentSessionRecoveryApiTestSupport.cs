@@ -180,11 +180,11 @@ public abstract class AgentSessionRecoveryApiTestSupport
 
         if (attachAndStart)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         }
         else if (attachIdle)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
             _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         }
 
@@ -208,7 +208,8 @@ public abstract class AgentSessionRecoveryApiTestSupport
             workType = work.WorkType,
             stage = work.Stage,
             title,
-            issueNumber
+            issueNumber,
+            runtime = "opencode"
         });
 
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);

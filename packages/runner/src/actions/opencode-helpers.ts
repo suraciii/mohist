@@ -1,6 +1,6 @@
 import type { ActionInvocationContext } from "./context.js"
 import type { PromptLoaderContext } from "../core/prompt.js"
-import { stringInput } from "../core/json.js"
+import { sessionNameFromContext } from "./workflow-session-name.js"
 
 export function buildPromptLoaderContext(context: ActionInvocationContext): PromptLoaderContext {
   return {
@@ -12,6 +12,4 @@ export function buildPromptLoaderContext(context: ActionInvocationContext): Prom
   }
 }
 
-export function sessionNameFromContext(context: ActionInvocationContext): string | undefined {
-  return stringInput(context.with, "session") ?? context.workId
-}
+export { sessionNameFromContext }

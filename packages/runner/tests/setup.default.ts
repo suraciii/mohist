@@ -1,6 +1,7 @@
 import { afterEach, beforeEach } from "vitest"
 import { setExternalProcessPolicyForTest, type ExternalProcessPolicy } from "../src/system/process-policy.js"
 import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
+import { setPiRuntimeFactoryForTest } from "../src/runtime/pi/index.js"
 
 const denyExternalProcess: ExternalProcessPolicy = {
   assertAllowed(label) {
@@ -11,11 +12,30 @@ const denyExternalProcess: ExternalProcessPolicy = {
 
 setExternalProcessPolicyForTest(denyExternalProcess)
 setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+setPiRuntimeFactoryForTest(() => ({
+  start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
+  ready: () => true,
+  diagnostic: () => null,
+  catalog: () => ({ models: [] }),
+  createSession: async () => ({ ok: true, value: { runtimeSessionId: "/test/pi-session", workDir: "/test" }, diagnostics: [] }),
+  runTurn: async () => ({ ok: true, value: { facts: { finalAssistantText: null, runtimeSessionId: "/test/pi-session", workDir: "/test" }, diagnostics: [] }, diagnostics: [] }),
+  shutdown: async () => {},
+} as never))
 beforeEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
   setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+  setPiRuntimeFactoryForTest(() => ({
+    start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
+    ready: () => true,
+    diagnostic: () => null,
+    catalog: () => ({ models: [] }),
+    createSession: async () => ({ ok: true, value: { runtimeSessionId: "/test/pi-session", workDir: "/test" }, diagnostics: [] }),
+    runTurn: async () => ({ ok: true, value: { facts: { finalAssistantText: null, runtimeSessionId: "/test/pi-session", workDir: "/test" }, diagnostics: [] }, diagnostics: [] }),
+    shutdown: async () => {},
+  } as never))
 })
 afterEach(() => {
   setExternalProcessPolicyForTest(denyExternalProcess)
   setOpencodeModelDiscoveryForTest(async () => ({ models: [], variants: {} }))
+  setPiRuntimeFactoryForTest(null)
 })

@@ -18,16 +18,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 — build the web SPA + publish the .NET server.
 #
-# The .NET SDK image is Ubuntu-based and ships apt packages for Node 22 + npm,
-# so we get both toolchains from mcr.microsoft.com (no docker.io dependency,
-# which matters in networks where Docker Hub is unreachable).
+# The Node toolchain is an explicit compatible release. Copying it into the
+# .NET builder keeps the Node version independent of the distro repository.
 # ─────────────────────────────────────────────────────────────────────────────
+FROM node:22.19.0-bookworm AS node-toolchain
+
 FROM mcr.microsoft.com/dotnet/sdk:11.0-preview AS builder
 
-# Node 22 + npm from the distro repo (matches the repo's @types/node@22 line).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=node-toolchain /usr/local/ /usr/local/
 
 WORKDIR /src
 

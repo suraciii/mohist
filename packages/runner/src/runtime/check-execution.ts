@@ -5,6 +5,9 @@ import type { ActionRegistry } from "../actions/registry.js"
 import { validateActionInput } from "../actions/input-validation.js"
 import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
 import { errorMessage } from "../core/errors.js"
+import { isActionFailure } from "../actions/action-result.js"
+import { workflowSessionName } from "../actions/workflow-session-name.js"
+import type { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 
 function rowToJsonValue(row: CheckResultRow & { invalidOutputReason?: string }): JsonValue {
   return { ...row } as unknown as JsonValue
@@ -28,6 +31,7 @@ export interface CheckResultRow {
 export interface CheckExecutionDeps {
   actions: ActionRegistry
   context: Omit<ActionInvocationContext, "with" | "workDir">
+  coordinator?: WorkflowSessionTurnCoordinator
   formatUnresolved: (unresolved: string[]) => string
   resolveWorkDir: (withInput: JsonObject | null) => Promise<string>
   toCheckStatus: (status: string) => string
@@ -95,49 +99,62 @@ async function runOneCheck(
       }
     }
     const workDir = await deps.resolveWorkDir(renderedWith)
-    let rawResult: unknown
-    try {
-      const actionContext: ActionInvocationContext = {
-        ...deps.context,
-        workType: "check",
-        title: check.title,
-        uses: check.uses,
-        with: validation.input,
-        workDir,
+    const runAction = async (): Promise<CheckResultRow & { invalidOutputReason?: string }> => {
+      let rawResult: unknown
+      try {
+        const actionContext: ActionInvocationContext = {
+          ...deps.context,
+          workType: "check",
+          title: check.title,
+          uses: check.uses,
+          with: validation.input,
+          workDir,
+        }
+        rawResult = await definition.run(actionContext as ValidatedActionContext)
+      } catch (thrown) {
+        rawResult = malformedToUnexpectedError(
+          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+        )
       }
-      rawResult = await definition.run(actionContext as ValidatedActionContext)
-    } catch (thrown) {
-      rawResult = malformedToUnexpectedError(
-        `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
-      )
-    }
-    const normalized = normalizeActionResult(rawResult, definition.manifest)
-    if (normalized.kind === "malformed") {
-      if (normalized.reason === "output") {
+      const normalized = normalizeActionResult(rawResult, definition.manifest)
+      if (normalized.kind === "malformed") {
+        if (normalized.reason === "output") {
+          return {
+            name: check.name,
+            status: "fail",
+            message: normalized.message,
+            invalidOutputReason: normalized.message,
+          }
+        }
+        const result = malformedToUnexpectedError(normalized.message)
         return {
           name: check.name,
           status: "fail",
-          message: normalized.message,
-          invalidOutputReason: normalized.message,
+          message: result.error?.message ?? normalized.message,
+          error: result.error ?? { code: "unexpected-error", message: normalized.message },
         }
       }
-      const result = malformedToUnexpectedError(normalized.message)
-      return {
-        name: check.name,
-        status: "fail",
-        message: result.error?.message ?? normalized.message,
-        error: result.error ?? { code: "unexpected-error", message: normalized.message },
+      if (normalized.kind === "error") {
+        return {
+          name: check.name,
+          status: "fail",
+          message: normalized.error.message,
+          error: normalized.error,
+        }
       }
+      return { name: check.name, status: "pass", output: normalized.output }
     }
-    if (normalized.kind === "error") {
-      return {
-        name: check.name,
-        status: "fail",
-        message: normalized.error.message,
-        error: normalized.error,
-      }
-    }
-    return { name: check.name, status: "pass", output: normalized.output }
+    const result = isInlineAgentAction(check.uses) && deps.coordinator
+      ? await deps.coordinator.withTurn(
+        {
+          projectId: deps.context.projectId ?? "",
+          workflowRunId: deps.context.workflowRunId,
+          sessionName: workflowSessionName(renderedWith, deps.context.workId),
+        },
+        runAction,
+      )
+      : await runAction()
+    return result
   } catch (error) {
     return {
       name: check.name,
@@ -146,6 +163,11 @@ async function runOneCheck(
       error: { code: "unexpected-error", message: errorMessage(error) },
     }
   }
+}
+
+function isInlineAgentAction(uses: string): boolean {
+  const normalized = uses.trim().toLowerCase()
+  return normalized === "mohist/opencode" || normalized === "mohist/pi"
 }
 
 function checkFailureDetails(

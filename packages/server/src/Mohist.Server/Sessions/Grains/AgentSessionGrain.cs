@@ -13,6 +13,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
     private const string OpenCodeRuntime = "opencode";
+    private const string PiRuntime = "pi";
 
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
@@ -147,7 +148,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.ChangeDir,
             command.ProcessPid,
             now,
-            command.Runtime);
+            command.Runtime,
+            command.ExpectedRuntime,
+            command.ExpectedAgentSessionId);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
@@ -163,6 +166,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
+        EnsureCommandRuntimeAvailable(session);
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
@@ -199,6 +203,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
+        EnsureCommandRuntimeAvailable(session);
         EnsureSessionIdleForRecovery(session);
         session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
 
@@ -246,6 +251,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
+        EnsureCommandRuntimeAvailable(session);
         EnsureSessionIdleForRecovery(session);
         var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
@@ -372,6 +378,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionFollowupReservation> BeginFollowupAsync()
     {
         var session = await GetRequiredAsync();
+        EnsureCommandRuntimeAvailable(session);
         EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {
@@ -521,7 +528,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     }
 
     private static bool IsRuntimeRegistered(string runtime) =>
-        string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase);
+        string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
+
+    private static void EnsureCommandRuntimeAvailable(AgentSession session)
+    {
+        if (string.Equals(session.Runtime.Runtime, PiRuntime, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Session commands are unavailable for the pi runtime.");
+    }
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
@@ -717,6 +731,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         RuntimeEventTypes.SessionLiveness => TranscriptPartTypes.Status,
         RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,
         RuntimeEventTypes.Compaction => TranscriptPartTypes.Compaction,
+        RuntimeEventTypes.ProviderRetry => TranscriptPartTypes.ProviderRetry,
         _ => eventType,
     };
 
@@ -1556,7 +1571,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         eventSummary.FailureCategory,
         eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
-            s.Runtime.Runtime);
+            s.Runtime.Runtime,
+            usage.CachedWriteTokens);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
@@ -1624,7 +1640,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 AgentSessionJsonHelper.GetCostCurrency(payload),
                 AgentSessionJsonHelper.GetContextWindowUsed(payload),
                 AgentSessionJsonHelper.GetContextWindowSize(payload),
-                now),
+                now,
+                AgentSessionJsonHelper.GetLongProp(payload, "cachedWriteTokens")),
             RuntimeEventTypes.ModelResolved => session.ResolveModel(
                 AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? AgentSessionJsonHelper.GetStringProp(payload, "model"),
                 now),
