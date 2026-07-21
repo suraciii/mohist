@@ -224,3 +224,19 @@
 - `npm run test:browser -w packages/web -- tests/browser/issue-decision-surface.spec.ts` — 10 / 10 pass.
 - `npm run check:fsd -w packages/web` — green (478 production modules).
 - `npm run check:test-boundaries -w packages/web` — green (367 active Web Vitest files).
+
+# Review Fixes — Preserve Authorized Dispatch and Historical Transcripts
+
+## Decisions
+
+- The shared decision controller now rejects any descriptor whose current `enabled` flag is false,
+  before considering its interaction mode. Confirmation forms may remain visible across a query
+  update, but they cannot dispatch a command after the runtime decision or lifecycle state revokes it.
+- Transcript navigation remains enabled whenever the issue has a workflow run and a concrete session,
+  including archived, completed, and cancelled issues. Those states still omit mutation and delegation
+  actions; the transcript remains the read-only historical entry point.
+
+## Focused Verification
+
+- `npm run typecheck -w packages/web` — green.
+- Focused action-model and controller tests — 61 / 61 tests pass.

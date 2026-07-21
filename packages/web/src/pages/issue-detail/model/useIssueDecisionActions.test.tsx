@@ -125,6 +125,17 @@ describe('buildIssueDecisionActionController', () => {
 })
 
 describe('runControllerAction', () => {
+  it('does not dispatch a disabled action after its authorization changes', () => {
+    const stopMutation = mutation()
+
+    runControllerAction(
+      makeCtx({ mutations: mutations({ stopMutation }) }),
+      makeAction('stop', { enabled: false }),
+    )
+
+    expect(stopMutation.mutate).not.toHaveBeenCalled()
+  })
+
   it('does not dispatch another action while a decision mutation is pending', () => {
     const approveMutation = mutation({ isPending: true })
     const sendBackMutation = mutation()

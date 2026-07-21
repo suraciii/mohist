@@ -108,7 +108,7 @@ export function runControllerAction(
   action: IssueDecisionAction,
   options?: { sendBackBody?: string },
 ): void {
-  if (pickPendingKind(ctx.mutations)) return
+  if (!action.enabled || pickPendingKind(ctx.mutations)) return
 
   switch (action.kind) {
     case 'approve':

@@ -307,7 +307,7 @@ describe('deriveIssueDecisionActions', () => {
     expect(result.transcript).toBeNull()
   })
 
-  it('omits transcript on archived and terminal issues even when sessions exist', () => {
+  it('keeps transcript navigation available on archived and terminal issues when sessions exist', () => {
     const session: Pick<WorkflowRunSession, 'sessionName' | 'status' | 'startedAt' | 'createdAt'> = {
       sessionName: 'review-1',
       status: 'completed',
@@ -319,14 +319,14 @@ describe('deriveIssueDecisionActions', () => {
       workflowSessions: [session],
       issue: makeIssue({ archivedAt: '2026-07-20T00:00:00Z' }),
     }))
-    expect(archived.actions.find((a) => a.kind === 'view-transcript')).toBeFalsy()
+    expect(archived.actions.find((a) => a.kind === 'view-transcript')?.enabled).toBe(true)
 
     const done = deriveIssueDecisionActions(makeContext({
       decision: null,
       workflowSessions: [session],
       issue: makeIssue({ status: IssueStatus.Done }),
     }))
-    expect(done.actions.find((a) => a.kind === 'view-transcript')).toBeFalsy()
+    expect(done.actions.find((a) => a.kind === 'view-transcript')?.enabled).toBe(true)
   })
 
   it('omits transcript when there is no workflowRunId', () => {

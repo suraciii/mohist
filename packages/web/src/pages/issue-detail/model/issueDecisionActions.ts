@@ -312,9 +312,7 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
     })
   }
 
-  const transcriptSession = !issueArchived
-    && !issueTerminal
-    && (issue.workflowRunId ?? null) !== null
+  const transcriptSession = (issue.workflowRunId ?? null) !== null
     && input.workflowSessions.length > 0
       ? selectTranscriptSession(input.workflowSessions)
       : null
