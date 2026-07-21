@@ -24,6 +24,7 @@
 - Verification: `npm run typecheck -w packages/runner` and `npm run typecheck:tests -w packages/runner`.
 - Replaced archive-change's test filesystem access with a narrow injected archive filesystem. Checkpoint creation, retry, collision, corruption, partial archive, and missing source coverage now uses an in-memory implementation.
 - Verification: Runner production and test typechecks, `npm run check:test-boundaries -w packages/runner`, and focused archive/action-boundary tests (32 tests).
+- Final verification: `npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner` (103 files, 1,212 tests), and `npm test` (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, and 1,212 Runner tests) all pass.
 
 ## T-002
 
