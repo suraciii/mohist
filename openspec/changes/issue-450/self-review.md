@@ -1,44 +1,44 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner Runtime/command wiring, repository architecture, and testing rules. This review modifies no other file.
+Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner/Server persistence and dispatch behavior, repository architecture, and testing rules. This review modifies no other file.
 
 ## Findings
 
-### F-1 High: The revised plan implements Session commands that issue #450 explicitly excludes
+### F-1 High: Action-event acknowledgement is not specified as a durable commit
 
-Issue #450 limits delivery to direct Workflow execution and names Session-command routing and implementation as sister-issue work. The proposal repeats that boundary (`proposal.md:14`), and the design says Session-command users are deliberately unaffected (`design.md:13,26-32`). Revised T-006 nevertheless adds production OpenCode `compact()` and `reset()` Runtime methods, registers `registerSessionCommandHandler`, implements command result routing, and adds command restart behavior (`tasks.json:161,168-171`). These are currently absent product capabilities, not compatibility changes to already-running handlers.
+The plan requires `session.input` acknowledgement before Prompt admission and says the Action-event cursor advances atomically with transcript/usage/model facts (`design.md:164-166`; `tasks.json:73-74,103`). The current `AgentSessionGrain.AppendRuntimeEventsAsync` path only mutates activation state and an in-memory transcript accumulator, schedules a persistence timer, fans out, and returns (`packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:742-856`). State/domain events and transcript rows are then persisted in separate phases (`AgentSessionGrain.cs:1158-1222`).
 
-This substantially expands the high-risk issue with an independent command vertical slice and contradicts its non-goals. Remove the new Compact/Reset implementation dependency from #450 and simplify the Action-stream/coordinator plan so unavailable commands remain unavailable without blocking Pi Workflow delivery. If OpenCode command implementation is genuinely prerequisite, the issue/spec boundary must be changed explicitly rather than burying that product scope in T-006 acceptance criteria.
+T-003 assigns a new route and cursor transition but never requires acknowledgement to wait for durable state, nor defines durable pending transcript evidence when transcript persistence follows cursor persistence. A crash after HTTP acknowledgement can therefore lose `session.input`; a cursor commit followed by transcript failure can also make retry look duplicate while the audit fact is absent. Define and assign the durable Action-event commit protocol: persist cursor, state/domain facts, and idempotent pending transcript evidence before acknowledgement, then project/retry transcript separately (or use one transaction). Add crash-after-ack, transcript-failure-after-cursor, duplicate retry, and reactivation tests.
 
-### F-2 High: The slot callback still cannot restore `preparing` before Runtime slot release
+### F-2 High: Workflow lease ownership is split between T-003 and T-006
 
-The design requires `prompt-active` to begin only after physical-slot reservation and to end before that slot is released (`design.md:127`). Revised T-002/T-003 add `onSlotReserved`, but T-003 says the Action calls `exitPromptActive` on `runTurn` completion (`tasks.json:42,68-69`). Today OpenCode owns `inFlight.end(sessionKey)` in `runTurn`'s internal `finally`, before the returned promise settles for the Action (`packages/runner/src/runtime/opencode/runtime.ts:214-242`). The proposed caller therefore cannot perform the required exit ordering. Cancellation and thrown-error wording does not close that gap.
+D6 says `WorkExecutor` acquires the complete task lease and passes an already-held lease token to the Action; the Action cannot acquire or release the coordinator (`design.md:121`). T-003 nevertheless owns migrating the production OpenCode Action into the coordinator (`tasks.json:64,67`), while T-006 separately owns `WorkExecutor` integration and says Action contexts carry `WorkflowSessionTurnCoordinator` itself (`tasks.json:153,156`). These contracts permit two incompatible implementations: Action-owned acquisition in T-003 or executor-owned acquisition in T-006.
 
-Define one scoped reservation lifecycle whose Runtime-owned `finally` invokes a synchronous release callback before ending the physical slot, or return a single-use reservation handle whose release ordering is explicit. Specify the equivalent Pi ordering, callback-failure behavior, and tests that assert both edges: reserve -> enter -> Prompt admission and Prompt settlement -> exit -> physical release.
+Assign production lease acquisition and the OpenCode migration to one task, and make the Action-facing type explicit. If D6 remains authoritative, T-003 should implement/test the coordinator as an injected boundary only, while T-006 atomically migrates `WorkExecutor`, OpenCode, and Pi so Actions receive only the held lease token needed for open/rebind/quarantine operations.
 
-### F-3 High: Compact crash reconciliation assumes an effect can be proven when no correlation evidence exists
+### F-3 High: The universal pre-dispatch Pi command guard is not race-safe for Cancel
 
-T-006 says `reconcileStarted` will inspect OpenCode and decide that compaction was applied or that no effect occurred, without repeating the effect (`tasks.json:170`). OpenCode Compact is `session.summarize` on the same physical Session (`design/runtimes/opencode.md:318-324`); the journal operation ID is not supplied to that SDK call, and the plan defines no durable before/after marker that attributes a summary to this operation. A post-restart snapshot can therefore show changed context without proving whether this command caused it, while an unchanged snapshot cannot prove the call never started.
+The revised plan promises every Pi Follow-up/Compact/Reset/Cancel rejects before reservation or Runner dispatch (`proposal.md:25`; `design.md:98,125`; `specs/pi-workflow-session/spec.md:93,134-137`; `tasks.json:76,161`). Reset can enforce this inside the grain before creating `PendingReset`, but Cancel currently resolves a binding snapshot, separately checks the grain, and later dispatches that stale target (`packages/server/src/Mohist.Server/Api/AgentSessionCancelRoutes.cs:69-129`). A Workflow rebind can commit between the check and dispatch; the Runner Cancel handler then invokes OpenCode for the stale wire binding.
 
-The required `completed` versus `not-started` decision is not implementable from the stated evidence and risks either duplicate compaction or falsely abandoning an applied effect. Define a verified, durable correlation protocol before Runtime entry and include its SDK/storage evidence in the design and smoke/tests, or retain `indeterminate` and move this command implementation to its owning issue. Reset needs the same explicit evidence analysis rather than a generic "physical session reflects the side effect" assertion.
+Because the plan explicitly excludes command admission fences and coordination, its universal guarantee cannot be implemented for concurrent Cancel. Either add a narrow durable Cancel admission fence respected by Workflow bind, or narrow the contract to reject commands whose linearized grain admission observes a Pi binding and explicitly permit an already-admitted OpenCode Cancel to finish against its old physical target. Add controlled cancel-check/rebind/dispatch race tests. T-003 must also explicitly remove Reset's current unregistered-runtime OpenCode fallback before creating its reservation (`AgentSessionGrain.cs:284-304`).
 
-### F-4 High: The Follow-up observer names undefined events and still lacks reconnect correlation
+### F-4 Medium: Crash redelivery's accepted duplicate-turn limitation is omitted
 
-Revised T-006 assigns an observer, but it says native `session.completed`/`session.error` events correlate to the operation and then produce Mohist `session.closed`/`session.followup_failed` evidence (`tasks.json:171`). Neither the current OpenCode Runtime nor its canonical event design defines those native terminal event names; the implemented subscription exposes untyped OpenCode envelopes and current turn logic recognizes `session.status` plus snapshot reconciliation (`packages/runner/src/runtime/opencode/event-subscription.ts:16-31`; `packages/runner/src/runtime/opencode/turn.ts:539-546`; `design/runtimes/opencode.md:245-260`). OpenCode events also carry Session/directory identity, not the Mohist Follow-up operation ID.
+The canonical Pi design explicitly accepts that Workflow redelivery in the Runner crash window can duplicate a turn (`design/runtimes/pi.md:195-199`). The change artifacts repeatedly say restart repair and "no replay" without distinguishing Runtime/outbox retries from Server redelivery (`proposal.md:9-11`; `design.md:162,168`; `tasks.json:106,109,112,170`). Current Runner ownership is process-local, and the Server redelivers Running work absent from the restarted Runner's report (`packages/runner/src/runtime/host.ts:342-399,455-459`; `packages/server/src/Mohist.Server/Runner/Services/DispatchService.cs:98-114`). The repaired Action checkpoint does not own TaskRun completion, so redelivery can submit the prompt again.
 
-Consequently the plan still does not define how an idle Follow-up distinguishes its own terminal transition from stale/previous Session events, what snapshot proves completion after disconnect, or how that evidence maps exactly once to the persisted reservation. Specify the smoke-verified native terminal signal, an admission baseline/generation or other operation correlation, reconnect snapshot rules, and the exact producer of each Mohist terminal event before assigning implementation tests.
+Do not invent durable TaskRun recovery in this issue. Instead, state the canonical accepted limitation explicitly and scope every no-replay assertion to Runtime/outbox behavior within one delivered execution. Add a restart/redelivery test that documents the possible duplicate turn while proving the Runtime and outbox themselves never resubmit an uncertain Prompt.
 
 ## Structural Checks
 
-- `tasks.json` parses as valid JSON.
-- All seven task IDs and dependencies resolve; the graph is acyclic, priorities are ordered, and every implementation task reaches T-001.
+- `tasks.json` parses as valid JSON; all seven task IDs and dependencies resolve and the graph is acyclic.
 - All referenced spec files and requirement anchors resolve.
 - All three proposal capabilities and the issue's seven acceptance criteria are represented.
-- The revised `tasks.json` assigns the previously missing seams, but assignment alone does not resolve the scope and protocol contradictions above.
-- Pi AgentJob execution, Pi Session-command routing, catalog/UI selection, ACP/RPC, and a generic `AgentRuntime` remain outside implementation scope.
+- The previous Session-command implementation, Runtime slot callback, Compact reconciliation, and Follow-up terminal-observer findings are removed from the plan.
+- Catalog loading is used only for Runtime readiness; catalog reporting and Web selection remain out of scope.
+- Pi AgentJob execution, Pi Session-command implementation, ACP/RPC, and a generic `AgentRuntime` remain outside implementation scope.
 
 ## Verdict
 
-The Pi product behavior is covered, but the revised task plan crosses the issue's explicit command boundary and still leaves reservation release, command reconciliation, and Follow-up terminal evidence under-specified. Builders would have to invent concurrency-critical protocols.
+The product surface is covered, but builders would still have to choose persistence, lease-ownership, and Cancel linearization protocols, and the restart contract currently overstates the canonical no-replay guarantee.
 
 <promise>FAIL</promise>
