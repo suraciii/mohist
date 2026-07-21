@@ -8,6 +8,7 @@ description: |
 
 variables:
   agent: {}
+  archive: null
 
 approval:
   feedback:
@@ -307,6 +308,7 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
+          archiveHint: ${{ vars.archive }}
         recovery:
           budget: 3
           handlers:
