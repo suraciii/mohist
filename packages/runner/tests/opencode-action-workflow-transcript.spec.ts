@@ -126,6 +126,7 @@ interface FakeConnectionHandles {
   eventCalls: Array<{ projectId: string; workflowRunId: string; sessionName: string; body: unknown }>
   setEventBehavior: (writer: (body: unknown) => Promise<void> | void) => void
   setEventRejection: (types: ReadonlySet<string>) => void
+  setInputAccepted: (accepted: boolean) => void
 }
 
 function makeFakeConnection(): FakeConnectionHandles {
@@ -134,6 +135,7 @@ function makeFakeConnection(): FakeConnectionHandles {
   const eventCalls: FakeConnectionHandles["eventCalls"] = []
   let writer: (body: unknown) => Promise<void> | void = async () => {}
   let rejectTypes: ReadonlySet<string> = new Set()
+  let inputAccepted = true
   const connection = {
     async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown) {
       openCalls.push({ projectId, workflowRunId, sessionName, body })
@@ -149,6 +151,8 @@ function makeFakeConnection(): FakeConnectionHandles {
         throw new Error(`rejected: ${runtimeEvents[0]?.type ?? "?"}`)
       }
       await writer(body)
+      if (!inputAccepted && runtimeEvents.some((event) => event.type === "session.input")) return []
+      return runtimeEvents.map((event) => ({ type: event.type }))
     },
   } as unknown as ServerConnection
   return {
@@ -161,6 +165,9 @@ function makeFakeConnection(): FakeConnectionHandles {
     },
     setEventRejection(next) {
       rejectTypes = next
+    },
+    setInputAccepted(accepted) {
+      inputAccepted = accepted
     },
   }
 }
@@ -391,6 +398,35 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     }
   })
 
+  it("suppresses activity and close reports when the server returns no accepted session.input receipt", async () => {
+    const { runtime } = buildRuntime({
+      emitDuringPrompt: async (subscription, sessionId) => {
+        subscription.emit({
+          type: "message.part.updated",
+          sessionID: sessionId,
+          payload: { part: { id: "txt_a", messageID: "msg_1", type: "text", text: "alpha" } },
+        })
+        await new Promise((resolve) => setImmediate(resolve))
+      },
+    })
+    await ensureReady(runtime)
+    const connection = makeFakeConnection()
+    connection.setInputAccepted(false)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    try {
+      const result = await opencodeAction(baseContext({ openCodeRuntime: runtime, serverConnection: connection.connection }))
+      expect(result.error).toBeUndefined()
+      expect(connection.eventCalls.map((call) => {
+        const events = (call.body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents
+        return events[0]?.type ?? "?"
+      })).toEqual(["session.input"])
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("type=session.input"))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("does not change a successful Action result when a projected event upload fails after input accepted", async () => {
     const { runtime } = buildRuntime({
       emitDuringPrompt: async (subscription, sessionId) => {
@@ -521,6 +557,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       },
       async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
         eventCalls.push(body)
+        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
       },
     } as unknown as ServerConnection
 
@@ -594,6 +631,7 @@ describe("WorkflowAgentSessionReporter — independent failure semantics", () =>
       async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
         eventCalls.push(body)
         await eventWriter(body)
+        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
       },
     } as unknown as ServerConnection
     const reporter = new WorkflowAgentSessionReporter({
@@ -666,6 +704,7 @@ describe("WorkflowAgentSessionReporter — independent failure semantics", () =>
       async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown, signal: AbortSignal) {
         expect(signal.aborted).toBe(false)
         void body
+        return [{ type: "session.input" }]
       },
     } as unknown as ServerConnection
     const reporter = new WorkflowAgentSessionReporter({
@@ -681,4 +720,3 @@ describe("WorkflowAgentSessionReporter — independent failure semantics", () =>
     expect(reporter.inputWasAccepted()).toBe(true)
   })
 })
-

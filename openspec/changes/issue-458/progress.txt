@@ -51,3 +51,17 @@
 - `npm test` (root) — 1361 cli + 1260 server unit + 30 server arch + 2891 server spec + 4995 web + 1190 runner = 11727 tests pass.
 - Architecture ratchets hold: file sizes stay under both budgets.
 - `git status` — only the source changes I touched and two new spec files (`opencode-action-workflow-terminal-close.spec.ts`, `WorkflowSessionTerminalConvergenceSpecs.cs`); no generated artifacts.
+
+# T-003 progress notes
+
+## Review follow-up
+
+- The Workflow runtime-events route returns the grain's accepted-event receipts even when the HTTP status is 200. A rejected `session.input` therefore appears as an empty receipt list when the input persistence fence cannot flush the prior pending turn.
+- `ServerConnection.workflowAgentSessionRuntimeEvents` now returns those receipts. `WorkflowAgentSessionReporter` requires a `session.input` receipt before opening its turn gate; an empty response follows the existing rejected-input path and suppresses all later activity and `session.closed` reports for that turn.
+- The runner regression uses a resolved empty receipt response, rather than a thrown transport error, and verifies the Action still succeeds while making only the input upload attempt.
+
+## Verification surface
+
+- `npm run typecheck -w packages/runner` — green.
+- `npm run typecheck:tests -w packages/runner` — green.
+- `npm test -w packages/runner` — 1191 tests pass (99 files).

@@ -292,8 +292,15 @@ export class ServerConnection {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
   }
 
-  async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`, body, signal)
+  async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
   }
 
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
@@ -333,6 +340,10 @@ export interface WorkflowAgentSession {
   workDir?: string | null
   model?: string | null
   resolvedModel?: string | null
+}
+
+export interface AgentSessionRuntimeEventReceipt {
+  type: string
 }
 
 export type AgentSession = WorkflowAgentSession

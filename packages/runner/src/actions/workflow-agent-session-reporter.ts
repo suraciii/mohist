@@ -95,7 +95,7 @@ export class WorkflowAgentSessionReporter {
 
   private async uploadInput(prompt: string, runtimeSessionId: string): Promise<void> {
     try {
-      await this.connection.workflowAgentSessionRuntimeEvents(
+      const acceptedEvents = await this.connection.workflowAgentSessionRuntimeEvents(
         this.projectId,
         this.workflowRunId,
         this.sessionName,
@@ -114,6 +114,9 @@ export class WorkflowAgentSessionReporter {
         }),
         this.controller.signal,
       )
+      if (!acceptedEvents.some((event) => event.type === "session.input")) {
+        throw new Error("session.input was not accepted by the Workflow AgentSession")
+      }
       if (!this.inputDecided) {
         this.inputAccepted = true
         this.inputDecided = true

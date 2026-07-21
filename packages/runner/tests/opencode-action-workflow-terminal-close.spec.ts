@@ -118,6 +118,7 @@ function makeFakeConnection(): FakeConnectionHandles {
         throw new Error(`rejected: ${runtimeEvents[0]?.type ?? "?"}`)
       }
       await writer(body)
+      return runtimeEvents.map((event) => ({ type: event.type }))
     },
   } as unknown as ServerConnection
   return {
@@ -322,6 +323,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close reportin
       },
       async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown) {
         events.push(body)
+        return (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents.map((event) => ({ type: event.type }))
       },
     } as unknown as ServerConnection
 
