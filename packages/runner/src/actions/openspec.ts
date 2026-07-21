@@ -328,7 +328,6 @@ function buildOpenSpecTaskPromptSpec(
   const loaderWith: JsonObject = {
     file: loaderConfig.file,
     items: loaderConfig.items,
-    base: "${{ prompts.build }}",
   }
   if (taskId?.trim()) loaderWith["taskId"] = taskId
   return {
