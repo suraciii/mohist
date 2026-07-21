@@ -2,22 +2,27 @@
 
 ## Findings
 
-### 1. High: production follow-up handling resolves the runtime before it exists
-
-The plan requires follow-up input to be durably enqueued and then invoked exactly once through the current OpenCode runtime (`specs/agent-session-runtime-event-delivery/spec.md:100-110`, `tasks.json:26-28`). It does not address a current composition defect on that path.
-
-`RunnerHost` constructs `RunnerSignalRClient` with a runtime accessor while `openCodeRuntime` is still null (`packages/runner/src/runtime/host.ts:156-168`); the runtime is created later in `initializeSharedConnection` (`packages/runner/src/runtime/host.ts:325-337`). `RunnerSignalRClient` registers handlers in its constructor and immediately calls `resolveOpenCodeRuntime()`, passing the resulting value into the follow-up and cancel handlers (`packages/runner/src/server/runner-signalr.ts:90-105`, `packages/runner/src/server/runner-signalr.ts:139-161`). The accessor is therefore resolved once to null rather than at command invocation time.
-
-Without an explicit correction, production follow-ups remain `unavailable` before durable enqueue or runtime invocation, so the issue's follow-up-input guarantee cannot be delivered. The plan must require follow-up/cancel handlers to resolve the runtime at invocation time (or receive an updated live handle) and add a real `RunnerSignalRClient` regression test where the client is constructed before the runtime becomes ready and a later follow-up uses the initialized runtime. A host test that only inspects an accessor through a mocked client is insufficient.
+No blocking findings.
 
 ## Review Summary
 
-- The proposal and specs cover upload retry, restart recovery, non-blocking Server delivery, and the issue's Server/cross-runner non-goals.
-- Managed producer-sequence ordering, AgentJob scope, acknowledgement policies, stale-binding behavior, local persistence failure handling, autonomous health recovery, migration, atomic switchover, and runner `test:ci` verification are internally consistent.
-- The remaining blocker is the live runtime composition required for the follow-up feature to function in production.
+- The proposal covers failed-upload recovery, runner-restart recovery, and non-blocking Server delivery for Workflow turn events and follow-up input while preserving the no-Server-deduplication and no-cross-runner-transfer boundaries.
+- The specs distinguish durable local enqueue from Server acceptance, preserve managed-sequence ordering, retain matching-receipt events until positive acknowledgement, and explicitly preserve the existing operation-fenced follow-up terminal semantics.
+- The design defines one atomic shared-outbox switchover, idempotent legacy import, binding-preserving retries, bounded independent sequence drains, autonomous full-state health recovery, and paused network delivery while the durable snapshot is unhealthy.
+- Workflow and follow-up execution remain independent of Server availability; pre-execution local write failure creates no orphan input, while post-start fact-write failure preserves the original runtime result and retains facts for recovery.
+- Runtime lookup is invocation-time, target resolution is binding-only, claims/follow-up/cancel use separate admission rules, and cancel remains available during outbox recovery.
+- AgentJob direct reporting and its cross-producer ordering remain explicitly out of scope, with source-local regression coverage.
+- The single implementation task is atomic, has no dependency-cycle risk, includes focused failure/restart/migration/composition coverage, and requires runner production typecheck plus `test:ci` test-typecheck, boundary, and Vitest verification.
+
+## Residual Risks
+
+- Ambiguous lost responses can duplicate content events because Server deduplication is explicitly out of scope.
+- Permanently stale matching-receipt events can block only their managed sequence and grow local state; eviction/dead-letter administration is deferred.
+- Events not locally committed before process termination are outside restart recovery, as explicitly documented.
+- A valid empty follow-up terminal response can represent either consumed operation or stale binding; preserving current terminal behavior intentionally permits the stale case to settle without proof of persistence.
 
 ## Verdict
 
-The plan is not ready to build.
+The plan is internally consistent, testable, scoped to issue 461, and ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
