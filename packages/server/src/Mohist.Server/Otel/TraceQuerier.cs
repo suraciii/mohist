@@ -32,6 +32,18 @@ public sealed class TraceQuerier : IOtelQueryExecutor
     /// <summary>Hard upper bound for the <c>POST /otel/api/query</c> body.</summary>
     public const int MaxQueryRequestBodyBytes = 64 * 1024;
 
+    /// <summary>Hard upper bound on rows returned by <c>POST /otel/api/query</c>.</summary>
+    public const int MaxQueryResponseRows = 1000;
+
+    /// <summary>Hard upper bound on serialized bytes returned by <c>POST /otel/api/query</c>.</summary>
+    public const int MaxQueryResponseBytes = 4 * 1024 * 1024;
+
+    /// <summary>Truncation reason returned when the row cap is hit.</summary>
+    public const string RowLimitTruncateReason = "row_limit";
+
+    /// <summary>Truncation reason returned when the byte cap is hit.</summary>
+    public const string ByteLimitTruncateReason = "byte_limit";
+
     /// <summary>Execution budget in seconds for the free-SQL endpoint.</summary>
     public const int QueryExecutionBudgetSeconds = 10;
 
@@ -160,6 +172,8 @@ public sealed class TraceQuerier : IOtelQueryExecutor
     ///   <item><see cref="OtelDb.OpenReadOnlyConnection"/> — physical isolation.</item>
     ///   <item>Caller's keyword check in <see cref="ValidateSelectOnly"/>.</item>
     ///   <item><see cref="QueryExecutionBudgetSeconds"/> — interrupts active SQLite work.</item>
+    ///   <item>Row and serialized-byte caps on the response, with a
+    ///         truncation indicator naming which bound was hit.</item>
     /// </list>
     /// </remarks>
     public async Task<QueryResult> ExecuteBoundedQuery(string sql, CancellationToken ct = default)
@@ -195,15 +209,47 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             fieldNames[i] = reader.GetName(i);
         }
 
-        var rows = new List<Dictionary<string, object?>>();
+        var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
+        var accumulatedBytes = 0L;
+        var rowEnvelopeBytes = ComputeRowEnvelopeBytes(fieldNames);
         while (await reader.ReadAsync(executionToken))
         {
+            if (rows.Count >= MaxQueryResponseRows)
+            {
+                return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
+            }
+
+            var estimatedRowBytes = rowEnvelopeBytes;
+            var oversizedCell = false;
+            for (var i = 0; i < fieldCount; i++)
+            {
+                if (reader.IsDBNull(i))
+                {
+                    estimatedRowBytes += 4;
+                    continue;
+                }
+
+                var cellBytes = TryPeekCellSerializedBytes(reader, i);
+                if (cellBytes.HasValue && cellBytes.Value > MaxQueryResponseBytes - accumulatedBytes)
+                {
+                    oversizedCell = true;
+                    break;
+                }
+                estimatedRowBytes += cellBytes ?? ScalarCellEstimate;
+            }
+
+            if (oversizedCell || accumulatedBytes + estimatedRowBytes > MaxQueryResponseBytes)
+            {
+                return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
+            }
+
             var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
             for (var i = 0; i < fieldCount; i++)
             {
                 row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             }
             rows.Add(row);
+            accumulatedBytes += estimatedRowBytes;
         }
         return new QueryResult(rows, Truncated: false, TruncateReason: null);
     }
@@ -302,6 +348,43 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             return 0L;
         }
     }
+
+    private static long ComputeRowEnvelopeBytes(string[] fieldNames)
+    {
+        // { "col": v, "col": v, ... }
+        long total = 2;
+        for (var i = 0; i < fieldNames.Length; i++)
+        {
+            total += System.Text.Encoding.UTF8.GetByteCount(fieldNames[i]);
+            total += 4; // "col":
+            if (i > 0)
+                total += 1; // ,
+        }
+        return total;
+    }
+
+    private static long? TryPeekCellSerializedBytes(SqliteDataReader reader, int ordinal)
+    {
+        var type = reader.GetFieldType(ordinal);
+        if (type == typeof(string))
+        {
+            long charCount = reader.GetChars(ordinal, 0, null, 0, 0);
+            // JavaScriptEncoder.Create(UnicodeRanges.All) escapes every non-ASCII
+            // char to \uXXXX, so worst-case serialized bytes = quotes + 6 per char.
+            if (charCount > int.MaxValue / 6)
+                return long.MaxValue;
+            return 2L + charCount * 6L;
+        }
+        if (type == typeof(byte[]))
+        {
+            long byteCount = reader.GetBytes(ordinal, 0, null, 0, 0);
+            // Base64 of n bytes fits in 4 * ceil(n / 3); wrap with quotes.
+            return 2L + ((byteCount + 2) / 3) * 4L;
+        }
+        return null;
+    }
+
+    private const long ScalarCellEstimate = 32;
 
     private static string NormalizeSql(string raw)
     {

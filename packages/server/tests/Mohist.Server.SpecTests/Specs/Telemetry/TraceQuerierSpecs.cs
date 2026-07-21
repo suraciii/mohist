@@ -235,6 +235,108 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
+    public void MaxQueryResponseRows_IsFixedAtOneThousand()
+    {
+        Assert.Equal(1000, TraceQuerier.MaxQueryResponseRows);
+    }
+
+    [Fact]
+    public void MaxQueryResponseBytes_IsFixedAtFourMiB()
+    {
+        Assert.Equal(4 * 1024 * 1024, TraceQuerier.MaxQueryResponseBytes);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_ManyRows_TruncatesAtRowLimitWithReason()
+    {
+        var query = """
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < 2500
+            )
+            SELECT x FROM cnt;
+            """;
+
+        var result = await _querier.ExecuteBoundedQuery(query);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.RowLimitTruncateReason, result.TruncateReason);
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, result.Rows.Count);
+        Assert.Equal(1L, result.Rows[0]["x"]);
+        Assert.Equal((long)TraceQuerier.MaxQueryResponseRows, result.Rows[^1]["x"]);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_SingleLargeCell_TruncatesAtByteLimitWithoutMaterializing()
+    {
+        const int oversizedChars = 8 * 1024 * 1024;
+
+        var result = await _querier.ExecuteBoundedQuery(
+            $"SELECT substr(replace(hex(zeroblob({oversizedChars})), '0', 'x'), 1, {oversizedChars}) AS big");
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.ByteLimitTruncateReason, result.TruncateReason);
+        Assert.Empty(result.Rows);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_ModerateRowsUnderByteLimit_TruncatesBeforeRowLimit()
+    {
+        // Each row carries a 6 KiB TEXT cell, so 1000 rows would exceed the
+        // 4 MiB byte cap by row ~700. The row cap (1000) is never reached.
+        const int rowCount = 1000;
+        const int cellBytes = 6 * 1024;
+
+        var recursiveQuery = $$"""
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < {{rowCount}}
+            )
+            SELECT hex(randomblob({{cellBytes / 2}})) AS payload FROM cnt;
+            """;
+
+        var recursiveResult = await _querier.ExecuteBoundedQuery(recursiveQuery);
+
+        Assert.True(recursiveResult.Truncated);
+        Assert.Equal(TraceQuerier.ByteLimitTruncateReason, recursiveResult.TruncateReason);
+        Assert.True(recursiveResult.Rows.Count < TraceQuerier.MaxQueryResponseRows);
+        Assert.True(recursiveResult.Rows.Count > 0);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_RecursiveCteAmplification_RespectsBothCaps()
+    {
+        var smallRowQuery = """
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < 100000
+            )
+            SELECT x FROM cnt;
+            """;
+
+        var result = await _querier.ExecuteBoundedQuery(smallRowQuery);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.RowLimitTruncateReason, result.TruncateReason);
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, result.Rows.Count);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_WithinBothCaps_DoesNotMarkTruncated()
+    {
+        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
+
+        var result = await _querier.ExecuteBoundedQuery(
+            $"SELECT {OtelDb.TracesServiceNameColumn} FROM {OtelDb.TracesTable}");
+
+        Assert.False(result.Truncated);
+        Assert.Null(result.TruncateReason);
+    }
+
+    [Fact]
     public void OpenConnection_HandleIsVisibleAndNonNull()
     {
         using var connection = new SqliteConnection("Data Source=:memory:");

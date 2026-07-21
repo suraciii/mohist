@@ -399,6 +399,128 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostQuery_MoreThanRowCap_ReturnsRowLimitTruncationIndicator()
+    {
+        const int target = TraceQuerier.MaxQueryResponseRows + 500;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + target + ") " +
+                  "SELECT x FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_SingleLargeCell_ReturnsByteLimitTruncationIndicator()
+    {
+        const int oversizedChars = 6 * 1024 * 1024;
+        var sql = "SELECT substr(replace(hex(zeroblob(" + oversizedChars + ")), '0', 'x'), 1, " + oversizedChars + ") AS big";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected OK but got {(int)response.StatusCode}: {responseBody}");
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal(0, data.GetProperty("rows").GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_ModerateRowsUnderRowCap_TruncatesByByteLimit()
+    {
+        const int rowCount = TraceQuerier.MaxQueryResponseRows;
+        const int cellBytes = 6 * 1024;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + rowCount + ") " +
+                  "SELECT hex(randomblob(" + (cellBytes / 2) + ")) AS payload FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.True(rows.GetArrayLength() < TraceQuerier.MaxQueryResponseRows);
+        Assert.True(rows.GetArrayLength() > 0);
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_RecursiveCteAmplification_BoundedByFirstLimitReached()
+    {
+        const int target = 50_000;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + target + ") " +
+                  "SELECT x FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_WithinBothCaps_OmitsTruncationIndicator()
+    {
+        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT service_name FROM traces\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.False(data.GetProperty("truncated").GetBoolean());
+        Assert.False(data.TryGetProperty("truncate_reason", out var reason) && reason.ValueKind != JsonValueKind.Null);
+    }
+
+    [Fact]
     public async Task GetStatus_OnMainApi_ReturnsCollectorStatus()
     {
         using var client = _factory.CreateMainApiClient();
