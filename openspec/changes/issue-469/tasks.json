@@ -13,6 +13,7 @@
         "Non-SELECT, multi-statement (e.g. SELECT 1; DROP TABLE traces), and write attempts (DELETE/INSERT/DROP/ALTER/ATTACH/PRAGMA) return HTTP 400 with stable codes query_not_select or query_sqlite_error.",
         "Missing SQL and malformed JSON return HTTP 400 with codes query_missing_sql and query_malformed respectively.",
         "Admission tests assert on ApiResponse code fields (not human-readable body text) and use no wall-clock assertions.",
+        "The misnamed existing test PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode is renamed/clarified during test-hardening to reflect that ATTACH is rejected at the keyword layer with code query_not_select (matching the reframed admission scenario), not as a read-only-engine bypass.",
         "dotnet build Mohist.sln succeeds (warnings-as-errors) and the server spec tests for the OTel query routes pass."
       ],
       "priority": 1,
@@ -36,6 +37,7 @@
         "Budget exhaustion returns a structured error with code query_execution_budget_exhausted and never returns a partial row array presented as a complete result.",
         "The real sqlite3_interrupt wiring is verified deterministically: a production-executor test seeds a large bounded recursive-CTE row set, advances FakeTimeProvider past the budget while the query is in-flight, and asserts the reader terminated early (did not consume all rows) and the connection was disposed — no Stopwatch, no Thread.Sleep, no wall-clock duration assertion. The route-level contract (budget -> query_execution_budget_exhausted, client cancel -> connection released) is verified through the FakeOtelQueryExecutor seam.",
         "SQLitePCL.raw resolves at compile time (add a direct SQLitePCLRaw.core PackageReference using the central Directory.Packages.props version if the transitive does not surface), and a guard test asserts SqliteConnection.Handle is non-null on an open in-memory connection so a future library update that changes visibility fails loudly.",
+        "ExecuteBoundedQuery replaces (not overloads) ExecuteRawQuery; the three existing ExecuteRawQuery_* unit tests in TraceQuerierSpecs.cs (SelectAllRows, AggregateCount, NullCell) are migrated onto ExecuteBoundedQuery asserting QueryResult.Rows and a non-truncated result, and no ExecuteRawQuery method or ExecuteRawQuery_* test remains (no old/new coexistence).",
         "dotnet build Mohist.sln succeeds (warnings-as-errors) and the server spec + unit tests pass."
       ],
       "priority": 2,

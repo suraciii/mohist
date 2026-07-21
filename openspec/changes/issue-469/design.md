@@ -40,7 +40,7 @@ The bounded query path registers a cancellation callback on the execution token 
 
 `raw.sqlite3_interrupt` is reached via `using static SQLitePCL.raw;`. `SQLitePCLRaw.core` is already a transitive dependency of `Microsoft.Data.Sqlite`, so its types normally flow to consumers; the build must confirm `SQLitePCL.raw` resolves at compile time and, if it does not, add a direct `<PackageReference Include="SQLitePCLRaw.core" />` using the version pinned in `Directory.Packages.props`. `SqliteConnection.Handle` is `public virtual sqlite3?` in the pinned `Microsoft.Data.Sqlite` 11 preview, so no reflection is involved; the build should assert this with a guard test (a trivial unit test that reads `connection.Handle` on an open in-memory connection) so a future library update that changes visibility fails loudly instead of silently disabling interruption.
 
-`CommandTimeout` is retained at its current 5 s purely as defense-in-depth for `SQLITE_BUSY` lock-wait; it is not relied on as the long-query bound (see `otel-query-execution-budget` spec). The doc comments on `ExecuteRawQuery` are updated to describe the new four-layer safety net (admission, read-only connection, execution-budget interrupt, row/byte response budgets) and to stop citing the removed `design.md` Decision 5/8.
+`CommandTimeout` is retained at its current 5 s purely as defense-in-depth for `SQLITE_BUSY` lock-wait; it is not relied on as the long-query bound (see `otel-query-execution-budget` spec). The doc comments on the new `ExecuteBoundedQuery` (which replaces `ExecuteRawQuery`) describe the four-layer safety net (admission, read-only connection, execution-budget interrupt, row/byte response budgets) and stop citing the removed `design.md` Decision 5/8.
 
 **Alternatives considered:**
 
@@ -73,7 +73,7 @@ The structured `413` is returned through the standard `ApiResponse` envelope via
 
 ### Decision 4: Response budgets applied during the read loop, with a `QueryResult` wrapper carrying truncation
 
-`ExecuteRawQuery` gains an overload (or a new `ExecuteBoundedQuery`) that returns a `QueryResult`:
+`ExecuteBoundedQuery` **replaces** the existing `ExecuteRawQuery` (a single method, not an overload kept alongside it, so there is no old/new coexistence) and returns a `QueryResult`:
 
 ```
 QueryResult {
@@ -90,7 +90,7 @@ The read loop stops when:
 
 Per-row serialized size is accounted as the loop runs (UTF-8 byte count of string cells + fixed size for numbers/bytes/nulls), and for potentially-oversized single cells the column byte length is peeked (`SqliteDataReader.GetBytes`) before the value is materialized, so a `SELECT repeat('x', …)` cannot force an oversized allocation. The endpoint serializes `ApiResponse<QueryResult>`; the Web UI reads `data.rows`, `data.truncated`, `data.truncate_reason`.
 
-This is a **contract change** for `/otel/api/query`: `data` moves from a bare array to `{ rows, truncated, truncate_reason }`. Consumers are the diagnostic UI and AI only (no external integrations), and the project is in active development with no version-compat constraint, so the evolution is acceptable. The existing `OtelQueryRoutesIntegrationSpecs` assertions on `data[0].total` move to `data.rows[0].total`.
+This is a **contract change** for `/otel/api/query`: `data` moves from a bare array to `{ rows, truncated, truncate_reason }`. Consumers are the diagnostic UI and AI only (no external integrations), and the project is in active development with no version-compat constraint, so the evolution is acceptable. The existing `OtelQueryRoutesIntegrationSpecs` assertions on `data[0].total` move to `data.rows[0].total`, and the three existing `ExecuteRawQuery_*` unit tests in `TraceQuerierSpecs.cs` (`SelectAllRows`, `AggregateCount`, `NullCell`) migrate onto `ExecuteBoundedQuery` (asserting `QueryResult.Rows` and a non-truncated result); no `ExecuteRawQuery` method or `ExecuteRawQuery_*` test remains.
 
 **Alternatives considered:**
 
