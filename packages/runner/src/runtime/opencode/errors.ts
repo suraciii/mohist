@@ -175,7 +175,7 @@ export function normalizeTurnFailed(raw: RawSdkError | string, diagnostics: read
     kind: "turn-failed",
     message: transportCode
       ? `OpenCode local transport failed (${transportCode}); confirm the local runtime is healthy, then retry`
-      : "OpenCode turn failed",
+      : message,
     diagnostics: [
       ...diagnostics,
       {
