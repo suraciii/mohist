@@ -120,6 +120,13 @@ async function mockIssueDetailApi(page: Page, issue: Record<string, unknown>, se
     const path = url.pathname.replace(/^\/api/, '')
     const method = route.request().method()
 
+    if (method === 'POST' && path === `/projects/${project.id}/issues/${issue.number}/approve`) {
+      return route.fulfill({ json: response({ issue, context: null, message: 'Approved' }) })
+    }
+    if (method === 'POST' && path === `/projects/${project.id}/issues/${issue.number}/feedback`) {
+      return route.fulfill({ json: response({ success: true, data: { id: 'feedback-1' } }) })
+    }
+
     if (method === 'GET' && path === '/projects') {
       return route.fulfill({ json: response([project]) })
     }
@@ -413,6 +420,53 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(page.getByTestId('approval-mobile-send-back')).toBeVisible()
     await expect(page.getByTestId('approval-review-evidence')).toBeVisible()
     await expect(page.getByTestId('mobile-action-sheet-launcher')).not.toBeVisible()
+  })
+
+  test('desktop approval shortcuts and Command+Enter use the visible action paths', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const issue = makeIssue({
+      number: 411,
+      status: 'in_progress',
+      workflowStage: 'plan',
+      workflowStatus: 'paused',
+      workflowRunId: 'wr-approval',
+      health: 'paused',
+      approvalState: {
+        status: 'awaiting',
+        stage: 'plan',
+        requestedAt: '2026-07-01T03:00:00Z',
+      },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'awaiting-approval',
+        workflowSummaryState: 'approval-required',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    await mockIssueDetailApi(page, issue, [])
+    let approveRequests = 0
+    let feedbackRequests = 0
+    page.on('request', (request) => {
+      if (request.method() !== 'POST') return
+      if (request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/approve`)) approveRequests += 1
+      if (request.url().endsWith(`/projects/${project.id}/issues/${issue.number}/feedback`)) feedbackRequests += 1
+    })
+    await page.goto(`/${project.name}/issues/${issue.number}`)
+
+    await expect(page.getByTestId('decision-action-approve-shortcut')).toHaveText('a')
+    await expect(page.getByTestId('decision-action-send-back-shortcut')).toHaveText('m')
+    await page.keyboard.press('a')
+    await expect.poll(() => approveRequests).toBe(1)
+
+    await page.keyboard.press('m')
+    const feedback = page.getByTestId('send-back-feedback-textarea')
+    await expect(feedback).toBeFocused()
+    await page.getByRole('radio', { name: 'Scope' }).click()
+    await feedback.fill('Keep the plan focused.')
+    await page.keyboard.press('a')
+    await expect.poll(() => approveRequests).toBe(1)
+    await page.keyboard.press('Meta+Enter')
+    await expect.poll(() => feedbackRequests).toBe(1)
   })
 
   test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({ page }) => {

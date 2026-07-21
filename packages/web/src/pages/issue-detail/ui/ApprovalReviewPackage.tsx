@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { MoreHorizontalIcon } from 'lucide-react'
 import {
@@ -15,6 +15,7 @@ import { cn } from '@/shared/lib/utils'
 import type { IssueDecisionAction } from '../model/issueDecisionActions'
 import type { IssueDecisionActionController } from '../model/useIssueDecisionActions'
 import { IssueDecisionSurface } from './IssueDecisionSurface'
+import { useApprovalKeyboardShortcuts } from './useApprovalKeyboardShortcuts'
 
 type ArtifactListHook = (...args: Parameters<typeof useIssueWorkflowArtifacts>) => Pick<ReturnType<typeof useIssueWorkflowArtifacts>, 'data' | 'isLoading' | 'error'>
 type ArtifactContentHook = (...args: Parameters<typeof useIssueWorkflowArtifactContent>) => Pick<ReturnType<typeof useIssueWorkflowArtifactContent>, 'data' | 'isLoading' | 'error'>
@@ -57,6 +58,12 @@ export function SendBackFeedbackForm({
   const textRef = useRef<HTMLTextAreaElement>(null)
   const valid = !!stage && !!draft.category && draft.body.trim().length > 0
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || !event.metaKey || event.repeat || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (valid && !pending) onSubmit()
+  }
+
   useEffect(() => {
     textRef.current?.focus()
   }, [])
@@ -90,11 +97,13 @@ export function SendBackFeedbackForm({
           data-testid="send-back-feedback-textarea"
           value={draft.body}
           onChange={(event) => onChange({ ...draft, body: event.target.value })}
+          onKeyDown={handleKeyDown}
           rows={4}
           className="mt-2 min-w-0 resize-y bg-card"
           placeholder="Describe the requested change..."
           aria-required="true"
         />
+        <div className="text-xs text-muted-foreground">Submit with <kbd className="rounded border border-border bg-card px-1 py-0.5 font-mono">Command+Enter</kbd></div>
       </div>
       <div className="mt-2 flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending}>
@@ -290,16 +299,26 @@ export function ApprovalReviewPackage({
   const sendBackReason = controller.pendingKind !== null
     ? 'Another request is in progress. Wait for it to finish before trying again.'
     : sendBack?.reason
+  const handleSendBackOpen = () => setSendBackOpen(true)
+  const handleSendBackSubmit = () => {
+    if (!sendBack || !sendBack.enabled || controller.pendingKind !== null || !draft.category || !draft.body.trim()) return
+    controller.runAction(sendBack, { sendBackBody: serializeSendBackFeedback(draft) })
+  }
+
+  useApprovalKeyboardShortcuts({
+    actions,
+    controller,
+    isNarrowViewport,
+    onSendBackOpen: handleSendBackOpen,
+  })
+
   const sendBackForm = sendBackOpen && (
     <SendBackFeedbackForm
       draft={draft}
       onChange={setDraft}
       onCancel={() => setSendBackOpen(false)}
-      onSubmit={() => {
-        if (!sendBack || !draft.category || !draft.body.trim()) return
-        controller.runAction(sendBack, { sendBackBody: serializeSendBackFeedback(draft) })
-      }}
-      pending={controller.pendingKind === 'send-back'}
+      onSubmit={handleSendBackSubmit}
+      pending={controller.pendingKind !== null}
       stage={approvalStage}
     />
   )
@@ -345,8 +364,12 @@ export function ApprovalReviewPackage({
           controller={controller}
           evidence={evidence}
           sendBackOpen={sendBackOpen}
-          onSendBackOpen={() => setSendBackOpen(true)}
+          onSendBackOpen={handleSendBackOpen}
           sendBackForm={sendBackForm}
+          shortcutHints={{
+            approve: approve?.enabled && controller.pendingKind === null ? 'a' : undefined,
+            'send-back': sendBack?.enabled && controller.pendingKind === null ? 'm' : undefined,
+          }}
         />
       )}
 
@@ -356,7 +379,7 @@ export function ApprovalReviewPackage({
             <Button type="button" data-testid="approval-mobile-approve" aria-describedby={approveReason ? 'approval-mobile-approve-reason' : undefined} disabled={!approve?.enabled || controller.pendingKind !== null} onClick={() => approve && controller.runAction(approve)} className="min-h-11">
               {controller.pendingKind === 'approve' ? 'Approving...' : 'Approve'}
             </Button>
-            <Button type="button" variant="destructive" data-testid="approval-mobile-send-back" aria-describedby={sendBackReason ? 'approval-mobile-send-back-reason' : undefined} disabled={!sendBack?.enabled || controller.pendingKind !== null} onClick={() => setSendBackOpen(true)} className="min-h-11">
+            <Button type="button" variant="destructive" data-testid="approval-mobile-send-back" aria-describedby={sendBackReason ? 'approval-mobile-send-back-reason' : undefined} disabled={!sendBack?.enabled || controller.pendingKind !== null} onClick={handleSendBackOpen} className="min-h-11">
               Send back
             </Button>
             <SecondaryActions actions={secondary} controller={controller} />
