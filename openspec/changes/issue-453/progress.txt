@@ -175,3 +175,21 @@
   `BranchBar`. The "neutral disabled styling" CSS hooks (`bg-muted text-muted-foreground hover:bg-muted
   border-border`) used for Stop / Send Back can be reused for Rebase when disabled.
 
+# T-003 — Make unavailable Rebase controls honest
+
+## Codebase Patterns
+
+- `BranchBar` remains the owner of Rebase beside branch and workspace evidence. Rebase eligibility is still the conjunction of `useRebaseRecovery.canRequest` and the `allowRebase` prop; the existing `rebase.trigger` mutation is unchanged.
+- `RebaseAction` is the shared rendering path for the upstream-unknown and behind/allowed layouts, so desktop and narrow layouts receive the same disabled reason, `aria-describedby` linkage, and neutral disabled classes.
+
+## Decisions
+
+- Unavailable copy is derived in priority order from conflict resolution, an in-progress/queued rebase, unknown upstream status, incomplete ahead/behind status, issue-level permission, and the remaining recovery gate.
+- Reasons are rendered as visible helper text with a stable `id`, while `title` remains a pointer supplement. Disabled Rebase uses `border-border bg-muted text-muted-foreground hover:bg-muted`; enabled Rebase keeps its existing contextual gray or amber classes.
+- Conflict-resolution status continues to render the existing resolving evidence and now includes the visible product-language reason without exposing implementation terms.
+
+## Verification
+
+- Focused `BranchBar.test.tsx` — 11 / 11 tests pass, covering loading, incomplete status, upstream errors, conflict resolution, enabled execution, visible reasons, accessible linkage, and enabled/disabled classes.
+- `npm run typecheck -w packages/web` — green.
+- `npm run test:run -w packages/web` — 5035 / 5035 tests pass across 372 files.

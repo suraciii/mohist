@@ -1,7 +1,9 @@
 import { WorkflowStage } from '../../../entities/issue'
 import { ApiError } from '../../../shared/api/client'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/components/button'
 import { useRebaseRecovery } from '../model/useRebaseRecovery'
+import type { RebaseRecovery } from '../model/useRebaseRecovery'
 
 interface BranchBarProps {
   issueNumber: number
@@ -9,6 +11,64 @@ interface BranchBarProps {
   isAgentRunning: boolean
   baseBranch?: string | null
   allowRebase?: boolean
+}
+
+const REBASE_REASON_ID = 'branch-bar-rebase-reason'
+
+function getRebaseUnavailableReason(rebase: RebaseRecovery, allowRebase: boolean): string | null {
+  if (rebase.isConflictResolving) return 'Rebase is unavailable while conflict resolution is in progress.'
+  if (rebase.isQueued || rebase.isPending || rebase.isRebasing) return 'Rebase is unavailable while another rebase is in progress.'
+  if (rebase.workspace.isUpstreamUnknown) return 'Branch status could not be checked.'
+  if (rebase.workspace.isChecking || !rebase.workspace.hasAheadBehind) return 'Branch status is still being checked.'
+  if (!allowRebase) return 'Rebase is unavailable for this issue.'
+  if (!rebase.canRequest) return 'Rebase is unavailable right now.'
+  return null
+}
+
+function RebaseReason({ reason, className }: { reason: string | null; className: string }) {
+  if (!reason) return null
+
+  return (
+    <p id={REBASE_REASON_ID} data-testid="branch-bar-rebase-reason" className={className}>
+      {reason}
+    </p>
+  )
+}
+
+function RebaseAction({
+  baseBranch,
+  rebase,
+  allowRebase,
+  enabledClassName,
+  reasonClassName,
+}: {
+  baseBranch: string
+  rebase: RebaseRecovery
+  allowRebase: boolean
+  enabledClassName: string
+  reasonClassName: string
+}) {
+  const canRequestRebase = rebase.canRequest && allowRebase
+  const reason = getRebaseUnavailableReason(rebase, allowRebase)
+
+  return (
+    <div className="flex w-full flex-col items-start gap-1 sm:w-auto sm:items-end">
+      <Button
+        variant="outline"
+        onClick={rebase.trigger}
+        disabled={!canRequestRebase}
+        aria-describedby={reason ? REBASE_REASON_ID : undefined}
+        title={reason ?? undefined}
+        className={cn(
+          'h-auto w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:w-auto',
+          canRequestRebase ? enabledClassName : 'border-border bg-muted text-muted-foreground hover:bg-muted',
+        )}
+      >
+        Rebase onto {baseBranch}
+      </Button>
+      <RebaseReason reason={reason} className={reasonClassName} />
+    </div>
+  )
 }
 
 export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, allowRebase = false }: BranchBarProps) {
@@ -19,7 +79,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
 
   const isUpstreamUnknown = workspace.isUpstreamUnknown
   const isBehind = workspace.isBehind
-  const canRequestRebase = rebase.canRequest && allowRebase
+  const rebaseUnavailableReason = getRebaseUnavailableReason(rebase, allowRebase)
   const baseBranch = workspace.data?.baseBranch ?? fallbackBaseBranch ?? 'master'
   const isDone = stage === WorkflowStage.Done
 
@@ -49,6 +109,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               </ul>
             </div>
           )}
+          <RebaseReason reason={rebaseUnavailableReason} className="text-xs text-blue-600" />
         </div>
       </div>
     )
@@ -67,21 +128,13 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:shrink-0">
               <span className="text-xs font-medium text-muted-foreground">未能检查上游</span>
               {allowRebase && (
-                <Button
-                  variant="outline"
-                  onClick={() => rebase.trigger()}
-                  disabled={!canRequestRebase}
-                  title={
-                    !workspace.hasAheadBehind
-                      ? 'Waiting for workspace status'
-                      : rebase.isConflictResolving
-                        ? 'Conflict resolution in progress'
-                        : undefined
-                  }
-                  className="h-auto w-full rounded-md border-gray-300 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-gray-50 disabled:opacity-50 sm:w-auto"
-                >
-                  Rebase onto {baseBranch}
-                </Button>
+                <RebaseAction
+                  baseBranch={baseBranch}
+                  rebase={rebase}
+                  allowRebase={allowRebase}
+                  enabledClassName="border-gray-300 text-foreground hover:bg-gray-50"
+                  reasonClassName="text-xs text-muted-foreground"
+                />
               )}
             </div>
           </div>
@@ -109,21 +162,13 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
                   {workspace.behind > 0 ? <span>↓{workspace.behind} behind</span> : <span>up to date</span>}
                 </span>
               )}
-              <Button
-                variant="outline"
-                onClick={() => rebase.trigger()}
-                disabled={!canRequestRebase}
-                title={
-                  !workspace.hasAheadBehind
-                    ? 'Waiting for workspace status'
-                    : rebase.isConflictResolving
-                      ? 'Conflict resolution in progress'
-                      : undefined
-                }
-                className="h-auto w-full rounded-md border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-50 disabled:opacity-50 sm:w-auto"
-              >
-                Rebase onto {baseBranch}
-              </Button>
+              <RebaseAction
+                baseBranch={baseBranch}
+                rebase={rebase}
+                allowRebase={allowRebase}
+                enabledClassName="border-amber-300 text-amber-800 hover:bg-amber-50"
+                reasonClassName="text-xs text-amber-700"
+              />
             </div>
           </div>
           {isDone && (
