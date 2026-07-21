@@ -2,37 +2,25 @@
 
 ## Findings
 
-### 1. Critical: an empty terminal receipt cannot distinguish replay from a stale binding
+### 1. High: generic follow-up delivery is outside the FIFO used by AgentJob events
 
-The plan settles operation-correlated follow-up terminal records when the endpoint returns any valid receipt array, including `[]` (`design.md:62-64`, `specs/agent-session-runtime-event-delivery/spec.md:94-108`, `tasks.json:41-42`). It separately requires events rejected for a stale physical binding to remain pending against their original identity (`specs/agent-session-runtime-event-delivery/spec.md:48-52`).
+The spec promises production-order delivery per logical AgentSession (`specs/agent-session-runtime-event-delivery/spec.md:60-68`), and the design keys every generic queue by `(projectId, sessionId)` (`design.md:46`). The atomic task switches Workflow reporting and follow-up input/outcomes to the shared outbox (`tasks.json:9`, `tasks.json:25-29`) but does not migrate AgentJob transcript production.
 
-The current Session grain returns the same empty array before terminal processing when the reported binding is stale (`AgentSessionGrain.cs:918-920`) and after terminal processing when the operation lease has already been consumed (`AgentSessionGrain.cs:1074-1102`). A runner-only acknowledgement policy cannot distinguish those outcomes. The current plan can therefore settle and lose a stale terminal fact, while requiring a matching receipt instead would recreate the permanent queue fence found in the previous review.
+AgentJob input and activity currently continue through an independent direct-upload chain (`packages/runner/src/runtime/agent-job-executor.ts:98-149`). A generic follow-up can therefore drain from the outbox while an earlier AgentJob event for the same AgentSession is still in flight, violating the stated FIFO and transcript-boundary guarantees.
 
-The plan must either introduce a distinguishable Server acknowledgement despite the current non-goal, or explicitly permit stale follow-up terminal records to settle and narrow the stale-binding retention contract. It is not implementable with both current requirements intact.
+The plan must either include AgentJob input/activity reporting in the shared ordering mechanism, or explicitly narrow the FIFO contract to source-local sequences and define the ordering boundary between AgentJob and generic follow-up producers. The current design claims one logical Session FIFO without controlling all of its producers.
 
-### 2. High: T-001 creates the competing outboxes that the design rejects
+### 2. High: verification omits runner test-boundary and test-typecheck guards
 
-D1 rejects a new content outbox beside `FollowupFailureOutbox` because independently draining queues can deliver a follow-up outcome or later event ahead of pending input (`design.md:31-40`). T-001 nevertheless declares itself independently usable while leaving the existing follow-up terminal outbox active until dependent T-002 migrates it (`tasks.json:31`, `tasks.json:37`, `tasks.json:46`, `tasks.json:57-59`).
+The task requires only `npm run typecheck -w packages/runner` and `npm test -w packages/runner` (`tasks.json:31`). The runner's `test:ci` script additionally runs `typecheck:tests` and `check:test-boundaries` before Vitest (`packages/runner/package.json:14-20`). Those guards are directly relevant because this change adds a recording filesystem, fake-time recovery, and many new runner tests while repository policy prohibits real filesystem and wall-clock dependencies.
 
-That intermediate deliverable has the exact ordering race used to justify the shared outbox. The implementation graph must make host switchover, follow-up producer migration, and legacy import one atomic deliverable, or stop treating T-001 as independently usable and restructure the task boundary accordingly.
-
-### 3. High: Workflow local-persistence failure behavior lacks integration coverage
-
-The corrected contract requires input persistence failure to prevent a Workflow prompt from starting, while activity or terminal persistence failure after runtime start must settle without replacing the runtime result (`specs/agent-session-runtime-event-delivery/spec.md:70-74`, `design.md:48-50`). T-001 covers completed enqueues, unsettled writes, transport failures, and outbox readiness, but does not require Workflow integration tests for either rejected-write boundary (`tasks.json:18-22`). T-002 adds only the corresponding follow-up input test (`tasks.json:39`, `tasks.json:47`).
-
-This omission is material because `RuntimeTurnObserver.onEvent` is synchronous and multiple callbacks can register writes before a rejection is observed. T-001 must verify that a rejected input write invokes no Workflow runtime, and that rejected activity/close writes from multiple synchronous callbacks remain tracked, observable, and unable to replace the original successful or failed runtime result.
-
-### 4. High: outbox health recovery has no autonomous transition contract
-
-The design says a persistence failure marks the outbox unhealthy and schedules recovery (`design.md:88-90`), while tasks require restored health to resume work claims and follow-up commands (`tasks.json:17`, `tasks.json:48`). No spec or design decision states what triggers recovery, how it proceeds when claims and follow-ups are gated, or what durable condition permits `ready()` to become true again.
-
-Recovery cannot depend on another enqueue because unhealthy state prevents new execution. The plan must define an autonomous fake-time-driven persistence retry plus startup/reconnect triggers, require a successful atomic snapshot covering every retained in-memory record before restoring health, and test recovery without new work or events.
+T-001 must require `npm run test:ci -w packages/runner`, or explicitly run `npm run typecheck:tests -w packages/runner`, `npm run check:test-boundaries -w packages/runner`, and the test suite. Production typecheck plus Vitest alone does not verify the plan's stated test constraints.
 
 ## Review Summary
 
-- The proposal still matches the issue's network-failure, restart-recovery, and non-blocking goals, and preserves the no-cross-runner boundary.
-- The corrected local-versus-Server durability wording, synchronous observer crash boundary, recording filesystem strategy, and task dependency direction are clear.
-- The remaining blockers concern an impossible terminal acknowledgement distinction, a non-deliverable intermediate task state, and missing behavioral contracts/tests at local persistence failure and health recovery boundaries.
+- The plan covers the issue's upload-failure recovery, restart recovery, and non-blocking Server-delivery requirements without adding Server deduplication or cross-runner transfer.
+- Matching-receipt versus successful-response semantics, stale-binding scope, local enqueue failure dispositions, autonomous health recovery, migration, and the one-task atomic outbox replacement are now internally consistent and testable.
+- The remaining blockers are the uncontrolled AgentJob producer in the claimed generic Session FIFO and incomplete verification commands for the repository's runner test rules.
 
 ## Verdict
 
