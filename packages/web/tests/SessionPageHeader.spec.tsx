@@ -475,7 +475,7 @@ describe('SessionPage header and states', () => {
       })
     })
 
-    it('shows waiting for activity state when session is running but no turns yet', async () => {
+    it('shows no-content state when session is running but no turns yet', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'running',
@@ -488,11 +488,11 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/waiting/i)).toBeInTheDocument()
+        expect(screen.getByText(/started but no content has been received/i)).toBeInTheDocument()
       })
     })
 
-    it('shows empty state when session has no recorded activity', async () => {
+    it('shows no-content state when session has no recorded content', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'completed',
@@ -505,11 +505,11 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/no activity/i)).toBeInTheDocument()
+        expect(screen.getByText(/no content was received for this session/i)).toBeInTheDocument()
       })
     })
 
-    it('treats completed session with no events as empty state', async () => {
+    it('treats completed session with no events as no-content state', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'completed',
@@ -523,7 +523,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/no activity/i)).toBeInTheDocument()
+        expect(screen.getByText(/no content was received for this session/i)).toBeInTheDocument()
       })
     })
   })
@@ -567,7 +567,7 @@ describe('SessionPage header and states', () => {
       // Wait until the header is rendered (metadata resolved).
       await screen.findByText('Issue #123')
 
-      // Same SessionHeader shared with the empty/waiting/incomplete branches.
+      // Same SessionHeader shared with the empty and incomplete branches.
       expect(screen.getByText('Test Issue')).toBeInTheDocument()
       expect(screen.getByText('Build')).toBeInTheDocument()
       // "Completed" appears in both the SessionHeader and the sticky title strip.
@@ -626,7 +626,7 @@ describe('SessionPage header and states', () => {
       const completedBadges = screen.getAllByText('Completed')
       expect(completedBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
-      expect(screen.queryByText(/No activity recorded/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/No content was received for this session/i)).not.toBeInTheDocument()
       unmount()
 
       const emptyDetail = makeMockDetail({
@@ -644,7 +644,7 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('Build')).toBeInTheDocument()
       const emptyCompletedBadges = screen.getAllByText('Completed')
       expect(emptyCompletedBadges.length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+      expect(screen.getByText(/No content was received for this session/i)).toBeInTheDocument()
       expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 
