@@ -1,0 +1,65 @@
+# T-001: Separate issue metadata from description content
+
+## Codebase Patterns
+
+- Web uses FSD: `app`, `pages`, `widgets`, `features`, `entities`, `shared`. Slices only export from `index.ts`; internal paths cannot be cross-imported.
+- Same-layer feature slices (e.g. `features/create-issue` ↔ `features/edit-issue`) cannot import each other directly; they share code through `entities/issue`.
+- `entities/issue/index.ts` exports public API; `lib/` houses pure helpers (collocation with `.test.ts`).
+- `Issue` body is raw string. `issue.body` is passed verbatim to MarkdownReader today; preview is computed from `body` in `IssueDescriptionSection`.
+- `IssueDetailsCard` currently only renders Parent Issue / Children / Project / Repository rows. No risk / workflow recommendation rows today.
+- `EditIssueDialog` initializes `body` from `issue.body` verbatim and sends it back through PATCH.
+- The current `parseIssueFrontmatter` lives in `features/create-issue/lib/frontmatter.ts` and returns `{ kind: 'none' | 'malformed' | 'parsed' }`. It only handles partitioned fields; it does not preserve the raw envelope or recompose.
+
+## Key findings
+
+- The `Issue` entity already exposes `risk` (string | null) and `workflowProfileId` (string | null). Authoritative risk is the Issue row, fallback to parsed body risk.
+- The "Workflow Profile" rail card uses `issue.workflowProfileId` (selected). Body recommendation should be labeled as such.
+- The `IssueDescriptionSection` is a thin wrapper around `MarkdownReader` with `buildPreviewHint(body)` that strips code, images, links, headings, quotes.
+- `EditIssueDialog` PATCHes with `body: body || undefined` and extracts attachment IDs from the new body. After our change, we must recombine the original raw envelope with the new description and re-extract attachment IDs from the combined body.
+- `CreateIssueDialog` uses the parser to drive recommendation UI and frontmatter risk. Migrating to the entity parser keeps behavior identical.
+
+## Plan
+
+1. Create `entities/issue/lib/issue-frontmatter.ts`:
+   - `IssueFrontmatterPartition` shape: `{ kind: 'none' | 'closed' | 'unclosed', recommendedWorkflow?, recommendedWorkflowReason?, risk?, description, rawEnvelope }`.
+   - `partitionIssueBody(body)` returns the deterministic partition.
+   - `recombineIssueBody(partition, description)` returns the recombined body (lossless for closed, repair for unclosed).
+   - Coverage: BOM, CRLF, unknown-key, block scalars, folded, quoted, bounded malformed, unclosed, empty description, lossless closed recomposition, one-delimiter unclosed repair.
+   - Pure functions, no side effects.
+
+2. Migrate tests from `features/create-issue/lib/create-issue-frontmatter.test.ts` to `entities/issue/lib/issue-frontmatter.test.ts`; expand coverage per acceptance criteria.
+
+3. Export through `entities/issue/index.ts`.
+
+4. `CreateIssueDialog` imports the parser from entities; remove `parseIssueFrontmatter` re-export / replace.
+
+5. `IssueDetailPage` partitions the body once, passes description content to `IssueDescriptionSection` and through to `IssueDetailsCard` for metadata display.
+
+6. `IssueDescriptionSection` accepts description string directly; preview is built only from description.
+
+7. `IssueDetailsCard` accepts `risk` (authoritative or fallback), `recommendedWorkflow`, `recommendedWorkflowReason`. Displays Recommendation workflow + Recommendation reason (only when present) and exactly one Risk row using `issue.risk ?? parsed.risk`.
+
+8. `EditIssueDialog`:
+   - Initialize textarea with `description` (post-envelope content).
+   - On save: recombine raw envelope + new description via `recombineIssueBody`; PATCH that combined body; extract attachment IDs from combined body.
+
+9. Write focused tests for: entity parser, create-issue frontmatter behavior (migrated), edit-issue preservation + repair, IssueDescriptionSection preview/hint, IssueDetailsCard recommendation + risk precedence, MSW-backed issue-detail metadata showing.
+
+10. Run `npm run check:fsd -w packages/web`, `npm run typecheck -w packages/web`, `npm run test:run -w packages/web`. Commit with T-001 prefix.
+
+## Implementation notes
+
+- "Malformed" frontmatter at the closed level is interpreted as "the envelope exists but is unusable" — represented via `kind: 'closed'` with no recognized values. The acceptance criteria are satisfied by: closed envelopes return post-envelope description; bounded malformed with a closing delimiter still returns post-envelope description; the recognized values are undefined.
+- "Unclosed" means leading `---` but no closing `---`; description is empty; raw envelope preserved for repair.
+- "None" means no leading `---`.
+- For the body that is exactly the closed envelope (no description content), we return `description: ''` and the page should render no Description body. The MarkdownReader short-circuits on empty content.
+- For recomposition of an unclosed envelope, we must insert exactly one closing `---` and append the new description content; line endings are preserved as in the original.
+
+## Completed implementation
+
+- `partitionIssueBody` now uses source offsets so `rawEnvelope` retains the opening BOM, unknown lines, closing-delimiter line ending, and CRLF bytes exactly; `description` is the untouched remainder.
+- A valid unknown `key: value` is ignored for metadata but preserved in the raw envelope. Any colon-less or empty-key line makes the bounded envelope malformed and suppresses all recognized values while retaining post-delimiter description.
+- `recombineIssueBody` concatenates closed envelopes losslessly and repairs unclosed envelopes by adding only the missing separator/closing delimiter before edited description content.
+- `IssueDetailPage` partitions once for display. `IssueDescriptionSection` receives description content only and suppresses empty/whitespace-only content; `IssueDetailsCard` shows recommendation labels and computes one risk value as `issue.risk ?? bodyMetadata.risk`.
+- `EditIssueDialog` exposes only `partition.description`, recombines before PATCH, and extracts attachment IDs from the recombined body. Create Issue now consumes the entity parser and retains recommendation/risk behavior.
+- Verification completed: Web FSD boundaries and typecheck passed; focused T-001 tests passed (80), and the complete Web suite passed (372 files, 5009 tests).

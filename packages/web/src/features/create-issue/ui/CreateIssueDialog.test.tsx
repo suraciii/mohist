@@ -600,6 +600,7 @@ describe('CreateIssueDialog workflow profile default', () => {
         value: [
           '---',
           'recommended_workflow: mohist/local',
+          'risk: medium',
           '---',
           '',
           'Body',
@@ -609,6 +610,7 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     expect(await screen.findByTestId('recommended-workflow')).toHaveTextContent('mohist/local')
     expect(screen.getByTestId('workflow-recommendation-unavailable')).toHaveTextContent('not enabled')
+    expect(screen.getByRole('button', { name: 'medium' })).toHaveAttribute('aria-pressed', 'true')
     const select = screen.getByLabelText('Workflow') as HTMLSelectElement
     await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
     expect([...select.options].map((option) => option.value)).toEqual(['mohist/github-pr'])
@@ -618,6 +620,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
     expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody.risk).toBe('medium')
   })
 })
 

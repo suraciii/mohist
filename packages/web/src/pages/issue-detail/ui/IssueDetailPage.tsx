@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentType } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus } from '../../../entities/issue'
+import { IssueStatus, partitionIssueBody } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -152,6 +152,7 @@ export function IssueDetailPage({
   }
 
   const decision = decisionInputs ? deriveRuntimeDecision(decisionInputs) : null
+  const issueBody = useMemo(() => partitionIssueBody(issue?.body), [issue?.body])
 
   const decisionActions = useMemo(() => {
     if (!issue) {
@@ -554,7 +555,10 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
+              <IssueDescriptionSection
+                description={issueBody.description}
+                resolveIssueAttachment={resolveIssueAttachment}
+              />
 
               <IssueCommentsSection
                 comments={comments}
@@ -584,6 +588,7 @@ export function IssueDetailPage({
               >
                 <IssueDetailsCard
                   issue={issue}
+                  bodyMetadata={issueBody}
                   unframed
                 />
               </CollapsibleRailCard>
