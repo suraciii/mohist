@@ -29,6 +29,8 @@ import {
   type CompletionEvaluation,
 } from "../actions/expectations.js"
 import type { AgentJobExecutor } from "./agent-job-executor.js"
+import type { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
+import { workflowSessionName } from "../actions/workflow-session-name.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -86,6 +88,7 @@ export class WorkExecutor {
      */
     private agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
+    private readonly workflowSessionTurnCoordinator: WorkflowSessionTurnCoordinator | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -187,71 +190,83 @@ export class WorkExecutor {
       if (startCheck.kind === "violation") {
         return startCheck.result
       }
-      let rawResult: unknown
-      try {
-        const actionContext = {
-          ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
-          with: validatedWith,
-          workDir,
-          ...(definition.manifest.name === "mohist/openspec-tasks"
-            ? { rawTask: isObject(work.with?.task) ? work.with.task : null }
-            : {}),
+      const executeInlineWork = async () => {
+        let rawResult: unknown
+        try {
+          const actionContext = {
+            ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
+            with: validatedWith,
+            workDir,
+            ...(definition.manifest.name === "mohist/openspec-tasks"
+              ? { rawTask: isObject(work.with?.task) ? work.with.task : null }
+              : {}),
+          }
+          rawResult = await runValidatedAction(definition, actionContext)
+        } catch (thrown) {
+          rawResult = malformedToUnexpectedError(
+            `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+          )
         }
-        rawResult = await runValidatedAction(definition, actionContext)
-      } catch (thrown) {
-        rawResult = malformedToUnexpectedError(
-          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
-        )
-      }
-      // stripRunnerPrivateFacts drops ActionResult.turnFact from the wire.
-      // The fact is consumed only by completion evaluation below; it MUST
-      // never be serialized into WorkItemResult.output, recovery matching,
-      // setVars projections, captured outputs, or artifacts (design D4).
-      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
-      const normalized = normalizeActionResult(rawResult, definition.manifest)
-      const validatedResult: ActionResult = normalized.kind === "malformed"
-        ? (malformedToUnexpectedError(normalized.message) as ActionResult)
-        : normalized.kind === "ok"
-          ? ({ output: normalized.output } as ActionResult)
-          : ({ error: normalized.error } as ActionResult)
-      const exitCode = passThroughExitCode(rawResult)
-      if (exitCode !== undefined && exitCode !== null) {
-        ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
-      }
-      const actionSucceeded = !isActionFailure(validatedResult)
-      const completion = actionSucceeded
-        ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
-        : null
-      const projected = projectTaskOutput(work, validatedResult, completion)
-      const resultForRecovery = projected
-      const recoveryResult = tryRecovery(work, resultForRecovery, variables)
-      if (recoveryResult) return recoveryResult
-      if (resultForRecovery.status !== "completed") {
-        return resultForRecovery
-      }
-      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
-      if (endCheck.kind === "violation") {
-        return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
-      }
-      const worktreeResult = await enforceCleanWorktree(
-        work,
-        workDir,
-        resultForRecovery,
-        renderedWith,
-        variables,
-        signal,
-        resolveCleanupAgentAction(legacyHandler(definition)),
-        { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
-        log,
-      )
-      if (worktreeResult.status !== "completed") {
-        const recoveryResult = tryRecovery(work, worktreeResult, variables)
+        // stripRunnerPrivateFacts drops ActionResult.turnFact from the wire.
+        // The fact is consumed only by completion evaluation below; it MUST
+        // never be serialized into WorkItemResult.output, recovery matching,
+        // setVars projections, captured outputs, or artifacts (design D4).
+        const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+        const normalized = normalizeActionResult(rawResult, definition.manifest)
+        const validatedResult: ActionResult = normalized.kind === "malformed"
+          ? (malformedToUnexpectedError(normalized.message) as ActionResult)
+          : normalized.kind === "ok"
+            ? ({ output: normalized.output } as ActionResult)
+            : ({ error: normalized.error } as ActionResult)
+        const exitCode = passThroughExitCode(rawResult)
+        if (exitCode !== undefined && exitCode !== null) {
+          ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
+        }
+        const actionSucceeded = !isActionFailure(validatedResult)
+        const completion = actionSucceeded
+          ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
+          : null
+        const projected = projectTaskOutput(work, validatedResult, completion)
+        const resultForRecovery = projected
+        const recoveryResult = tryRecovery(work, resultForRecovery, variables)
         if (recoveryResult) return recoveryResult
-        return worktreeResult
+        if (resultForRecovery.status !== "completed") {
+          return resultForRecovery
+        }
+        const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
+        if (endCheck.kind === "violation") {
+          return tryRecovery(work, endCheck.result, variables) ?? endCheck.result
+        }
+        const worktreeResult = await enforceCleanWorktree(
+          work,
+          workDir,
+          resultForRecovery,
+          renderedWith,
+          variables,
+          signal,
+          resolveCleanupAgentAction(legacyHandler(definition)),
+          { baseContext: (cleanupWork, cleanupSignal) => baseContext(cleanupWork, cleanupSignal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId) },
+          log,
+        )
+        if (worktreeResult.status !== "completed") {
+          const recoveryResult = tryRecovery(work, worktreeResult, variables)
+          if (recoveryResult) return recoveryResult
+          return worktreeResult
+        }
+        const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
+        const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
+        return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
       }
-      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, worktreeResult, validatedResult, variables, signal)
-      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, validatedResult)
-      return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
+      return isInlineAgentAction(work.uses) && this.workflowSessionTurnCoordinator
+        ? await this.workflowSessionTurnCoordinator.withTurn(
+          {
+            projectId: work.projectId ?? "",
+            workflowRunId: work.workflowRunId,
+            sessionName: workflowSessionName(renderedWith, work.workId),
+          },
+          executeInlineWork,
+        )
+        : await executeInlineWork()
     } catch (error) {
       return failure(work, errorMessage(error))
     }
@@ -264,6 +279,7 @@ export class WorkExecutor {
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
+      coordinator: this.workflowSessionTurnCoordinator ?? undefined,
       context: baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
@@ -314,6 +330,11 @@ export class WorkExecutor {
     const capturedOutputs = captureOutputs(work.outputs, actionResult)
     return capturedOutputs ? { ...result, capturedOutputs } : result
   }
+}
+
+function isInlineAgentAction(uses?: string | null): boolean {
+  const normalized = uses?.trim().toLowerCase()
+  return normalized === "mohist/opencode" || normalized === "mohist/pi"
 }
 
 /**

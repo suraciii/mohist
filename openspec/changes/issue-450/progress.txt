@@ -32,3 +32,10 @@
 - Physical AgentSession and transcript runtime IDs are unbounded in the EF model and snapshot. SQLite stores both as TEXT already, so the migration is an explicit no-op rather than an unsupported SQLite AlterColumn operation.
 - Runtime-event acceptance is now parsed by `ServerConnection`; non-empty submissions require an array with one accepted entry per fact. `cachedWriteTokens` and `provider.retry` are carried through Server and Web contracts without merging cache counters.
 - T-003 verification: focused Server unit tests passed (101), binding specs passed (7), Web typecheck passed, Runner typecheck passed, and Runner tests passed (99 files / 1,168 tests). Final `npm test` passed: CLI 1,361, Server unit 1,259, architecture 30, Server specs 2,872, Web 4,993, and Runner 1,168.
+
+## T-004 Notes
+
+- `WorkflowSessionTurnCoordinator` is RunnerHost-owned and process-local. Its queue key is a JSON tuple of project ID, WorkflowRun ID, and normalized logical Session name; it stores only promise tails and conditionally removes the current tail after settlement.
+- `workflowSessionName` trims explicit names and falls back to the Work ID for omitted/null/blank names. OpenCode binding and task/check coordinator keys use this same helper and the same rendered Action input.
+- WorkExecutor holds the task lease across the complete Inline Agent segment, including completion checks, worktree enforcement, and cleanup reinvocation. Check execution acquires the shared coordinator per Inline Agent Action while retaining independent Sessions' concurrency.
+- T-004 verification: baseline focused tests passed (18), coordinator/focused regression tests passed (9), Runner typecheck passed, and the full Runner suite passed (100 files / 1,173 tests).

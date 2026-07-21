@@ -29,6 +29,7 @@ import {
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
+import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 import {
   type FollowupTarget,
   type FollowupTargetResolution,
@@ -97,6 +98,7 @@ export class RunnerHost {
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
   private readonly modelRediscoveryIntervalMs: number
+  private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
@@ -364,6 +366,7 @@ export class RunnerHost {
       this.openCodeRuntime,
       new AgentJobExecutor(this.connection, this.openCodeRuntime),
       this.agentSessionRuntimeEventOutbox,
+      this.workflowSessionTurnCoordinator,
     )
   }
 
