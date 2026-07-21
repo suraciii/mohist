@@ -270,6 +270,21 @@ export interface ActionContext {
    */
   openCodeRuntime?: import("../runtime/opencode/index.js").OpenCodeRuntime | null
   /**
+   * Host-owned shared AgentSession runtime-event outbox (issue-461).
+   * The Workflow reporter and the SignalR follow-up handler route
+   * their durable inputs / activity / close / terminals through this
+   * single primitive. Null only when the runner host has not provided
+   * it (e.g. CLI smoke-test usage); production wire sets it from
+   * `RunnerHost` via `WorkExecutor`.
+   */
+  agentSessionRuntimeEventOutbox?: import("../server/runtime-event-outbox.js").AgentSessionRuntimeEventOutbox | null
+  /**
+   * Injectable deterministic id source for runtime-event records. The
+   * production default uses `Date.now` + `Math.random`; tests inject
+   * predictable ids so they can assert against specific records.
+   */
+  runtimeEventRecordId?: () => string
+  /**
    * Single sink for ops command output. Every ops output (workspace
    * prep, branch stability, action body, cleanup) flows through
    * `log.write(source, text)` so masking, monotonic `seq` assignment,

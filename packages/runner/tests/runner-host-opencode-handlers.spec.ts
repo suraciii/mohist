@@ -47,9 +47,8 @@ const {
 } = mocks
 
 interface CapturedSignalROptions {
-  serverConnection: unknown
   followupTargetResolver: unknown
-  followupFailureOutbox: unknown
+  agentSessionRuntimeEventOutbox: unknown
   openCodeRuntime: unknown
 }
 
@@ -82,16 +81,14 @@ vi.mock("../src/server/runner-signalr.js", () => ({
       _runnerRoot: string,
       _buildGitHash: string | null,
       options: {
-        serverConnection?: unknown
         followupTargetResolver?: unknown
-        followupFailureOutbox?: unknown
+        agentSessionRuntimeEventOutbox?: unknown
         openCodeRuntime?: unknown
       } = {},
     ) {
       capturedSignalROptions = {
-        serverConnection: options.serverConnection ?? null,
         followupTargetResolver: options.followupTargetResolver ?? null,
-        followupFailureOutbox: options.followupFailureOutbox ?? null,
+        agentSessionRuntimeEventOutbox: options.agentSessionRuntimeEventOutbox ?? null,
         openCodeRuntime: options.openCodeRuntime ?? null,
       }
     }
@@ -217,13 +214,12 @@ describe("RunnerHost wires OpenCodeRuntime into SignalR followup/cancel handlers
     expect(accessor()).toBe(stub)
   })
 
-  it("passes the followup target resolver, failure outbox, and server connection through to RunnerSignalRClient", async () => {
+  it("passes the followup target resolver and runtime-event outbox through to RunnerSignalRClient", async () => {
     installStubRuntimeFactory()
     await startHost()
 
     expect(capturedSignalROptions).not.toBeNull()
     expect(typeof capturedSignalROptions?.followupTargetResolver).toBe("function")
-    expect(capturedSignalROptions?.followupFailureOutbox).not.toBeNull()
-    expect(capturedSignalROptions?.serverConnection).not.toBeNull()
+    expect(capturedSignalROptions?.agentSessionRuntimeEventOutbox).not.toBeNull()
   })
 })

@@ -5,7 +5,13 @@ import { ActionRegistry, createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
-import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
+import {
+  createAgentSessionRuntimeEventOutbox,
+  RUNTIME_EVENT_OUTBOX_FILE,
+  LEGACY_FOLLOWUP_FAILURE_FILE,
+  type AgentSessionRuntimeEventOutbox,
+} from "../server/runtime-event-outbox.js"
+import { createServerRuntimeEventDelivery } from "../server/runtime-event-delivery.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
@@ -24,7 +30,6 @@ import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 import {
-  FOLLOWUP_TARGET_UNAVAILABLE,
   type FollowupTarget,
   type FollowupTargetResolution,
   type SessionTarget,
@@ -86,7 +91,7 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
-  private readonly followupFailureOutbox: FollowupFailureOutbox
+  private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
@@ -142,7 +147,11 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
-    this.followupFailureOutbox = new FollowupFailureOutbox(options.runnerRoot)
+    this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
+      filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
+      legacyFilePath: `${options.runnerRoot}/${LEGACY_FOLLOWUP_FAILURE_FILE}`,
+      deliver: createServerRuntimeEventDelivery({ connection: this.connection }),
+    })
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
@@ -160,9 +169,8 @@ export class RunnerHost {
       this.buildGitHash,
       {
         onReconnected: () => this.onDispatchReconnected(),
-        serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
-        followupFailureOutbox: this.followupFailureOutbox,
+        agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
         registry: this.workspaceRegistry,
         openCodeRuntime: () => this.openCodeRuntime,
       },
@@ -177,7 +185,6 @@ export class RunnerHost {
     if (binding.runnerId !== this.options.runnerId) return null
     if (!binding.runtimeSessionId) return null
     if (!binding.workDir) return null
-    if (!this.isOpenCodeReadyForClaim()) return FOLLOWUP_TARGET_UNAVAILABLE
     const resolved: FollowupTarget = {
       runtimeSessionId: binding.runtimeSessionId,
       workDir: binding.workDir,
@@ -199,12 +206,22 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
+      // Load the AgentSession runtime-event outbox BEFORE accepting
+      // SignalR commands or claiming work. An unreadable snapshot is
+      // never replaced with empty state — the outbox loads itself once
+      // a successful read happens and stays unhealthy otherwise.
+      await this.loadAgentSessionRuntimeEventOutbox(signal)
       // OpenCode execution health and CLI model discovery are independent.
       // Discovery is best-effort, but it completes before the first
       // registration so that registration reports one host-owned snapshot.
       await this.initializeSharedConnection(signal)
       this.replaceCoderModels(await this.discoverModels(signal))
       await this.connectRunner(signal)
+      // Kick a non-blocking drain: an unavailable server does not gate
+      // startup; records stay durable and re-drain on reconnect.
+      if (this.agentSessionRuntimeEventOutbox.ready()) {
+        void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
+      }
       // Startup convergence: pick up any terminal events the runner
       // missed while it was offline (e.g. completed while the previous
       // process was down). Runs immediately after SignalR is up so the
@@ -346,7 +363,24 @@ export class RunnerHost {
       undefined,
       this.openCodeRuntime,
       new AgentJobExecutor(this.connection, this.openCodeRuntime),
+      this.agentSessionRuntimeEventOutbox,
     )
+  }
+
+  private async loadAgentSessionRuntimeEventOutbox(signal: AbortSignal): Promise<void> {
+    const outbox = this.agentSessionRuntimeEventOutbox
+    try {
+      await outbox.load()
+    } catch (error) {
+      // Loading itself is best effort — `outbox.ready()` reflects the
+      // actual durable state and gates the follow-up handler and claim
+      // loop.
+      console.error("agent-session runtime event outbox failed to load:", error)
+    }
+    if (signal.aborted) return
+    if (!outbox.ready()) {
+      console.warn("agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers")
+    }
   }
 
   private async shutdownSharedConnection() {
@@ -436,7 +470,7 @@ export class RunnerHost {
 
   private isOpenCodeReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
-    return runtime !== null && runtime.ready()
+    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
   }
 
   /**

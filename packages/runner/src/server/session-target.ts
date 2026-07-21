@@ -52,31 +52,23 @@ export interface FollowupTarget {
   readonly projectId: string
 }
 
-export interface FollowupTargetUnavailable {
-  readonly unavailable: true
-}
-
-export const FOLLOWUP_TARGET_UNAVAILABLE: FollowupTargetUnavailable = { unavailable: true }
-
 /**
  * The runner-side resolver turns a discriminated `SessionTarget`
  * (issue-129 T-004) into a `FollowupTarget` constructed from the
  * persisted binding, or `null` when no usable binding is registered.
- * `FOLLOWUP_TARGET_UNAVAILABLE` is returned when the runtime is not
- * ready for execution so the handler can return the existing
- * `unavailable` taxonomy without consulting a live connection.
+ *
+ * Issue-461 D1: the resolver is BINDING-ONLY. It never reads runtime
+ * or outbox readiness. Admission is owned by each caller (claim,
+ * follow-up, cancel) so the resolver observes neither a stale runtime
+ * nor a second runtime during replacement.
  *
  * Both `ReceiveFollowup` and `CancelAgentSession` call into this
  * resolver; a single registration keeps the wire-decoding logic in
  * one place.
  */
-export type FollowupTargetResolution = FollowupTarget | FollowupTargetUnavailable | null
+export type FollowupTargetResolution = FollowupTarget | null
 
 export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>
-
-export function isFollowupTargetUnavailable(value: FollowupTargetResolution): value is FollowupTargetUnavailable {
-  return value !== null && "unavailable" in value
-}
 
 /**
  * Discriminated session target carried in the unified

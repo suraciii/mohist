@@ -146,7 +146,7 @@ export class AgentJobExecutor {
                 runtimeEvents: [{ type: event.type, payload: event.payload }],
               },
               signal,
-            ))
+            ).then(() => undefined))
             .catch((error) => {
               console.error(`agent-session runtime event failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
             })
