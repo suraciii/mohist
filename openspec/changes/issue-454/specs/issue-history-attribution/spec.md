@@ -34,7 +34,7 @@ Activity entries for artifact-recorded events SHALL identify the recorded artifa
 
 ### Requirement: New comments record a declared author
 
-Every new issue comment SHALL include a nonblank author label declared by the caller. The comment command SHALL trim, validate, persist, and return that label with the comment. Web and CLI comment submission SHALL require the author and SHALL NOT infer it from the current viewer, request channel, client type, or an unauthenticated role.
+Every new issue comment SHALL include an author label declared by the caller. The comment command SHALL trim the label, require 1 through 100 characters after trimming, persist it, and return it with the comment. Web and CLI comment submission SHALL require the author and SHALL NOT infer it from the current viewer, request channel, client type, or an unauthenticated role.
 
 #### Scenario: Web user submits a comment
 
@@ -54,6 +54,12 @@ Every new issue comment SHALL include a nonblank author label declared by the ca
 - **WHEN** a new comment request has a missing or blank author
 - **THEN** the comment SHALL NOT be created
 - **AND** the caller SHALL receive an actionable validation error
+
+#### Scenario: New comment author is too long
+
+- **WHEN** a new comment author exceeds 100 characters after trimming
+- **THEN** the comment SHALL NOT be created
+- **AND** the caller SHALL receive an actionable validation error that states the limit
 
 ### Requirement: Comment rows show recorded or historical attribution
 
