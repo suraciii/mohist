@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- `AgentSessionGrain.AppendEventsAsync` owns both discard boundaries: binding validation returns before state, transcript, timer, and fan-out work; unsupported transcript types must be diagnosed after `allEntries` is materialized and before the existing accumulator and fan-out allowlist checks.
+- `TranscriptAccumulator.EventTypes` is a `HashSet<string>` with ordinal equality and remains the single allowlist authority.
+- `AgentSessionGrainFixture` registers in-memory stores, fake time, and a grain-specific test logger through the Orleans silo service collection. Its transcript publisher is now a resettable recording fake.
+- Orleans direct grain calls require a `List<AgentSessionRuntimeEventInput>` for the serialized command; collection-expression arrays can fail deep-copy generation for the interface call.
+
+## Decisions and Verification
+
+- Binding warnings normalize a missing/whitespace reported runtime session identity to a structured `null` value while preserving the existing rejection condition and command shape.
+- Unsupported warnings group materialized entries with `StringComparer.Ordinal`; `allEntries` is passed unchanged to existing processing.
+- Focused `AgentSessionEventDiscardObservabilitySpecs` cover stale binding, missing binding, repeated unsupported type in a mixed batch, and supported-only input. The focused four-spec run passed.
+- Pre-change `dotnet test` passed all 5,550 server/CLI tests. The initial `npm test` invocation completed the .NET suite but workspace JS checks failed because `tsx` and `tsc` were unavailable before dependencies were installed.

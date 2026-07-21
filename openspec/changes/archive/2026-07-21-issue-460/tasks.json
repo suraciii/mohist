@@ -1,0 +1,30 @@
+{
+  "project": "mohist-local",
+  "description": "Make AgentSession runtime-event discards observable with structured warning logs for stale physical bindings and unsupported transcript event types while preserving all existing discard, persistence, and publication behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose AgentSession event discards in server logs",
+      "spec": "specs/agent-session-event-discard-observability/spec.md#binding-rejected-event-batches-are-observable, specs/agent-session-event-discard-observability/spec.md#unsupported-transcript-event-types-are-observable",
+      "description": "Add structured warning diagnostics at the two existing AgentSession event-discard boundaries. Log rejected binding batches once with both physical identities and the batch count, aggregate unsupported transcript entries once per event type, and keep the original event list and all state, return, persistence, and realtime publication semantics unchanged.",
+      "acceptanceCriteria": [
+        "A non-empty runtime-event batch with a stale reported physical binding emits exactly one warning containing structured `SessionId`, `ExpectedRuntimeSessionId`, `ReportedRuntimeSessionId`, and `DiscardedEventCount` values, then returns the existing rejected result without changing AgentSession state, stores, timers, or realtime publications.",
+        "A non-empty runtime-event batch with a missing reported physical binding emits the same warning shape with an explicit absent reported identity and the full batch count, and remains rejected without buffering or retry.",
+        "After an accepted batch is materialized, entries outside `TranscriptAccumulator.EventTypes` are grouped using ordinal type equality and emit exactly one warning per unsupported type with structured `SessionId`, `EventType`, and per-type `DiscardedEventCount` values.",
+        "Unsupported entries remain in the existing processing pipeline rather than being prefiltered: current sequencing, domain/state processing, and returned event information are unchanged, while the existing accumulator and fan-out allowlist checks continue to exclude them from transcript persistence and realtime publication.",
+        "A mixed batch with supported events and repeated unsupported events persists and publishes the supported events, neither persists nor publishes unsupported events, and reports the correct unsupported count; a supported-only batch emits no discard warning.",
+        "`AgentSessionGrainFixture` provides resettable recording transcript publication and captures structured logger state so focused `AgentSessionEventDiscardObservabilitySpecs` assert named warning fields and side effects without parsing only formatted text.",
+        "Focused specs cover stale identity, missing identity, repeated unsupported type in a mixed batch, and supported-only input using fake time and in-memory collaborators; they introduce no network, filesystem, process, or wall-clock dependency.",
+        "No runtime-events endpoint or DTO, event allowlist, AgentSession model, database schema, retry/buffer path, metric, alert integration, event payload logging, or external dependency is added or changed.",
+        "The focused Session specs and `npm test` pass, and verification leaves no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Structured discard warnings in `AgentSessionGrain`, recording Session grain test support, focused observability specs, and unchanged AgentSession event-processing behavior.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep this as one Session vertical slice: both discard causes share `AppendEventsAsync`, `TranscriptAccumulator.EventTypes`, and the same regression fixture. Log unsupported types from the materialized entry list without filtering or rewriting it; do not inject logging into `TranscriptAccumulator` or duplicate warnings in persistence and fan-out. The single-node dependency graph is acyclic."
+    }
+  ]
+}

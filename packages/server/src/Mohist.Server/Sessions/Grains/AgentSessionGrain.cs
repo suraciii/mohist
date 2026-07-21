@@ -920,6 +920,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             && (string.IsNullOrWhiteSpace(runtimeSessionId)
                 || !string.Equals(runtimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal)))
         {
+            _log.LogWarning(
+                "AgentSessionGrain discarded runtime events because the reported runtime session binding was not current for {SessionId}; expected {ExpectedRuntimeSessionId}, reported {ReportedRuntimeSessionId}, count {DiscardedEventCount}",
+                SessionId,
+                session.Status.AgentRuntimeSessionId,
+                string.IsNullOrWhiteSpace(runtimeSessionId) ? null : runtimeSessionId,
+                runtimeEvents.Count);
             return [];
         }
 
@@ -1020,6 +1026,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _lastHealthPercent = previousUsagePercent;
 
         var allEntries = entries.Concat(supplementaryEntries).ToList();
+
+        foreach (var group in allEntries
+            .Where(entry => !TranscriptAccumulator.EventTypes.Contains(entry.Type))
+            .GroupBy(entry => entry.Type, StringComparer.Ordinal))
+        {
+            _log.LogWarning(
+                "AgentSessionGrain discarded unsupported transcript events for {SessionId}; type {EventType}, count {DiscardedEventCount}",
+                SessionId,
+                group.Key,
+                group.Count());
+        }
 
         _transcript.Accept(session, allEntries, now);
 
