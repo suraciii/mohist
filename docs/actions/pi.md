@@ -178,6 +178,10 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 
 ## 实装差距
 
-`mohist/pi` 尚未实装，本篇是产品契约的目标形态。落地前，`uses: mohist/pi` 的 task
-会在开始执行时以「未知 Action」失败。与之配套的 Mohist Agent 执行后端选择（在
-Agent 配置中选择 Pi）同样未实装，当前 Mohist Agent 固定使用 OpenCode 执行。
+直接 Workflow 路径已经实装：`uses: mohist/pi` 的 task/check 可执行回合，复用
+Workflow AgentSession，并在现有 Session 页面展示 transcript、工具、状态、压缩、模型、
+用量、成本与 lineage。以下能力仍属于后续工作：
+
+- Mohist Agent 的 AgentJob 执行后端选择仍未实装，当前 Mohist Agent 固定使用 OpenCode。
+- Pi 的 Follow-up、Compact、Reset、Cancel 等 Session 命令仍未实装。
+- 面向 runtime 的模型 catalog 与 Web 模型选择 UI 仍未实装。

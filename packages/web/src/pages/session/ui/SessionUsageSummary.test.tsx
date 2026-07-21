@@ -9,6 +9,7 @@ function fullUsage(overrides: Partial<AgentSessionUsage> = {}): AgentSessionUsag
     outputTokens: 3200,
     totalTokens: 4700,
     cachedReadTokens: 800,
+    cachedWriteTokens: 300,
     thoughtTokens: 1200,
     costAmount: 0.18,
     costCurrency: 'USD',
@@ -32,6 +33,7 @@ describe('SessionUsageSummary', () => {
     it('renders cached and thought tokens', () => {
       render(<SessionUsageSummary usage={fullUsage()} />)
       expect(screen.getByTestId('usage-summary-cached')).toHaveTextContent('· 800 cached')
+      expect(screen.getByTestId('usage-summary-cache-write')).toHaveTextContent('· 300 cache write')
       expect(screen.getByTestId('usage-summary-thought')).toHaveTextContent('· 1.2k thought')
     })
 
@@ -79,6 +81,11 @@ describe('SessionUsageSummary', () => {
       render(<SessionUsageSummary usage={fullUsage({ cachedReadTokens: undefined })} />)
       expect(screen.queryByTestId('usage-summary-cached')).toBeNull()
     })
+
+    it('omits cache-write tokens when zero', () => {
+      render(<SessionUsageSummary usage={fullUsage({ cachedWriteTokens: 0 })} />)
+      expect(screen.queryByTestId('usage-summary-cache-write')).toBeNull()
+    })
   })
 
   describe('reasoning tokens surfaced', () => {
@@ -110,6 +117,7 @@ describe('SessionUsageSummary', () => {
         outputTokens: null,
         totalTokens: null,
         cachedReadTokens: null,
+        cachedWriteTokens: null,
         thoughtTokens: null,
         costAmount: null,
         contextWindowUsed: null,

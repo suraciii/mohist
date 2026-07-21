@@ -47,3 +47,9 @@
 - Pi runtime readiness is owned by RunnerHost alongside OpenCode. Failed Pi startup is retried from the existing work-claim readiness loop, while registration continues to project only the OpenCode catalog.
 - Pi runtime events are buffered for one turn and sent in order. Successful and submitted failure turns append one `session.closed`; terminal reporting uses an independent 30-second signal and preserves the runtime error when terminal acceptance fails.
 - Existing Runner host tests need the default test setup to inject a no-network Pi runtime because real Pi catalog initialization is provider/network backed; product Pi tests use the explicit runtime factory seam.
+
+## T-006 Notes
+
+- The Web milestone classifier now accepts exactly `mohist/opencode` and `mohist/pi` when a non-blank logical Session name is present; unrelated Action and AgentJob work remains excluded.
+- The existing Session path carries Pi cache-write usage from metadata to the generic usage summary, and generic chat/timeline projections render `provider.retry` as recovery/status facts alongside assistant, reasoning, tools, compaction, and terminal events.
+- T-006 documentation footnotes now mark only the direct Workflow path and existing Session presentation as delivered; AgentJob runtime selection, Pi Session commands, and runtime-aware catalog/UI remain gaps.

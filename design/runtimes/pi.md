@@ -395,6 +395,10 @@ Pi 是 0.x 快速演进的依赖（约每周一个 minor），SDK 的 breaking c
 
 ## 实装差距
 
-`PiRuntime`、`mohist/pi` Action 与「Server 与 Web 触及面」列出的泛化全部未实装；
-当前 `uses: mohist/pi` 的 task 以未知 Action 失败，Mohist Agent 固定使用 OpenCode
-执行。
+直接 Workflow 路径已经实装：`PiRuntime`、`mohist/pi` Action、runtime-aware Workflow
+Session binding，以及现有 Session transcript/tool/status/compaction/model/usage/cost/
+lineage 展示均已落地。以下设计触及面仍是实现差距：
+
+- AgentJob executor 与 Agent 配置中的 runtime 选择仍未接入，Mohist Agent 固定使用 OpenCode。
+- Follow-up、Cancel、Compact、Reset 等 Pi Session command handler 仍未接入。
+- runtime-aware model catalog API 与 Web 模型选择 UI 仍未接入。

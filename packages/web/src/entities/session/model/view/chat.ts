@@ -2,6 +2,7 @@ import type { SessionChatPart, SessionChatTurn, SessionChatView, SessionEvent } 
 import {
   defaultToolStatus,
   extractTextChunk,
+  getNumberProp,
   getStringProp,
   isAssistantReasoningEvent,
   isAssistantTextEvent,
@@ -142,6 +143,15 @@ function pushErrorPart(
   return { ...turn, parts: [...turn.parts, part] }
 }
 
+function providerRetryMessage(payload: Record<string, unknown>): string {
+  const phase = getStringProp(payload, 'phase')
+  const attempt = getNumberProp(payload, 'attempt')
+  const maxAttempts = getNumberProp(payload, 'maxAttempts')
+  const message = getStringProp(payload, 'message')
+  const progress = attempt && maxAttempts ? ` (${attempt}/${maxAttempts})` : ''
+  return `Provider retry${phase ? `: ${phase}` : ''}${progress}${message ? ` - ${message}` : ''}`
+}
+
 function makeInitialTurn(): SessionChatTurn {
   const at = new Date(0).toISOString()
   return {
@@ -261,6 +271,11 @@ export function buildChatView(events: SessionEvent[]): SessionChatView {
         const reason = getStringProp(payload, 'failureReason') ?? 'Liveness failed'
         current = pushErrorPart(current, reason, 'recovery', event.createdAt, counter)
       }
+      continue
+    }
+
+    if (event.type === 'provider.retry') {
+      current = pushErrorPart(current, providerRetryMessage(payload), 'recovery', event.createdAt, counter)
       continue
     }
   }
