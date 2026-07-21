@@ -64,8 +64,10 @@ workspace 是可重建的执行副本；远程 workflow branch 是阶段间恢�
 - **build**：`verify` 通过后 `push`，使下一个 stage 即使在新 Runner 上重建 workspace 也能取得
   已验证的成果。
 - **check**：`ai-review` 通过后 `push` → `mark-pr-ready`（幂等：只读
-  `vars.github.pr.number`，PR 已 ready 时直接成功；不更新 title/body、不推代码）。stage check
-  `github-pr-status` 只读确认 PR 状态。
+  `vars.github.pr.number`，PR 已 ready 时直接成功；不更新 title/body、不推代码）→ `verify-pr-checks`
+  （`mohist/github-pr-checks`：轮询 GitHub PR checks，CI 失败时返回 `error.code: pr-checks-failed`，
+  与 integrate 的 merge-pr recovery 对称地派 `recover:fix-pr-checks` + `recover:push` 后 `retrySelf`，
+  交付前自愈 CI）。stage check `github-pr-status` 只读确认 PR 状态。
 - **integrate**：`archive-change` → `push` → `merge-pr`（`mohist/merge-github-pr`：等待 GitHub PR checks，squash merge，重新查询确认 `state=MERGED`）。stage check `merge-verified` 用 `github-pr-status` 的 `expect: merged` 做只读确认。
 
 审批反馈是有序任务：先由 agent 应用反馈，再 `push` 当前 HEAD，随后重跑 stage checks。
@@ -81,6 +83,9 @@ workspace 是可重建的执行副本；远程 workflow branch 是阶段间恢�
 
 ### 不变量
 
+- PR checks 在两处显式门控：check 阶段的 `verify-pr-checks` task（交付前自愈）与 integrate 的
+  `merge-pr` action 内部前置（merge 前最终门）。两者复用同一套轮询/分类纯函数与同一 `pr-checks-failed`
+  error code，recovery 结构对称。
 - PR checks 是 merge action 的内部前置条件，不是 stage check。
 - 所有发布与 PR 副作用都是显式 task，没有隐式 stage 边界钩子。
 - `push` 不声明业务 recovery：push 失败意味着权限/网络问题或远程 branch 被外部写入，应作为普通 task failure 暴露。

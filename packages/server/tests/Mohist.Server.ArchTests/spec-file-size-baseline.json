@@ -17,7 +17,7 @@
   "Mohist.Server.SpecTests/Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs": 25560,
   "Mohist.Server.SpecTests/Specs/Issue/Profile/IssueWorkflowProfileApiSpecs.cs": 25270,
   "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistLocalWorkflowProfileSpecs.cs": 62108,
-  "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 37840,
+  "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 38588,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsQualitySpecs.cs": 51363,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsStageDurationsSpecs.cs": 45941,
   "Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs": 30791,

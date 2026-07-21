@@ -283,6 +283,12 @@ PR 操作失败只重试 PR,merge 恢复只处理 merge 自己的失败。
 checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自动修复,profile 必须
 声明显式 recovery。
 
+`mohist/github-pr-checks` 把同一套轮询/分类逻辑暴露成可在 stage graph 中声明的显式 task
+（典型用法:check 阶段在 `mark-pr-ready` 之后做交付前 CI 门控）。它复用 merge Action 内部
+的轮询纯函数与 `pr-checks-failed` error code,因此 profile 的 recovery handler 与 merge-pr
+完全对称(同样的 `recover:fix-pr-checks` + `recover:push` + `retrySelf`)。它只读校验:
+不改 PR、不 push、不做隐式修复,profile 声明显式 recovery。
+
 完整 task graph 见 [`builtin-workflows.md`](builtin-workflows.md)。
 
 ## Status

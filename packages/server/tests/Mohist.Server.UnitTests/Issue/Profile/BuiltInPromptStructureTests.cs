@@ -29,4 +29,19 @@ public class BuiltInPromptStructureTests
         Assert.Contains("${{ failure.error.message }}", body);
         Assert.DoesNotContain("${{ failure.output", body);
     }
+
+    [Fact]
+    public void FixPrChecksPrompt_IsStageAgnosticForCheckAndIntegrate()
+    {
+        var template = new FilePromptLoader().LoadAllTemplates()["fix-pr-checks"];
+
+        Assert.Null(template.Stage);
+        Assert.Contains("check", template.Tags);
+        Assert.Contains("integrate", template.Tags);
+
+        Assert.DoesNotContain("merge-github-pr rejected", template.Body);
+        Assert.DoesNotContain("only checks PR state", template.Body);
+        Assert.Contains("gh pr view", template.Body);
+        Assert.Contains("gh run view", template.Body);
+    }
 }
