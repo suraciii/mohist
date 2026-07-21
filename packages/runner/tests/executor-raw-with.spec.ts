@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { defineTestAction, ActionRegistry } from "./support/action-registry-test.js"
 
 let workDir: string
 
@@ -32,11 +32,16 @@ describe("WorkExecutor rawWith", () => {
   it("exposes rawWith as server-expanded form and with as recursively-rendered form", async () => {
     let capturedContext: ActionContext | null = null
 
-    const registry = new ActionRegistry()
-    registry.register("test/capture-context", async (ctx) => {
-      capturedContext = ctx
-      return { output: null }
-    })
+    const registry = new ActionRegistry([
+      defineTestAction("test/capture-context", async (ctx) => {
+        capturedContext = ctx
+        return { output: null }
+      }, {
+        inputs: {
+          task: { types: ["object"] },
+        },
+      }),
+    ])
 
     const executor = new WorkExecutor(
       registry,
@@ -76,11 +81,16 @@ describe("WorkExecutor rawWith", () => {
 
   it("propagates parent issue context only through ActionContext", async () => {
     let capturedContext: ActionContext | null = null
-    const registry = new ActionRegistry()
-    registry.register("test/capture-parent-context", async (ctx) => {
-      capturedContext = ctx
-      return { output: null }
-    })
+    const registry = new ActionRegistry([
+      defineTestAction("test/capture-parent-context", async (ctx) => {
+        capturedContext = ctx
+        return { output: null }
+      }, {
+        inputs: {
+          prompt: { types: ["string"] },
+        },
+      }),
+    ])
     const executor = new WorkExecutor(
       registry,
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),

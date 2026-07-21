@@ -98,11 +98,13 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/actions/registry.js", () => ({
-  createDefaultRegistry: () => ({
-    resolve: () => undefined,
-  }),
-}))
+vi.mock("../src/actions/registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+  return {
+    ...actual,
+    createDefaultRegistry: () => new actual.ActionRegistry([]),
+  }
+})
 
 
 interface StubRuntimeOptions {

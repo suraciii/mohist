@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest"
 import type { WorkExecutor } from "../src/runtime/executor.js"
-import type { ActionRegistry } from "../src/actions/registry.js"
+import type { ActionRegistry, ActionDefinition } from "../src/actions/registry.js"
+import { defineAction } from "../src/actions/define-action.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
@@ -10,15 +11,31 @@ const mockFallbackWorkDir = "/tmp"
 describe("Check verdict validation", () => {
   let executor: WorkExecutor
   let mockActionRegistry: ActionRegistry
+  let capturedHandler: ((context: unknown) => Promise<ActionResult>) | null
 
   beforeEach(async () => {
     const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" })
 
     const mockConnection = {} as unknown as ServerConnection
 
+    capturedHandler = null
+    const definition: ActionDefinition = defineAction({
+      manifest: {
+        name: "test/check-action",
+        inputs: {
+          path: { types: ["string"] },
+          expect: { types: ["string"] },
+        },
+        outputs: [],
+        errors: [{ code: "marker-failed" }],
+      },
+      run: async (ctx) => {
+        if (capturedHandler) return await capturedHandler(ctx)
+        return { output: null }
+      },
+    })
     mockActionRegistry = {
-      resolve: vi.fn(),
-      register: vi.fn(),
+      resolve: vi.fn().mockImplementation(() => ({ kind: "definition", definition, canonicalName: definition.manifest.name })),
     } as unknown as ActionRegistry
 
     const mod = await import("../src/runtime/executor.js")
@@ -31,7 +48,7 @@ describe("Check verdict validation", () => {
   })
 
   const mockAction = (result: ActionResult) => {
-    ;(mockActionRegistry.resolve as any).mockImplementation(() => async () => result)
+    capturedHandler = async () => result
   }
 
   const makeCheckWork = (checks: JsonObject[]): RenderedWorkItem => ({
@@ -85,5 +102,23 @@ describe("Check verdict validation", () => {
     expect(result).toMatchObject({ status: "fail", error: { code: "unexpected-error" } })
     expect(() => JSON.stringify(result)).not.toThrow()
     expect(result.output).toEqual([{ name: "cyclic", status: "fail", message: expect.any(String) }])
+  })
+
+  it("resolves a check working directory from the engine-owned input", async () => {
+    let workDir = ""
+    capturedHandler = async (context) => {
+      workDir = (context as { workDir: string }).workDir
+      return { output: null }
+    }
+    const work = makeCheckWork([{
+      name: "subdirectory-check",
+      uses: "core/marker",
+      with: { "working-directory": "subdir", path: "review.md" },
+    }])
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("pass")
+    expect(workDir).toBe("/tmp/test-work/subdir")
   })
 })

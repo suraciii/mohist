@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- RunnerHost owns one ActionRegistry instance and passes that exact instance to WorkExecutor; registration and heartbeat state project its catalog from the same registry.
+- Runner catalog DTOs use arrays for deterministic ordering. C# ActionCatalogInput.Default is the only generic JSON leaf and remains nullable so omitted static defaults stay absent on the wire.
+- RunnerGrain clones reported catalog data before retaining it and mirrors the retained RunnerInfo into the online global registry.
+
+## T-002 Notes
+
+- Added typed ActionCatalog records to RunnerInfo, register/heartbeat request binding, and RunnerWorksState retention.
+- Persisted catalog JSON alongside LastKnownInfo because Orleans persistence did not retain nullable JsonElement defaults reliably through grain reactivation; activation restores the typed catalog from this durable representation.
+- A missing catalog is the current Runner state: re-registration or heartbeat repair from an older Runner clears a previously retained catalog rather than publishing stale capabilities.
+- Check dispatch resolves the engine-owned `working-directory` from rendered input while Actions receive only validated Action-owned input. Invalid successful check output remains an aggregate `unexpected-error`; other malformed check results remain row-level `unexpected-error` with aggregate `check-failed`.
+- ActionRegistry validates every supplied manifest during construction so malformed definitions cannot bypass `defineAction`.
+- defineAction deep-freezes cloned array and object defaults, including nested JSON values, so callers cannot alter the manifest-derived execution or catalog contract after construction.
+- Verification passed with `npm test`, `npm run typecheck -w packages/runner`, and `npm run test:ci -w packages/runner`.

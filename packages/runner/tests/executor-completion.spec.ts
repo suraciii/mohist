@@ -2,12 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
 import { succeed, fail, validateActionOutputShape } from "../src/actions/action-result.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import type { ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { defineTestActions } from "./support/action-registry-test.js"
 
 let workDir: string
 
@@ -22,8 +22,9 @@ afterEach(async () => {
 })
 
 function execute(result: ActionResult) {
-  const actions = new ActionRegistry()
-  actions.register("test/action", async () => result)
+  const actions = defineTestActions({
+    "test/action": async () => result,
+  })
   const executor = new WorkExecutor(
     actions,
     verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),

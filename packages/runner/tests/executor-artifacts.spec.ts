@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
+import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/types.js"
@@ -49,10 +49,13 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | 
   }
 }
 
-function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
-  const registry = new ActionRegistry()
-  registry.register("test/action", async (ctx) => handler(ctx))
-  return registry
+function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>, errors: { code: string }[] = []): ActionRegistry {
+  return defineTestActions({
+    "test/action": {
+      run: handler,
+      errors,
+    },
+  })
 }
 
 let workDir: string
@@ -90,7 +93,7 @@ describe("WorkExecutor artifact capture", () => {
   it("taskRecoveryPreservesNestedRecoveryOnAddedTasks", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async () => ({ error: { code: "base-moved", message: "base moved" } })),
+      makeRegistry(async () => ({ error: { code: "base-moved", message: "base moved" } }), [{ code: "base-moved" }]),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       workDir,

@@ -9,7 +9,11 @@ import { createTestTempDir } from "./support/temp-dir.js"
 describe("mohist/openspec-artifacts", () => {
   it("registers openspec-artifacts in the default registry", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/openspec-artifacts")).toBe(openspecArtifactsAction)
+    const resolved = registry.resolve("mohist/openspec-artifacts")
+    expect(resolved.kind).toBe("definition")
+    if (resolved.kind === "definition") {
+      expect(resolved.definition.manifest.name).toBe("mohist/openspec-artifacts")
+    }
   })
 
   it("returns success and lists zero missing artifacts when all four plan artifacts exist", async () => {

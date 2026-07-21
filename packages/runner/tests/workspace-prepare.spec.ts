@@ -95,7 +95,11 @@ function cleanProbeResponses(extra: (call: GitCall, history: GitCall[]) => { suc
 describe("mohist/workspace-prepare", () => {
   it("registers workspacePrepareAction under mohist/workspace-prepare", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/workspace-prepare")).toBe(workspacePrepareAction)
+    const resolved = registry.resolve("mohist/workspace-prepare")
+    expect(resolved.kind).toBe("definition")
+    if (resolved.kind === "definition") {
+      expect(resolved.definition.manifest.name).toBe("mohist/workspace-prepare")
+    }
   })
 
   it("FastPass_CleanWorkspace_IssuesNoMutationCommands", async () => {

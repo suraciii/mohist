@@ -11,6 +11,7 @@ import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { WorkspaceManager } from "../src/runtime/workspace.js"
 import { setProcessSpawnerForTest } from "../src/system/process.js"
 import { FakeProcessSpawner } from "./support/fake-process.js"
+import { defineTestActions } from "./support/action-registry-test.js"
 
 let workDir: string
 let processSpawner: FakeProcessSpawner
@@ -37,9 +38,9 @@ afterEach(async () => {
 })
 
 function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
-  const registry = new ActionRegistry()
-  registry.register("mohist/test-action", async (ctx) => handler(ctx))
-  return registry
+  return defineTestActions({
+    "mohist/test-action": handler,
+  })
 }
 
 function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null })): WorkExecutor {

@@ -1,7 +1,9 @@
 import type { ActionContext, ActionError, JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import type { ActionRegistry } from "../actions/registry.js"
-import { isActionFailure, validateActionOutputShape } from "../actions/action-result.js"
+import { validateActionInput } from "../actions/input-validation.js"
+import { malformedToUnexpectedError, normalizeActionResult } from "../actions/result-validation.js"
+import { errorMessage } from "../core/errors.js"
 
 function rowToJsonValue(row: CheckResultRow & { invalidOutputReason?: string }): JsonValue {
   return { ...row } as unknown as JsonValue
@@ -64,22 +66,83 @@ async function runOneCheck(
   variables: JsonObject,
   deps: CheckExecutionDeps,
 ): Promise<CheckResultRow & { invalidOutputReason?: string }> {
-  const action = deps.actions.resolve(check.uses)
-  if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
+  const resolved = deps.actions.resolve(check.uses)
+  if (resolved.kind === "unknown") {
+    return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
+  }
+  if (resolved.kind === "tombstone") {
+    return {
+      name: check.name,
+      status: "fail",
+      message: `Check uses the removed Action '${check.uses}'. ${resolved.tombstone.guidance}`,
+    }
+  }
+  const definition = resolved.definition
   try {
     const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
     if (unresolved.length > 0) {
       return { name: check.name, status: "fail", message: deps.formatUnresolved(unresolved) }
     }
     const renderedWith = renderTemplate(check.with ?? null, variables)
+    const validation = validateActionInput(definition.manifest, renderedWith)
+    if (validation.kind === "failure") {
+      return {
+        name: check.name,
+        status: "fail",
+        message: validation.error.message,
+        error: validation.error,
+      }
+    }
     const workDir = await deps.resolveWorkDir(renderedWith)
-    const result = await action({ ...deps.context, workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
-    if (isActionFailure(result)) return { name: check.name, status: "fail", message: result.error.message, error: result.error }
-    const invalidReason = validateActionOutputShape(result.output)
-    if (invalidReason) return { name: check.name, status: "fail", message: invalidReason, invalidOutputReason: invalidReason }
-    return { name: check.name, status: "pass", output: result.output }
+    let rawResult: unknown
+    try {
+      rawResult = await definition.run({
+        ...deps.context,
+        workType: "check",
+        title: check.title,
+        uses: check.uses,
+        with: validation.input as never,
+        workDir,
+      })
+    } catch (thrown) {
+      rawResult = malformedToUnexpectedError(
+        `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+      )
+    }
+    const normalized = normalizeActionResult(rawResult, definition.manifest)
+    if (normalized.kind === "malformed") {
+      if (normalized.reason === "output") {
+        return {
+          name: check.name,
+          status: "fail",
+          message: normalized.message,
+          invalidOutputReason: normalized.message,
+        }
+      }
+      const result = malformedToUnexpectedError(normalized.message)
+      return {
+        name: check.name,
+        status: "fail",
+        message: result.error?.message ?? normalized.message,
+        error: result.error ?? { code: "unexpected-error", message: normalized.message },
+      }
+    }
+    if (normalized.kind === "error") {
+      return {
+        name: check.name,
+        status: "fail",
+        message: normalized.error.message,
+        error: normalized.error,
+      }
+    }
+    return { name: check.name, status: "pass", output: normalized.output }
   } catch (error) {
-    return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
+    return {
+      name: check.name,
+      status: "fail",
+      message: errorMessage(error),
+      error: { code: "unexpected-error", message: errorMessage(error) },
+    }
   }
 }
 

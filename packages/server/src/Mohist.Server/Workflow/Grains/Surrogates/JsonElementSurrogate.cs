@@ -14,10 +14,10 @@ public struct JsonElementSurrogate
 public sealed class JsonElementSurrogateConverter : IConverter<JsonElement, JsonElementSurrogate>
 {
     public JsonElement ConvertFromSurrogate(in JsonElementSurrogate surrogate) =>
-        JSON.DeserializeElement(surrogate.RawJson);
+        JSON.DeserializeElement(surrogate.RawJson).Clone();
 
     public JsonElementSurrogate ConvertToSurrogate(in JsonElement value) => new()
     {
-        RawJson = value.GetRawText(),
+        RawJson = value.ValueKind == JsonValueKind.Undefined ? "null" : value.GetRawText(),
     };
 }

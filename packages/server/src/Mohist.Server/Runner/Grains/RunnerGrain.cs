@@ -2,6 +2,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -90,7 +91,14 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _slots = await _definitions.GetOrInitAsync(RunnerId, ct);
         if (!_worksState.RecordExists)
             await _worksState.ReadStateAsync();
-        _info = GetState().LastKnownInfo;
+        var state = GetState();
+        _info = state.LastKnownInfo;
+        if (_info is not null && state.LastKnownActionCatalogJson is not null)
+        {
+            var catalog = JSON.Deserialize<ActionCatalog>(state.LastKnownActionCatalogJson);
+            if (catalog is not null)
+                _info = _info with { ActionCatalog = catalog };
+        }
         await HydrateOutstandingAgentJobWorksAsync(ct);
     }
 
@@ -583,6 +591,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash,
             RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
+            ActionCatalog = info.ActionCatalog,
         };
     }
 
@@ -592,6 +601,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash ?? _info?.BuildGitHash,
             RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
+            ActionCatalog = info.ActionCatalog,
         };
     }
 
@@ -746,8 +756,42 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private void SetRunnerInfo(RunnerInfo? info)
     {
-        _info = info;
-        GetState().LastKnownInfo = info;
+        var retained = info is null
+            ? null
+            : info with { ActionCatalog = CloneActionCatalog(info.ActionCatalog) };
+        _info = retained;
+        var state = GetState();
+        state.LastKnownInfo = retained;
+        state.LastKnownActionCatalogJson = retained?.ActionCatalog is { } catalog
+            ? JSON.Serialize(catalog)
+            : null;
+    }
+
+    private static ActionCatalog? CloneActionCatalog(ActionCatalog? catalog)
+    {
+        if (catalog is null)
+            return null;
+
+        return new ActionCatalog(
+            catalog.Actions.Select(action => new ActionCatalogEntry(
+                action.Name,
+                action.Inputs.Select(input => new ActionCatalogInput(
+                    input.Name,
+                    [.. input.Types],
+                    input.Required,
+                    CloneDefault(input.Default),
+                    input.Description)).ToArray(),
+                action.Outputs.Select(output => new ActionCatalogOutput(output.Name, output.Description)).ToArray(),
+                action.Errors.Select(error => new ActionCatalogError(error.Code, error.Description)).ToArray(),
+                action.Description)).ToArray(),
+            catalog.Tombstones.Select(tombstone => new ActionCatalogTombstone(tombstone.Name, tombstone.Guidance)).ToArray());
+    }
+
+    private static System.Text.Json.JsonElement? CloneDefault(System.Text.Json.JsonElement? value)
+    {
+        if (value is not { } element || element.ValueKind == System.Text.Json.JsonValueKind.Undefined)
+            return null;
+        return element.Clone();
     }
 
     private void AddWork(RunnerWork work)
