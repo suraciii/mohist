@@ -16,7 +16,7 @@ While the issue detail page is open, the page SHALL subscribe to the live event 
 
 #### Scenario: An approval request or blocked state appears without reload
 
-- **WHEN** an approval-requested event or a blocked-state event for the viewed issue arrives over the live event stream while the page is open
+- **WHEN** the viewed issue enters an approval-waiting or blocked state while the page is open
 - **THEN** the approval-waiting or blocked state SHALL appear in the page without a navigation or reload
 
 ### Requirement: The reader's scroll position is preserved across every live update
