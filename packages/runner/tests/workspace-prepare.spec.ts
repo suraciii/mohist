@@ -132,12 +132,13 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    const result = await workspacePrepareAction({
+    const contextWithHiddenVariables: ActionContext = {
       ...context(),
       workDir: "/host-workspace",
       with: { expectedBranch: EXPECTED_BRANCH },
       variables: { workspace: { path: "/hidden-workspace", branch: "hidden-branch" } },
-    })
+    }
+    const result = await workspacePrepareAction(contextWithHiddenVariables)
 
     expect(result.error).toBeUndefined()
     expect(calls.every((call) => call.workDir === "/host-workspace")).toBe(true)
@@ -576,11 +577,12 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    const result = await workspacePrepareAction({
+    const contextWithHiddenVariables: ActionContext = {
       ...context(),
       with: {},
       variables: { workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null } },
-    })
+    }
+    const result = await workspacePrepareAction(contextWithHiddenVariables)
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeDefined()

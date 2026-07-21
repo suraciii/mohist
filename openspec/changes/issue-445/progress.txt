@@ -16,6 +16,11 @@
 - `npm run typecheck -w packages/runner`
 - `npm run test:ci -w packages/runner` (102 files, 1,204 tests)
 
+## Review Follow-up
+
+- Restored Runner test typecheck after narrowing the Action invocation context. The base Variable-free view remains structurally compatible with dispatch-shaped test fixtures, while `ValidatedActionContext` keeps a required validated `with` payload and production handler types still omit `variables`.
+- Verification: `npm run typecheck:tests -w packages/runner`.
+
 ## T-002
 
 - Workspace preparation now consumes required `with.expectedBranch` and always uses the executor-provided host `workDir`.

@@ -33,9 +33,7 @@ export type ValidatedWith<M extends ActionManifest> = M extends ActionManifest
  * shape from the wider engine `ActionContext` so a built-in or custom
  * Action cannot observe `variables` at compile time or runtime.
  */
-export type ActionInvocationContext = Omit<ActionContext, "with" | "variables"> & {
-  readonly with: JsonObject
-}
+export type ActionInvocationContext = Omit<ActionContext, "variables">
 
 /**
  * Manifest-typed variant of {@link ActionInvocationContext}. The Runner
