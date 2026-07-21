@@ -49,7 +49,7 @@ function renderBranch(
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
-        <LiveTaskContext.Provider value={{ activeTaskId: null, activeTaskElapsedMs: null, rebaseConflict }}>
+        <LiveTaskContext.Provider value={{ activeTaskId: null, activeTaskElapsedMs: null, rebaseConflict, eventsReconnectVersion: 0 }}>
           <BranchBar
             issueNumber={issueNumber}
             stage={props.stage === undefined ? WorkflowStage.Build : props.stage}

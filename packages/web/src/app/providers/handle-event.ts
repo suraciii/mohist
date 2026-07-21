@@ -127,6 +127,10 @@ function stageHandler(ctx: HandlerContext): void {
   ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
 }
 
+function workflowTaskHandler(ctx: HandlerContext): void {
+  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
+}
+
 function issueHandler(ctx: HandlerContext): void {
   if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
     return
@@ -269,6 +273,11 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
 
   [REVERSE_DNS_EVENT_TYPES.StageApprovalRequested]: approvalHandler,
   [REVERSE_DNS_EVENT_TYPES.StageApprovalResolved]: approvalHandler,
+
+  [REVERSE_DNS_EVENT_TYPES.TaskStarted]: workflowTaskHandler,
+  [REVERSE_DNS_EVENT_TYPES.TaskCompleted]: workflowTaskHandler,
+  [REVERSE_DNS_EVENT_TYPES.TaskFailed]: workflowTaskHandler,
+  [REVERSE_DNS_EVENT_TYPES.ArtifactRecorded]: workflowTaskHandler,
 
   [REVERSE_DNS_EVENT_TYPES.InboxItemPersisted]: inboxHandler,
 }

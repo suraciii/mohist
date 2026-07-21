@@ -83,9 +83,14 @@ function useLiveEvents(
     [handleEvent],
   )
 
-  eventsConnectionHook(projectId, handleEvent, handleTranscriptEvent)
+  const { reconnectVersion } = eventsConnectionHook(projectId, handleEvent, handleTranscriptEvent)
 
-  return { activeTaskId, activeTaskElapsedMs, rebaseConflict }
+  return {
+    activeTaskId,
+    activeTaskElapsedMs,
+    rebaseConflict,
+    eventsReconnectVersion: reconnectVersion,
+  }
 }
 
 interface LiveTaskProviderProps {

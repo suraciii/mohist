@@ -8,6 +8,10 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.StageFailed]: { issueNumber: number; projectId: string; from: string; to: string }
   [REVERSE_DNS_EVENT_TYPES.StageApprovalRequested]: { issueNumber: number; projectId: string; stage: string }
   [REVERSE_DNS_EVENT_TYPES.StageApprovalResolved]: { issueNumber: number; projectId: string; stage: string }
+  [REVERSE_DNS_EVENT_TYPES.TaskStarted]: { issueNumber: number; projectId: string; stage: string; taskId: string; workerId: string }
+  [REVERSE_DNS_EVENT_TYPES.TaskCompleted]: { issueNumber: number; projectId: string; stage: string; taskId: string }
+  [REVERSE_DNS_EVENT_TYPES.TaskFailed]: { issueNumber: number; projectId: string; stage: string; taskId: string; message?: string | null }
+  [REVERSE_DNS_EVENT_TYPES.ArtifactRecorded]: { issueNumber: number; projectId: string; workflowRunId: string; taskRunId: string; path: string; recordedAt: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused]: { issueNumber: number; projectId: string }

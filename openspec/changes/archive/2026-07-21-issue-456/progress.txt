@@ -1,0 +1,22 @@
+## Codebase Patterns
+
+- `useWorkflowTimeline` is consumed by the issue detail workflow surface and Activity timeline; its query key is under the `['issues']` prefix, so existing domain invalidations refresh it without a separate page-local cache path.
+- `useEventsConnection` increments `reconnectVersion` only after `onreconnected`; `LiveTaskProvider` now forwards that value as `eventsReconnectVersion` through `LiveTaskState`.
+- Task and artifact reverse-DNS events are already in `EVENT_TYPES` and subscribed by the events hub. Their typed payloads must be added to `entities/issue/@x/events.ts` before adding `ROUTE` rows so `_AssertRouteSubscribes` remains meaningful.
+- Issue detail uses a first-load-only `isLoading || !issue` guard and identity keys in its workflow/reference sections. No `isFetching` guard or new remount key was introduced, preserving local collapse state and reading position.
+
+## T-001
+
+- Removed the steady-state `refetchInterval` from `useWorkflowTimeline`.
+- Added a page-owned effect keyed by `eventsReconnectVersion` that calls the timeline query's `refetch()` once per successful reconnect; version `0` does not trigger catch-up.
+- Added typed `TaskStarted`, `TaskCompleted`, `TaskFailed`, and `ArtifactRecorded` payloads and routes. All four routes invalidate `['issues']`, matching the existing stage cascade.
+- Added focused coverage for task/artifact route invalidation, reconnect signal exposure, and absence of a timeline polling interval.
+- Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 375 files and 5052 tests.
+
+## T-002
+
+- Added `useIssueAttentionNudges` as a page-owned edge trigger over the already-derived `decision.summary`; the first available summary is the baseline, and navigation to another issue resets that baseline without a mount toast.
+- Approval-required transitions use the existing informational approval copy; blocked transitions use an error toast naming the blocked issue. Failed and routine summaries remain silent, and repeated renders of the same target summary do not duplicate the nudge.
+- Wired the hook into `IssueDetailPage`; `handle-event.ts` and its viewed-issue global-toast suppression remain unchanged, so the page nudge is the viewed-issue notice.
+- Added hook coverage for approval, blocked, duplicate suppression, routine/failed transitions, mount/navigation behavior, and phone-width parity.
+- Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 376 files and 5062 tests; `git diff --check` passed with no generated changes.
