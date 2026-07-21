@@ -303,6 +303,19 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     await client.stop()
   })
 
+  it("Start_RecoversRuntimeEventOutbox", async () => {
+    builders.length = 0
+    const recover = vi.fn(async () => {})
+    const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      agentSessionRuntimeEventOutbox: recoveryOutbox(recover),
+    })
+
+    await client.start()
+
+    expect(recover).toHaveBeenCalledTimes(1)
+    await client.stop()
+  })
+
   it("ProbeLiveness_ReturnsFalse_WhenNotConnected", async () => {
     builders.length = 0
     const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
