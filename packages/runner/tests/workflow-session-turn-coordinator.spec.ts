@@ -7,6 +7,7 @@ import { defineAction } from "../src/actions/define-action.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { succeed } from "../src/actions/action-result.js"
 import type { ActionInvocationContext } from "../src/actions/context.js"
+import type { ActionResult } from "../src/core/types.js"
 import { deferred } from "./support/deferred.js"
 
 const key = (sessionName: string) => ({
@@ -35,7 +36,7 @@ const PI_MANIFEST = {
   errors: [{ code: "turn-failed" }],
 }
 
-function makeRegistry(action: (context: ActionInvocationContext) => ReturnType<typeof succeed>): ActionRegistry {
+function makeRegistry(action: (context: ActionInvocationContext) => Promise<ActionResult>): ActionRegistry {
   const definitions: ActionDefinition[] = [
     defineAction({ manifest: AGENT_MANIFEST, run: action }),
     defineAction({ manifest: PI_MANIFEST, run: action }),
@@ -112,7 +113,7 @@ describe("check Action turn coordination", () => {
       const session = String(context.with?.session ?? context.workId).trim()
       started.push(session)
       if (session === "shared" && started.filter((value) => value === "shared").length === 1) await release.promise
-      return succeed("ok")
+      return succeed(null)
     }
     const actions = makeRegistry(action)
     const context = {
