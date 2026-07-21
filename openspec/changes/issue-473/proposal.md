@@ -15,8 +15,8 @@ Operator-triggered rebase (`mo issue rebase`) builds an ad-hoc task whose `with`
 
 ## Impact
 
-- **Server Issue API helpers** (`packages/server/src/Mohist.Server/Api/IssueRoutes.Helpers.cs`): `BuildRebaseTaskWith` stops emitting the `repository` object; the run-owned `WorkflowRepositoryContext` parameter remains in use only for base-branch defaulting.
-- **Server Issue API rebase route** (`packages/server/src/Mohist.Server/Api/IssueRoutes.Rebase.cs`): the missing-context rejection and base-branch defaulting logic is unchanged; only the field mirrored into the Action's `with` is removed.
+- **Server Issue API helpers** (`packages/server/src/Mohist.Server/Api/IssueRoutes.Helpers.cs`): `BuildRebaseTaskWith` stops emitting the `repository` object; its now-unused `repository` parameter is removed so the signature collapses to `BuildRebaseTaskWith(string baseBranch)` (the parameter only ever fed the payload object — base-branch defaulting happens at the call site, not in the helper).
+- **Server Issue API rebase route** (`packages/server/src/Mohist.Server/Api/IssueRoutes.Rebase.cs`): `runSnapshot` stays in scope at the route handler for its two existing responsibilities — missing-context rejection and base-branch defaulting; only the mirroring of the snapshot into the Action's `with` is removed.
 - **Server unit tests** (`packages/server/tests/Mohist.Server.UnitTests/Api/IssueRebaseRecoveryTests.cs`): `BuildRebaseTaskWith_UsesResolvedRepositoryContext` is updated to encode the corrected contract; the sibling recovery test is untouched.
 - **No change** to the `mohist/rebase` Action (`packages/runner/src/actions/built-ins.ts`) or to Action input validation (`packages/runner/src/actions/input-validation.ts`, introduced by issue 444) — the manifest remains the authority and the caller now conforms.
 - **No change** to CLI surface, persisted models, database schema, recovery task shape, or any other server-constructed task; no new external dependency.
