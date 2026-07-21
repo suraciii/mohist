@@ -2,12 +2,8 @@
 
 ## Findings
 
-### 1. [blocker] Default OpenSpec tasks now fail when `prompts.build` is absent
+### 1. [blocker] The build-prompt workaround changes the Action contract and breaks existing callers
 
-`packages/runner/src/actions/openspec.ts:324-338` unconditionally adds `base: "${{ prompts.build }}"` to every generated default prompt-loader spec. Before this change, the loader only received a `base` field when `prompts.build` existed in the dispatched variables; otherwise the field was omitted and the generated task still ran. The new child task dispatch treats the prompt object as an immediate input, so a missing `prompts.build` is reported as an unresolved template and the default `mohist/opencode` task fails input validation. Preserve the old conditional behavior while still carrying the deferred task file/items/task selector through the result effect.
-
-### 2. [major] Manifest-specific host typing is defined but not used by Action execution
-
-`packages/runner/src/actions/host.ts:59-67` defines `ActionHostFor<M>` to make capability members depend on the selected manifest, but `packages/runner/src/actions/manifest.ts:56-59` types every `ActionDefinition.run` as receiving the unrestricted `ActionHost`, whose `agent`, `issue`, and `checkpoint` members are all visible to every Action. Consequently an Action with no declared capabilities can still compile against those capability APIs, and a declared Action does not get a manifest-derived execution type. This leaves the capability boundary runtime-only and contradicts the design requirement that the host be type-checkable and that available capabilities equal the manifest declaration. Make the Action definition/run and registration path use the manifest-specific host type, with declared capabilities required and undeclared capability members absent.
+The current follow-up adds `buildPrompt` to the `mohist/openspec-tasks` manifest in `packages/runner/src/actions/built-ins.ts:145-148` and reads it in `packages/runner/src/actions/openspec.ts:96-106`. This is a new public `with` input, contrary to the issue's non-goal of preserving every Action input contract. More importantly, existing callers that supplied `prompts.build` through workflow variables but did not supply this new input now generate fallback prompt loaders without `base`; only newly migrated callers that explicitly pass `buildPrompt` retain the old behavior. The shipped profiles avoid the regression only because they already provide an explicit prompt loader, which does not preserve arbitrary existing OpenSpec callers. Restore the old conditional behavior without adding a new Action input or requiring callers to migrate their `with` payload; the variable-to-deferred-task handoff must remain engine-owned and preserve both the present and absent `prompts.build` cases.
 
 <promise>FAIL</promise>
