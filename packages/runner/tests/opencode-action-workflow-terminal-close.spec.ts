@@ -292,7 +292,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close reportin
         with: { prompt: "opencode will fail", session: "plan" } as never,
       })
       const result = await opencodeAction(context)
-      expect(result.error?.message).toMatch(/OpenCode/)
+      expect(result.error?.message).toBe("opencode-runtime-explosion")
       expect(result.error?.message).not.toMatch(/rejected/)
       expect(result.error?.message).not.toMatch(/upload/)
       const types = eventTypeList(connection.eventCalls)

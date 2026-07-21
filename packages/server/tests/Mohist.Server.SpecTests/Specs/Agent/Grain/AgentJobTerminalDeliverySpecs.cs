@@ -12,26 +12,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
 
-/// <summary>
-/// Focused specs for the durable AgentJob → AgentSession terminal protocol
-/// (issue-449 T-001 / design decision 2). Covers:
-/// <list type="bullet">
-/// <item>All AgentJob terminal sources persist a stable pending
-///   Session-close delivery (runner-reported completion/failure, preflight
-///   failure, dispatch exhaustion, report timeout, forced failure).</item>
-/// <item>Runner failure category precedence: structured output
-///   <c>failureCategory</c> → <c>WorkResult.Error.Code</c> → report status;
-///   missing-workspace results persist <c>invalid-input</c>.</item>
-/// <item>The AgentSession terminal command is idempotent and durable;
-///   retried deliveries converge on exactly one <c>session.closed</c>
-///   transcript fact.</item>
-/// <item>Close-persistence failures leave the pending delivery retryable;
-///   reminder / activation / report replay converge without wall-clock waits.</item>
-/// <item>Activation loss before transcript flush does not lose the pending
-///   delivery; a fake persistence failure and forced reactivation prove
-///   convergence.</item>
-/// </list>
-/// </summary>
 [Collection("AgentJobGrain")]
 public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 {
@@ -69,7 +49,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(
                 Status: "failed",
                 Message: "AgentJob requires 'workspace.path' in dispatch variables",
-                Output: "{}",
+                Output: JSON.DeserializeElement("{}"),
                 ExitCode: 1,
                 Error: new Mohist.Server.Workflow.Domain.Run.ExecutionError(
                     Code: "invalid-input",
@@ -123,7 +103,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await runner.ReportAgentJobResultAsync(
             jobKey,
             workId,
-            new WorkResult(Status: "completed", Message: "ok", Output: "{}", ExitCode: 0));
+            new WorkResult(Status: "completed", Message: "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -160,7 +140,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(
                 Status: "failed",
                 Message: "context exhausted",
-                Output: """{"failureCategory":"context_exhausted"}""",
+                Output: JSON.DeserializeElement("""{"failureCategory":"context_exhausted"}"""),
                 ExitCode: 1,
                 Error: new Mohist.Server.Workflow.Domain.Run.ExecutionError(
                     Code: "runtime-failed",
@@ -200,7 +180,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             new WorkResult(
                 Status: "failed",
                 Message: "missing workspace",
-                Output: "{}",
+                Output: JSON.DeserializeElement("{}"),
                 ExitCode: 1,
                 Error: new Mohist.Server.Workflow.Domain.Run.ExecutionError(
                     Code: "invalid-input",
@@ -237,7 +217,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await runner.ReportAgentJobResultAsync(
             jobKey,
             workId,
-            new WorkResult(Status: "failed", Message: "boom", Output: "{}", ExitCode: 1));
+            new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -352,7 +332,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
             workId: workId,
-            result: new WorkResult(Status: "completed", Message: "first result", Output: "{}", ExitCode: 0));
+            result: new WorkResult(Status: "completed", Message: "first result", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -367,7 +347,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var redeliver = await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
             workId: workId,
-            result: new WorkResult(Status: "failed", Message: "redelivered", Output: "{}", ExitCode: 1));
+            result: new WorkResult(Status: "failed", Message: "redelivered", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         Assert.False(redeliver.Tracked,
             "Already-terminal AgentJob rejects report replay but still owns the original delivery");
 
@@ -504,7 +484,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
             workId: workId,
-            result: new WorkResult(Status: "failed", Message: "transient", Output: "{}", ExitCode: 1));
+            result: new WorkResult(Status: "failed", Message: "transient", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         // The pending payload survives the failed first delivery — the
@@ -566,7 +546,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
             workId: workId,
-            result: new WorkResult(Status: "failed", Message: "boom", Output: "{}", ExitCode: 1));
+            result: new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
 
         // The failed first delivery leaves the pending payload durable
@@ -593,7 +573,7 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var redeliver = await runner.ReportAgentJobResultAsync(
             agentJobId: job.GetPrimaryKeyString(),
             workId: workId,
-            result: new WorkResult(Status: "failed", Message: "boom", Output: "{}", ExitCode: 1));
+            result: new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         Assert.False(redeliver.Tracked);
 
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
