@@ -16,7 +16,7 @@ The Runner SHALL bundle a fixed version of `@earendil-works/pi-coding-agent` and
 
 ### Requirement: Pi readiness gates Runner work claiming
 
-Before the Runner registers or claims work, it SHALL initialize the Pi SDK services and successfully load Pi's available-model catalog. A successfully loaded empty catalog SHALL leave Pi ready and SHALL emit a warning that no credentialed provider models are available. SDK initialization failure or catalog-load failure SHALL make Pi unavailable, SHALL emit an actionable diagnostic, and SHALL prevent the Runner from claiming new work until Pi is rebuilt and readiness passes. Failure of an in-process Pi turn caused by Runner process loss MUST NOT trigger automatic prompt replay.
+Before the Runner registers or claims work, it SHALL initialize the Pi SDK services and successfully load Pi's available-model catalog. A successfully loaded empty catalog SHALL leave Pi ready and SHALL emit a warning that no credentialed provider models are available. SDK initialization failure or catalog-load failure SHALL make Pi unavailable, SHALL emit an actionable diagnostic, and SHALL prevent the Runner from claiming new work until Pi is rebuilt and readiness passes. Failure of an in-process Pi turn caused by Runner process loss MUST NOT cause PiRuntime or outbox repair to resubmit the Prompt within that delivered execution; normal at-least-once Workflow redelivery MAY execute a duplicate turn in the crash window.
 
 #### Scenario: Successful initialization enables work claiming
 
@@ -132,6 +132,12 @@ A Pi Workflow turn SHALL use a 60-minute duration declared by the Workflow execu
 - **WHEN** the Runner cannot determine whether a prompt was admitted or completed
 - **THEN** the runtime MUST NOT automatically submit that prompt again
 - **AND** it SHALL report the uncertain interruption or failure to the work owner
+
+#### Scenario: Workflow redelivery may duplicate a crash-window turn
+
+- **WHEN** Runner process loss clears process-local ownership after Pi may have admitted a Prompt and the Server redelivers the still-Running Workflow work
+- **THEN** the newly delivered execution MAY submit a duplicate turn under the existing at-least-once dispatch contract
+- **AND** PiRuntime and outbox repair MUST NOT themselves resubmit the uncertain Prompt
 
 #### Scenario: Unconfirmed interruption quarantines the physical Session
 

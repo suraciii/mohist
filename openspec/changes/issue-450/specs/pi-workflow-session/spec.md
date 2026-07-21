@@ -220,6 +220,12 @@ Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL comple
 - **THEN** it SHALL reconcile the persisted Pi Session messages through the manifest's projector fingerprints
 - **AND** it SHALL append and drain missing required facts before admitting later work on that Session
 
+#### Scenario: Outbox repair is distinct from Workflow redelivery
+
+- **WHEN** Runner restart repairs an admitted checkpoint and the Server separately redelivers its still-Running Workflow work item
+- **THEN** outbox repair SHALL reconcile and drain audit facts without submitting a Prompt
+- **AND** the separately delivered execution MAY run a duplicate turn under the canonical crash-window limitation
+
 #### Scenario: Admitted checkpoint without a Pi file follows missing-session recovery
 
 - **WHEN** restart finds an admitted checkpoint but the bound Pi session file was never created or is unreadable
