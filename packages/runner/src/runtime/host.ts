@@ -113,6 +113,7 @@ export class RunnerHost {
    */
   private openCodeRuntime: OpenCodeRuntime | null = null
   private piRuntime: PiRuntime | null = null
+  private providerPolicyDiagnostic: string | null = null
 
   // The active outer-run signal. The onReconnected callback fires from
   // outside the run loop, so we capture the signal here to bound the
@@ -353,7 +354,10 @@ export class RunnerHost {
     // from claiming work.
     const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
     if (!policy.ok) {
-      console.error("provider error policy is invalid; using defaults:", policy.error.message)
+      this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
+      console.error(this.providerPolicyDiagnostic)
+    } else {
+      this.providerPolicyDiagnostic = null
     }
     const factory = getOpenCodeRuntimeFactory()
     this.openCodeRuntime = factory({
@@ -495,7 +499,10 @@ export class RunnerHost {
   }
 
   private isReadyForClaim(): boolean {
-    return this.isOpenCodeReadyForClaim() && this.piRuntime !== null && this.piRuntime.ready()
+    return this.providerPolicyDiagnostic === null
+      && this.isOpenCodeReadyForClaim()
+      && this.piRuntime !== null
+      && this.piRuntime.ready()
   }
 
   /**
@@ -516,6 +523,7 @@ export class RunnerHost {
   }
 
   private readinessDiagnostic(): string | null {
+    if (this.providerPolicyDiagnostic !== null) return this.providerPolicyDiagnostic
     if (!this.isOpenCodeReadyForClaim()) return this.openCodeReadinessDiagnostic()
     const diagnostic = this.piRuntime?.diagnostic()
     return diagnostic ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}` : "pi runtime not ready; skipping poll"

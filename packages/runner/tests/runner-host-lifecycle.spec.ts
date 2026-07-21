@@ -179,6 +179,46 @@ describe("RunnerHost", () => {
     }
   })
 
+  it("does not claim work when provider policy configuration is invalid", async () => {
+    vi.clearAllMocks()
+    vi.stubEnv("MOHIST_PROVIDER_RETRY_THRESHOLD", "0")
+    const connected = deferred<void>()
+    connect.mockImplementation(async () => {
+      connected.resolve()
+    })
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    poll.mockResolvedValue([])
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
+      expect(poll).not.toHaveBeenCalled()
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("provider error policy invalid"))
+      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining("provider error policy invalid"))
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      errorSpy.mockRestore()
+      warningSpy.mockRestore()
+    }
+  })
+
   it("WorkerPool_PollsUntilServerReturnsNoWorkWithoutLocalConcurrencyCap", async () => {
     vi.clearAllMocks()
     const pollCalls = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()]
