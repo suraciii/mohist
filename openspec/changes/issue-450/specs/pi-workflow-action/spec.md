@@ -1,6 +1,6 @@
 ### Requirement: `mohist/pi` is a Workflow Inline Agent Action
 
-A Workflow task with `uses: mohist/pi` SHALL execute one Pi-backed Inline Agent turn owned by its TaskRun. The Action SHALL be classified as UserFacing and SHALL participate in normal Workflow dispatch, retry, recovery, artifact, and worktree-cleanup behavior. It MUST NOT resolve a Mohist Agent, create an AgentJob, or route through `mohist/opencode`.
+A Workflow task with `uses: mohist/pi` SHALL execute one Pi-backed Inline Agent turn owned by its TaskRun. The Action SHALL be classified as UserFacing and SHALL participate in normal Workflow dispatch, retry, recovery, artifact, and worktree-cleanup behavior. It MUST NOT resolve a Mohist Agent, create an AgentJob, or route through `mohist/opencode`. In this issue it is a task-only Action and MUST NOT execute as a Workflow check.
 
 #### Scenario: Workflow dispatch recognizes Pi
 
@@ -13,6 +13,13 @@ A Workflow task with `uses: mohist/pi` SHALL execute one Pi-backed Inline Agent 
 - **WHEN** the Runner executes a `mohist/pi` task
 - **THEN** the TaskRun SHALL remain the work owner
 - **AND** the Action MUST NOT resolve a Mohist Agent or create an AgentJob
+
+#### Scenario: Pi cannot execute as a check
+
+- **WHEN** a Workflow check declares `uses: mohist/pi`
+- **THEN** Server validation SHALL reject the definition with an actionable task-only diagnostic
+- **AND** Runner check execution SHALL defensively reject the Action name before registry resolution
+- **AND** no logical Session, lease, physical Session, or Prompt SHALL be created
 
 ### Requirement: Pi Action input is explicit and recursively expanded
 
