@@ -1,0 +1,33 @@
+## Codebase Patterns
+
+- Issue 453 owns the ordered `IssueDecisionAction` descriptors and `IssueDecisionActionController`; approval composition must consume those values rather than derive a second action model.
+- `useIssueWorkflowArtifacts` keeps the existing HTTP parameters and now accepts an optional run scope only for the TanStack Query key.
+- `ArtifactTextContent` is shared by the dialog and inline review package; Markdown uses `MarkdownReader`, while other recorded text stays raw in a wrapping `pre`.
+
+## T-001
+
+- Added `ApprovalReviewPackage` at the existing top decision slot. Plan uses exact `proposal.md` and `tasks.json` artifact paths; Check uses exact `review.md` plus diff state.
+- Approval phone layouts use direct fixed Approve and Send back controls and an optional non-modal More actions menu. Non-approval phone layouts still use `MobileActionBar` and its action sheet.
+- Desktop and phone send-back use one package-owned controlled draft serialized as `Category: <Title case>`, a blank line, and trimmed text. No server contract changed.
+- Existing approval tests that asserted the generic drawer or bare feedback were updated to the new product contract.
+- Verification completed: Web typecheck, full Web Vitest suite, FSD/test-boundary checks, and focused issue decision-surface Playwright suite.
+
+## T-002
+
+- Added a package-local desktop-only approval keydown hook. It binds only enabled `a`/`m` actions, ignores editable targets, modifiers, repeats, and pending controller state, and removes its listener when the package or viewport/state changes.
+- Send-back and comments now share one guarded submit path between their buttons and Command+Enter. Plain Enter, IME composition, repeat, blank, and pending cases do not submit; visible forms show the Command+Enter hint.
+- Desktop approval action hints are passed through `IssueDecisionSurface` and are shown only while the corresponding action is enabled and no request is pending. These bindings remain outside the application-wide shortcut registry.
+- Added focused component tests and a controlled browser scenario covering approval shortcuts, editable-field safety, hints, send-back Command+Enter, comment submission, invalid/pending guards, plain Enter, and one request per keypress.
+- Verification completed: Web typecheck, full Web Vitest suite (4982 tests), and focused issue decision-surface Playwright suite (11 tests).
+
+## Review Follow-up
+
+- The approval shortcut guard now detects editable ancestors, preventing `a` or `m` from escaping a nested contenteditable or role-textbox child. A focused regression test covers the nested contenteditable case.
+- Verification completed: focused ApprovalReviewPackage Vitest file and Web typecheck.
+- Browser fixtures now cover phone Plan artifact rendering, long-token overflow, direct approval and structured send-back requests, phone Check review/diff rendering, and secondary-action navigation. The approval action bar layers above the global mobile navigation so More actions remains operable.
+- JSON file artifacts now retain their raw recorded text; only JSON payloads shaped as directory listings are treated as directories. Focused client tests cover both response types.
+- Verification completed: focused issue API client Vitest file, Web typecheck, and focused issue decision-surface Playwright suite (14 tests).
+- Final verification completed: Web typecheck, full Web Vitest suite (4984 tests), and focused issue decision-surface Playwright suite (14 tests).
+- Artifact content parsing now uses the list response's authoritative file/directory kind instead of inferring directories from JSON fields, so recorded `tasks.json` files with `entries` and `totalSize` remain raw text. Focused client coverage exercises the colliding JSON shape.
+- Verification completed: Web typecheck and focused issue artifact, approval-package, and workflow-artifact Vitest files (24 tests).
+- Final verification completed: Web typecheck, full Web Vitest suite (4984 tests), and focused issue decision-surface Playwright suite (14 tests).

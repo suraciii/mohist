@@ -17,6 +17,10 @@ export interface IssueDecisionSurfaceProps {
   nextAction: string
   controller: IssueDecisionActionController
   evidence?: React.ReactNode
+  sendBackOpen?: boolean
+  onSendBackOpen?: () => void
+  sendBackForm?: React.ReactNode
+  shortcutHints?: Partial<Record<IssueDecisionActionKind, string>>
   className?: string
 }
 
@@ -108,12 +112,14 @@ function ActionButton({
   pendingKind,
   error,
   onClick,
+  shortcutHint,
 }: {
   action: IssueDecisionAction
   primary: boolean
   pendingKind: IssueDecisionActionKind | null
   error: Error | null
   onClick: () => void
+  shortcutHint?: string
 }) {
   const isPending = pendingKind === action.kind
   const isBusy = pendingKind !== null
@@ -171,23 +177,26 @@ function ActionButton({
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <Button
-        variant={variantFor(action, primary)}
-        size="sm"
-        data-testid={`decision-action-${action.kind}`}
-        data-primary={primary ? 'true' : 'false'}
-        data-destructive={isDestructive(action) ? 'true' : 'false'}
-        disabled={isDisabled}
-        aria-describedby={descriptionId}
-        onClick={onClick}
-        className={cn(
-          'min-w-[7rem]',
-          isDestructive(action) && isDisabled && 'border-border bg-muted text-muted-foreground hover:bg-muted',
-        )}
-      >
-        {action.kind === 'mark-as-done' && !isPending ? <CircleCheckIcon className="size-4" aria-hidden="true" /> : null}
-        {label}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          variant={variantFor(action, primary)}
+          size="sm"
+          data-testid={`decision-action-${action.kind}`}
+          data-primary={primary ? 'true' : 'false'}
+          data-destructive={isDestructive(action) ? 'true' : 'false'}
+          disabled={isDisabled}
+          aria-describedby={descriptionId}
+          onClick={onClick}
+          className={cn(
+            'min-w-[7rem]',
+            isDestructive(action) && isDisabled && 'border-border bg-muted text-muted-foreground hover:bg-muted',
+          )}
+        >
+          {action.kind === 'mark-as-done' && !isPending ? <CircleCheckIcon className="size-4" aria-hidden="true" /> : null}
+          {label}
+        </Button>
+        {shortcutHint && <kbd data-testid={`decision-action-${action.kind}-shortcut`} className="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground">{shortcutHint}</kbd>}
+      </div>
       {isDisabled && reason && (
         <p
           id={descriptionId}
@@ -227,13 +236,18 @@ export function IssueDecisionSurface({
   nextAction,
   controller,
   evidence,
+  sendBackOpen: controlledSendBackOpen,
+  onSendBackOpen,
+  sendBackForm,
+  shortcutHints,
   className,
 }: IssueDecisionSurfaceProps) {
   const presentation = SUMMARY_PRESENTATION[summary]
-  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [uncontrolledSendBackOpen, setUncontrolledSendBackOpen] = useState(false)
   const [sendBackText, setSendBackText] = useState('')
   const pendingKind = controller.pendingKind
   const error = controller.error
+  const sendBackOpen = controlledSendBackOpen ?? uncontrolledSendBackOpen
 
   const primaryKind = actions.find((a) => a.primary)?.kind ?? null
   const visibleActions = [...actions]
@@ -246,7 +260,8 @@ export function IssueDecisionSurface({
       return
     }
     if (action.kind === 'send-back' && action.enabled) {
-      setSendBackOpen(true)
+      onSendBackOpen?.()
+      if (!onSendBackOpen) setUncontrolledSendBackOpen(true)
       return
     }
     controller.runAction(action)
@@ -312,6 +327,7 @@ export function IssueDecisionSurface({
               pendingKind={pendingKind}
               error={error}
               onClick={() => handleClick(action)}
+              shortcutHint={shortcutHints?.[action.kind]}
             />
           ))}
         </div>
@@ -352,7 +368,7 @@ export function IssueDecisionSurface({
         </div>
       )}
 
-      {sendBackOpen && (
+       {sendBackOpen && sendBackForm ? sendBackForm : sendBackOpen && (
         <div
           data-testid="decision-send-back-form"
           className="mt-3 rounded-md border border-border bg-muted p-3"
@@ -379,7 +395,7 @@ export function IssueDecisionSurface({
               size="sm"
               data-testid="decision-send-back-cancel"
               onClick={() => {
-                setSendBackOpen(false)
+                 setUncontrolledSendBackOpen(false)
                 setSendBackText('')
               }}
               disabled={pendingKind === 'send-back'}

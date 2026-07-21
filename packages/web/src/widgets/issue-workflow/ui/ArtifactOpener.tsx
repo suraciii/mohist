@@ -110,6 +110,7 @@ export function ArtifactOpener({
               artifactId={selectedArtifact.artifactId}
               path={selectedArtifact.path}
               size={selectedArtifact.size}
+              artifactKind={selectedArtifact.kind}
               open={selectedArtifactId !== null}
               contentHook={contentHook}
               onOpenChange={(open) => {
@@ -157,6 +158,7 @@ export function ArtifactOpener({
           artifactId={selectedArtifact.artifactId}
           path={selectedArtifact.path}
           size={selectedArtifact.size}
+          artifactKind={selectedArtifact.kind}
           open={selectedArtifactId !== null}
           contentHook={contentHook}
           onOpenChange={(open) => {
