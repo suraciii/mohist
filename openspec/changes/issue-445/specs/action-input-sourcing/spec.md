@@ -1,6 +1,8 @@
 ### Requirement: Built-in Action inputs have one source
 
-Every built-in Action SHALL derive all Action-owned input exclusively from the rendered and manifest-validated `with` payload. A built-in Action MUST NOT inspect Run Variables or effective Variables to obtain an omitted input, choose an alternative input value, or supplement the validated payload. Engine-owned execution context, including the resolved working directory, SHALL remain available as host context and MUST NOT be treated as an Action input fallback.
+Every built-in Action SHALL derive all Action-owned semantic input exclusively from fields declared in `with`. Values consumed by the current invocation MUST come from the rendered and manifest-validated payload. A built-in Action MUST NOT inspect Run Variables or effective Variables to obtain an omitted input, choose an alternative input value, or supplement the validated payload. Engine-owned execution context, including the resolved working directory, SHALL remain available as host context and MUST NOT be treated as an Action input fallback.
+
+For a declared composite input whose purpose is to generate later tasks, the Runner MAY also preserve that same input's unrendered source syntax after its top-level field has passed manifest validation. The Action MUST treat this representation only as an opaque template carrier for the generated task; it MUST NOT resolve it against Variables, read values from it for the current invocation, or use it as an undeclared input channel.
 
 #### Scenario: Omitted input is not recovered from Variables
 - **WHEN** a built-in Action's rendered `with` payload omits an Action input and the same semantic value exists in Run Variables
@@ -16,6 +18,12 @@ Every built-in Action SHALL derive all Action-owned input exclusively from the r
 - **WHEN** the engine invokes a built-in Action with a resolved working directory
 - **THEN** the Action SHALL execute in that host-provided directory
 - **AND** the Action MUST NOT select a different directory from Run Variables
+
+#### Scenario: Generated task preserves declared template syntax
+- **WHEN** a validated composite `with` input declares a generated task containing a nested template expression
+- **THEN** the generating Action MAY copy the corresponding unrendered syntax into that generated task
+- **AND** it MUST NOT evaluate the raw syntax or use it to change the generating Action's own behavior
+- **AND** the generated task SHALL render and validate that copied input when it is later dispatched
 
 ### Requirement: Former implicit inputs are declared and enforced
 

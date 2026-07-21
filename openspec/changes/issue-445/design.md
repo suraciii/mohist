@@ -35,7 +35,9 @@ The primary stakeholders are workflow authors, who need definitions to reveal co
 
 The executor will continue to build effective Variables internally, render `with` and `expect`, validate the rendered Action input, resolve `workDir`, and run engine checks. Before `definition.run`, it will construct a dedicated invocation context that omits `variables` at both the TypeScript type and runtime object levels. `ValidatedActionContext` and built-in handler signatures will use this narrower shape; unsafe casts back to the old Variable-bearing context will be removed.
 
-`workDir` remains host context because the engine has already resolved and constrained it. Dispatch metadata used by existing capabilities, such as workflow/run identity and optional issue identity for an explicitly selected issue-field source, also remains host context. `rawWith` may remain only as the unrendered representation of a declared composite input needed to preserve templates in generated tasks; it is not a Variable source.
+`workDir` remains host context because the engine has already resolved and constrained it. Dispatch metadata used by existing capabilities, such as workflow/run identity and optional issue identity for an explicitly selected issue-field source, also remains host context.
+
+`rawWith` remains a narrowly defined syntax carrier, not a second semantic input. The executor first validates the rendered top-level composite field against the manifest. A generating Action may then copy only the corresponding raw subtree into a later task so nested `${{ }}` expressions survive until that task's dispatch. It may not render the raw subtree, inspect it for current behavior, or read any value outside the declared composite field. Tests will lock this exception to `openspec-tasks` task propagation and prove that the generated task performs its own normal render-and-validate cycle.
 
 The prompt-loader context will also drop its `variables` member. The current OpenSpec prompt loader reads only its declared loader `with` fields and `workDir`, so this closes a transitive Variable channel without changing prompt output.
 
@@ -70,7 +72,7 @@ Alternative considered: retain the issue-backed cross-check as defense in depth.
 
 ### 3. Remove the remaining OpenSpec and OpenCode Variable reads
 
-`mohist/openspec-tasks` will stop synthesizing a build prompt from `variables.prompts.build`. The bundled profiles already place `${{ prompts.build }}` in the declared nested task prompt input, and `rawWith` preserves that template until generated-task dispatch.
+`mohist/openspec-tasks` will stop synthesizing a build prompt from `variables.prompts.build`. The bundled profiles already place `${{ prompts.build }}` in the declared nested task prompt input. After the rendered `task` object passes manifest validation, `openspec-tasks` copies only that declared object's raw syntax into generated tasks; it does not inspect or render the raw object itself. Each generated task resolves and validates the copied template at its own dispatch.
 
 `mohist/archive-change` will stop reading legacy `_actions.archiveChange.destination` and `openspecArchiveName` Variables. Retry idempotence will use the existing source/archive filesystem state: before moving, choose the unique date/name destination; after a move, locate the matching archived change when the source is absent and continue Git staging/commit. Variable persistence used only to feed the removed read path will be deleted. Tests will cover retry after move and collision suffixes, including a date-boundary-independent lookup.
 

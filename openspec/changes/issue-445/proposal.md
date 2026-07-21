@@ -4,7 +4,7 @@ Workflow definitions cannot currently reveal an Action's complete effective inpu
 
 ## What Changes
 
-- **BREAKING** Make the rendered and validated `with` payload the only source of built-in Action inputs; custom profiles that relied on implicit Run Variable fallbacks must bind those values explicitly, including through `${{ vars.* }}` when Variables are intended.
+- **BREAKING** Make declared `with` the only source of built-in Action inputs: values consumed by the current invocation are rendered and validated, while an unrendered composite subtree may only be carried forward as template syntax for generated tasks. Custom profiles that relied on implicit Run Variable fallbacks must bind those values explicitly, including through `${{ vars.* }}` when Variables are intended.
 - Declare delivery-related repository, branch, remote, pull request, and workspace values in the affected Action manifests, and fail missing required values with `invalid-input` before the Action runs.
 - Remove delivery input fallbacks and issue-backed cross-check guards that compare declared values with repository or workspace values from Run Variables. Credentials remain the delivery security boundary.
 - Update the bundled `mohist/local` and `mohist/github-pr` profiles so every affected task and check passes its required inputs explicitly and the existing delivery flows continue to work.

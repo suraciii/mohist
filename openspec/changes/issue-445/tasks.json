@@ -9,7 +9,7 @@
       "description": "Migrate the non-delivery OpenCode and OpenSpec Action paths away from effective Variables while preserving their declared prompt and task behavior. Remove the prompt-loader Variable bag, rely on the profile-declared nested build prompt, and make archive retry idempotence derive from workspace/archive state instead of Run Variable persistence.",
       "acceptanceCriteria": [
         "`mohist/opencode` prompt resolution and every registered prompt loader receive declared loader input and host workDir but no effective or Run Variables",
-        "`mohist/openspec-tasks` does not read `variables.prompts.build`; generated tasks preserve the explicitly declared `${{ prompts.build }}` nested prompt template through late dispatch expansion",
+        "`mohist/openspec-tasks` does not read `variables.prompts.build`; after the rendered top-level `task` object passes manifest validation, it copies only the corresponding declared raw subtree without inspecting or rendering it, and the generated task resolves `${{ prompts.build }}` during its own dispatch",
         "`mohist/archive-change` neither reads `_actions.archiveChange.destination` or `openspecArchiveName` nor writes archive-name retry state to Run Variables",
         "Archive retries after a completed move locate the intended archive deterministically across collision suffixes and date rollover, and ambiguous matches fail without staging or committing the wrong directory",
         "Focused OpenCode prompt-loader, OpenSpec task generation, archive first-run, retry-after-move, collision, and failure tests use fake filesystem/process boundaries and no wall-clock waits",
@@ -21,7 +21,7 @@
       "output": "Variable-independent OpenCode prompt loading and OpenSpec task/archive implementations with focused Runner regressions under packages/runner/.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep rawWith only for the declared composite task input whose nested templates must survive until generated-task dispatch. Do not add buildPrompt/archiveName compatibility inputs or change template syntax."
+      "notes": "Keep rawWith only as an opaque syntax carrier for the already validated top-level task input. It must not affect the generating Action's current behavior or expose Variables. Do not add buildPrompt/archiveName compatibility inputs or change template syntax."
     },
     {
       "id": "T-002",
@@ -84,7 +84,7 @@
         "The object passed to `ActionDefinition.run` has no `variables` property at runtime, and `ValidatedActionContext` plus built-in handler types do not expose one at compile time",
         "The executor still renders `${{ vars.* }}` before validation, freezes the rendered value for the invocation, resolves host workDir, evaluates recovery, and applies setVars with unchanged semantics",
         "A boundary test proves a custom Action cannot observe `variables` while it receives validated with-input and the resolved host workDir",
-        "Production built-ins contain no `context.variables` reads and no cast restores a Variable-bearing Action context; rawWith remains limited to declared generated-task template propagation",
+        "Production built-ins contain no `context.variables` reads and no cast restores a Variable-bearing Action context; rawWith is exposed only for the top-level-validated generated-task composite, is copied without semantic inspection, and cannot access Variables",
         "Every runtime-affecting built-in input appears in its manifest-derived catalog entry and user documentation, and documented Variable examples bind through `with`",
         "No Server policy validation, template namespace/syntax change, or broad Action capability-host redesign is introduced",
         "Runner typecheck, test-boundary checks, unit/spec tests, and relevant Server profile tests cover tasks and individual checks with no real external dependency or wall-clock timing",
