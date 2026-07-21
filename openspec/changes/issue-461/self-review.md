@@ -2,44 +2,40 @@
 
 ## Findings
 
-### 1. Critical: the universal receipt rule can permanently fence accepted follow-up terminal events
+### 1. Critical: an empty terminal receipt cannot distinguish replay from a stale binding
 
-The design routes follow-up terminal outcomes through the shared outbox and removes every record only after a matching receipt (`design.md:34`, `design.md:55-59`, `tasks.json:39-43`). That is incompatible with the current operation-fenced terminal path: first acceptance removes the pending follow-up lease and commits the evidence (`AgentSessionGrain.cs:1074-1106`), while replay after a lost response finds no lease and returns an empty receipt (`AgentSessionGrain.cs:1077-1102`).
+The plan settles operation-correlated follow-up terminal records when the endpoint returns any valid receipt array, including `[]` (`design.md:62-64`, `specs/agent-session-runtime-event-delivery/spec.md:94-108`, `tasks.json:41-42`). It separately requires events rejected for a stale physical binding to remain pending against their original identity (`specs/agent-session-runtime-event-delivery/spec.md:48-52`).
 
-The outbox would therefore retain an already-applied terminal record forever and block every later event for that logical Session. Imported `followup-failures.json` records have the same exposure. The plan must define a terminal-specific acknowledgement/reconciliation rule or explicitly change the Server contract; the current design cannot preserve terminal durability and its matching-receipt rule simultaneously.
+The current Session grain returns the same empty array before terminal processing when the reported binding is stale (`AgentSessionGrain.cs:918-920`) and after terminal processing when the operation lease has already been consumed (`AgentSessionGrain.cs:1074-1102`). A runner-only acknowledgement policy cannot distinguish those outcomes. The current plan can therefore settle and lose a stale terminal fact, while requiring a matching receipt instead would recreate the permanent queue fence found in the previous review.
 
-### 2. High: the synchronous runtime observer cannot provide the promised per-event crash durability
+The plan must either introduce a distinguishable Server acknowledgement despite the current non-goal, or explicitly permit stale follow-up terminal records to settle and narrow the stale-binding retention contract. It is not implementable with both current requirements intact.
 
-The specs require every generated Workflow event to be durably retained and restart-recoverable (`specs/agent-session-runtime-event-delivery/spec.md:1-5`, `specs/workflow-agent-session-transcript/spec.md:11-15`). The design instead enqueues observed events asynchronously and waits for local persistence only after `runTurn` completes (`design.md:41-47`, `tasks.json:17`).
+### 2. High: T-001 creates the competing outboxes that the design rejects
 
-Today `RuntimeTurnObserver.onEvent` returns `void` and `runTurn` invokes it synchronously without awaiting persistence (`packages/runner/src/runtime/opencode/types.ts:79-82`, `packages/runner/src/runtime/opencode/turn.ts:141-145`). A runner crash between observation and the queued snapshot write loses the event, so the stated restart guarantee is not implementable as written. The plan must either introduce an awaited local-persistence/event-pump boundary or narrow the normative durability point and its tests.
+D1 rejects a new content outbox beside `FollowupFailureOutbox` because independently draining queues can deliver a follow-up outcome or later event ahead of pending input (`design.md:31-40`). T-001 nevertheless declares itself independently usable while leaving the existing follow-up terminal outbox active until dependent T-002 migrates it (`tasks.json:31`, `tasks.json:37`, `tasks.json:46`, `tasks.json:57-59`).
 
-### 3. High: follow-up persistence order is internally contradictory
+That intermediate deliverable has the exact ordering race used to justify the shared outbox. The implementation graph must make host switchover, follow-up producer migration, and legacy import one atomic deliverable, or stop treating T-001 as independently usable and restructure the task boundary accordingly.
 
-The design and T-002 require durable local enqueue before invoking `runtime.followup` (`design.md:47`, `tasks.json:37`). The normative scenario says the follow-up executes "without waiting for the input event to be persisted" (`specs/agent-session-runtime-event-delivery/spec.md:72-76`), while the same spec requires every follow-up input to be durably retained (`specs/agent-session-runtime-event-delivery/spec.md:1-5`).
+### 3. High: Workflow local-persistence failure behavior lacks integration coverage
 
-The contract must distinguish local outbox persistence from Server transcript persistence and state what happens when local persistence fails. Otherwise an implementation cannot know whether to delay/reject runtime invocation for local durability or execute immediately and accept a loss window.
+The corrected contract requires input persistence failure to prevent a Workflow prompt from starting, while activity or terminal persistence failure after runtime start must settle without replacing the runtime result (`specs/agent-session-runtime-event-delivery/spec.md:70-74`, `design.md:48-50`). T-001 covers completed enqueues, unsettled writes, transport failures, and outbox readiness, but does not require Workflow integration tests for either rejected-write boundary (`tasks.json:18-22`). T-002 adds only the corresponding follow-up input test (`tasks.json:39`, `tasks.json:47`).
 
-### 4. High: runner readiness behavior lacks acceptance coverage at the actual gates
+This omission is material because `RuntimeTurnObserver.onEvent` is synchronous and multiple callbacks can register writes before a rejection is observed. T-001 must verify that a rejected input write invokes no Workflow runtime, and that rejected activity/close writes from multiple synchronous callbacks remain tracked, observable, and unable to replace the original successful or failed runtime result.
 
-The design makes outbox health a prerequisite for claiming work and accepting follow-up commands (`design.md:79-83`), but T-001 asks only for outbox-level store-failure readiness tests (`tasks.json:16`, `tasks.json:20`). Current claim readiness checks only `OpenCodeRuntime.ready()`, and follow-up registration is independent of outbox health (`packages/runner/src/runtime/host.ts:372-440`, `packages/runner/src/server/runner-signalr.ts:139-156`).
+### 4. High: outbox health recovery has no autonomous transition contract
 
-The tasks need explicit host and SignalR-handler acceptance tests proving that initial corruption and later persistence failure stop new claims/commands while existing pending delivery and already-running work retain the specified behavior. Without those tests, the new readiness requirement can be omitted while all listed outbox unit cases pass.
+The design says a persistence failure marks the outbox unhealthy and schedules recovery (`design.md:88-90`), while tasks require restored health to resume work claims and follow-up commands (`tasks.json:17`, `tasks.json:48`). No spec or design decision states what triggers recovery, how it proceeds when claims and follow-ups are gated, or what durable condition permits `ready()` to become true again.
 
-### 5. Medium: the concrete durability and migration adapter is deliberately left untested
-
-The plan relies on atomic rename, owner-only permissions, legacy-file import, and crash-safe migration in the physical store (`design.md:43`, `design.md:90-92`, `tasks.json:11`, `tasks.json:41-42`), but also states that no test will instantiate that adapter (`design.md:99-103`, `tasks.json:12`). In-memory outbox tests cannot verify serialization, file mode, temporary-file ordering, or legacy marker behavior.
-
-The design needs a fake file-I/O boundary beneath the concrete snapshot/import adapter, or equivalent pure serialization and recorded-operation tests, so the repository's no-real-filesystem rule is preserved without leaving the persistence mechanism unverified.
+Recovery cannot depend on another enqueue because unhealthy state prevents new execution. The plan must define an autonomous fake-time-driven persistence retry plus startup/reconnect triggers, require a successful atomic snapshot covering every retained in-memory record before restoring health, and test recovery without new work or events.
 
 ## Review Summary
 
-- The proposal covers the issue's three acceptance criteria and preserves the stated no-server-deduplication and no-cross-runner-transfer boundaries.
-- The two-task dependency graph is valid and acyclic: T-002 consumes T-001 and references a strictly earlier priority.
-- The blocking defects are in delivery semantics and implementability, not task graph syntax. The follow-up terminal path can deadlock after an ambiguous success, and the planned observer boundary cannot guarantee all generated events survive a crash.
+- The proposal still matches the issue's network-failure, restart-recovery, and non-blocking goals, and preserves the no-cross-runner boundary.
+- The corrected local-versus-Server durability wording, synchronous observer crash boundary, recording filesystem strategy, and task dependency direction are clear.
+- The remaining blockers concern an impossible terminal acknowledgement distinction, a non-deliverable intermediate task state, and missing behavioral contracts/tests at local persistence failure and health recovery boundaries.
 
 ## Verdict
 
-The plan requires correction before implementation.
+The plan is not ready to build.
 
 <promise>FAIL</promise>
