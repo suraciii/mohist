@@ -1,5 +1,10 @@
 import { runCommand } from "../system/process.js"
-import type { ActionInvocationContext } from "./context.js"
+export interface IssueFieldLookupContext {
+  readonly workDir: string
+  readonly signal: AbortSignal
+  readonly projectId: string | null
+  readonly issueNumber: number | null
+}
 
 type CommandRunner = typeof runCommand
 
@@ -20,12 +25,12 @@ export function isIssueFieldSource(source: string | undefined): source is IssueF
   return source === "issue.title" || source === "issue.body"
 }
 
-export async function resolveIssueField(context: ActionInvocationContext, source: IssueFieldSource): Promise<string> {
+export async function resolveIssueField(context: IssueFieldLookupContext, source: IssueFieldSource): Promise<string> {
   const fields = await resolveIssueFields(context)
   return source === "issue.title" ? fields.title : fields.body
 }
 
-export async function resolveIssueFields(context: ActionInvocationContext): Promise<IssueFields> {
+export async function resolveIssueFields(context: IssueFieldLookupContext): Promise<IssueFields> {
   const issueNumber = resolveIssueNumber(context)
   if (issueNumber === null) {
     throw new Error("issue field source requires an issue number")
@@ -68,12 +73,12 @@ export function parseIssueFields(output: string): IssueFields | null {
   }
 }
 
-function resolveIssueNumber(context: ActionInvocationContext): number | null {
+function resolveIssueNumber(context: IssueFieldLookupContext): number | null {
   if (typeof context.issueNumber === "number" && context.issueNumber > 0) return context.issueNumber
   return null
 }
 
-function resolveProjectId(context: ActionInvocationContext): string | null {
+function resolveProjectId(context: IssueFieldLookupContext): string | null {
   return context.projectId ?? null
 }
 

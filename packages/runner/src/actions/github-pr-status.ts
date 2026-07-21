@@ -1,5 +1,5 @@
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
@@ -117,22 +117,22 @@ function emptyStatusOutput(message: string): GitHubPrStatusOutput {
   }
 }
 
-export async function githubPrStatusAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const requestedPrNumber = numberInput(context.with, "prNumber")
+export async function githubPrStatusAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const requestedPrNumber = numberInput(inputs, "prNumber")
   if (requestedPrNumber === undefined || !Number.isFinite(requestedPrNumber)) {
     return fail("invalid-input", "GitHub PR status check requires 'prNumber'")
   }
   const prNumber = requestedPrNumber
-  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+  const repositoryUrl = typeof inputs["repositoryUrl"] === "string" ? inputs["repositoryUrl"] : undefined
   if (!repositoryUrl) return fail("invalid-input", "GitHub PR status check requires 'repositoryUrl'")
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return fail("config-error", "github-pr-status requires a valid GitHub repository URL")
 
-  const expect = parseGitHubPrStatusExpectation(stringInput(context.with, "expect"))
-  const workDir = context.workDir
+  const expect = parseGitHubPrStatusExpectation(stringInput(inputs, "expect"))
+  const workDir = host.workDir
 
   const steps: GitHubPrStatusStep[] = []
-  const ghOpts = ghLineOptions(context)
+  const ghOpts = ghLineOptions(host)
   const recordStep = (name: string, command: string, exitCode: number, output: string, metadata?: Pick<GitHubPrStatusStep, "status" | "timeoutMs">) => {
     steps.push({ name, command, exitCode, output, ...metadata })
   }
@@ -141,7 +141,7 @@ export async function githubPrStatusAction(context: ActionInvocationContext): Pr
     "gh",
     withGitHubRepository(["pr", "view", String(prNumber), "--json", prViewFields.join(",")], githubRepository),
     workDir,
-    context.signal,
+    host.signal,
     undefined,
     ghOpts,
   )
@@ -232,9 +232,9 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
   }
 }
 
-function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function ghLineOptions(host: ActionHost): CommandLineOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => host.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {

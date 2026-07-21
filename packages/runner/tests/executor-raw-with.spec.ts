@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
-import type { ActionInvocationContext } from "../src/actions/context.js"
+import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
@@ -31,11 +31,13 @@ afterEach(async () => {
 
 describe("WorkExecutor action input boundary", () => {
   it("exposes only recursively-rendered input to a custom Action", async () => {
-    let capturedContext: ActionInvocationContext | null = null
+    let capturedInputs: JsonObject | null = null
+    let capturedHost: ActionHost | null = null
 
     const registry = new ActionRegistry([
-      defineTestAction("test/capture-context", async (ctx) => {
-        capturedContext = ctx
+      defineTestAction("test/capture-inputs", async (inputs, host) => {
+        capturedInputs = inputs
+        capturedHost = host
         return { output: null }
       }, {
         inputs: {
@@ -60,7 +62,7 @@ describe("WorkExecutor action input boundary", () => {
       workType: "task",
       stage: "build",
       title: "Test action input boundary",
-      uses: "test/capture-context",
+      uses: "test/capture-inputs",
       with: { task: { with: { options: placeholder } } },
       variables: {
         workspace: { path: workDir, branch: null, changeDir: null },
@@ -71,21 +73,24 @@ describe("WorkExecutor action input boundary", () => {
     const result = await executor.execute(workItem, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(capturedContext).not.toBeNull()
+    expect(capturedInputs).not.toBeNull()
+    expect(capturedHost).not.toBeNull()
 
-    const renderedWith = capturedContext!.with as JsonObject
-
-    expect((renderedWith.task as JsonObject).with).toEqual({ options: agentObject })
-    expect(capturedContext).not.toHaveProperty("variables")
-    expect(capturedContext).not.toHaveProperty("rawWith")
-    expect(capturedContext).not.toHaveProperty("rawTask")
+    const renderedTask = capturedInputs!.task as JsonObject
+    expect((renderedTask as JsonObject).with).toEqual({ options: agentObject })
+    expect(capturedInputs).not.toHaveProperty("variables")
+    expect(capturedInputs).not.toHaveProperty("rawWith")
+    expect(capturedInputs).not.toHaveProperty("rawTask")
+    expect(capturedHost!.workDir).toBe(workDir)
   })
 
-  it("preserves parent issue context without exposing Variables", async () => {
-    let capturedContext: ActionInvocationContext | null = null
+  it("receives inputs and host without exposing internal data", async () => {
+    let capturedInputs: JsonObject | null = null
+    let capturedHost: ActionHost | null = null
     const registry = new ActionRegistry([
-      defineTestAction("test/capture-parent-context", async (ctx) => {
-        capturedContext = ctx
+      defineTestAction("test/capture-inputs-boundary", async (inputs, host) => {
+        capturedInputs = inputs
+        capturedHost = host
         return { output: null }
       }, {
         inputs: {
@@ -104,7 +109,7 @@ describe("WorkExecutor action input boundary", () => {
       workId: "work-parent-context",
       workType: "task",
       stage: "plan",
-      uses: "test/capture-parent-context",
+      uses: "test/capture-inputs-boundary",
       with: { prompt: "child prompt" },
       variables: { workspace: { path: workDir, branch: null, changeDir: null } },
       parentIssueContext: { title: "Parent", body: "Parent body" },
@@ -113,8 +118,47 @@ describe("WorkExecutor action input boundary", () => {
     const result = await executor.execute(workItem, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(capturedContext!.parentIssueContext).toEqual({ title: "Parent", body: "Parent body" })
-    expect(capturedContext!.with).toEqual({ prompt: "child prompt" })
-    expect(capturedContext).not.toHaveProperty("variables")
+    expect(capturedInputs).toEqual({ prompt: "child prompt" })
+    expect(capturedHost!.workDir).toBe(workDir)
+    expect(capturedInputs).not.toHaveProperty("variables")
+    expect(capturedHost).not.toHaveProperty("variables")
+  })
+
+  it("derives engine-sourced inputs from variables without exposing the variable map", async () => {
+    let capturedInputs: JsonObject | null = null
+    const registry = new ActionRegistry([
+      defineTestAction("test/engine-input", async (inputs) => {
+        capturedInputs = inputs
+        return { output: null }
+      }, {
+        inputs: {
+          buildPrompt: { types: ["string"], engineSource: "prompts.build" },
+        },
+      }),
+    ])
+
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      {} as never,
+      workDir,
+    )
+
+    const result = await executor.execute({
+      workflowRunId: "wf-engine-input",
+      workId: "work-engine-input",
+      workType: "task",
+      title: "Engine input",
+      uses: "test/engine-input",
+      with: {},
+      variables: {
+        workspace: { path: workDir, branch: null, changeDir: null },
+        prompts: { build: "build instructions" },
+      },
+    }, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(capturedInputs).toEqual({ buildPrompt: "build instructions" })
+    expect(capturedInputs).not.toHaveProperty("variables")
   })
 })

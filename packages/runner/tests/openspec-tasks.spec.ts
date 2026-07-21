@@ -2,14 +2,13 @@ import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
-import type { ActionContext } from "../src/core/types.js"
-import type { OpenSpecTasksInvocationContext } from "../src/actions/context.js"
-import type { ServerConnection } from "../src/server/connection.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
 import { renderTemplate } from "../src/core/template.js"
 import "../src/core/prompt-registry.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "../src/actions/openspec-task-prompt.js"
 import { createTestTempDir } from "./support/temp-dir.js"
+import { callAction } from "./support/call-action.js"
 
 describe("mohist/openspec-tasks", () => {
   it("OpenSpecTaskWithoutExplicitPrompt_LoadsExecutableAcpTaskWithPromptLoaderSpec", async () => {
@@ -27,17 +26,19 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
     const output = result.output as Record<string, unknown>
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
     expect(output.loaded).toBe(1)
-    expect(addTasks).toHaveBeenCalledWith("workflow-1", expect.any(Array))
+    expect((result as any).effects?.addTasks).toBeTruthy()
     expect(loadedTasks[0].uses).toBe("mohist/opencode")
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001" },
+    })
   })
 
   it("OpenSpecTaskWithoutExplicitPrompt_PromptLoaderSpecResolvesThroughRegisteredLoader", async () => {
@@ -55,8 +56,7 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
         with: {
@@ -66,8 +66,8 @@ describe("mohist/openspec-tasks", () => {
           },
         },
       },
-    }, addTasks, { prompts: { build: "<base>build instructions</base>" } }))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    }, { prompts: { build: "<base>build instructions</base>" } }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     setPromptLoaderRegistryForTest(null)
@@ -95,19 +95,21 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: { with: { options: "${{ vars.agent }}" } },
-    }, addTasks, {
+    }, {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBe("${{ vars.agent }}")
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001" },
+    })
   })
 
   it("OpenSpecTaskWithoutOptionsTemplate_LoadsTaskWithoutOptions", async () => {
@@ -122,11 +124,10 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks, {
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }, {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
@@ -162,9 +163,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
@@ -179,7 +179,10 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.type).toBeUndefined()
     expect(loadedWith.requireFiles).toBeUndefined()
     expect(loadedWith.requireMarkers).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001" },
+    })
     const promptAsText = JSON.stringify(loadedWith)
     expect(promptAsText).not.toContain("${{ prompts.xxx }}")
     expect(promptAsText).not.toContain("Add skill asset manifest support")
@@ -201,9 +204,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
@@ -227,9 +229,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
@@ -256,9 +257,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
@@ -280,19 +280,18 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: { with: { prompt: "default-with caller prompt" } },
-    }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
     expect(loadedWith.prompt).toBe("default-with caller prompt")
   })
 
-  it("OpenSpecTaskWithBuildPromptVariable_EmbedsBaseInLoaderSpec", async () => {
+  it("OpenSpecTaskWithBuildPromptInput_EmbedsBaseInFallbackLoaderSpec", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -304,18 +303,20 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks, {
-      prompts: { build: "<build>build prompt</build>" },
+    const result = await callAction(openspecTasksAction, context(workDir, {
+      path: tasksPath,
+      buildPrompt: "<build>build prompt</build>",
     }))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
+    expect(loadedWith.prompt.with.base).toBe("<build>build prompt</build>")
+    expect(loadedWith.prompt.with.taskId).toBe("T-001")
   })
 
-  it("OpenSpecTaskWithoutBuildPromptVariable_OmitsBaseInLoaderSpec", async () => {
+  it("OpenSpecTaskWithoutBuildPromptInput_OmitsBaseInFallbackLoaderSpec", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -327,13 +328,18 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
+    expect(loadedWith.prompt.with.base).toBeUndefined()
+    expect(loadedWith.prompt.with).toEqual({
+      file: tasksPath,
+      items: "tasks",
+      taskId: "T-001",
+    })
   })
 
   it("OpenSpecTaskWithCustomItemsPath_PropagatesItemsInLoaderSpec", async () => {
@@ -348,16 +354,18 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       items: "items.nested",
-    }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "items.nested", taskId: "T-001" },
+    })
   })
 
   it("OpenSpecTaskWithMultipleTasks_InjectsPerTaskSelectors", async () => {
@@ -371,16 +379,17 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(3)
-    for (const with_ of loadedWithList) {
-      expect(with_.prompt).toBeUndefined()
-    }
+    expect(loadedWithList.map((with_: Record<string, unknown>) => with_.prompt)).toEqual([
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-001" } },
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-002" } },
+      { uses: OPENSPEC_TASK_PROMPT_LOADER_NAME, with: { file: tasksPath, items: "tasks", taskId: "T-003" } },
+    ])
   })
 
   it("OpenSpecTaskWithDefaultRegistry_OpenSpecTaskPromptLoaderIsRegistered", () => {
@@ -398,8 +407,7 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
         uses: "mohist/opencode",
@@ -415,10 +423,10 @@ describe("mohist/openspec-tasks", () => {
           },
         },
       },
-    }, addTasks, {
+    }, {
       prompts: { build: "<artifact id=\"build-task\">base</artifact>" },
     }))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(loadedTasks).toHaveLength(2)
@@ -447,8 +455,7 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: {
         uses: "mohist/opencode",
@@ -464,8 +471,8 @@ describe("mohist/openspec-tasks", () => {
           },
         },
       },
-    }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(loadedWithList[0].prompt).toBe("literal override")
@@ -488,9 +495,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(2)
@@ -511,9 +517,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(loadedTasks[0].uses).toBe("mohist/custom-action")
     expect(loadedTasks[1].uses).toBe("mohist/opencode")
@@ -544,9 +549,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(loadedTasks[0].expect).toEqual({
       files: [{ path: "review.md" }],
@@ -581,9 +585,8 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const result = await callAction(openspecTasksAction, context(workDir, { path: tasksPath }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
 
     expect(loadedTasks[0].expect).toEqual({
       markers: [{
@@ -594,7 +597,7 @@ describe("mohist/openspec-tasks", () => {
     })
   })
 
-  it("OpenSpecTaskWithExecutorStyleSplitContext_UsesRawWithTaskSubtreePlaceholders", async () => {
+  it("OpenSpecTaskWithExecutorStyleSplitContext_UsesWithAsPassed", async () => {
     const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -607,25 +610,16 @@ describe("mohist/openspec-tasks", () => {
     }))
 
     const resolvedAgent = { type: "opencode", model: "model-a" }
-    const addTasks = vi.fn()
 
-    const ctx = context(workDir, {
+    const result = await callAction(openspecTasksAction, context(workDir, {
       path: tasksPath,
       task: { with: { options: resolvedAgent } },
-    }, addTasks)
-
-    const actionContext: OpenSpecTasksInvocationContext = {
-      ...ctx,
-      rawTask: { with: { options: "${{ vars.agent }}" } },
-    }
-
-    const result = await openspecTasksAction(actionContext)
-    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    }))
+    const loadedTasks = (result as any).effects?.addTasks ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.options).toBe("${{ vars.agent }}")
-    expect(loadedWith.options).not.toEqual(resolvedAgent)
+    expect(loadedWith.options).toEqual(resolvedAgent)
   })
 })
 
@@ -634,7 +628,7 @@ afterEach(() => {
   setPromptLoaderRegistryForTest(null)
 })
 
-function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"], variables: Record<string, unknown> = {}): ActionContext {
+function context(workDir: string, withInput: Record<string, unknown>, _serverConnectionDeps?: Record<string, unknown>): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "load-build",
@@ -643,10 +637,9 @@ function context(workDir: string, withInput: Record<string, unknown>, addTasks: 
     title: "Load build tasks",
     uses: "mohist/openspec-tasks",
     with: withInput as never,
-    variables: variables as never,
+    variables: {} as never,
     workDir,
     signal: new AbortController().signal,
-    serverConnection: { addTasks } as ServerConnection,
     writeVars: vi.fn(),
   }
 }

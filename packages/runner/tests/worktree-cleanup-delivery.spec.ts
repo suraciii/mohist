@@ -5,9 +5,12 @@ import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
-import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
+import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { defineTestActions, type ActionRegistry, type TestActionDefinition } from "./support/action-registry-test.js"
+import { callAction } from "./support/call-action.js"
 
 interface FakeWorktree {
   workDir: string
@@ -87,7 +90,7 @@ function commitCleanup(state: FakeWorktree, files: string[], sha: string) {
   state.cleanupCommits.push({ files, sha })
 }
 
-function buildRegistry(handlers: Record<string, TestActionDefinition | ((ctx: ActionContext) => Promise<ActionResult>)>): ActionRegistry {
+function buildRegistry(handlers: Record<string, TestActionDefinition | ((inputs: JsonObject, host: ActionHost) => Promise<ActionResult>)>): ActionRegistry {
   return defineTestActions(handlers)
 }
 
@@ -211,10 +214,9 @@ function installRebaseMockGit(calls: string[]) {
 describe("worktree cleanup before delivery", () => {
   it("commits agent leftovers before rebase and push", async () => {
     const cleanupPrompts: string[] = []
-    setCleanupAgentActionForTest(async (ctx) => {
-      const prompt = String(ctx.with?.prompt ?? "")
+    setCleanupAgentActionForTest(async (host, inputs) => {
+      const prompt = String(inputs.prompt ?? "")
       cleanupPrompts.push(prompt)
-      expect(ctx.workId).toBe("build:agent.1")
       expect(prompt).toMatch(/do NOT start any new task work/i)
       expect(prompt).toMatch(/do NOT push to any remote/i)
       expect(prompt).toContain("src/agent-output.ts")
@@ -244,7 +246,7 @@ describe("worktree cleanup before delivery", () => {
 
     const rebaseCalls: string[] = []
     installRebaseMockGit(rebaseCalls)
-    const rebaseResult = await rebaseAction(rebaseContext())
+    const rebaseResult = await callAction(rebaseAction, rebaseContext())
     const rebaseOutput = rebaseResult.output as Record<string, unknown>
 
     expect(rebaseResult.error).toBeUndefined()
@@ -284,7 +286,7 @@ describe("worktree cleanup before delivery", () => {
       }
     })
 
-    const pushResult = await pushAction(pushContext())
+    const pushResult = await callAction(pushAction, pushContext())
     const pushOutput = pushResult.output as Record<string, unknown>
     expect(pushResult.error).toBeUndefined()
     expect(pushOutput).toMatchObject({
@@ -304,9 +306,9 @@ describe("worktree cleanup before delivery", () => {
 
   it("fails delivery after cleanup attempts leave the workspace dirty", async () => {
     let attempt = 0
-    setCleanupAgentActionForTest(async (ctx) => {
+    setCleanupAgentActionForTest(async (_host, inputs) => {
       attempt += 1
-      const prompt = String(ctx.with?.prompt ?? "")
+      const prompt = String(inputs.prompt ?? "")
       expect(prompt).toContain(`attempt ${attempt}`)
       return { output: null }
     })

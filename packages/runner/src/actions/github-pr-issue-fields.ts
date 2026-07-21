@@ -1,25 +1,29 @@
 import { stringInput } from "../core/json.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { JsonObject } from "../core/types.js"
+import type { ActionHost } from "./host.js"
 import { errorMessage } from "./github-pr-parse.js"
-import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
+import { isIssueFieldSource, type IssueFields } from "./issue-fields.js"
 
-export async function resolveCreatePrText(context: ActionInvocationContext): Promise<
+export async function resolveCreatePrText(inputs: JsonObject, host: ActionHost): Promise<
   | { kind: "ok"; title: string; body: string }
   | { kind: "failure"; message: string }
 > {
-  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
-  const bodyLiteral = stringInput(context.with, "body")
-  const titleSource = titleLiteral === undefined ? stringInput(context.with, "titleFrom") ?? "issue.title" : undefined
-  const bodySource = bodyLiteral === undefined ? stringInput(context.with, "bodyFrom") ?? "issue.body" : undefined
+  const titleLiteral = stringInput(inputs, "title") ?? stringInput(inputs, "message")
+  const bodyLiteral = stringInput(inputs, "body")
+  const titleSource = titleLiteral === undefined ? stringInput(inputs, "titleFrom") ?? "issue.title" : undefined
+  const bodySource = bodyLiteral === undefined ? stringInput(inputs, "bodyFrom") ?? "issue.body" : undefined
 
   const sourceError = validateIssueFieldSource("titleFrom", titleSource) ?? validateIssueFieldSource("bodyFrom", bodySource)
   if (sourceError) return { kind: "failure", message: sourceError }
 
   let issueFields: IssueFields | null = null
   if (titleSource || bodySource) {
-    const loaded = await loadIssueFields(context)
-    if (loaded.kind === "failure") return loaded
-    issueFields = loaded.issueFields
+    if (!host.issue) return { kind: "failure", message: "Issue field resolution requires the issue-fields capability" }
+    try {
+      issueFields = await host.issue.fields()
+    } catch (error) {
+      return { kind: "failure", message: errorMessage(error) }
+    }
   }
 
   return {
@@ -29,36 +33,29 @@ export async function resolveCreatePrText(context: ActionInvocationContext): Pro
   }
 }
 
-export async function resolveMergeSubject(context: ActionInvocationContext): Promise<
+export async function resolveMergeSubject(inputs: JsonObject, host: ActionHost): Promise<
   | { kind: "ok"; subject: string }
   | { kind: "failure"; message: string }
 > {
-  const literal = stringInput(context.with, "subject")
+  const literal = stringInput(inputs, "subject")
   if (literal !== undefined) return { kind: "ok", subject: literal }
 
-  const source = stringInput(context.with, "subjectFrom") ?? "issue.title"
+  const source = stringInput(inputs, "subjectFrom") ?? "issue.title"
   const sourceError = validateIssueFieldSource("subjectFrom", source)
   if (sourceError) return { kind: "failure", message: sourceError }
 
-  const issueFields = await loadIssueFields(context)
-  if (issueFields.kind === "failure") return issueFields
-  return { kind: "ok", subject: resolveIssueFieldValue(issueFields.issueFields, source) }
+  if (!host.issue) return { kind: "failure", message: "Issue field resolution requires the issue-fields capability" }
+  try {
+    const issueFields = await host.issue.fields()
+    return { kind: "ok", subject: resolveIssueFieldValue(issueFields, source) }
+  } catch (error) {
+    return { kind: "failure", message: errorMessage(error) }
+  }
 }
 
 export function validateIssueFieldSource(name: string, source: string | undefined): string | null {
   if (source === undefined || isIssueFieldSource(source)) return null
   return `Unsupported ${name} source '${source}'. Supported sources: issue.title, issue.body.`
-}
-
-export async function loadIssueFields(context: ActionInvocationContext): Promise<
-  | { kind: "ok"; issueFields: IssueFields }
-  | { kind: "failure"; message: string }
-> {
-  try {
-    return { kind: "ok", issueFields: await resolveIssueFields(context) }
-  } catch (error) {
-    return { kind: "failure", message: errorMessage(error) }
-  }
 }
 
 export function resolveIssueFieldValue(issueFields: IssueFields, source: string | undefined): string {

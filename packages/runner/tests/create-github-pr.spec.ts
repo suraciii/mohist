@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
+import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
@@ -168,7 +170,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -216,7 +218,7 @@ describe("mohist/create-github-pr action", () => {
       return ghFail(`unexpected gh call: ${args.join(" ")}`)
     })
 
-    const result = await createGitHubPrAction(context({ repositoryUrl: "https://github.com/acme/repo.git", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }, { repository: { gitUrl: "https://example.com/other.git", baseBranch: "other" } }))
+    const result = await callAction(createGitHubPrAction, context({ repositoryUrl: "https://github.com/acme/repo.git", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }, { repository: { gitUrl: "https://example.com/other.git", baseBranch: "other" } }))
 
     expect(result.error).toBeUndefined()
     expect(prArguments).toHaveLength(2)
@@ -224,7 +226,7 @@ describe("mohist/create-github-pr action", () => {
   })
 
   it("rejects an invalid explicit repository URL", async () => {
-    const result = await createGitHubPrAction(context({ repositoryUrl: "not a Git URL", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }))
+    const result = await callAction(createGitHubPrAction, context({ repositoryUrl: "not a Git URL", source: "mohist/run-wr-gh-pr-1", target: "master", title: "Issue title", body: "Issue body" }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("valid GitHub repository URL")
@@ -250,7 +252,7 @@ describe("mohist/create-github-pr action", () => {
       return ghFail(`unexpected gh call in ${cwd}: ${full}`)
     })
 
-    const result = await createGitHubPrAction(withLog(context({ target: "master" }), writes))
+    const result = await callAction(createGitHubPrAction, withLog(context({ target: "master" }), writes))
 
     expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:create-github-pr" && write.text.includes("gh pr create"))).toBe(true)
@@ -287,7 +289,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -343,7 +345,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -371,7 +373,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       titleFrom: "issue.summary",
     }))
     expect(result.error).toBeDefined()
@@ -389,7 +391,7 @@ describe("mohist/create-github-pr action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -413,7 +415,7 @@ describe("mohist/create-github-pr action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       title: "Issue title",
       body: "Issue body",
     }))
@@ -452,7 +454,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -502,7 +504,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    await createGitHubPrAction(context({
+    await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",
@@ -560,7 +562,7 @@ describe("mohist/create-github-pr action", () => {
       }
     })
 
-    const result = await createGitHubPrAction(context({
+    const result = await callAction(createGitHubPrAction, context({
       source: "mohist/run-wr-gh-pr-1",
       target: "master",
       remote: "origin",

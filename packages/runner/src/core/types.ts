@@ -223,72 +223,6 @@ export interface WorkItemResult {
   addTasks?: AddTaskInput[] | null
 }
 
-export interface ActionContext {
-  workflowRunId: string
-  workId: string
-  workType: string
-  stage?: string | null
-  title?: string | null
-  uses?: string | null
-  with?: JsonObject | null
-  variables: JsonObject
-  workDir: string
-  signal: AbortSignal
-  recovery?: JsonObject | null
-  projectId?: string | null
-  issueNumber?: number | null
-  epicNumber?: number | null
-  parentIssueContext?: ParentIssueContext | null
-  ownerKind?: string | null
-  agentJobId?: string | null
-  agentSessionId?: string | null
-  serverConnection?: import("../server/connection.js").ServerConnection | null
-  /**
-   * Shared OpenCode runtime handle for both the Workflow Inline Agent
-   * path and the AgentJob path. The runtime owns the shared
-   * Server/Client lifecycle and execution-health readiness; it is set by
-   * the runner host so `mohist/opencode` turns, AgentJob execution,
-   * and follow-up commands can route through it. Null when the
-   * runtime is not yet ready or has rebuilt (recoverable by waiting
-   * for the runner to re-publish the handle).
-   */
-  openCodeRuntime?: import("../runtime/opencode/index.js").OpenCodeRuntime | null
-  piRuntime?: import("../runtime/pi/index.js").PiRuntime | null
-  /**
-   * Host-owned shared AgentSession runtime-event outbox (issue-461).
-   * The Workflow reporter and the SignalR follow-up handler route
-   * their durable inputs / activity / close / terminals through this
-   * single primitive. Null only when the runner host has not provided
-   * it (e.g. CLI smoke-test usage); production wire sets it from
-   * `RunnerHost` via `WorkExecutor`.
-   */
-  agentSessionRuntimeEventOutbox?: import("../server/runtime-event-outbox.js").AgentSessionRuntimeEventOutbox | null
-  /**
-   * Injectable deterministic id source for runtime-event records. The
-   * production default uses `Date.now` + `Math.random`; tests inject
-   * predictable ids so they can assert against specific records.
-   */
-  runtimeEventRecordId?: () => string
-  /**
-   * Single sink for ops command output. Every ops output (workspace
-   * prep, branch stability, action body, cleanup) flows through
-   * `log.write(source, text)` so masking, monotonic `seq` assignment,
-   * and buffering happen in exactly one place. Exposed as a value
-   * rather than a factory because the executor thread constructs one
-   * `TaskLogger` per work item and reuses it across all phases; the
-   * logger is intentionally missing on contexts that do not capture
-   * (agent-only paths) so wiring stays opt-in.
-   */
-  log?: import("../runtime/task-log.js").TaskLogger | null
-  /**
-   * Persist workflow runtime variables immediately, before the task completes.
-   * This is distinct from declarative `setVars`, which only patches variables
-   * after a task succeeds. Mid-execution writes are best-effort and are NOT
-   * rolled back if the task later fails, so retries can observe the value.
-   */
-  writeVars(vars: JsonObject): Promise<void>
-}
-
 export interface ActionError {
   code: string
   message: string
@@ -298,6 +232,10 @@ export type ActionResult = (
   | { output: JsonObject | null; error?: never }
   | { output?: never; error: ActionError }
 ) & {
+  effects?: {
+    addTasks?: AddTaskInput[]
+    writeVars?: JsonObject
+  }
   exitCode?: number | null
   /**
    * Runner-private Action-result facts that must never be serialized

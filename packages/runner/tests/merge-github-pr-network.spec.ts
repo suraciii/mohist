@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { callAction } from "./support/call-action.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { mergeGitHubPrAction, setGitHubPrTransientRetryForTest } from "../src/actions/github-pr.js"
 import {
@@ -56,7 +57,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
         : ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" })),
     )
 
-    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
+    const result = await callAction(mergeGitHubPrAction, context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
 
     expect(result.error).toBeUndefined()
     expect(mergeStateCallCount()).toBe(2)
@@ -70,7 +71,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
       ghFail(`Post "https://api.github.com/graphql": unexpected EOF`),
     )
 
-    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
+    const result = await callAction(mergeGitHubPrAction, context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
     expect(result.error).toMatchObject({ code: "retry-safe" })
     // 1 initial attempt + 2 retries.
     expect(mergeStateCallCount()).toBe(3)
@@ -95,7 +96,7 @@ describe("mohist/merge-github-pr transient network retry", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
+    const result = await callAction(mergeGitHubPrAction, context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }))
 
     expect(result.error).toBeDefined()
     expect(localCalls.filter((c) => c === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus").length).toBe(1)
@@ -127,7 +128,7 @@ describe("mohist/merge-github-pr network timeouts", () => {
       }
     })
 
-    await mergeGitHubPrAction(context({
+    await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -170,7 +171,7 @@ describe("mohist/merge-github-pr network timeouts", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -195,7 +196,7 @@ describe("mohist/merge-github-pr network timeouts", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   opencodeAction,
   parseOpencodeInput,
-  buildTurnRequest,
   DEFAULT_TURN_DEADLINE_MS,
 } from "../src/actions/opencode.js"
 import { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
@@ -11,9 +10,10 @@ import type { OpencodeServerHandle } from "../src/runtime/opencode/server-proces
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { RuntimeProviderErrorPolicy } from "../src/runtime/opencode/types.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
 import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
+import { callAction } from "./support/call-action.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -175,7 +175,7 @@ describe("opencodeAction — happy path + turn fact", () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
     const context = baseContext({ openCodeRuntime: runtime })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     expect(result.turnFact).toEqual({ finalAssistantText: "hello from opencode" })
   })
@@ -195,8 +195,8 @@ describe("opencodeAction — happy path + turn fact", () => {
       with: { prompt: originalPrompt } as never,
     })
 
-    await opencodeAction(context)
-    await opencodeAction({ ...context, workId: "work-2" })
+    await callAction(opencodeAction, context)
+    await callAction(opencodeAction, { ...context, workId: "work-2" })
 
     const expected = `Parent issue context (read-only background; JSON):\n${JSON.stringify(parentIssueContext)}\n\nTreat the parent issue context above as read-only background. The current child issue body is authoritative and controls delivery scope.\n\n${originalPrompt}`
     const submitted = client.sessionPrompt.mock.calls.map((call) => {
@@ -215,7 +215,7 @@ describe("opencodeAction — happy path + turn fact", () => {
     await ensureReady(runtime)
     const originalPrompt = "  exact prompt\nwith markdown --- and trailing spaces  "
 
-    await opencodeAction(baseContext({
+    await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       stage: "plan",
       with: { prompt: originalPrompt } as never,
@@ -232,7 +232,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       openCodeRuntime: runtime,
       with: { prompt: "<promise>PASS</promise>" } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     const output = result.output as Record<string, unknown>
     expect(output.promise).toBeUndefined()
     expect(output.kind).toBe("opencode")
@@ -250,12 +250,12 @@ describe("opencodeAction — happy path + turn fact", () => {
       openWorkflowAgentSession,
       attachWorkflowAgentSession,
     } as unknown as NonNullable<ActionContext["serverConnection"]>
-    const first = await opencodeAction(baseContext({
+    const first = await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection,
       with: { session: "plan", prompt: "first task" } as never,
     }))
-    const second = await opencodeAction(baseContext({
+    const second = await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection,
       workId: "work-2",
@@ -281,7 +281,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       attachWorkflowAgentSession: vi.fn(async () => { throw new Error("attach rejected") }),
     } as unknown as NonNullable<ActionContext["serverConnection"]>
 
-    const result = await opencodeAction(baseContext({
+    const result = await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection,
       with: { session: "plan", prompt: "do not submit" } as never,
@@ -301,7 +301,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       attachWorkflowAgentSession: vi.fn(),
     } as unknown as NonNullable<ActionContext["serverConnection"]>
 
-    const result = await opencodeAction(baseContext({
+    const result = await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection,
       with: { session: "plan", prompt: "do not use old workspace" } as never,
@@ -324,7 +324,7 @@ describe("opencodeAction — happy path + turn fact", () => {
     })
     await ensureReady(runtime)
 
-    const result = await opencodeAction(baseContext({ openCodeRuntime: runtime }))
+    const result = await callAction(opencodeAction, baseContext({ openCodeRuntime: runtime }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("UND_ERR_HEADERS_TIMEOUT")
@@ -338,7 +338,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", options: { model: "openrouter/vendor/family/model", variant: "high" } } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const arg = client.sessionPrompt.mock.calls[0]?.[0] as { model?: unknown }
     expect(arg.model).toEqual({ providerID: "openrouter", modelID: "vendor/family/model" })
@@ -351,7 +351,7 @@ describe("opencodeAction — happy path + turn fact", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", options: { model: "openai/gpt-5", type: "opencode", livenessQuietThresholdMs: 5000 } } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
   })
@@ -360,9 +360,9 @@ describe("opencodeAction — happy path + turn fact", () => {
 describe("opencodeAction — readiness gates", () => {
   it("Fails when the OpenCode runtime handle is missing", async () => {
     const context = baseContext()
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeDefined()
-    expect(result.error?.message).toMatch(/requires the opencode runtime/i)
+    expect(result.error?.message).toMatch(/requires the agent-turn capability/i)
   })
 
   it("Fails when the OpenCode runtime is not ready", async () => {
@@ -370,7 +370,7 @@ describe("opencodeAction — readiness gates", () => {
     await runtime.start()
     await runtime.shutdown({ clearDiagnostic: true })
     const context = baseContext({ openCodeRuntime: runtime })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeDefined()
     expect(result.error?.message).toMatch(/requires the opencode runtime to be ready/i)
   })
@@ -384,7 +384,7 @@ describe("opencodeAction — input validation short-circuits before runtime", ()
       openCodeRuntime: runtime,
       with: { prompt: "   " } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeDefined()
     expect(result.error?.message).toMatch(/requires 'prompt'/)
   })
@@ -396,7 +396,7 @@ describe("opencodeAction — input validation short-circuits before runtime", ()
       openCodeRuntime: runtime,
       with: { prompt: "do", options: { model: "no-slash" } } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeDefined()
     expect(result.error?.message).toMatch(/provider\/model/)
     expect(client.sessionPrompt).not.toHaveBeenCalled()
@@ -410,7 +410,7 @@ describe("opencodeAction — provider-error fail-fast propagates", () => {
     })
     await ensureReady(runtime)
     const context = baseContext({ openCodeRuntime: runtime })
-    const actionPromise = opencodeAction(context)
+    const actionPromise = callAction(opencodeAction, context)
     await new Promise((resolve) => setImmediate(resolve))
     subscription.emit({
       type: "session.status",
@@ -427,37 +427,13 @@ describe("opencodeAction — provider-error fail-fast propagates", () => {
   })
 })
 
-describe("buildTurnRequest — deadline declaration", () => {
-  it("Places the supplied deadlineMs on the turn request", () => {
-    const request = buildTurnRequest(
-      { runtimeSessionId: null, workDir: "/tmp/work" },
-      "do the work",
-      undefined,
-      90_000,
-    )
-    expect(request.deadlineMs).toBe(90_000)
-  })
-
-  it("Preserves the prompt and options unchanged when no deadline override is provided", () => {
-    const request = buildTurnRequest(
-      { runtimeSessionId: null, workDir: "/tmp/work" },
-      "do the work",
-      undefined,
-      DEFAULT_TURN_DEADLINE_MS,
-    )
-    expect(request.prompt).toBe("do the work")
-    expect(request.deadlineMs).toBe(DEFAULT_TURN_DEADLINE_MS)
-    expect(request.options).toBeDefined()
-  })
-})
-
 describe("opencodeAction — deadline declaration", () => {
   it("Defaults the turn deadline to 60 minutes when no override is supplied", async () => {
     const { runtime } = buildRuntime()
     await ensureReady(runtime)
     const runTurnSpy = vi.spyOn(runtime, "runTurn")
     const context = baseContext({ openCodeRuntime: runtime })
-    await opencodeAction(context)
+    await callAction(opencodeAction, context)
     expect(runTurnSpy).toHaveBeenCalledTimes(1)
     const request = runTurnSpy.mock.calls[0]?.[0] as { deadlineMs?: number }
     expect(request.deadlineMs).toBe(DEFAULT_TURN_DEADLINE_MS)
@@ -471,7 +447,7 @@ describe("opencodeAction — deadline declaration", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", timeout: 5 * 60 * 1000 } as never,
     })
-    await opencodeAction(context)
+    await callAction(opencodeAction, context)
     const request = runTurnSpy.mock.calls[0]?.[0] as { deadlineMs?: number }
     expect(request.deadlineMs).toBe(5 * 60 * 1000)
   })
@@ -484,7 +460,7 @@ describe("opencodeAction — deadline declaration", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", timeout: 0 } as never,
     })
-    await opencodeAction(context)
+    await callAction(opencodeAction, context)
     const request = runTurnSpy.mock.calls[0]?.[0] as { deadlineMs?: number }
     expect(request.deadlineMs).toBe(DEFAULT_TURN_DEADLINE_MS)
   })
@@ -496,7 +472,7 @@ describe("opencodeAction — deadline declaration", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", timeout: 5 * 60 * 1000 } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>
@@ -514,7 +490,7 @@ describe("opencodeAction — deadline declaration", () => {
     const { runtime, client } = buildRuntime()
     await ensureReady(runtime)
     const context = baseContext({ openCodeRuntime: runtime })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>
@@ -534,7 +510,7 @@ describe("opencodeAction — deadline declaration", () => {
       openCodeRuntime: runtime,
       with: { prompt: "do", timeout: 30 * 60 * 1000 } as never,
     })
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const promptArg = client.sessionPrompt.mock.calls[0]?.[0] as {
       parts: Array<{ type: string; text: string }>

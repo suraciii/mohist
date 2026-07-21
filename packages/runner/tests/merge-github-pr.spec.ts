@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { mergeGitHubPrAction, setGitHubPrChecksTimingForTest, setGitHubPrGhRunnerForTest } from "../src/actions/github-pr.js"
 import {
@@ -54,7 +55,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -98,14 +99,14 @@ describe("mohist/merge-github-pr action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await mergeGitHubPrAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42, method: "squash", subject: "Issue title" }, { repository: { gitUrl: "https://example.com/other.git" } }))
+    const result = await callAction(mergeGitHubPrAction, context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42, method: "squash", subject: "Issue title" }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
      expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")
   })
 
   it("rejects an invalid explicit repository URL", async () => {
-    const result = await mergeGitHubPrAction(context({ repositoryUrl: "not a Git URL", prNumber: 42, method: "squash", subject: "Issue title" }))
+    const result = await callAction(mergeGitHubPrAction, context({ repositoryUrl: "not a Git URL", prNumber: 42, method: "squash", subject: "Issue title" }))
     expect(result.error).toMatchObject({ code: "config-error" })
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })
@@ -136,7 +137,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(withLog(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }), writes))
+    const result = await callAction(mergeGitHubPrAction, withLog(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }), writes))
 
     expect(result.error).toBeUndefined()
     expect(writes.some((write) => write.source === "action:merge-github-pr" && write.text.includes("gh pr merge 42"))).toBe(true)
@@ -159,7 +160,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       source: "mohist/run-wr-merge-1",
       target: "master",
       subjectFrom: "issue.title",
@@ -192,7 +193,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -225,7 +226,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -264,7 +265,7 @@ describe("mohist/merge-github-pr action", () => {
         }
       })
 
-      const result = await mergeGitHubPrAction(context({
+      const result = await callAction(mergeGitHubPrAction, context({
         prNumber: 42,
         method: "squash",
         subjectFrom: "issue.title",
@@ -310,7 +311,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -356,7 +357,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -401,7 +402,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -435,7 +436,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -468,7 +469,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "squash",
       subjectFrom: "issue.title",
@@ -493,7 +494,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       subjectFrom: "issue.title",
     }))
@@ -525,7 +526,7 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       subject: "Issue title",
     }, { project: { id: "proj_1", path: PROJECT_PATH } }))
@@ -544,7 +545,7 @@ describe("mohist/merge-github-pr action", () => {
       return ghOk("ok\n")
     })
 
-    const result = await mergeGitHubPrAction(context({
+    const result = await callAction(mergeGitHubPrAction, context({
       prNumber: 42,
       method: "merge",
     }))
@@ -597,7 +598,7 @@ describe("mohist/merge-github-pr action", () => {
           method: "squash",
           subjectFrom: "issue.title",
         })
-        const resultPromise = mergeGitHubPrAction(ctx)
+        const resultPromise = callAction(mergeGitHubPrAction, ctx)
         await vi.advanceTimersByTimeAsync(15_000)
         await vi.advanceTimersByTimeAsync(15_000)
         const result = await resultPromise
@@ -656,7 +657,7 @@ describe("mohist/merge-github-pr action", () => {
           method: "squash",
           subjectFrom: "issue.title",
         })
-        const resultPromise = mergeGitHubPrAction(ctx)
+        const resultPromise = callAction(mergeGitHubPrAction, ctx)
         await vi.advanceTimersByTimeAsync(15_000)
         await vi.advanceTimersByTimeAsync(15_000)
         const result = await resultPromise
@@ -705,7 +706,7 @@ describe("mohist/merge-github-pr action", () => {
           subjectFrom: "issue.title",
         })
         Object.assign(ctx, { signal: controller.signal })
-        const resultPromise = mergeGitHubPrAction(ctx)
+        const resultPromise = callAction(mergeGitHubPrAction, ctx)
         const probe = resultPromise.then(
           () => "resolved" as const,
           (error: unknown) => ({ kind: "rejected" as const, error }),
@@ -756,7 +757,7 @@ describe("mohist/merge-github-pr action", () => {
           }
         })
 
-        const result = await mergeGitHubPrAction(context({
+        const result = await callAction(mergeGitHubPrAction, context({
           prNumber: 42,
           method: "squash",
           subjectFrom: "issue.title",

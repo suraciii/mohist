@@ -1,6 +1,6 @@
 /**
  * Single sink for ops command output. The runner exposes ONE capture
- * funnel (`ActionContext.log.write(source, text)`) so every ops output
+ * funnel (`ActionHost.log.write(source, text)`) so every ops output
  * — workspace preparation, branch-stability checks, action body, and
  * clean-worktree enforcement — flows through one chokepoint that
  * masks credentials, assigns a monotonic `seq`, and buffers the entry.

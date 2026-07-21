@@ -1,5 +1,6 @@
 import { defineAction } from "./define-action.js"
 import type { ActionDefinition } from "./manifest.js"
+import type { ActionHost } from "./host.js"
 import { opencodeAction } from "./opencode.js"
 import { piAction } from "./pi.js"
 import {
@@ -134,6 +135,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "interrupted", description: "The turn was interrupted" },
         { code: "turn-failed", description: "OpenCode turn failed for an unspecified reason" },
       ],
+      capabilities: ["agent-turn"],
     },
     run: opencodeAction,
   }),
@@ -159,7 +161,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "turn-failed", description: "Pi turn failed for an unspecified reason" },
       ],
     },
-    run: piAction,
+    run: (inputs, host: ActionHost) => piAction(inputs, host),
   }),
   defineAction({
     manifest: {
@@ -167,8 +169,9 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       description: "Load tasks.json into the workflow as executable tasks",
       inputs: {
         path: { types: ["string"], required: true, description: "Path to tasks.json" },
-        task: { types: ["object"], description: "Default task-level fields applied to each entry" },
+        task: { types: ["object"], description: "Default task-level fields applied to each entry", render: "deferred" },
         items: { types: ["string"], default: "tasks", description: "Top-level items path inside the JSON document" },
+        buildPrompt: { types: ["string"], engineSource: "prompts.build" },
       },
       outputs: [
         { name: "loaded", description: "Count of tasks loaded into the run" },
@@ -177,6 +180,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "missing-source", description: "tasks.json file is missing" },
         { code: "server-unavailable", description: "Server connection is unavailable" },
       ],
+      capabilities: ["add-tasks"],
     },
     run: openspecTasksAction,
   }),
@@ -221,6 +225,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "missing-source", description: "Source change directory is missing" },
         { code: "config-error", description: "Archive configuration is invalid" },
       ],
+      capabilities: ["workflow-checkpoint"],
     },
     run: archiveChangeAction,
   }),
@@ -261,6 +266,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "conflict", description: "Rebase encountered conflicts" },
         { code: "squash-failed", description: "Squash step failed" },
       ],
+      capabilities: ["issue-fields"],
     },
     run: rebaseAction,
   }),
@@ -382,6 +388,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "retry-safe", description: "PR operation is safe to retry" },
         { code: "create-pr-failed", description: "Failed to create the PR" },
       ],
+      capabilities: ["issue-fields"],
     },
     run: createGitHubPrAction,
   }),
@@ -446,6 +453,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "pr-checks-failed", description: "Required PR checks did not pass" },
         { code: "merge-failed", description: "Failed to merge the PR" },
       ],
+      capabilities: ["issue-fields"],
     },
     run: mergeGitHubPrAction,
   }),
@@ -473,7 +481,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         { code: "aborted", description: "Polling was cancelled" },
       ],
     },
-    run: async (context) => githubPrChecksAction(context),
+    run: async (inputs, host) => githubPrChecksAction(inputs, host),
   }),
   defineAction({
     manifest: {

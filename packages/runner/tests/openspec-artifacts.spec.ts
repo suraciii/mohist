@@ -2,9 +2,10 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { openspecArtifactsAction } from "../src/actions/openspec.js"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { createTestTempDir } from "./support/temp-dir.js"
+import { callAction } from "./support/call-action.js"
 
 describe("mohist/openspec-artifacts", () => {
   it("registers openspec-artifacts in the default registry", () => {
@@ -25,7 +26,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -43,7 +44,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("OpenSpec artifacts missing")
     expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
@@ -57,7 +58,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("OpenSpec artifacts missing")
     expect(result.error?.message).toContain(join(changeDir, "specs"))
@@ -71,7 +72,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "specs", "pr-first-workflow", "spec.md"), "spec\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(join(changeDir, "design.md"))
   })
@@ -84,7 +85,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "specs", "pr-first-workflow", "spec.md"), "spec\n")
     await writeFile(join(changeDir, "design.md"), "design\n")
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(join(changeDir, "tasks.json"))
   })
@@ -98,7 +99,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(join(changeDir, "specs"))
   })
@@ -111,7 +112,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
   })
@@ -121,7 +122,7 @@ describe("mohist/openspec-artifacts", () => {
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(changeDir, { recursive: true })
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir))
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain(join(changeDir, "proposal.md"))
     expect(result.error?.message).toContain(join(changeDir, "specs"))
@@ -131,7 +132,7 @@ describe("mohist/openspec-artifacts", () => {
 
   it("fails with a clear message when only changeDir is supplied (the action's sole input)", async () => {
     const workDir = await createTestTempDir("mohist-openspec-artifacts-")
-    const result = await openspecArtifactsAction({
+    const result = await callAction(openspecArtifactsAction, {
       workflowRunId: "workflow-1",
       workId: "plan-artifacts",
       workType: "task",
@@ -141,6 +142,7 @@ describe("mohist/openspec-artifacts", () => {
       with: {} as never,
       workDir,
       signal: new AbortController().signal,
+      variables: {},
       writeVars: vi.fn(),
     })
     expect(result.error).toBeDefined()
@@ -155,7 +157,7 @@ describe("mohist/openspec-artifacts", () => {
     await writeFile(join(changeDir, "design.md"), "design\n")
     await writeFile(join(changeDir, "tasks.json"), JSON.stringify({ tasks: [] }))
 
-    const result = await openspecArtifactsAction(artifactsContext(workDir, changeDir, {
+    const result = await callAction(openspecArtifactsAction, artifactsContext(workDir, changeDir, {
       path: "/somewhere/else/should/be/ignored",
       extra: "noise",
     }))

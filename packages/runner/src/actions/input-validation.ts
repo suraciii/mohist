@@ -1,4 +1,5 @@
 import type { JsonObject, JsonValue } from "../core/types.js"
+import { stringAt } from "../core/json-path.js"
 import {
   type ActionInputKind,
   type ActionManifest,
@@ -7,6 +8,29 @@ import {
 } from "./manifest.js"
 
 export const ENGINE_RESERVED_INPUT_KEY = "working-directory"
+
+export function deferredInputFields(manifest: ActionManifest): Set<string> {
+  const deferred = new Set<string>()
+  for (const [name, declaration] of Object.entries(manifest.inputs)) {
+    if (declaration.render === "deferred") deferred.add(name)
+  }
+  return deferred
+}
+
+export function injectEngineInputs(
+  manifest: ActionManifest,
+  withInput: JsonObject | null | undefined,
+  variables: JsonObject,
+): JsonObject | null {
+  const injected: JsonObject = { ...(withInput ?? {}) }
+  for (const [name, declaration] of Object.entries(manifest.inputs)) {
+    if (declaration.engineSource !== "prompts.build") continue
+    const buildPrompt = stringAt(variables, ["prompts", "build"])
+    if (buildPrompt === undefined) delete injected[name]
+    else injected[name] = buildPrompt
+  }
+  return Object.keys(injected).length > 0 ? injected : null
+}
 
 export function validateActionInput(
   manifest: ActionManifest,

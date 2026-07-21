@@ -369,12 +369,12 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     }
   })
 
-  it("Workflow source receives the OpenCode runtime handle on ActionContext", async () => {
+  it("Workflow source does not receive the OpenCode runtime handle", async () => {
     installReadyOpenCodeRuntimeFactory()
     let observed: { openCodeRuntime: unknown } | null = null
     const actionStarted = deferred<void>()
     const actionRelease = deferred<void>()
-    blockingAction.mockReset().mockImplementation(async (context: { openCodeRuntime?: unknown }) => {
+    blockingAction.mockReset().mockImplementation(async (_inputs: unknown, context: { openCodeRuntime?: unknown }) => {
       observed = { openCodeRuntime: context.openCodeRuntime }
       actionStarted.resolve()
       await actionRelease.promise
@@ -395,11 +395,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       await actionStarted.promise
       const observedNonNull = observed as { openCodeRuntime: unknown } | null
       expect(observedNonNull).not.toBeNull()
-      expect(observedNonNull?.openCodeRuntime).not.toBeNull()
-      const runtime = observedNonNull?.openCodeRuntime as { ready: () => boolean; createSession: (...args: unknown[]) => unknown }
-      expect(typeof runtime.ready).toBe("function")
-      expect(typeof runtime.createSession).toBe("function")
-      expect(runtime.ready()).toBe(true)
+      expect(observedNonNull?.openCodeRuntime).toBeUndefined()
     } finally {
       controller.abort()
       actionRelease.resolve()

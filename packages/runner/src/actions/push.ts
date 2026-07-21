@@ -1,5 +1,5 @@
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
@@ -23,38 +23,33 @@ export function setPushGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
 }
 
-/**
- * `source` tag recorded against every captured `mohist/push` action
- * body line. Phase-distinguished from `branch-check` and `cleanup`
- * so the web viewer can tell which ops phase produced which line.
- */
 const ACTION_SOURCE = "action:push"
 
-function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
-  return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+function sinkOptions(host: ActionHost): GitOptions | undefined {
+  return host.log ? { sink: { log: host.log, source: ACTION_SOURCE } } : undefined
 }
 
-function networkOptions(context: ActionInvocationContext): GitOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function networkOptions(host: ActionHost): GitOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: host.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
-export async function pushAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const source = stringInput(context.with, "source")
-  const target = stringInput(context.with, "target")
-  const remote = stringInput(context.with, "remote")
+export async function pushAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const source = stringInput(inputs, "source")
+  const target = stringInput(inputs, "target")
+  const remote = stringInput(inputs, "remote")
   if (!source) return fail("invalid-input", "Push requires input 'source'")
   if (!target) return fail("invalid-input", "Push requires input 'target'")
   if (!remote) return fail("invalid-input", "Push requires input 'remote'")
-  const force = booleanInput(context.with, "force") === true
-  const forceWithLease = !force && booleanInput(context.with, "forceWithLease") === true
+  const force = booleanInput(inputs, "force") === true
+  const forceWithLease = !force && booleanInput(inputs, "forceWithLease") === true
   const refspec = `${source}:${target}`
-  const workDir = context.workDir
-  const opts = sinkOptions(context)
-  const networkOpts = networkOptions(context)
+  const workDir = host.workDir
+  const opts = sinkOptions(host)
+  const networkOpts = networkOptions(host)
   const steps: GitHubPrStep[] = []
 
-  const sourceResolve = await git(workDir, ["rev-parse", source], context.signal, opts)
+  const sourceResolve = await git(workDir, ["rev-parse", source], host.signal, opts)
   if (!sourceResolve.success) {
     return pushOutput(
       source,
@@ -74,16 +69,9 @@ export async function pushAction(context: ActionInvocationContext): Promise<Acti
 
   const pushArgs = ["push"]
   if (force) {
-    // Dynamic workflow branches (e.g. mohist/run-<runId>) are single-owner and
-    // carry no configured remote-tracking ref, so `--force-with-lease` fails
-    // with "(stale info)" and is misclassified as base-moved. `--force` is
-    // safe for these branches and bypasses the tracking-ref dependency.
     pushArgs.push("--force")
   } else if (forceWithLease) {
-    // Regular force-with-lease path: resolve the remote tip and use the
-    // explicit lease form, which git trusts regardless of tracking-ref state.
-    // If the probe itself fails, fall back to the bare form (best-effort).
-    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, networkOpts)
+    const remoteTip = await resolveRemoteTip(workDir, remote, target, host.signal, networkOpts)
     if (remoteTip.kind === "timeout") {
       steps.push({ name: "git-ls-remote", command: remoteTip.command, exitCode: remoteTip.result.exitCode, output: remoteTip.result.combinedOutput, ...timeoutStepMetadata(remoteTip.result) })
       return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, remoteTip.result.combinedOutput, "timeout", remoteTip.result.exitCode, steps)
@@ -93,10 +81,9 @@ export async function pushAction(context: ActionInvocationContext): Promise<Acti
     } else if (remoteTip.tip) {
       pushArgs.push(`--force-with-lease=${target}:${remoteTip.tip}`)
     }
-    // remoteTip.tip === "" → branch absent on remote; a plain push creates it, no force needed.
   }
   pushArgs.push(remote, refspec)
-  const push = await git(workDir, pushArgs, context.signal, networkOpts)
+  const push = await git(workDir, pushArgs, host.signal, networkOpts)
   steps.push({ name: "git-push", command: pushArgs.join(" "), exitCode: push.exitCode, output: push.combinedOutput, ...timeoutStepMetadata(push) })
   if (!push.success) {
     const failureCode = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : push.status === "timeout" ? "timeout" : "push-failed"
@@ -149,21 +136,10 @@ function pushOutput(
 }
 
 function looksLikeNonFastForward(text: string) {
-  // Match git's actual push-rejection shapes so transient network/auth errors
-  // do not get mis-classified as base-moved. Real non-fast-forward messages
-  // contain either `! [rejected]` followed by a hint in parens, or an
-  // explicit "non-fast-forward" / "fetch first" hint.
   return /non[-\s]?fast-forward|fetch first/i.test(text)
     || /!\s*\[rejected\][^\n]*\((stale info|stale|fetch first|non[-\s]?fast-forward|behind[^\)]*)\)/i.test(text)
 }
 
-/**
- * Resolves the current tip of `target` on `remote` via `ls-remote`.
- *   - tip sha when the branch exists on the remote,
- *   - "" when the branch is absent (a plain push creates it, no force needed),
- *   - failed when the probe itself failed (caller falls back to bare --force-with-lease),
- *   - timeout when the probe hung and must be surfaced instead of disappearing.
- */
 async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal, opts?: GitOptions): Promise<
   | { kind: "resolved"; tip: string }
   | { kind: "failed" }

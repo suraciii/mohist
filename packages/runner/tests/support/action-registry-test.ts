@@ -1,6 +1,7 @@
-import type { ActionContext, ActionResult } from "../../src/core/types.js"
+import type { ActionResult, JsonObject } from "../../src/core/types.js"
 import { defineAction } from "../../src/actions/define-action.js"
 import type { ActionDefinition, ActionManifest } from "../../src/actions/manifest.js"
+import type { ActionHost } from "../../src/actions/host.js"
 import { ActionRegistry } from "../../src/actions/registry.js"
 
 export interface TestActionOptions {
@@ -8,25 +9,24 @@ export interface TestActionOptions {
   outputs?: ActionManifest["outputs"]
   errors?: ActionManifest["errors"]
   description?: string
+  capabilities?: ActionManifest["capabilities"]
 }
 
 const NAMESPACED_TEST_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-/**
- * Build an {@link ActionDefinition} for a test stub. Test stubs typically
- * do not need a rich manifest contract — they exercise dispatch,
- * recovery, and branch-stability paths rather than input validation.
- *
- * The helper still flows through {@link defineAction} so the registry's
- * construction invariants (canonical name, non-empty defaults where
- * declared, reserved-error rejection) stay authoritative; it only
- * supplies an empty contract by default so the stub accepts any
- * `with: {}`-shaped payload. Tests that exercise validation or output
- * projection must declare the relevant inputs/outputs/errors.
- */
+export function makeHost(overrides: Partial<ActionHost> = {}): ActionHost {
+  return {
+    workDir: "/tmp/test-workdir",
+    signal: new AbortController().signal,
+    log: null,
+    exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    ...overrides,
+  }
+}
+
 export function defineTestAction(
   name: string,
-  handler: (context: ActionContext) => Promise<ActionResult>,
+  handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>,
   options: TestActionOptions = {},
 ): ActionDefinition {
   if (!NAMESPACED_TEST_NAME.test(name)) {
@@ -38,17 +38,16 @@ export function defineTestAction(
     inputs: options.inputs ?? {},
     outputs: options.outputs ?? [],
     errors: options.errors ?? [],
+    capabilities: options.capabilities,
   }
-  return defineAction({ manifest, run: handler as unknown as ActionDefinition["run"] })
+  return defineAction({ manifest, run: handler as ActionDefinition["run"] })
 }
 
-/**
- * Convenience: build an {@link ActionRegistry} containing one or more
- * test Actions keyed by their canonical name. Mirrors the shape of
- * production registry construction without the bare-handler bypass
- * API.
- */
-export function defineTestActions(actions: Record<string, TestActionDefinition | ((context: ActionContext) => Promise<ActionResult>)>): ActionRegistry {
+type TestHandler =
+  | ((inputs: JsonObject, host: ActionHost) => Promise<ActionResult>)
+  | { run: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>; inputs?: ActionManifest["inputs"]; outputs?: ActionManifest["outputs"]; errors?: ActionManifest["errors"]; description?: string; capabilities?: ActionManifest["capabilities"] }
+
+export function defineTestActions(actions: Record<string, TestHandler>): ActionRegistry {
   const definitions = Object.entries(actions).map(([name, value]) => {
     if (typeof value === "function") {
       return defineTestAction(name, value)
@@ -58,17 +57,19 @@ export function defineTestActions(actions: Record<string, TestActionDefinition |
       outputs: value.outputs,
       errors: value.errors,
       description: value.description,
+      capabilities: value.capabilities,
     })
   })
   return new ActionRegistry(definitions)
 }
 
 export interface TestActionDefinition {
-  run: (context: ActionContext) => Promise<ActionResult>
+  run: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>
   inputs?: ActionManifest["inputs"]
   outputs?: ActionManifest["outputs"]
   errors?: ActionManifest["errors"]
   description?: string
+  capabilities?: ActionManifest["capabilities"]
 }
 
 export { ActionRegistry }
