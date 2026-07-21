@@ -93,10 +93,11 @@ stages[1].tasks[0].recovery.handlers[0]: handler 需要声明 tasks 或 retrySel
 
 ### 运行时任务
 
-`WorkflowDefinition` 不是完整执行计划。`WorkflowRun` 启动时保存 definition snapshot；
-运行期间 recovery、retry、审批反馈和控制命令（如 `mo issue rebase` 插入
-`uses: mohist/rebase`）都可以产生新的 `TaskRun`，使用相同的 dispatch、report 与
-Variables 解析语义，不改写 snapshot。
+`WorkflowDefinition` 不是完整执行计划，`WorkflowRun` 也不保存 Definition snapshot。
+Run 创建时物化推进生命周期所需的 StageRun 和审批事实；每个 Stage 初始化时重新读取所选
+Profile 的当前 Definition。已初始化 Stage 不被后续编辑追溯改写。运行期间 recovery、
+retry、审批反馈和控制命令（如 `mo issue rebase` 插入 `uses: mohist/rebase`）都可以产生
+新的 `TaskRun`，使用相同的 dispatch、report 与 Variables 解析语义。
 
 运行时插入的任务不再过 definition 校验：runner 构造的恢复任务来自已校验 definition 的
 子树；服务端控制命令构造的任务由构造方保证合法。
@@ -151,7 +152,7 @@ stages[0].tasks[0].with.prompt: 未知命名空间 openspecChangeDir
 | `expect` / `artifacts` / `setVars` / `error` 的执行分工 | [`actions.md`](actions.md) |
 | recovery 的匹配位置、预算流转（`recoveryRemaining`）、人工 retry 重建 | [`recovery.md`](recovery.md) |
 | `vars.*` 的合并算法与写入 API | [`variables.md`](variables.md) |
-| Profile 资源、definition snapshot 与 API | [`profile.md`](profile.md) |
+| Profile 资源、实时 Definition 解析与 API | [`profile.md`](profile.md) |
 | 内置 profile 的取舍与不变量 | [`builtin-workflows.md`](builtin-workflows.md) |
 
 ## Status

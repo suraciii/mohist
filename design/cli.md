@@ -39,6 +39,10 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 
 `run` 是 WorkflowRun 的命令行短名。`workflow` 是 WorkflowProfile 的导航名；group help 的首句必须写明它管理 Workflow Profile，不能让用户把它理解成 WorkflowRun。CLI 短名不引入新的领域概念，也不改变 [`domain-analysis.md`](domain-analysis.md) 的所有权。
 
+`workflow edit` 修改 Profile 资源，而不是只为未来 Run 准备配置。绑定该 Profile 的活动
+WorkflowRun 会在后续 Stage 初始化时读取新的 Definition；修改 Issue 选择或 Project
+默认值则不会切换活动 Run 的 Profile。`workflow edit --help` 必须明确这一运行中影响。
+
 ### Canonical ownership
 
 动作只放在拥有该状态变化的 area：
