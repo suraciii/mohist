@@ -262,6 +262,27 @@ public class WorkflowSessionSpecs
         Assert.Equal(1, listed.ExitCode);
     }
 
+    [Fact]
+    public async Task GivenOpenRequestOmitsRuntime_ThenServerRejectsWithRuntimeInvalid()
+    {
+        var (project, _, workflowRunId) = await CreateIssueWorkflowAsync("Open without runtime");
+        var sessionName = $"open-no-runtime-{Guid.NewGuid():N}";
+
+        var path = RunnerSessionPath("runner-1", project.Id, workflowRunId, sessionName) + "/open";
+        using var response = await _client.PostAsJsonAsync(path, new
+        {
+            workId = "proposal",
+            workType = "task",
+            stage = "plan",
+            title = "Generate proposal",
+            runtime = (string?)null,
+        });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.Equal("runtime_invalid", body!.RootElement.GetProperty("code").GetString());
+    }
+
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
     {
         var issueTitle = title ?? $"Workflow session {name}";

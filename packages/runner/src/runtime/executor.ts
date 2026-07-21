@@ -307,6 +307,7 @@ export class WorkExecutor {
                 issueNumber: work.issueNumber,
                 epicNumber: work.epicNumber,
                 workDir,
+                runtime: "opencode",
               },
               signal,
             )
@@ -348,6 +349,7 @@ export class WorkExecutor {
                 processPid: null,
                 model: request.options?.model ?? null,
                 workId: work.workId,
+                runtime: "opencode",
               },
               signal,
             )
