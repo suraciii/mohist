@@ -43,6 +43,7 @@ export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHand
   const outbox: AgentSessionRuntimeEventOutbox = {
     ready: () => true,
     async load() {},
+    async recover() {},
     async enqueueBeforeExecution(record) {
       const internal: RuntimeEventRecord = { ...record }
       records.push(internal)

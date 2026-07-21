@@ -443,6 +443,19 @@ describe("AgentSessionRuntimeEventOutbox — autonomous health recovery", () => 
     await vi.advanceTimersByTimeAsync(100)
     expect(outbox.ready()).toBe(true)
   })
+
+  it("explicit recovery reloads a healed startup snapshot without waiting for the retry timer", async () => {
+    const fileSystem = new RecordingFileSystem()
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, "{ not json")
+    const { outbox } = makeOutbox({ fileSystem, localRetryDelayMs: 100 })
+    await outbox.load()
+    expect(outbox.ready()).toBe(false)
+
+    fileSystem.textStore.set(RUNTIME_EVENT_OUTBOX_FILE, JSON.stringify({ version: 1, entries: [] }))
+    await outbox.recover()
+
+    expect(outbox.ready()).toBe(true)
+  })
 })
 
 describe("AgentSessionRuntimeEventOutbox — legacy migration", () => {

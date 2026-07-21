@@ -257,6 +257,7 @@ export function buildRecordingOutbox(options: BuildOutboxOptions = {}): Recordin
     async load() {
       // Recording outbox: nothing to load — health is always true.
     },
+    async recover() {},
     async enqueueBeforeExecution(record) {
       const internal: RuntimeEventRecord = { ...record }
       beforeExecutionCalls.push(internal)

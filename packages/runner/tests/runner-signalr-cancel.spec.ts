@@ -211,6 +211,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => false,
       load: async () => {},
+      recover: async () => {},
       enqueueBeforeExecution: async () => {},
       enqueueProducedFact: async () => {},
       kick: async () => {},

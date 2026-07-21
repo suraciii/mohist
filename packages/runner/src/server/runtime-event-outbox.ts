@@ -139,6 +139,7 @@ export interface RuntimeEventDelivery {
 export interface AgentSessionRuntimeEventOutbox {
   ready(): boolean
   load(): Promise<void>
+  recover(): Promise<void>
   enqueueBeforeExecution(
     record: Pick<RuntimeEventRecord, "id" | "target" | "runtimeSessionId" | "work" | "event" | "acknowledgementPolicy" | "producerFamily">,
   ): Promise<void>
@@ -216,6 +217,7 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
   private localRetry: { unref(): void } | null = null
   private stopped = false
   private snapshotInFlight: Promise<void> | null = null
+  private recoveryInFlight: Promise<void> | null = null
   private readonly deliveryStop = new AbortController()
   private recoveryRequiresLoad = false
   private loadAttempts = 0
@@ -489,15 +491,30 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
     if (this.localRetry) return
     this.localRetry = this.timer.setTimeout(() => {
       this.localRetry = null
-      void this.retryLocalRecovery()
+      void this.recover()
     }, this.localRetryDelayMs)
   }
 
-  private async retryLocalRecovery(): Promise<void> {
+  async recover(): Promise<void> {
     if (this.stopped) return
-    if (this.recoveryRequiresLoad) {
+    if (this.recoveryInFlight) {
+      await this.recoveryInFlight
+      return
+    }
+    this.recoveryInFlight = this.recoverLocalState().finally(() => {
+      this.recoveryInFlight = null
+    })
+    await this.recoveryInFlight
+  }
+
+  private async recoverLocalState(): Promise<void> {
+    if (!this.loaded || this.recoveryRequiresLoad) {
       await this.load()
       if (this.healthy) void this.kick()
+      return
+    }
+    if (this.healthy) {
+      void this.kick()
       return
     }
     if (this.snapshotInFlight) {

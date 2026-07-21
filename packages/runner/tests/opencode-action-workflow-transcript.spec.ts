@@ -188,6 +188,7 @@ function makeFailureOutbox(): AgentSessionRuntimeEventOutbox {
   return {
     ready: () => true,
     load: async () => {},
+    recover: async () => {},
     async enqueueBeforeExecution() { throw new Error("disk full (input)") },
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
     kick: async () => {},
@@ -200,6 +201,7 @@ function makeProducedFactFailureOutbox(): AgentSessionRuntimeEventOutbox {
   return {
     ready: () => true,
     load: async () => {},
+    recover: async () => {},
     async enqueueBeforeExecution() {},
     async enqueueProducedFact() { throw new Error("disk full (produced)") },
     kick: async () => {},
@@ -376,6 +378,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
+      recover: async () => {},
       async enqueueBeforeExecution(record) {
         handles.records.push(record as RuntimeEventRecord)
       },
@@ -472,6 +475,7 @@ describe("WorkflowAgentSessionReporter — outbox-driven failure semantics", () 
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
+      recover: async () => {},
       async enqueueBeforeExecution(record) {
         beforeExecutionCalls.push(record as RuntimeEventRecord)
         if (failEnqueueBeforeExecution) throw new Error("input snapshot failed")

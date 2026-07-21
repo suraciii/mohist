@@ -112,8 +112,7 @@ export class RunnerSignalRClient {
 
   async start(): Promise<void> {
     if (this.agentSessionRuntimeEventOutbox) {
-      await this.agentSessionRuntimeEventOutbox.load()
-      void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
+      await this.recoverRuntimeEventOutbox()
     }
     await this.connection.start()
   }
@@ -134,16 +133,20 @@ export class RunnerSignalRClient {
   }
 
   async forceReconnect(signal: AbortSignal): Promise<void> {
-    return forceReconnect(this.connection, this.onReconnected, signal)
+    await forceReconnect(this.connection, this.onReconnected, signal)
+    await this.recoverRuntimeEventOutbox()
   }
 
   private registerLifecycleCallbacks(): void {
     this.connection.onreconnected((connectionId) => {
       notifyReconnected(this.connection, this.onReconnected, connectionId)
-      if (this.agentSessionRuntimeEventOutbox) {
-        void this.agentSessionRuntimeEventOutbox.kick().catch(() => undefined)
-      }
+      void this.recoverRuntimeEventOutbox().catch(() => undefined)
     })
+  }
+
+  private async recoverRuntimeEventOutbox(): Promise<void> {
+    if (!this.agentSessionRuntimeEventOutbox) return
+    await this.agentSessionRuntimeEventOutbox.recover()
   }
 
   private registerHandlers(): void {

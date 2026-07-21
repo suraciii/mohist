@@ -81,6 +81,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
+      recover: async () => {},
       async enqueueBeforeExecution(record) {
         order.push(`before:${record.event.type}`)
       },
@@ -160,6 +161,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => false,
       load: async () => {},
+      recover: async () => {},
       enqueueBeforeExecution: async () => {},
       enqueueProducedFact: async () => {},
       kick: async () => {},
@@ -180,6 +182,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     const outbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
+      recover: async () => {},
       async enqueueBeforeExecution() { throw new Error("disk full") },
       enqueueProducedFact: async () => {},
       kick: async () => {},
