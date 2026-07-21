@@ -357,6 +357,7 @@ describe("opencodeAction — Workflow AgentSession transcript reporting", () => 
       "session.input",
       "message.delta",
       "message.delta",
+      "session.closed",
     ])
   })
 
@@ -680,3 +681,4 @@ describe("WorkflowAgentSessionReporter — independent failure semantics", () =>
     expect(reporter.inputWasAccepted()).toBe(true)
   })
 })
+
