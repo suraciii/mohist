@@ -29,8 +29,8 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
 })
 
-describe("WorkExecutor rawWith", () => {
-  it("exposes rawWith as server-expanded form and with as recursively-rendered form", async () => {
+describe("WorkExecutor action input boundary", () => {
+  it("exposes only recursively-rendered input to a custom Action", async () => {
     let capturedContext: ActionInvocationContext | null = null
 
     const registry = new ActionRegistry([
@@ -59,7 +59,7 @@ describe("WorkExecutor rawWith", () => {
       workId: "work-raw-with",
       workType: "task",
       stage: "build",
-      title: "Test rawWith",
+      title: "Test action input boundary",
       uses: "test/capture-context",
       with: { task: { with: { options: placeholder } } },
       variables: {
@@ -73,12 +73,12 @@ describe("WorkExecutor rawWith", () => {
     expect(result.status).toBe("completed")
     expect(capturedContext).not.toBeNull()
 
-    const rawWith = capturedContext!.rawWith as JsonObject
     const renderedWith = capturedContext!.with as JsonObject
 
-    expect((rawWith.task as JsonObject).with).toEqual({ options: placeholder })
     expect((renderedWith.task as JsonObject).with).toEqual({ options: agentObject })
     expect(capturedContext).not.toHaveProperty("variables")
+    expect(capturedContext).not.toHaveProperty("rawWith")
+    expect(capturedContext).not.toHaveProperty("rawTask")
   })
 
   it("preserves parent issue context without exposing Variables", async () => {

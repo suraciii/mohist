@@ -189,12 +189,15 @@ export class WorkExecutor {
       }
       let rawResult: unknown
       try {
-        rawResult = await runValidatedAction(definition, {
+        const actionContext = {
           ...baseContext(work, signal, this.connection, log, this.openCodeRuntime, this.agentSessionRuntimeEventOutbox, this.runtimeEventRecordId),
           with: validatedWith,
-          rawWith: work.with,
           workDir,
-        })
+          ...(definition.manifest.name === "mohist/openspec-tasks"
+            ? { rawTask: isObject(work.with?.task) ? work.with.task : null }
+            : {}),
+        }
+        rawResult = await runValidatedAction(definition, actionContext)
       } catch (thrown) {
         rawResult = malformedToUnexpectedError(
           `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
@@ -436,7 +439,7 @@ export function baseContext(
   openCodeRuntime: OpenCodeRuntime | null = null,
   agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox | null = null,
   runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
-): Omit<ActionInvocationContext, "with" | "workDir" | "rawWith"> {
+): Omit<ActionInvocationContext, "with" | "workDir"> {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   return {
     workflowRunId: work.workflowRunId,

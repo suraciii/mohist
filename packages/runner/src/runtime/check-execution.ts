@@ -27,7 +27,7 @@ export interface CheckResultRow {
 
 export interface CheckExecutionDeps {
   actions: ActionRegistry
-  context: Omit<ActionInvocationContext, "with" | "workDir" | "rawWith">
+  context: Omit<ActionInvocationContext, "with" | "workDir">
   formatUnresolved: (unresolved: string[]) => string
   resolveWorkDir: (withInput: JsonObject | null) => Promise<string>
   toCheckStatus: (status: string) => string

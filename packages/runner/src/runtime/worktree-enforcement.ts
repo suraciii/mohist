@@ -50,7 +50,7 @@ export class WorktreeProbeError extends Error {
 export type CleanupAgentAction = (context: ActionInvocationContext) => Promise<ActionResult>
 
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
-type BaseContextFactory = (work: RenderedWorkItem, signal: AbortSignal) => Omit<ActionInvocationContext, "with" | "workDir" | "rawWith">
+type BaseContextFactory = (work: RenderedWorkItem, signal: AbortSignal) => Omit<ActionInvocationContext, "with" | "workDir">
 
 export type ContextParts = {
   baseContext: BaseContextFactory

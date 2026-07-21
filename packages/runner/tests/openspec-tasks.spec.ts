@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
+import type { OpenSpecTasksInvocationContext } from "../src/actions/context.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
 import { renderTemplate } from "../src/core/template.js"
@@ -613,12 +614,12 @@ describe("mohist/openspec-tasks", () => {
       task: { with: { options: resolvedAgent } },
     }, addTasks)
 
-    ctx.rawWith = {
-      path: tasksPath,
-      task: { with: { options: "${{ vars.agent }}" } },
-    } as never
+    const actionContext: OpenSpecTasksInvocationContext = {
+      ...ctx,
+      rawTask: { with: { options: "${{ vars.agent }}" } },
+    }
 
-    const result = await openspecTasksAction(ctx)
+    const result = await openspecTasksAction(actionContext)
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
@@ -642,7 +643,6 @@ function context(workDir: string, withInput: Record<string, unknown>, addTasks: 
     title: "Load build tasks",
     uses: "mohist/openspec-tasks",
     with: withInput as never,
-    rawWith: withInput as never,
     variables: variables as never,
     workDir,
     signal: new AbortController().signal,

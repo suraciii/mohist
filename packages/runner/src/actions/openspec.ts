@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import type { ActionResult, JsonObject, JsonValue } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionInvocationContext, OpenSpecTasksInvocationContext } from "./context.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
@@ -70,7 +70,7 @@ function isCrossDeviceError(err: unknown): boolean {
 
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
-export async function openspecTasksAction(context: ActionInvocationContext): Promise<ActionResult> {
+export async function openspecTasksAction(context: OpenSpecTasksInvocationContext): Promise<ActionResult> {
   const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return fail("invalid-input", "OpenSpec task loader requires 'path'")
   if (!exists(path)) return fail("missing-source", `tasks.json not found: ${path}`)
@@ -79,7 +79,7 @@ export async function openspecTasksAction(context: ActionInvocationContext): Pro
   const sourceTasks = Array.isArray(root.tasks) ? root.tasks.filter(isObject) : []
   if (!Array.isArray(root.tasks)) return fail("invalid-input", "tasks.json must contain a tasks array")
 
-  const taskDefaults = objectInput(context.rawWith ?? context.with, "task")
+  const taskDefaults = context.rawTask ?? objectInput(context.with, "task")
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/opencode"
   const defaultWith = objectInput(taskDefaults, "with")
   const itemsPath = stringInput(context.with, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH

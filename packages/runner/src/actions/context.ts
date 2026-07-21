@@ -35,6 +35,10 @@ export type ValidatedWith<M extends ActionManifest> = M extends ActionManifest
  */
 export type ActionInvocationContext = Omit<ActionContext, "variables">
 
+export type OpenSpecTasksInvocationContext = ActionInvocationContext & {
+  readonly rawTask?: JsonObject | null
+}
+
 /**
  * Manifest-typed variant of {@link ActionInvocationContext}. The Runner
  * substitutes the validated `with` shape for the selected manifest
