@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react'
+import { useMemo, useState, type ComponentType } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus } from '../../../entities/issue'
@@ -9,7 +9,7 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundState } from '@/shared/ui/not-found-state'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, useRebaseRecovery } from '../../../widgets/issue-workflow'
+import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -19,17 +19,21 @@ import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
+import { deriveIssueOnlyStatus } from '../model/issueDecisionContext'
+import {
+  deriveIssueDecisionActions,
+  type IssueDecisionAction,
+} from '../model/issueDecisionActions'
+import { getStopConsequenceCopy, useIssueDecisionActionController } from '../model/useIssueDecisionActions'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
 } from '../model/useIssueDetailMutations'
-import { deriveRuntimeDecision } from '../../../widgets/issue-workflow'
-import { buildExecutionSignal } from '../model/buildExecutionSignal'
-import { buildDriftRecoveryAction } from '../model/buildDriftRecoveryAction'
-import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
+import { ArchivedPill, DraftPill, PriorityChip } from './pills'
 import { StatusHeadline } from './StatusHeadline'
+import { IssueOnlyStatusHeadline } from './IssueOnlyStatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
-import { IssueActionsCard } from './cards/IssueActionsCard'
+import { IssueDecisionSurface } from './IssueDecisionSurface'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
 import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
@@ -52,6 +56,13 @@ export interface IssueDetailPageProps {
   mutationDependencies?: Partial<IssueDetailMutationDependencies>
 }
 
+type DecisionSummary = 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'done-no-action' | 'terminal-no-action'
+
+function decisionSummaryFromRuntime(summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | undefined): DecisionSummary {
+  if (!summary) return 'terminal-no-action'
+  return summary
+}
+
 export function IssueDetailPage({
   components,
   mutationDependencies,
@@ -66,23 +77,7 @@ export function IssueDetailPage({
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
-  const {
-    startMutation,
-    approveMutation,
-    sendBackMutation,
-    markReadyMutation,
-    addPrerequisiteMutation,
-    removePrerequisiteMutation,
-    closeMutation,
-    markDoneMutation,
-    forceStopMutation,
-    stopMutation,
-    resumeMutation,
-    retryMutation,
-    rerunMutation,
-    addCommentMutation,
-    deleteCommentMutation,
-  } = useIssueDetailMutations(
+  const mutations = useIssueDetailMutations(
     {
       issueNumber,
       projectId,
@@ -115,36 +110,15 @@ export function IssueDetailPage({
 
   const workflowRunId = !isCompositeParent ? (issue?.workflowRunId ?? null) : null
   const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
-  const activeSession = workflowSessions.find((session) => (
-    session.status === 'active'
-    || session.status === 'running'
-    || session.status === 'probing'
-  ))
-
-  const rebaseRecovery = useRebaseRecovery(issueNumber, workflowDataEnabled)
 
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber, workflowDataEnabled)
 
-  if (isError) {
-    return <NotFoundState />
-  }
+  const isBacklog = issue?.status === IssueStatus.Backlog
+  const isArchived = !!issue?.archivedAt
 
-  if (isLoading || !issue) {
-    return (
-      <div className="flex items-center justify-center flex-1">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    )
-  }
-
-  const isBacklog = issue.status === IssueStatus.Backlog
-  const isArchived = !!issue.archivedAt
-  const workflowStage = isCompositeParent ? null : (issue.workflowStage ?? null)
-  const prDeliveryMetadata = isCompositeParent ? null : findPublishViaPrMetadata(workflowTimeline)
-
-  const decisionInputs = isCompositeParent ? null : {
+  const decisionInputs = isCompositeParent || !issue ? null : {
     issue: {
       status: issue.status,
       workflowStage: issue.workflowStage ?? null,
@@ -177,26 +151,65 @@ export function IssueDetailPage({
 
   const decision = decisionInputs ? deriveRuntimeDecision(decisionInputs) : null
 
-  const executionSignal = decision
-    ? buildExecutionSignal({
-        activeSession: activeSession
-          ? {
-              sessionName: activeSession.sessionName,
-              transcriptPath: toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`),
-            }
-          : null,
-        agentStatus: agentStatus ?? null,
+  const decisionActions = useMemo(() => {
+    if (!issue) {
+      return { actions: [] as ReadonlyArray<IssueDecisionAction>, primary: null, transcript: null }
+    }
+    return deriveIssueDecisionActions({
+      decision,
+      issue: {
+        number: issue.number,
+        status: issue.status,
+        workflowStatus: issue.workflowStatus ?? null,
+        health: issue.health,
+        isDraft: !!issue.isDraft,
+        canStart: !!issue.canStart,
+        workflowStage: issue.workflowStage ?? null,
+        workflowRunId: issue.workflowRunId ?? null,
+        archivedAt: issue.archivedAt,
+        children: issue.children,
+        childIssuesSummary: issue.childIssuesSummary ?? null,
         blocker: issue.blocker,
-        summary: decision.summary,
-      })
-    : null
-  const driftRecovery = decision
-    ? buildDriftRecoveryAction({
-        drift: issue.drift ?? null,
-        rebase: rebaseRecovery,
-        baseBranchFallback: issue.repository?.baseBranch ?? null,
-      })
-    : null
+      },
+      agentStatus: agentStatus ?? null,
+      workflowSessions: workflowSessions.map((s) => ({
+        sessionName: s.sessionName,
+        status: s.status,
+        startedAt: s.startedAt,
+        createdAt: s.createdAt,
+      })),
+      projectPath: toProjectPath,
+    })
+  }, [
+    decision,
+    issue,
+    agentStatus,
+    workflowSessions,
+    toProjectPath,
+  ])
+
+  const controller = useIssueDecisionActionController({
+    mutations,
+    stopRecoverable: decision?.stopRecoverable ?? null,
+    approvalStage: decision?.approvalStage ?? null,
+    getStopConsequenceCopy,
+  })
+
+  if (isError) {
+    return <NotFoundState />
+  }
+
+  if (isLoading || !issue) {
+    return (
+      <div className="flex items-center justify-center flex-1">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    )
+  }
+
+  const workflowStage = isCompositeParent ? null : (issue.workflowStage ?? null)
+  const prDeliveryMetadata = isCompositeParent ? null : findPublishViaPrMetadata(workflowTimeline)
+
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
@@ -221,9 +234,31 @@ export function IssueDetailPage({
         blockedCount: issue.childIssuesSummary?.blockedCount ?? 0,
       }
     : null
-  const showMobileActionBar = isNarrowViewport && !isCompositeParent && !!decision?.primary
+  const issueOnlyContext = isCompositeParent
+    ? deriveIssueOnlyStatus({
+      status: issue.status,
+      health: issue.health,
+      isDraft: !!issue.isDraft,
+      isArchived,
+      childSummary: compositeSummary,
+    })
+    : null
+
+  const issueActions: ReadonlyArray<IssueDecisionAction> = decisionActions.actions
+  const surfaceSummary: DecisionSummary = decision
+    ? decisionSummaryFromRuntime(decision.summary)
+    : (isArchived ? 'terminal-no-action' : issueActions.length === 0 ? 'done-no-action' : 'terminal-no-action')
+  const surfaceRationale = decision?.rationale
+    ?? issueOnlyContext?.rationale
+    ?? 'No active workflow decision.'
+  const surfaceNextAction = decision?.nextAction
+    ?? issueOnlyContext?.nextAction
+    ?? 'No action required right now.'
+
+  const showDecisionSurface = !isNarrowViewport
+    && (decision !== null || issueOnlyContext !== null)
+  const showMobileActionBar = isNarrowViewport
   const showWorkflowSections = !isCompositeParent
-  const showRuntimeDecisionSurface = !isNarrowViewport && !isCompositeParent
 
   return (
     <>
@@ -238,11 +273,21 @@ export function IssueDetailPage({
           data-bar-reserved={showMobileActionBar ? 'true' : 'false'}
         >
           <div data-testid="status-header-tier" className="space-y-4">
-            {decision && (
-              <StatusHeadline
-                decision={decision}
-                stageProgress={issue.workflowStageProgress ?? null}
+            {isCompositeParent && issueOnlyContext ? (
+              <IssueOnlyStatusHeadline
+                status={issue.status}
+                health={issue.health}
+                isDraft={!!issue.isDraft}
+                isArchived={isArchived}
+                context={issueOnlyContext}
               />
+            ) : (
+              decision && (
+                <StatusHeadline
+                  decision={decision}
+                  stageProgress={issue.workflowStageProgress ?? null}
+                />
+              )
             )}
 
             <button
@@ -273,11 +318,6 @@ export function IssueDetailPage({
                     </span>
                   )}
                 </div>
-                {decision && !isCompositeParent && (
-                  <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
-                    <RuntimeSummaryPill summary={decision.summary} />
-                  </div>
-                )}
               </div>
               {isArchived && (
                 <div
@@ -361,26 +401,14 @@ export function IssueDetailPage({
               </div>
             </div>
 
-            {showRuntimeDecisionSurface && decision && (
-              <div data-testid="runtime-decision-surface-frame">
-                <RuntimeDecisionSurface
-                  decision={decision}
-                  evidence={{
-                    issueNumber,
-                    workflowRunId: issue.workflowRunId ?? null,
-                  }}
-                  executionSignal={executionSignal}
-                  driftRecovery={driftRecovery}
-                  mutations={{
-                    approveMutation,
-                    sendBackMutation,
-                    retryMutation,
-                    resumeMutation,
-                    rerunMutation,
-                    forceStopMutation,
-                    stopMutation,
-                    startMutation,
-                  }}
+            {showDecisionSurface && (
+              <div data-testid="issue-decision-surface-frame">
+                <IssueDecisionSurface
+                  actions={issueActions}
+                  summary={surfaceSummary}
+                  rationale={surfaceRationale}
+                  nextAction={surfaceNextAction}
+                  controller={controller}
                 />
               </div>
             )}
@@ -520,7 +548,7 @@ export function IssueDetailPage({
                 setDeletingCommentId={setDeletingCommentId}
                 deleteCommentError={deleteCommentError}
                 setDeleteCommentError={setDeleteCommentError}
-                mutations={{ addCommentMutation, deleteCommentMutation }}
+                mutations={{ addCommentMutation: mutations.addCommentMutation, deleteCommentMutation: mutations.deleteCommentMutation }}
               />
             </div>
 
@@ -537,7 +565,7 @@ export function IssueDetailPage({
                 summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
               >
                 <IssueDetailsCard
-                  issue={isCompositeParent ? { ...issue, workflowStage: null } : issue}
+                  issue={issue}
                   unframed
                 />
               </CollapsibleRailCard>
@@ -591,34 +619,9 @@ export function IssueDetailPage({
                 summary={issue.model ?? 'default model'}
               >
                 <IssueConfigurationCard
-                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, canStart: issue.canStart, blocker: issue.blocker, isBacklog }}
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, canStart: issue.canStart, blocker: issue.blocker, isBacklog: !!isBacklog }}
                   projectId={issueProjectId}
-                  mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
-                  unframed
-                />
-              </CollapsibleRailCard>
-
-              <CollapsibleRailCard
-                testId="reference-rail-actions"
-                title="Actions"
-                forceCollapsed={isNarrowViewport}
-                summary={issue.isDraft ? 'draft' : (issue.archivedAt ? 'archived' : 'available')}
-              >
-                <IssueActionsCard
-                  issue={issue}
-                  agentStatus={agentStatus ?? null}
-                  mutations={{
-                    approveMutation,
-                    sendBackMutation,
-                    startMutation,
-                    markReadyMutation,
-                    markDoneMutation,
-                    closeMutation,
-                    resumeMutation,
-                    retryMutation,
-                    rerunMutation,
-                  }}
-                  onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
+                  mutations={{ addPrerequisiteMutation: mutations.addPrerequisiteMutation, removePrerequisiteMutation: mutations.removePrerequisiteMutation }}
                   unframed
                 />
               </CollapsibleRailCard>
@@ -657,19 +660,14 @@ export function IssueDetailPage({
         />
       )}
 
-      {showMobileActionBar && decision && (
+      {showMobileActionBar && (
         <MobileActionBar
-          decision={decision}
-          mutations={{
-            approveMutation,
-            sendBackMutation,
-            retryMutation,
-            resumeMutation,
-            rerunMutation,
-            forceStopMutation,
-            stopMutation,
-            startMutation,
-          }}
+          actions={issueActions}
+          primary={decisionActions.primary}
+          rationale={surfaceRationale}
+          nextAction={surfaceNextAction}
+          controller={controller}
+          summary={surfaceSummary}
         />
       )}
     </>

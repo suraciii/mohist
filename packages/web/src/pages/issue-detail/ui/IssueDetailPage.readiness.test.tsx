@@ -86,7 +86,7 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('decision-action-start')).toBeInTheDocument())
     expect(screen.queryByTestId('draft-pill')).not.toBeInTheDocument()
   })
 
@@ -95,12 +95,10 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-readiness')).toBeInTheDocument())
-    const readiness = screen.getByTestId('start-readiness')
-    expect(readiness).toHaveAttribute('data-blocker', 'draft')
-    const markReadyButton = screen.getByTestId('mark-ready-button')
+    await waitFor(() => expect(screen.getByTestId('issue-decision-surface')).toBeInTheDocument())
+    const markReadyButton = await screen.findByTestId('decision-action-mark-ready')
     expect(markReadyButton).not.toBeDisabled()
-    expect(readiness.textContent).toMatch(/still a draft/i)
+    expect(markReadyButton).toHaveTextContent(/Mark ready/i)
   })
 
   it('disables the Start control with a "waiting for #N" reason for a WaitingFor issue', async () => {
@@ -112,13 +110,11 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
-    const readiness = screen.getByTestId('readiness-panel')
-    expect(screen.getByTestId('readiness-blocker')).toHaveAttribute('data-blocker-kind', 'waiting-for')
-    const startButton = screen.getByTestId('runtime-action-start')
+    await waitFor(() => expect(screen.getByTestId('decision-action-start')).toBeInTheDocument())
+    const startButton = screen.getByTestId('decision-action-start')
     expect(startButton).toBeDisabled()
-    expect(startButton.getAttribute('title')).toMatch(/waiting for #200/i)
-    expect(readiness.textContent).toMatch(/waiting for #200/i)
+    const reason = await screen.findByTestId('decision-action-start-reason')
+    expect(reason.textContent ?? '').toMatch(/waiting for #200/i)
   })
 
   it('enables the Start control for a ready, unblocked backlog issue', async () => {
@@ -126,8 +122,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
-    const startButton = screen.getByTestId('runtime-action-start')
+    await waitFor(() => expect(screen.getByTestId('decision-action-start')).toBeInTheDocument())
+    const startButton = screen.getByTestId('decision-action-start')
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -137,8 +133,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('mark-ready-button')).toBeInTheDocument())
-    screen.getByTestId('mark-ready-button').click()
+    const markReadyButton = await waitFor(() => screen.getByTestId('decision-action-mark-ready'))
+    markReadyButton.click()
     await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1))
     expect(updateIssue).toHaveBeenCalledWith(201, { isDraft: false }, 'proj-1')
   })

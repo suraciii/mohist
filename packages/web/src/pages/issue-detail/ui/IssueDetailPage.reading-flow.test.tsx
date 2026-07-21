@@ -535,7 +535,7 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
 
     renderPage()
 
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
+    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
     const readingFlow = screen.getByTestId('reading-flow')
     const headerTier = screen.getByTestId('status-header-tier')
 
@@ -543,7 +543,7 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     expect(headerTier.contains(surface)).toBe(true)
 
     for (const kind of ['start', 'stop', 'retry', 'resume', 'rerun', 'approve', 'send-back']) {
-      const action = screen.getByTestId('issue-detail-page-container').querySelector(`[data-testid="runtime-action-${kind}"]`)
+      const action = screen.getByTestId('issue-detail-page-container').querySelector(`[data-testid="decision-action-${kind}"]`)
       if (action) {
         expect(readingFlow.contains(action)).toBe(false)
         expect(headerTier.contains(action)).toBe(true)
@@ -624,9 +624,5 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     expect(convergenceSection).toBeTruthy()
     expect(referenceRail.contains(convergenceSection!)).toBe(true)
     expect(readingFlow.contains(convergenceSection!)).toBe(false)
-
-    const actionsSection = screen.getByTestId('reference-rail-actions')
-    expect(referenceRail.contains(actionsSection)).toBe(true)
-    expect(readingFlow.contains(actionsSection)).toBe(false)
   })
 })

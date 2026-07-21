@@ -25,8 +25,6 @@ interface SummaryPresentation {
   actions: (ctx: SummaryPresentationContext) => RuntimeAvailableAction[]
 }
 
-const INSPECT_DISABLED_REASON = 'Transcript navigation is not available from this surface yet.'
-
 function buildAllowedActions(input: RuntimeDecisionInput): Set<string> {
   const recoveryActions = input.issue?.recovery?.allowedActions ?? []
   const timelineActions = (input.timeline?.availableActions ?? []).map((action) => action.name)
@@ -58,19 +56,7 @@ function actionEnabled(
   if (kind === 'stop') {
     return allowed.has('stop') || allowed.has('force-stop') || allowed.has('force_stop')
   }
-  if (kind === 'inspect') {
-    return allowed.has('inspect')
-  }
   return false
-}
-
-function buildInspectAction(): RuntimeAvailableAction {
-  return {
-    kind: 'inspect',
-    label: 'View transcript',
-    enabled: false,
-    reason: INSPECT_DISABLED_REASON,
-  }
 }
 
 function buildRetryAction(ctx: SummaryPresentationContext): RuntimeAvailableAction {
@@ -81,7 +67,7 @@ function buildRetryAction(ctx: SummaryPresentationContext): RuntimeAvailableActi
     enabled: !ctx.isClosed && !ctx.isDone && offered,
     reason: offered
       ? undefined
-      : 'Retry is not currently offered by the backend projection.',
+      : 'Retry is not available right now.',
   }
 }
 
@@ -93,7 +79,7 @@ function buildResumeAction(ctx: SummaryPresentationContext): RuntimeAvailableAct
     enabled: !ctx.isClosed && !ctx.isDone && offered,
     reason: offered
       ? undefined
-      : 'Resume is not currently offered by the backend projection.',
+      : 'Resume is not available right now.',
   }
 }
 
@@ -105,7 +91,7 @@ function buildRerunAction(ctx: SummaryPresentationContext): RuntimeAvailableActi
     enabled: !ctx.isClosed && !ctx.isDone && offered,
     reason: offered
       ? undefined
-      : 'Rerun is not currently offered by the backend projection.',
+      : 'Rerun is not available right now.',
   }
 }
 
@@ -117,7 +103,7 @@ function buildStopAction(ctx: SummaryPresentationContext): RuntimeAvailableActio
     enabled: !ctx.isClosed && !ctx.isDone && offered,
     reason: offered
       ? undefined
-      : 'Stop is not currently offered by the backend projection.',
+      : 'Stop becomes available between tasks.',
   }
 }
 
@@ -129,7 +115,7 @@ function buildStartNewWorkflowAction(ctx: SummaryPresentationContext): RuntimeAv
     enabled: !ctx.isClosed && !ctx.isDone && offered,
     reason: offered
       ? undefined
-      : 'Start is not currently offered by the backend projection.',
+      : 'Start is not available right now.',
   }
 }
 
@@ -142,7 +128,6 @@ function terminalActions(
     buildResumeAction(ctx),
     buildRerunAction(ctx),
     terminalKind === 'start' ? buildStartNewWorkflowAction(ctx) : buildStopAction(ctx),
-    buildInspectAction(),
   ]
 }
 
@@ -156,7 +141,7 @@ function buildApprovalActions(ctx: SummaryPresentationContext): RuntimeAvailable
       enabled: !ctx.isClosed && approveOffered,
       reason: approveOffered
         ? undefined
-        : 'Approval is not currently offered by the backend projection.',
+        : 'Approval is not available right now.',
     },
     {
       kind: 'send-back',
@@ -164,7 +149,7 @@ function buildApprovalActions(ctx: SummaryPresentationContext): RuntimeAvailable
       enabled: !ctx.isClosed && sendBackOffered,
       reason: sendBackOffered
         ? undefined
-        : 'Send-back is not currently offered by the backend projection.',
+        : 'Send-back is not available right now.',
     },
   ]
 }
@@ -172,12 +157,11 @@ function buildApprovalActions(ctx: SummaryPresentationContext): RuntimeAvailable
 function buildRunningActions(ctx: SummaryPresentationContext): RuntimeAvailableAction[] {
   return [
     buildStopAction(ctx),
-    buildInspectAction(),
   ]
 }
 
 function buildDoneActions(): RuntimeAvailableAction[] {
-  return [buildInspectAction()]
+  return []
 }
 
 function buildQueuedActions(ctx: SummaryPresentationContext): RuntimeAvailableAction[] {
@@ -186,7 +170,7 @@ function buildQueuedActions(ctx: SummaryPresentationContext): RuntimeAvailableAc
     || (ctx.isBacklog && ctx.input.issue?.canStart === true)
   const startEnabled = !ctx.isClosed && startOffered && !ctx.waitReason
   const startReason = ctx.waitReason
-    ?? (!startOffered ? 'Start is not currently offered by the backend projection.' : undefined)
+    ?? (!startOffered ? 'Start is not available right now.' : undefined)
   return [
     {
       kind: 'start',
@@ -223,13 +207,13 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
   },
   'approval-required': {
     headline: (ctx) => {
-      if (ctx.currentTask) return `Approval required on ${ctx.currentTask.title}`
-      return `Approval required at ${formatStageLabelForCtx(ctx)}`
+      if (ctx.currentTask) return `Approval pending on ${ctx.currentTask.title}`
+      return `Approval pending at ${formatStageLabelForCtx(ctx)}`
     },
-    rationale: () => 'The workflow is paused and waiting for your review.',
+    rationale: () => 'The workflow is paused while an approval decision is pending.',
     nextAction: (ctx) => {
       const approve = buildApprovalActions(ctx).find((a) => a.kind === 'approve' && a.enabled)
-      if (approve) return `Review and approve to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
+      if (approve) return `An approval decision is needed to continue${ctx.currentTask ? ` (${ctx.currentTask.title})` : ''}.`
       return 'Approval actions are unavailable right now.'
     },
     actions: buildApprovalActions,
@@ -246,7 +230,7 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       const recovery = issue?.recovery
       if (recovery?.latestAttemptState === 'interrupted'
         || issue?.workflowStatus?.toLowerCase() === 'interrupted') {
-        return 'The workflow was interrupted. Resume or rerun to continue.'
+        return 'Execution stopped manually. Resume or rerun to continue.'
       }
       return 'The workflow is blocked and needs an action to continue.'
     },

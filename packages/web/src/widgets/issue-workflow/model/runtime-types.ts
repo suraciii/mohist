@@ -17,7 +17,6 @@ export type RuntimeActionKind =
   | 'rerun'
   | 'stop'
   | 'start'
-  | 'inspect'
 
 export interface RuntimeCurrentTask {
   kind: 'task' | 'check'

@@ -32,7 +32,7 @@ describe('deriveRuntimeDecision', () => {
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
         recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Implement RuntimeDecisionSurface' },
+          currentWorkItem: { type: 'task', id: 't1', title: 'Implement action controls' },
           latestAttemptState: 'running',
           workflowSummaryState: 'running',
           allowedActions: ['stop', 'inspect'],
@@ -52,7 +52,7 @@ describe('deriveRuntimeDecision', () => {
             tasks: [
               {
                 id: 't1',
-                title: 'Implement RuntimeDecisionSurface',
+                title: 'Implement action controls',
                 uses: null,
                 status: 'running',
                 startedAt: null,
@@ -75,8 +75,8 @@ describe('deriveRuntimeDecision', () => {
     const decision = deriveRuntimeDecision(input)
 
     expect(decision.summary).toBe('running')
-    expect(decision.currentTask?.title).toBe('Implement RuntimeDecisionSurface')
-    expect(decision.headline).toContain('Implement RuntimeDecisionSurface')
+    expect(decision.currentTask?.title).toBe('Implement action controls')
+    expect(decision.headline).toContain('Implement action controls')
     expect(decision.actions.some((a) => a.kind === 'stop' && a.enabled)).toBe(true)
     expect(decision.primary?.kind).toBe('stop')
     expect(decision.primary?.label).toBe('Stop')

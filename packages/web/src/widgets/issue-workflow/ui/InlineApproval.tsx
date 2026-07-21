@@ -297,20 +297,16 @@ export function StepList({
         </div>
       )}
 
-      {isAwaitingApproval && !readOnly && (
-        <div className="space-y-3">
+      {isAwaitingApproval && (
+        <div className="space-y-3" data-testid="step-list-approval-evidence">
           {checkResults.length === 0 && (
             <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
               Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered after an incomplete run; rerun the stage if you need fresh verification before approving.
             </div>
           )}
-          <InlineApprovalControls
-            issueNumber={issue.number}
-            stage={stage}
-            approvalOutput={issue.approvalState?.output}
-            approveIssueFn={dependencies?.approveIssue}
-            requestChangesHook={dependencies?.requestChangesHook}
-          />
+          {issue.approvalState?.output != null && (
+            <ReviewSummary output={issue.approvalState.output} />
+          )}
         </div>
       )}
 

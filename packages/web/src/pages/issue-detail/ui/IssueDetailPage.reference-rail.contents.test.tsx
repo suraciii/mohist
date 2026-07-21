@@ -51,7 +51,7 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     expect(referenceRail.contains(configurationToggle)).toBe(true)
   })
 
-  it('exposes the non-runtime IssueActionsCard in the rail and excludes the runtime decision surface', async () => {
+  it('does not place lifecycle or workflow actions in the reference rail (they live in the issue decision surface)', async () => {
     mockIssue(makeIssue({
       health: 'blocked',
       blockedReason: 'Blocked by runtime execution.',
@@ -65,16 +65,17 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     renderPage()
 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
-    const actionsToggle = screen.getByTestId('reference-rail-actions-toggle')
-    expect(referenceRail.contains(actionsToggle)).toBe(true)
 
+    expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
+    expect(referenceRail.querySelector('[data-testid="issue-decision-surface"]')).toBeNull()
     expect(referenceRail.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
     expect(referenceRail.textContent ?? '').not.toContain('Current:')
     expect(referenceRail.textContent ?? '').not.toContain('Build decision surface')
     expect(referenceRail.textContent ?? '').not.toContain('Blocked by runtime execution.')
 
-    for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start']) {
+    for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start', 'mark-ready', 'close', 'mark-as-done']) {
       const action = referenceRail.querySelector(`[data-testid="runtime-action-${kind}"]`)
+        ?? referenceRail.querySelector(`[data-testid="decision-action-${kind}"]`)
       expect(action).toBeNull()
     }
   })
@@ -206,7 +207,7 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
 
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('blocked')
-    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('Runtime blocked without convergence payload.')
+    expect(screen.getByTestId('decision-rationale').textContent ?? '').toContain('Runtime blocked without convergence payload.')
     expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
   })
 
@@ -296,7 +297,6 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
-      'reference-rail-actions',
       'reference-rail-prerequisites',
     ]
     for (const testId of expectedRailCards) {
@@ -339,9 +339,11 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
       'commits-section',
       'description-section',
       'comments-section',
+      'issue-decision-surface',
       'runtime-decision-surface',
       'latest-artifacts-panel',
       'diff-summary-banner',
+      'reference-rail-actions',
     ]
     for (const testId of forbiddenTestIds) {
       expect(
@@ -351,7 +353,7 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
     }
   })
 
-  it('renders only metadata, configuration, workflow-profile, and non-runtime actions on the rail (no runtime surface)', async () => {
+  it('renders only metadata, configuration, and workflow-profile on the rail (no decision surface)', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -372,11 +374,13 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
     expect(referenceRail.contains(screen.getByTestId('issue-detail-details-metadata'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('issue-workflow-profile-control-frame'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('workflow-profile-editor-frame'))).toBe(true)
-    expect(referenceRail.contains(screen.getByTestId('reference-rail-actions-toggle'))).toBe(true)
+    expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
 
     for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start']) {
       expect(referenceRail.querySelector(`[data-testid="runtime-action-${kind}"]`)).toBeNull()
+      expect(referenceRail.querySelector(`[data-testid="decision-action-${kind}"]`)).toBeNull()
     }
     expect(referenceRail.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
+    expect(referenceRail.querySelector('[data-testid="issue-decision-surface"]')).toBeNull()
   })
 })

@@ -1,407 +1,239 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { MobileActionBar } from './MobileActionBar'
-import type { RuntimeDecision, RuntimeAvailableAction } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
-import type { RuntimeDecisionSurfaceMutations } from '../../../widgets/issue-workflow/ui/RuntimeDecisionSurface'
+import type { IssueDecisionAction, IssueDecisionActionKind } from '../model/issueDecisionActions'
+import type { IssueDecisionActionController } from '../model/useIssueDecisionActions'
 
-function mutation<TMutation extends { mutate: unknown; isPending: boolean; error: Error | null } = RuntimeDecisionSurfaceMutations['startMutation']>(overrides: Partial<TMutation> = {}): TMutation {
+function makeAction(kind: IssueDecisionActionKind, overrides: Partial<IssueDecisionAction> = {}): IssueDecisionAction {
   return {
-    mutate: vi.fn() as TMutation['mutate'],
-    isPending: false,
+    kind,
+    label: kind,
+    pendingLabel: 'Pending...',
+    enabled: true,
+    reason: null,
+    primary: false,
+    destructive: false,
+    mode: 'immediate',
+    to: null,
+    order: 0,
+    ...overrides,
+  }
+}
+
+function buildController(overrides: Partial<IssueDecisionActionController> = {}): IssueDecisionActionController {
+  return {
+    pendingKind: null,
     error: null,
-    ...overrides,
-  } as TMutation
-}
-
-function mutations(overrides: Partial<RuntimeDecisionSurfaceMutations> = {}): RuntimeDecisionSurfaceMutations {
-  return {
-    approveMutation: mutation(),
-    sendBackMutation: mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>(),
-    retryMutation: mutation(),
-    resumeMutation: mutation(),
-    rerunMutation: mutation(),
-    forceStopMutation: mutation(),
-    stopMutation: mutation(),
-    startMutation: mutation(),
+    stopConfirming: false,
+    stopConfirmTitle: 'Stop (recoverable)',
+    stopConfirmBody: 'Stop will preserve progress.',
+    openStopConfirm: vi.fn(),
+    closeStopConfirm: vi.fn(),
+    runAction: vi.fn(),
+    sendBackBodyValid: vi.fn(() => true),
     ...overrides,
   }
 }
 
-function decision(overrides: Partial<RuntimeDecision> = {}): RuntimeDecision {
-  const stop: RuntimeAvailableAction = { kind: 'stop', label: 'Stop', enabled: true }
-  return {
-    summary: 'running',
-    headline: 'Workflow running (Build)',
-    rationale: 'The workflow is currently executing.',
-    currentTask: null,
-    nextAction: 'No user action required right now.',
-    primary: stop,
-    actions: [stop, { kind: 'inspect', label: 'View transcript', enabled: false }],
-    stopRecoverable: true,
-    waitReason: null,
-    driftNote: null,
-    blockedReason: null,
-    approvalStage: null,
-    ...overrides,
-  }
+function renderBar(props: Partial<React.ComponentProps<typeof MobileActionBar>> = {}) {
+  return render(
+    <MemoryRouter>
+      <MobileActionBar
+        actions={props.actions ?? [makeAction('stop')]}
+        primary={'primary' in props ? (props.primary as IssueDecisionAction | null) : makeAction('stop')}
+        rationale={props.rationale ?? 'The workflow is currently executing.'}
+        nextAction={props.nextAction ?? 'No action required right now.'}
+        controller={props.controller ?? buildController()}
+        summary={props.summary ?? 'running'}
+      />
+    </MemoryRouter>,
+  )
 }
+
+afterEach(() => cleanup())
 
 describe('MobileActionBar', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
+  it('keeps no-action context reachable from the launcher', () => {
+    renderBar({ actions: [], primary: null })
+
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(screen.getByTestId('mobile-action-sheet-rationale')).toHaveTextContent('The workflow is currently executing.')
+    expect(screen.getByTestId('mobile-action-sheet-next-action')).toHaveTextContent('No action required right now.')
+    expect(screen.getByTestId('mobile-sheet-no-action')).toBeInTheDocument()
   })
 
-  it('renders nothing when decision.primary is null', () => {
-    const { container } = render(
-      <MobileActionBar
-        decision={decision({ primary: null, actions: [] })}
-        mutations={mutations()}
-      />,
-    )
-    expect(container.firstChild).toBeNull()
+  it('renders the launcher with the primary label', () => {
+    renderBar({ primary: makeAction('stop', { label: 'Stop workflow' }) })
+    const launcher = screen.getByTestId('mobile-action-sheet-launcher')
+    expect(launcher).toHaveTextContent('Stop workflow')
+    expect(launcher).toHaveAttribute('data-action-kind', 'stop')
   })
 
-  it('renders a single primary action button sourced from decision.primary', () => {
-    const stop: RuntimeAvailableAction = { kind: 'stop', label: 'Stop', enabled: true }
-    render(<MobileActionBar decision={decision({ primary: stop })} mutations={mutations()} />)
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.actionKind).toBe('stop')
-    expect(bar.dataset.summary).toBe('running')
-
-    const primaryButton = screen.getByTestId('mobile-action-stop')
-    expect(primaryButton).toHaveAttribute('data-primary', 'true')
-    expect(within(bar).queryByTestId('mobile-action-send-back')).toBeNull()
-    expect(within(bar).queryByTestId('mobile-action-approve')).toBeNull()
-  })
-
-  it('uses the Stop copy verbatim from decision.primary label', () => {
-    render(<MobileActionBar decision={decision()} mutations={mutations()} />)
-    expect(screen.getByTestId('mobile-action-stop')).toHaveTextContent('Stop')
-  })
-
-  it('preserves custom primary labels from decision.primary', () => {
-    const start: RuntimeAvailableAction = { kind: 'start', label: 'Start new workflow', enabled: true }
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'failed',
-          primary: start,
-          actions: [start],
-          stopRecoverable: null,
-        })}
-        mutations={mutations()}
-      />,
-    )
-
-    expect(screen.getByTestId('mobile-action-start')).toHaveTextContent('Start new workflow')
-  })
-
-  it('disables unavailable primary actions, exposes the reason, and does not invoke mutations', () => {
-    const start: RuntimeAvailableAction = {
-      kind: 'start',
-      label: 'Start',
-      enabled: false,
-      reason: 'Issue is still a draft. Mark it ready before starting.',
-    }
-    const startMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'queued',
-          primary: start,
-          actions: [start],
-          stopRecoverable: null,
-        })}
-        mutations={mutations({ startMutation })}
-      />,
-    )
-
-    const button = screen.getByTestId('mobile-action-start')
-    expect(button).toBeDisabled()
-    expect(button).toHaveTextContent('Start')
-    expect(button).toHaveAttribute('title', 'Issue is still a draft. Mark it ready before starting.')
-    expect(button).toHaveAttribute('aria-describedby', 'mobile-action-start-reason')
-
-    fireEvent.click(button)
-
-    expect(startMutation.mutate).not.toHaveBeenCalled()
-  })
-
-  it('opens the confirmation drawer when a destructive primary (Stop) is activated', () => {
-    render(<MobileActionBar decision={decision()} mutations={mutations()} />)
-
-    expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-
-    const drawer = screen.getByTestId('confirmation-drawer')
-    expect(drawer).toBeInTheDocument()
-    expect(drawer).toHaveAttribute('role', 'dialog')
-    expect(drawer).toHaveAttribute('aria-modal', 'true')
-    expect(screen.getByTestId('mobile-stop-confirmation')).toBeInTheDocument()
-    expect(screen.getByTestId('mobile-confirmation-title')).toHaveTextContent('recoverable')
-  })
-
-  it('renders recoverable consequence copy in the stop drawer when stopRecoverable is true', () => {
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: true })}
-        mutations={mutations()}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-
-    expect(screen.getByTestId('mobile-confirmation-body')).toHaveTextContent('preserve progress')
-  })
-
-  it('renders irreversible consequence copy in the stop drawer when stopRecoverable is false', () => {
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: false })}
-        mutations={mutations()}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-
-    expect(screen.getByTestId('mobile-confirmation-body')).toHaveTextContent('irreversible')
-  })
-
-  it('confirming a recoverable Stop routes to forceStopMutation', () => {
-    const forceStopMutation = mutation()
-    const stopMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: true })}
-        mutations={mutations({ forceStopMutation, stopMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-    fireEvent.click(screen.getByTestId('mobile-confirmation-confirm'))
-
-    expect(forceStopMutation.mutate).toHaveBeenCalledTimes(1)
-    expect(stopMutation.mutate).not.toHaveBeenCalled()
-  })
-
-  it('confirming an irreversible Stop routes to stopMutation', () => {
-    const forceStopMutation = mutation()
-    const stopMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: false })}
-        mutations={mutations({ forceStopMutation, stopMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-    fireEvent.click(screen.getByTestId('mobile-confirmation-confirm'))
-
-    expect(stopMutation.mutate).toHaveBeenCalledTimes(1)
-    expect(forceStopMutation.mutate).not.toHaveBeenCalled()
-  })
-
-  it('does not invoke any mutation when the stop drawer Cancel is pressed', () => {
-    const forceStopMutation = mutation()
-    const stopMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: true })}
-        mutations={mutations({ forceStopMutation, stopMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-stop'))
-    fireEvent.click(screen.getByTestId('mobile-confirmation-cancel'))
-
-    expect(forceStopMutation.mutate).not.toHaveBeenCalled()
-    expect(stopMutation.mutate).not.toHaveBeenCalled()
-    expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
-  })
-
-  it('invokes start mutation immediately when primary is Start and not destructive', () => {
-    const start: RuntimeAvailableAction = { kind: 'start', label: 'Start', enabled: true }
-    const startMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'queued',
-          primary: start,
-          actions: [start],
-          stopRecoverable: null,
-        })}
-        mutations={mutations({ startMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-start'))
-
-    expect(startMutation.mutate).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
-  })
-
-  it('invokes approve mutation immediately when primary is Approve and not destructive', () => {
-    const approve: RuntimeAvailableAction = { kind: 'approve', label: 'Approve', enabled: true }
-    const approveMutation = mutation()
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'approval-required',
-          primary: approve,
-          actions: [approve, { kind: 'send-back', label: 'Send back', enabled: true }],
-          approvalStage: 'check',
-        })}
-        mutations={mutations({ approveMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-approve'))
-
-    expect(approveMutation.mutate).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId('confirmation-drawer')).toBeNull()
-  })
-
-  it('opens the send-back drawer when Send back is the primary', () => {
-    const sendBack: RuntimeAvailableAction = { kind: 'send-back', label: 'Send back', enabled: true }
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'approval-required',
-          primary: sendBack,
-          actions: [{ kind: 'approve', label: 'Approve', enabled: true }, sendBack],
-          approvalStage: 'check',
-        })}
-        mutations={mutations()}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-send-back'))
-
-    expect(screen.getByTestId('mobile-send-back-form')).toBeInTheDocument()
-    expect(screen.getByTestId('mobile-send-back-textarea')).toBeInTheDocument()
-  })
-
-  it('does not call sendBackMutation until the textarea has content', () => {
-    const sendBack: RuntimeAvailableAction = { kind: 'send-back', label: 'Send back', enabled: true }
-    const sendBackMutation = mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>()
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'approval-required',
-          primary: sendBack,
-          actions: [{ kind: 'approve', label: 'Approve', enabled: true }, sendBack],
-          approvalStage: 'check',
-        })}
-        mutations={mutations({ sendBackMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-send-back'))
-
-    const submit = screen.getByTestId('mobile-confirmation-confirm')
-    expect(submit).toBeDisabled()
-
-    fireEvent.change(screen.getByTestId('mobile-send-back-textarea'), {
-      target: { value: 'Please fix the failing test.' },
+  it('keeps the launcher enabled even when the primary action itself is disabled', () => {
+    renderBar({
+      primary: makeAction('start', { label: 'Start', enabled: false, reason: 'Mark the issue ready before starting.' }),
+      actions: [makeAction('start', { enabled: false, reason: 'Mark the issue ready before starting.' })],
     })
-    expect(submit).not.toBeDisabled()
+    const launcher = screen.getByTestId('mobile-action-sheet-launcher')
+    expect(launcher).not.toBeDisabled()
+  })
 
-    fireEvent.click(submit)
+  it('opens the action sheet containing every applicable action and the rationale + next-action text', () => {
+    const approve = makeAction('approve', { label: 'Approve', primary: true, order: 0 })
+    const sendBack = makeAction('send-back', { label: 'Send back', mode: 'feedback', order: 1 })
+    const askAgent = makeAction('ask-agent', { label: 'Ask Agent', mode: 'navigation', to: '/agent-sessions/new?issue=14', order: 2 })
+    renderBar({
+      primary: approve,
+      actions: [approve, sendBack, askAgent],
+      rationale: 'The workflow is paused while an approval decision is pending.',
+      nextAction: 'An approval decision is needed to continue.',
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-action-sheet-rationale')).toHaveTextContent(/approval decision is pending/i)
+    expect(within(sheet).getByTestId('mobile-action-sheet-next-action')).toHaveTextContent(/approval decision is needed to continue/i)
+    expect(within(sheet).getByTestId('mobile-sheet-action-approve')).toBeTruthy()
+    expect(within(sheet).getByTestId('mobile-sheet-action-send-back')).toBeTruthy()
+    expect(within(sheet).getByTestId('mobile-sheet-action-ask-agent')).toBeTruthy()
+  })
 
-    expect(sendBackMutation.mutate).toHaveBeenCalledWith(
-      { stage: 'check', body: 'Please fix the failing test.' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
+  it('renders disabled destructive actions without live destructive styling', () => {
+    renderBar({
+      primary: makeAction('stop', { enabled: false, reason: 'Stop becomes available between tasks.', destructive: true }),
+      actions: [makeAction('stop', { enabled: false, reason: 'Stop becomes available between tasks.', destructive: true })],
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const stopButton = screen.getByTestId('mobile-sheet-action-stop')
+    expect(stopButton).toBeDisabled()
+    expect(stopButton).toHaveAttribute('data-destructive', 'true')
+    // the disabled treatment uses neutral muted styling instead of destructive background
+    expect(stopButton.className).toContain('bg-muted')
+    expect(stopButton.className).toContain('text-muted-foreground')
+    expect(stopButton.className).not.toContain('text-destructive')
+  })
+
+  it('exposes a visible reason for every disabled action via aria-describedby', () => {
+    renderBar({
+      primary: makeAction('start', { enabled: false, reason: 'Mark the issue ready before starting.' }),
+      actions: [makeAction('start', { enabled: false, reason: 'Mark the issue ready before starting.' })],
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const start = screen.getByTestId('mobile-sheet-action-start')
+    expect(start).toHaveAttribute('aria-describedby', 'mobile-sheet-action-start-reason')
+    const reason = screen.getByTestId('mobile-sheet-action-start-reason')
+    expect(reason).toHaveTextContent('Mark the issue ready before starting.')
+  })
+
+  it('locks every action with a visible associated reason while a mutation is in flight', () => {
+    renderBar({
+      primary: makeAction('approve', { pendingLabel: 'Approving...', primary: true }),
+      actions: [
+        makeAction('approve', { pendingLabel: 'Approving...', primary: true }),
+        makeAction('send-back', { label: 'Send back' }),
+      ],
+      controller: buildController({ pendingKind: 'approve' }),
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const approve = screen.getByTestId('mobile-sheet-action-approve')
+    expect(approve).toBeDisabled()
+    expect(approve).toHaveTextContent('Approving...')
+    expect(approve).toHaveAttribute('aria-describedby', 'mobile-sheet-action-approve-reason')
+    expect(screen.getByTestId('mobile-sheet-action-approve-reason')).toHaveTextContent(/another request is in progress/i)
+    const sendBack = screen.getByTestId('mobile-sheet-action-send-back')
+    expect(sendBack).toBeDisabled()
+    expect(sendBack).toHaveAttribute('aria-describedby', 'mobile-sheet-action-send-back-reason')
+    expect(screen.getByTestId('mobile-sheet-action-send-back-reason')).toHaveTextContent(/another request is in progress/i)
+    const pending = screen.getByTestId('mobile-sheet-action-approve-pending')
+    expect(pending).toHaveAttribute('aria-live', 'polite')
+    expect(pending.textContent ?? '').toMatch(/another request/i)
+  })
+
+  it('calls controller.runAction when an enabled action button is clicked', () => {
+    const runAction = vi.fn()
+    renderBar({
+      primary: makeAction('approve', { primary: true }),
+      actions: [makeAction('approve', { primary: true })],
+      controller: buildController({ runAction }),
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    fireEvent.click(screen.getByTestId('mobile-sheet-action-approve'))
+    expect(runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'approve' }))
+    expect(screen.getByTestId('mobile-action-sheet')).toBeInTheDocument()
+  })
+
+  it('opens the stop confirmation when stop is clicked and routes through runAction on confirm', () => {
+    const openStopConfirm = vi.fn()
+    const runAction = vi.fn()
+    const controller = buildController({ openStopConfirm, runAction, stopConfirming: true })
+    renderBar({
+      primary: makeAction('stop', { mode: 'confirmation', destructive: true }),
+      actions: [makeAction('stop', { mode: 'confirmation', destructive: true })],
+      controller,
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    fireEvent.click(screen.getByTestId('mobile-sheet-action-stop'))
+    expect(openStopConfirm).toHaveBeenCalledOnce()
+    const sheet = screen.getByTestId('mobile-action-sheet')
+    expect(within(sheet).getByTestId('mobile-stop-confirmation')).toBeInTheDocument()
+    expect(within(sheet).getByTestId('mobile-stop-confirmation-title')).toHaveTextContent(/recoverable/i)
+    fireEvent.click(within(sheet).getByTestId('mobile-stop-confirmation-confirm'))
+    expect(runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'stop' }))
+  })
+
+  it('collects feedback before sending back an approval', () => {
+    const runAction = vi.fn()
+    const sendBackBodyValid = vi.fn((body: string) => body.trim().length > 0)
+    renderBar({
+      primary: makeAction('approve', { primary: true }),
+      actions: [
+        makeAction('approve', { primary: true }),
+        makeAction('send-back', { label: 'Send back', mode: 'feedback' }),
+      ],
+      controller: buildController({ runAction, sendBackBodyValid }),
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    fireEvent.click(screen.getByTestId('mobile-sheet-action-send-back'))
+    const confirm = screen.getByTestId('mobile-send-back-confirm')
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByTestId('mobile-send-back-textarea'), {
+      target: { value: 'Tighten the failing test.' },
+    })
+    expect(confirm).not.toBeDisabled()
+    fireEvent.click(confirm)
+    expect(runAction).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'send-back' }),
+      { sendBackBody: 'Tighten the failing test.' },
     )
   })
 
-  it('uses fixed positioning and CSS offsets that clear the mobile nav', () => {
-    render(<MobileActionBar decision={decision()} mutations={mutations()} />)
-
-    const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.className).toMatch(/fixed\b/)
-    expect(bar.className).toMatch(/inset-x-0\b/)
-    expect(bar.className).toMatch(/\bz-30\b/)
-    expect(bar.className).toMatch(/bottom-\[calc\(/)
-    expect(bar.className).toMatch(/md:bottom-0/)
+  it('closes the sheet via Escape', () => {
+    const closeStopConfirm = vi.fn()
+    renderBar({ controller: buildController({ closeStopConfirm }) })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    const drawer = screen.getByTestId('mobile-action-sheet')
+    expect(drawer).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('mobile-action-sheet')).toBeNull()
   })
 
-  it('renders immediate action mutation errors in an alert region', () => {
-    const start: RuntimeAvailableAction = { kind: 'start', label: 'Start', enabled: true }
-    render(
-      <MobileActionBar
-        decision={decision({
-          summary: 'queued',
-          primary: start,
-          actions: [start],
-          stopRecoverable: null,
-        })}
-        mutations={mutations({
-          startMutation: mutation<RuntimeDecisionSurfaceMutations['startMutation']>({
-            error: new Error('Start failed'),
-          }),
-        })}
-      />,
-    )
-
+  it('renders an error message when the controller surfaces one', () => {
+    renderBar({
+      controller: buildController({ error: new Error('Approve failed') }),
+    })
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
     const error = screen.getByTestId('mobile-action-error')
     expect(error).toHaveAttribute('role', 'alert')
-    expect(error).toHaveAttribute('aria-live', 'polite')
-    expect(error).toHaveTextContent('Start failed')
+    expect(error).toHaveTextContent('Approve failed')
   })
 
-  it('renders drawer-confirmed mutation errors inside the open drawer', () => {
-    const sendBack: RuntimeAvailableAction = { kind: 'send-back', label: 'Send back', enabled: true }
-    const baseDecision = decision({
-      summary: 'approval-required',
-      primary: sendBack,
-      actions: [{ kind: 'approve', label: 'Approve', enabled: true }, sendBack],
-      approvalStage: 'check',
+  it('renders a launcher primary label that uses pending copy when a runtime action is pending', () => {
+    renderBar({
+      primary: makeAction('stop', { label: 'Stop', pendingLabel: 'Stopping...' }),
+      actions: [makeAction('stop', { label: 'Stop', pendingLabel: 'Stopping...' })],
+      controller: buildController({ pendingKind: 'stop' }),
     })
-    const sendBackMutation = mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>()
-    const { rerender } = render(
-      <MobileActionBar
-        decision={baseDecision}
-        mutations={mutations({ sendBackMutation })}
-      />,
-    )
-
-    fireEvent.click(screen.getByTestId('mobile-action-send-back'))
-    fireEvent.change(screen.getByTestId('mobile-send-back-textarea'), {
-      target: { value: 'Please revise this.' },
-    })
-    fireEvent.click(screen.getByTestId('mobile-confirmation-confirm'))
-
-    rerender(
-      <MobileActionBar
-        decision={baseDecision}
-        mutations={mutations({
-          sendBackMutation: mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>({
-            error: new Error('Send back failed'),
-          }),
-        })}
-      />,
-    )
-
-    const drawer = screen.getByTestId('confirmation-drawer')
-    const error = within(drawer).getByTestId('mobile-action-error')
-    expect(error).toHaveAttribute('role', 'alert')
-    expect(error).toHaveTextContent('Send back failed')
-  })
-
-  it('disables the primary button while a mutation is pending and shows pending copy', () => {
-    const forceStopMutation = mutation<RuntimeDecisionSurfaceMutations['forceStopMutation']>({ isPending: true })
-    render(
-      <MobileActionBar
-        decision={decision({ stopRecoverable: true })}
-        mutations={mutations({ forceStopMutation })}
-      />,
-    )
-
-    const button = screen.getByTestId('mobile-action-stop')
-    expect(button).toBeDisabled()
-    expect(button).toHaveTextContent('Stopping...')
+    const launcher = screen.getByTestId('mobile-action-sheet-launcher')
+    expect(launcher).toHaveTextContent('Stopping...')
   })
 })
