@@ -29,8 +29,8 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
 })
 
-describe("WorkExecutor mid-execution variable writes", () => {
-  it("passes writeVars through to patchRunVars immediately even when the action fails", async () => {
+describe("WorkExecutor result variable effects", () => {
+  it("merges result effects and setVars into one patch with setVars precedence", async () => {
     const signal = new AbortController().signal
     const events: string[] = []
     const patchCalls: Array<{ workflowRunId: string; vars: JsonObject; signal: AbortSignal }> = []
@@ -42,11 +42,13 @@ describe("WorkExecutor mid-execution variable writes", () => {
     } as Partial<ServerConnection>
 
     const registry = defineTestActions({
-      "test/write-vars": async (ctx) => {
+      "test/write-vars": {
+        capabilities: ["write-vars"],
+        run: async () => {
         events.push("action-start")
-        await ctx.writeVars({ checkpoint: "before-failure" })
         events.push("action-after-write")
-        return { error: { code: "action-failed", message: "boom" } }
+        return { output: { checkpoint: "from-output" }, effects: { writeVars: { checkpoint: "from-effect", extra: true } } }
+        },
       },
     })
 
@@ -59,10 +61,9 @@ describe("WorkExecutor mid-execution variable writes", () => {
 
     const result = await executor.execute(buildWork(), signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.message).toBe("boom")
-    expect(events).toEqual(["action-start", "patchRunVars", "action-after-write"])
-    expect(patchCalls).toEqual([{ workflowRunId: "wf-write-vars", vars: { checkpoint: "before-failure" }, signal }])
+    expect(result.status).toBe("completed")
+    expect(events).toEqual(["action-start", "action-after-write", "patchRunVars"])
+    expect(patchCalls).toEqual([{ workflowRunId: "wf-write-vars", vars: { checkpoint: "from-output", extra: true }, signal }])
   })
 })
 
@@ -75,6 +76,7 @@ function buildWork(): RenderedWorkItem {
     title: "Write runtime vars",
     uses: "test/write-vars",
     with: {},
+    setVars: { checkpoint: "output.checkpoint" },
     variables: { workspace: { path: workDir, branch: null, changeDir: null } },
   }
 }

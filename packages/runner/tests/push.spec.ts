@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
+import { callAction } from "./support/call-action.js"
 
 type GitCall = { workDir: string; args: string[]; timeoutMs: number | undefined }
 
@@ -78,7 +80,7 @@ describe("mohist/push", () => {
 
   it("MissingSource_FailsWithoutVariableFallback", async () => {
     const calls = installGit(async () => { throw new Error("git must not run") })
-    const result = await pushAction(context({ source: null }, {
+    const result = await callAction(pushAction, context({ source: null }, {
       project: { path: WORKSPACE_PATH, defaultBranch: "main" },
       repository: { name: "web", gitUrl: "https://example.com/web.git", baseBranch: null },
     }))
@@ -101,7 +103,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({
+    const result = await callAction(pushAction, context({
       source: "HEAD",
       target: "mo/issue-99",
       remote: "origin",
@@ -136,7 +138,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -169,7 +171,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({}, { project: { path: PROJECT_PATH } }))
+    const result = await callAction(pushAction, context({}, { project: { path: PROJECT_PATH } }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -191,7 +193,7 @@ describe("mohist/push", () => {
       }
     })
 
-    await pushAction(context())
+    await callAction(pushAction, context())
 
     const workspaceCmdSet = new Set(workspaceCalls(calls))
     // No checkout, no clone, no reset, no merge, no commit, no status
@@ -226,7 +228,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     expect(result.error).toMatchObject({ code: "base-moved" })
     expect(result.error?.message).toContain("target branch moved")
   })
@@ -244,7 +246,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
@@ -261,7 +263,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
@@ -276,7 +278,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     expect(result.error).toMatchObject({ code: "push-failed" })
   })
 
@@ -293,7 +295,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context(
+    const result = await callAction(pushAction, context(
       { remote: "upstream" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
     ))
@@ -316,7 +318,7 @@ describe("mohist/push", () => {
       if (command === "push upstream other:release") return ok("pushed")
       return fail(`unexpected git call: ${command}`)
     })
-    const result = await pushAction(context(
+    const result = await callAction(pushAction, context(
       { remote: "upstream", source: "other", target: "release" },
       {
         repository: {
@@ -345,7 +347,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context(
+    const result = await callAction(pushAction, context(
       { source: "custom-source" },
       { repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" } },
     ))
@@ -376,7 +378,7 @@ describe("mohist/push", () => {
       }
     })
 
-    await pushAction(context())
+    await callAction(pushAction, context())
 
     expect(landingCloneAttempted).toBe(false)
   })
@@ -394,7 +396,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     const output = result.output as Record<string, unknown>
 
     // Single push owner: the landed commit and the push-occurred flag both
@@ -420,7 +422,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ forceWithLease: true }))
+    const result = await callAction(pushAction, context({ forceWithLease: true }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -453,7 +455,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ forceWithLease: true }))
+    const result = await callAction(pushAction, context({ forceWithLease: true }))
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toEqual([
@@ -479,7 +481,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ forceWithLease: true }))
+    const result = await callAction(pushAction, context({ forceWithLease: true }))
 
     expect(result.error).toBeUndefined()
     expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
@@ -503,7 +505,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const stringTrue = await pushAction(context({ forceWithLease: "true" }))
+    const stringTrue = await callAction(pushAction, context({ forceWithLease: "true" }))
     const stringTrueOutput = stringTrue.output as Record<string, unknown>
     expect(stringTrue.error).toBeUndefined()
     expect(stringTrueOutput.forceWithLease).toBe(true)
@@ -511,7 +513,7 @@ describe("mohist/push", () => {
     expect(workspaceCalls(calls)).toContain("push --force-with-lease=master:remote-tip origin mo/issue-99:master")
 
     calls.length = 0
-    const absent = await pushAction(context({ forceWithLease: "no" }))
+    const absent = await callAction(pushAction, context({ forceWithLease: "no" }))
     const absentOutput = absent.output as Record<string, unknown>
     expect(absent.error).toBeUndefined()
     expect(absentOutput.forceWithLease).toBe(false)
@@ -537,7 +539,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ forceWithLease: true }))
+    const result = await callAction(pushAction, context({ forceWithLease: true }))
     expect(result.error).toMatchObject({ code: "base-moved" })
   })
 
@@ -554,7 +556,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ force: true }))
+    const result = await callAction(pushAction, context({ force: true }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -585,7 +587,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ force: true, forceWithLease: true }))
+    const result = await callAction(pushAction, context({ force: true, forceWithLease: true }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -616,7 +618,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ force: false, forceWithLease: true }))
+    const result = await callAction(pushAction, context({ force: false, forceWithLease: true }))
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
@@ -642,7 +644,7 @@ describe("mohist/push", () => {
       }
     })
 
-    await pushAction(context())
+    await callAction(pushAction, context())
 
     const revParse = calls.find((c) => c.args.join(" ") === "rev-parse mo/issue-99")
     const push = calls.find((c) => c.args.join(" ") === "push origin mo/issue-99:master")
@@ -665,7 +667,7 @@ describe("mohist/push", () => {
       }
     })
 
-    await pushAction(context({ forceWithLease: true }))
+    await callAction(pushAction, context({ forceWithLease: true }))
 
     const revParse = calls.find((c) => c.args.join(" ") === "rev-parse mo/issue-99")
     const lsRemote = calls.find((c) => c.args.join(" ") === "ls-remote origin refs/heads/master")
@@ -698,7 +700,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await callAction(pushAction, context())
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("timed out")
     expect(result.exitCode).toBe(124)
@@ -726,7 +728,7 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context({ forceWithLease: true }))
+    const result = await callAction(pushAction, context({ forceWithLease: true }))
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("timed out")
     expect(calls.some((call) => call.args[0] === "push")).toBe(false)

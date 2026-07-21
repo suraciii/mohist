@@ -104,7 +104,7 @@ beforeEach(() => {
   // Default implementation: write two rebase-tagged lines and resolve
   // with success — overridable per test.
   blockingAction.mockReset()
-  blockingAction.mockImplementation(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+    blockingAction.mockImplementation(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
     log?.write("action:rebase", "rebasing commit a1b2c3")
     log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
     return { output: { rebase: "ok" } }
@@ -177,7 +177,7 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workId: "work-live", agentJobId: "aj-live" })]).mockImplementation(async () => [])
     const release = deferred()
-    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+    blockingAction.mockImplementationOnce(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
       log?.write("action:test", "line before completion")
       actionStarted.resolve()
       await release.promise
@@ -245,7 +245,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
       .mockImplementation(async () => [])
     const releases = new Map<string, Deferred<void>>()
     const gate = deferred()
-    blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
+    let actionInvocation = 0
+    blockingAction.mockImplementation(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
+      const workId = actionInvocation++ === 0 ? "work-A" : "work-B"
       const release = deferred()
       releases.set(workId, release)
       log?.write("action:test", `line for ${workId}`)

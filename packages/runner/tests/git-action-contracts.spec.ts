@@ -44,4 +44,9 @@ describe("local Git Action manifests", () => {
       error: { code: "invalid-input", message: expect.stringContaining(`'${field}'`) },
     })
   })
+
+  it("keeps engine-sourced OpenSpec inputs out of the public catalog", () => {
+    const entry = createDefaultRegistry().catalog().actions.find((action) => action.name === "mohist/openspec-tasks")
+    expect(entry?.inputs.map((input) => input.name)).not.toContain("buildPrompt")
+  })
 })

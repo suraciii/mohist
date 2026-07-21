@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import type { JsonObject } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
+import { callAction } from "./support/call-action.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
@@ -109,7 +111,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     expect(result.error).toBeUndefined()
     const parsed = result.output as Record<string, unknown>
@@ -133,14 +135,14 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${[cmd, ...args].join(" ")}`)
     })
 
-    const result = await githubPrStatusAction(context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
+    const result = await callAction(githubPrStatusAction, context({ repositoryUrl: "https://github.com/acme/repo.git", prNumber: 42 }, { repository: { gitUrl: "https://example.com/other.git" } }))
 
     expect(result.error).toBeUndefined()
     expect(commands).toEqual(["gh pr view 42 --json url,state,isDraft"])
   })
 
   it("rejects an invalid explicit repository URL", async () => {
-    const result = await githubPrStatusAction(context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ repositoryUrl: "not a Git URL", prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("valid GitHub repository URL")
   })
@@ -154,7 +156,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(withLog(context({ prNumber: 42 }), writes))
+    const result = await callAction(githubPrStatusAction, withLog(context({ prNumber: 42 }), writes))
 
     expect(result.error).toBeUndefined()
     expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft --repo github.com/example/repo" }])
@@ -167,7 +169,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.code).toBe("pr-status-failed")
@@ -180,7 +182,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.code).toBe("pr-status-failed")
@@ -193,7 +195,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "merged" }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42, expect: "merged" }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.code).toBe("pr-status-failed")
@@ -206,7 +208,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "merged" }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42, expect: "merged" }))
 
     expect(result.error).toBeUndefined()
     const parsed = result.output as Record<string, unknown>
@@ -221,7 +223,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "ready" }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42, expect: "ready" }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.code).toBe("pr-status-failed")
@@ -234,7 +236,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({}, {
+    const result = await callAction(githubPrStatusAction, context({}, {
       github: { pr: { number: 7, url: "https://github.com/acme/repo/pull/7" } },
     }))
 
@@ -242,7 +244,7 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("returns failure with a clear message when prNumber is missing", async () => {
-    const result = await githubPrStatusAction(context({}))
+    const result = await callAction(githubPrStatusAction, context({}))
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("prNumber")
@@ -251,7 +253,7 @@ describe("mohist/github-pr-status action", () => {
   it("returns failure when gh pr view fails", async () => {
     installGh(() => ghFail("gh: not found"))
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("gh pr view 42 failed")
@@ -260,7 +262,7 @@ describe("mohist/github-pr-status action", () => {
   it("returns failure when gh pr view returns unparseable JSON", async () => {
     installGh(() => ghOk("not-json"))
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     expect(result.error).toBeDefined()
     expect(result.error?.message).toContain("unparseable JSON")
@@ -284,7 +286,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    await githubPrStatusAction(context({ prNumber: 42 }))
+    await callAction(githubPrStatusAction, context({ prNumber: 42 }))
 
     const view = ghCalls.find((c) => c.command.startsWith("gh pr view 42"))
     expect(view?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
@@ -305,7 +307,7 @@ describe("mohist/github-pr-status action", () => {
       return ghFail(`unexpected gh call: ${full}`)
     })
 
-    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const result = await callAction(githubPrStatusAction, context({ prNumber: 42 }))
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: "timeout" })
     expect(result.error?.message).toContain("timed out")

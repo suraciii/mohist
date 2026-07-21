@@ -1,5 +1,5 @@
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { numberInput } from "../core/json.js"
 import type { CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
@@ -33,26 +33,26 @@ export interface GitHubPrChecksOutput {
   steps: GitHubPrChecksStep[]
 }
 
-export async function githubPrChecksAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const prNumber = numberInput(context.with, "prNumber")
+export async function githubPrChecksAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const prNumber = numberInput(inputs, "prNumber")
   if (prNumber === undefined || !Number.isFinite(prNumber)) {
     return fail("invalid-input", "GitHub PR checks requires 'prNumber'")
   }
-  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+  const repositoryUrl = typeof inputs["repositoryUrl"] === "string" ? inputs["repositoryUrl"] : undefined
   if (!repositoryUrl) return fail("invalid-input", "GitHub PR checks requires 'repositoryUrl'")
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return fail("config-error", "github-pr-checks requires a valid GitHub repository URL")
-  const workDir = context.workDir
+  const workDir = host.workDir
 
   const gh = getGitHubPrGh()
-  const ghOpts = ghLineOptions(context)
+  const ghOpts = ghLineOptions(host)
 
   const steps: GitHubPrChecksStep[] = []
   const record = (name: string, command: string, exitCode: number, output: string, metadata?: Pick<GitHubPrChecksStep, "status" | "timeoutMs">) => {
     steps.push({ name, command, exitCode, output, ...metadata })
   }
 
-  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
+  const ghPrecheck = await runGhPrecheck(gh, workDir, host.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { exitCode: 1 })
@@ -62,7 +62,7 @@ export async function githubPrChecksAction(context: ActionInvocationContext): Pr
     gh,
     workDir,
     prNumber,
-    context.signal,
+    host.signal,
     record,
     ghOpts,
     githubRepository,
@@ -105,7 +105,7 @@ function toJsonOutput(output: GitHubPrChecksOutput): JsonObject {
   }
 }
 
-function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function ghLineOptions(host: ActionHost): CommandLineOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => host.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }

@@ -3,7 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ActionRegistry, createDefaultRegistry } from "../src/actions/registry.js"
-import type { ActionContext, ActionResult, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
+import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { TaskLogCollector } from "../src/runtime/task-log.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
@@ -37,7 +38,7 @@ afterEach(async () => {
   setProcessSpawnerForTest(null)
 })
 
-function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
+function makeRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>): ActionRegistry {
   return defineTestActions({
     "mohist/test-action": handler,
   })
@@ -76,10 +77,10 @@ async function runWith(registry: ActionRegistry, work: RenderedWorkItem = buildW
 describe("WorkExecutor forwards action output to the task log", () => {
   it("ForwardsActionBodyWriteToSinkTaggedWithActionSource", async () => {
     let loggerPresent = false
-    const registry = makeRegistry(async (ctx) => {
-      loggerPresent = ctx.log !== null && ctx.log !== undefined
-      ctx.log?.write("action:rebase", "rebasing commit a1b2c3")
-      ctx.log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
+    const registry = makeRegistry(async (_inputs, host) => {
+      loggerPresent = host.log !== null && host.log !== undefined
+      host.log?.write("action:rebase", "rebasing commit a1b2c3")
+      host.log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
       return { output: { rebase: "ok" } }
     })
     const { collector } = await runWith(registry)
@@ -179,9 +180,9 @@ describe("WorkExecutor forwards action output to the task log", () => {
   })
 
   it("CapturesFailingOpsCommandOutputInCollector", async () => {
-    const registry = makeRegistry(async (ctx) => {
-      ctx.log?.write("action:rebase", "Rebase conflict in src/lib/rebase.ts")
-      ctx.log?.write("action:rebase", "fatal: Could not apply abc1234")
+    const registry = makeRegistry(async (_inputs, host) => {
+      host.log?.write("action:rebase", "Rebase conflict in src/lib/rebase.ts")
+      host.log?.write("action:rebase", "fatal: Could not apply abc1234")
       return {
         error: { code: "conflict", message: "Rebase conflict" },
         exitCode: 1,
@@ -219,8 +220,8 @@ describe("WorkExecutor forwards action output to the task log", () => {
     }
     setExecutorGitRunnerForTest(fakeGit as unknown as Parameters<typeof setExecutorGitRunnerForTest>[0])
 
-    const registry = makeRegistry(async (ctx) => {
-      ctx.log?.write("action:health-check", "ok")
+    const registry = makeRegistry(async (_inputs, host) => {
+      host.log?.write("action:health-check", "ok")
       return {
         output: {
           kind: "health-check",
@@ -236,18 +237,18 @@ describe("WorkExecutor forwards action output to the task log", () => {
   })
 
   it("DeliberatelyFailingOpsCommandOutputReachesCollectorBuffer", async () => {
-    const registry = makeRegistry(async (ctx) => {
+    const registry = makeRegistry(async (_inputs, host) => {
       // Simulate a rebase conflict tail end: emit the failure text
       // through the sink before returning a failure result.
-      ctx.log?.write("action:rebase", "First, rewinding head to replay your work on top of it...")
-      ctx.log?.write("action:rebase", "Applying: feat: introduce capture-and-upload plumbing")
-      ctx.log?.write("action:rebase", "Using index info to reconstruct a base tree...")
-      ctx.log?.write("action:rebase", "Falling back to patching base and 3-way merge...")
-      ctx.log?.write("action:rebase", "Auto-merging src/runtime/executor.ts")
-      ctx.log?.write("action:rebase", "CONFLICT (content): Merge conflict in src/runtime/executor.ts")
-      ctx.log?.write("action:rebase", "error: Failed to merge in the changes.")
-      ctx.log?.write("action:rebase", "Patch failed at 0001 feat: introduce capture-and-upload plumbing")
-      ctx.log?.write("action:rebase", "hint: Use 'git am --show-current-patch' to see the failed patch")
+      host.log?.write("action:rebase", "First, rewinding head to replay your work on top of it...")
+      host.log?.write("action:rebase", "Applying: feat: introduce capture-and-upload plumbing")
+      host.log?.write("action:rebase", "Using index info to reconstruct a base tree...")
+      host.log?.write("action:rebase", "Falling back to patching base and 3-way merge...")
+      host.log?.write("action:rebase", "Auto-merging src/runtime/executor.ts")
+      host.log?.write("action:rebase", "CONFLICT (content): Merge conflict in src/runtime/executor.ts")
+      host.log?.write("action:rebase", "error: Failed to merge in the changes.")
+      host.log?.write("action:rebase", "Patch failed at 0001 feat: introduce capture-and-upload plumbing")
+      host.log?.write("action:rebase", "hint: Use 'git am --show-current-patch' to see the failed patch")
       return { error: { code: "conflict", message: "Rebase failed: conflict" } }
     })
     const { result, collector } = await runWith(registry)
@@ -262,8 +263,8 @@ describe("WorkExecutor forwards action output to the task log", () => {
     const secret = "runner-configured-secret-12345"
     process.env[secretName] = secret
     try {
-      const registry = makeRegistry(async (ctx) => {
-        ctx.log?.write("action:script", `command failed with ${secret}`)
+      const registry = makeRegistry(async (_inputs, host) => {
+        host.log?.write("action:script", `command failed with ${secret}`)
         return { error: { code: "action-failed", message: "failed" } }
       })
 

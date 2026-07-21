@@ -1,5 +1,6 @@
 import { afterEach } from "vitest"
-import type { ActionContext, JsonObject } from "../../src/core/types.js"
+import type { JsonObject } from "../../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./action-test-context.js"
 import { setIssueFieldCommandRunnerForTest } from "../../src/actions/issue-fields.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../../src/actions/git.js"
 import {

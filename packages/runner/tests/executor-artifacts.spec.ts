@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
@@ -49,7 +50,7 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | 
   }
 }
 
-function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>, errors: { code: string }[] = []): ActionRegistry {
+function makeRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>, errors: { code: string }[] = []): ActionRegistry {
   return defineTestActions({
     "test/action": {
       run: handler,
@@ -385,8 +386,8 @@ describe("WorkExecutor artifact capture", () => {
     let actionWorkDir = ""
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
-      makeRegistry(async (ctx) => {
-        actionWorkDir = ctx.workDir
+      makeRegistry(async (_inputs, host) => {
+        actionWorkDir = host.workDir
         return { output: null }
       }),
       verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),

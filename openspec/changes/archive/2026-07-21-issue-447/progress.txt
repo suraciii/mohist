@@ -1,0 +1,23 @@
+## Codebase Patterns
+
+- Action execution now uses `(validatedInputs, host)`; the default host contains only `workDir`, `signal`, `log`, and `exec`. Capability operations are attached by `WorkExecutor` only from the selected manifest.
+- `agent-turn` owns OpenCode runtime/session/reporting behavior and private turn facts. Promise projection is selected from the manifest capability set.
+- `issue-fields` and `workflow-checkpoint` resolve private dispatch context through closures. Checkpoint tokens hash workflow-run identity plus scope and are opaque to Actions.
+- Deferred input rendering is field-specific. Unresolved-template checks must exclude deferred fields so nested OpenSpec templates survive parent dispatch.
+- Action effects are normalized privately and applied after completion/postconditions. Variable effects and declarative `setVars` use one patch, with `setVars` merged last; task additions are attached only after that patch succeeds.
+- Checks normalize and reject effects as `unexpected-error`; they never deliver effects.
+
+## T-001
+
+- Migrated built-in Action call sites and test adapters away from the old Action invocation surface. Removed raw OpenSpec task injection and the name-based promise projection branch.
+- Existing Runner regressions initially exposed stale tests asserting runtime/context exposure or immediate `writeVars`; those tests now assert the capability boundary and result-effect behavior.
+- Verification so far: `npm run typecheck -w packages/runner`, focused capability/executor tests, and the full Runner suite passed before final test additions.
+- The first repository verification reproduced a test-only Runner failure: `npm run test:ci -w packages/runner` could not typecheck stale adapters in `executor-workspace-boundary.spec.ts` and `worktree-cleanup-delivery.spec.ts`, plus an incomplete `ActionContext` fixture in `openspec-artifacts.spec.ts`. Updated those fixtures to the `(inputs, host)` contract and restored the missing `variables` field.
+- `npm run test:ci -w packages/runner` now passes: 105 files and 1,242 tests. `npm run verify` reaches the Runner gate, but the unrelated server spec suite remains nondeterministic in this workspace: the original composite-issue 409 passes when isolated, while a later full run timed out in agent-job concurrency tests and left several agent-job status assertions pending. Verification produced no Git-visible generated changes.
+- Review follow-up restored the default deferred `mohist/openspec-task-prompt` spec for generated OpenSpec tasks, including the task file, items path, task selector, and late `${{ prompts.build }}` expansion.
+- Removed the product-level broad `ActionContext` type and migrated remaining Runner test helpers and registry adapters to the narrow `(inputs, host)` Action contract. Focused OpenSpec and executor tests pass after the migration.
+- Review follow-up preserved the no-`prompts.build` OpenSpec fallback by omitting `base` unless the caller supplies an explicit prompt loader spec. The shipped profiles continue to carry their explicit build prompt context.
+- `ActionDefinition.run` now uses manifest-specific `ActionHostFor<M>` typing: declared agent, issue, and checkpoint capabilities are required, while undeclared members are absent from the Action authoring type. `npm run typecheck -w packages/runner` and the full Runner suite pass after this fix.
+- Check follow-up restored the conditional fallback `base` through a generic engine-sourced input. `mohist/openspec-tasks` declares `buildPrompt` with the internal `prompts.build` source; the executor derives it from variables without accepting it from workflow `with`, and the catalog omits it. Fallback loaders include `base` only when the source is present and non-empty. Regression coverage verifies engine injection and the hidden catalog input. `npm run typecheck -w packages/runner` and the full Runner suite (105 files, 1,244 tests) pass.
+- PR #174 CI repair fixed the Runner test typecheck errors in `executor-artifacts.spec.ts` and `openspec-tasks.spec.ts`; `npm run test:ci -w packages/runner` now passes with 105 files and 1,244 tests. The .NET CI failure is confined to unchanged OTLP integration tests and a subsequent test-host timeout; no server change is justified by the PR diff.
+- PR #174 rerun `29830060811` passes the Runner portion but still fails unchanged server OTLP integration routes and one web `TaskItem` subscription assertion before the workflow gate. Neither failing area is present in the PR diff or this checkout, so no unrelated assertion or workflow behavior was changed.

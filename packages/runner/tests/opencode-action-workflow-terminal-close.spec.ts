@@ -5,11 +5,12 @@ import type { OpenCodeRuntimeDeps } from "../src/runtime/opencode/runtime.js"
 import type { OpencodeServerHandle } from "../src/runtime/opencode/server-process.js"
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
 import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
 import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
 import type { RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import { callAction } from "./support/call-action.js"
 
 class FakeSubscription implements RuntimeEventSubscription {
   private listeners = new Set<(event: RuntimeGlobalEvent) => void>()
@@ -122,7 +123,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       agentSessionRuntimeEventOutbox: handles.outbox,
     })
 
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
 
     const closed = handles.eventsByType("session.closed")
@@ -143,7 +144,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     const handles = makeRecordingOutbox()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const result = await opencodeAction(baseContext({
+      const result = await callAction(opencodeAction, baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
         agentSessionRuntimeEventOutbox: handles.outbox,
@@ -171,7 +172,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
         agentSessionRuntimeEventOutbox: handles.outbox,
         signal: abortController.signal,
       })
-      const result = await opencodeAction(context)
+      const result = await callAction(opencodeAction, context)
       expect(result.error).toBeDefined()
       const closed = handles.eventsByType("session.closed")[0]
       const reason = (closed?.event.payload as Record<string, unknown>).failureReason as string
@@ -202,7 +203,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       agentSessionRuntimeEventOutbox: handles.outbox,
     })
 
-    const result = await opencodeAction(context)
+    const result = await callAction(opencodeAction, context)
     expect(result.error).toBeUndefined()
     const types = handles.eventTypeList()
     const closedIdx = types.lastIndexOf("session.closed")
@@ -225,7 +226,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
     }
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
-      const result = await opencodeAction(baseContext({
+      const result = await callAction(opencodeAction, baseContext({
         openCodeRuntime: runtime,
         serverConnection: handles.connection,
         agentSessionRuntimeEventOutbox: failingOutbox,
@@ -264,7 +265,7 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
         agentSessionRuntimeEventOutbox: failingOutbox,
         with: { prompt: "opencode will fail", session: "plan" } as never,
       })
-      const result = await opencodeAction(context)
+      const result = await callAction(opencodeAction, context)
       expect(result.error?.code).toBe("turn-failed")
       expect(result.error?.message).toBe("opencode-runtime-explosion")
       const closed = handles.eventsByType("session.closed")
@@ -291,14 +292,14 @@ describe("opencodeAction — Workflow AgentSession terminal-state close", () => 
       },
     } as unknown as typeof handles.connection
 
-    await opencodeAction(baseContext({
+    await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
       agentSessionRuntimeEventOutbox: handles.outbox,
       workId: "work-a",
       with: { prompt: "first prompt", session: "plan" } as never,
     }))
-    await opencodeAction(baseContext({
+    await callAction(opencodeAction, baseContext({
       openCodeRuntime: runtime,
       serverConnection: handles.connection,
       agentSessionRuntimeEventOutbox: handles.outbox,

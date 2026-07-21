@@ -1,6 +1,23 @@
 import { describe, expect, it, vi } from "vitest"
 import { piAction, PI_TURN_DURATION_MS } from "./pi.js"
-import type { ActionContext } from "../core/types.js"
+import type { JsonObject, ParentIssueContext } from "../core/types.js"
+import type { ServerConnection } from "../server/connection.js"
+import type { PiRuntime } from "../runtime/pi/index.js"
+
+type ActionContext = {
+  workflowRunId: string
+  workId: string
+  workType: string
+  variables: JsonObject
+  workDir: string
+  signal: AbortSignal
+  with?: JsonObject | null
+  writeVars: (vars: JsonObject) => Promise<void>
+  projectId?: string | null
+  parentIssueContext?: ParentIssueContext | null
+  piRuntime?: PiRuntime | null
+  serverConnection?: ServerConnection | null
+}
 
 function context(overrides: Partial<ActionContext> = {}): ActionContext {
   return {

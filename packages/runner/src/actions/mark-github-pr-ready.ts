@@ -1,6 +1,6 @@
 import { numberInput } from "../core/json.js"
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { combinedGhOutput, parsePrViewWithDraft } from "./github-pr-parse.js"
@@ -13,9 +13,9 @@ import { fail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:mark-github-pr-ready"
 
-export async function markGitHubPrReadyAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const prNumber = numberInput(context.with, "prNumber")
-  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
+export async function markGitHubPrReadyAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const prNumber = numberInput(inputs, "prNumber")
+  const repositoryUrl = typeof inputs["repositoryUrl"] === "string" ? inputs["repositoryUrl"] : undefined
   if (prNumber === undefined) {
     return markReadyOutput({
       kind: "mark-github-pr-ready",
@@ -55,16 +55,16 @@ export async function markGitHubPrReadyAction(context: ActionInvocationContext):
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return fail("config-error", "mark-github-pr-ready requires a valid GitHub repository URL")
 
-  const workDir = context.workDir
+  const workDir = host.workDir
   const gh = getGitHubPrGh()
-  const ghOpts = ghLineOptions(context)
-  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
+  const ghOpts = ghLineOptions(host)
+  const ghPrecheck = await runGhPrecheck(gh, workDir, host.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
 
-  const viewResult = await gh("gh", withGitHubRepository(["pr", "view", String(prNumber), "--json", "state,isDraft,url"], githubRepository), workDir, context.signal, undefined, ghOpts)
+  const viewResult = await gh("gh", withGitHubRepository(["pr", "view", String(prNumber), "--json", "state,isDraft,url"], githubRepository), workDir, host.signal, undefined, ghOpts)
   const viewOutput = combinedGhOutput(viewResult)
   record("gh-pr-view", `pr view ${prNumber} --json state,isDraft,url`, viewResult.exitCode, viewOutput, timeoutStepMetadata(viewResult))
   if (viewResult.exitCode !== 0) {
@@ -101,7 +101,7 @@ export async function markGitHubPrReadyAction(context: ActionInvocationContext):
     })
   }
 
-  const readyResult = await gh("gh", withGitHubRepository(["pr", "ready", String(prNumber)], githubRepository), workDir, context.signal, undefined, ghOpts)
+  const readyResult = await gh("gh", withGitHubRepository(["pr", "ready", String(prNumber)], githubRepository), workDir, host.signal, undefined, ghOpts)
   const readyOutput = combinedGhOutput(readyResult)
   record("gh-pr-ready", `pr ready ${prNumber}`, readyResult.exitCode, readyOutput, timeoutStepMetadata(readyResult))
   if (readyResult.exitCode !== 0) {
@@ -133,9 +133,9 @@ function createRecorder(steps: GitHubPrStep[]) {
   }
 }
 
-function ghLineOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function ghLineOptions(host: ActionHost): CommandLineOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => host.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 export function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {

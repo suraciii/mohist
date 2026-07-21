@@ -1,14 +1,36 @@
-import type { ActionInvocationContext } from "./context.js"
 import type { ActionResult, JsonObject, ParentIssueContext } from "../core/types.js"
+import type { ServerConnection } from "../server/connection.js"
+import type { TaskLogger } from "../runtime/task-log.js"
+import type { PiRuntime } from "../runtime/pi/index.js"
+import type { ActionHost } from "./host.js"
 import { isObject } from "../core/json.js"
 import { resolvePrompt } from "../core/prompt.js"
-import { buildPromptLoaderContext, sessionNameFromContext } from "./opencode-helpers.js"
+import { sessionNameFromContext } from "./workflow-session-name.js"
 import { parseModelIdentifier } from "../runtime/opencode/index.js"
-import type { PiRuntime, PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
+import type { PiRuntimeEvent, PiTurnRequest } from "../runtime/pi/index.js"
 import { actionErrorMessage, fail, succeed } from "./action-result.js"
+import type { PromptLoaderContext } from "../core/prompt.js"
 
 export const PI_USES = "mohist/pi"
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
+
+interface ActionInvocationContext {
+  workflowRunId: string
+  workId: string
+  workType: string
+  stage?: string | null
+  title?: string | null
+  with?: JsonObject | null
+  workDir: string
+  signal: AbortSignal
+  projectId?: string | null
+  issueNumber?: number | null
+  epicNumber?: number | null
+  parentIssueContext?: ParentIssueContext | null
+  piRuntime?: PiRuntime | null
+  serverConnection?: ServerConnection | null
+  log?: TaskLogger | null
+}
 
 export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssueContext | null): string {
   if (!parentIssueContext) return prompt
@@ -18,7 +40,21 @@ export function composePiPrompt(prompt: string, parentIssueContext?: ParentIssue
 
 interface PiOptions { model?: string; variant?: string; unknownKeys?: readonly string[] }
 
-export async function piAction(context: ActionInvocationContext): Promise<ActionResult> {
+export function piAction(context: ActionInvocationContext): Promise<ActionResult>
+export function piAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult>
+export async function piAction(contextOrInputs: ActionInvocationContext | JsonObject, host?: ActionHost): Promise<ActionResult> {
+  const context: ActionInvocationContext = host
+    ? {
+      workflowRunId: "",
+      workId: "pi",
+      workType: "task",
+      with: contextOrInputs as JsonObject,
+      workDir: host.workDir,
+      signal: host.signal,
+      piRuntime: host.piRuntime,
+      log: host.log,
+    }
+    : contextOrInputs as ActionInvocationContext
   const parsed = await parseInput(context)
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
@@ -115,6 +151,16 @@ export async function piAction(context: ActionInvocationContext): Promise<Action
   }
   if (!result.ok) return fail(runtimeCode ?? "turn-failed", result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
   return succeed(null, { exitCode: 0, turnFact: { finalAssistantText: finalText } })
+}
+
+function buildPromptLoaderContext(context: Pick<ActionInvocationContext, "workDir" | "workId" | "title" | "stage">): PromptLoaderContext {
+  return {
+    with: {},
+    workDir: context.workDir,
+    workId: context.workId,
+    title: context.title ?? null,
+    stage: context.stage ?? null,
+  }
 }
 
 async function reportWithTerminalSignal(report: (facts: readonly PiRuntimeEvent[], signal?: AbortSignal) => Promise<void>, facts: readonly PiRuntimeEvent[]): Promise<void> {

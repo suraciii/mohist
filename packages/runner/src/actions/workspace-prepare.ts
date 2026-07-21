@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { stringInput } from "../core/json.js"
 import { exists } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
@@ -16,13 +16,6 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
 type ExistsChecker = typeof exists
 type GitResult = Awaited<ReturnType<GitRunner>>
 
-/**
- * `source` tag recorded against every captured `mohist/workspace-prepare`
- * action body line. Distinct from `workspace-prep` (the clone/checkout
- * phase that runs as part of the executor lifecycle) so the web viewer
- * phase-distinguishes the action body from the dispatcher-level
- * workspace materialization.
- */
 const ACTION_SOURCE = "action:workspace-prepare"
 
 let git: GitRunner = defaultGit
@@ -80,21 +73,21 @@ interface HeadProbe {
 
 const DETACHED_REF = "(detached)"
 
-function sinkOptions(context: ActionInvocationContext): GitOptions | undefined {
-  return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+function sinkOptions(host: ActionHost): GitOptions | undefined {
+  return host.log ? { sink: { log: host.log, source: ACTION_SOURCE } } : undefined
 }
 
-export async function workspacePrepareAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const expectedBranch = stringInput(context.with, "expectedBranch")
-  const workDir = context.workDir
-  const opts = sinkOptions(context)
+export async function workspacePrepareAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const expectedBranch = stringInput(inputs, "expectedBranch")
+  const workDir = host.workDir
+  const opts = sinkOptions(host)
 
   if (!expectedBranch) {
-    const snapshot = await captureSnapshot(workDir, context.signal, opts)
+    const snapshot = await captureSnapshot(workDir, host.signal, opts)
     return failureOutput(workDir, "(none)", snapshot, "resolve", "Workspace branch is not defined in with.expectedBranch", 1)
   }
 
-  const initial = await captureSnapshot(workDir, context.signal, opts)
+  const initial = await captureSnapshot(workDir, host.signal, opts)
   const initialProbeFailure = probeFailureOutput(workDir, expectedBranch, initial)
   if (initialProbeFailure) return initialProbeFailure
 
@@ -105,90 +98,90 @@ export async function workspacePrepareAction(context: ActionInvocationContext): 
   let current = initial
 
   if (current.residual.rebaseMerge || current.residual.rebaseApply) {
-    const abort = await git(workDir, ["rebase", "--abort"], context.signal, opts)
+    const abort = await git(workDir, ["rebase", "--abort"], host.signal, opts)
     if (!abort.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-rebase", `git rebase --abort failed: ${abort.combinedOutput}`, abort.exitCode)
     }
-    const reprobe = await probeRebaseDirs(workDir, context.signal, opts)
+    const reprobe = await probeRebaseDirs(workDir, host.signal, opts)
     if (reprobe.failure) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-rebase", reprobe.failure.message, reprobe.failure.exitCode)
     }
     if (reprobe.rebaseMerge || reprobe.rebaseApply) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-rebase", "Rebase is still in progress after abort", 1)
     }
-    current = await captureSnapshot(workDir, context.signal, opts)
+    current = await captureSnapshot(workDir, host.signal, opts)
     const currentProbeFailure = probeFailureOutput(workDir, expectedBranch, current)
     if (currentProbeFailure) return currentProbeFailure
   }
 
   if (current.residual.mergeHead) {
-    const abort = await git(workDir, ["merge", "--abort"], context.signal, opts)
+    const abort = await git(workDir, ["merge", "--abort"], host.signal, opts)
     if (!abort.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-merge", `git merge --abort failed: ${abort.combinedOutput}`, abort.exitCode)
     }
-    const reprobe = await probeMergeHead(workDir, context.signal, opts)
+    const reprobe = await probeMergeHead(workDir, host.signal, opts)
     if (reprobe.failure) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-merge", reprobe.failure.message, reprobe.failure.exitCode)
     }
     if (reprobe.exists) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-merge", "Merge is still in progress after abort", 1)
     }
-    current = await captureSnapshot(workDir, context.signal, opts)
+    current = await captureSnapshot(workDir, host.signal, opts)
     const currentProbeFailure = probeFailureOutput(workDir, expectedBranch, current)
     if (currentProbeFailure) return currentProbeFailure
   }
 
   if (current.residual.cherryPickHead) {
-    const abort = await git(workDir, ["cherry-pick", "--abort"], context.signal, opts)
+    const abort = await git(workDir, ["cherry-pick", "--abort"], host.signal, opts)
     if (!abort.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-cherry-pick", `git cherry-pick --abort failed: ${abort.combinedOutput}`, abort.exitCode)
     }
-    const reprobe = await probeCherryPickHead(workDir, context.signal, opts)
+    const reprobe = await probeCherryPickHead(workDir, host.signal, opts)
     if (reprobe.failure) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-cherry-pick", reprobe.failure.message, reprobe.failure.exitCode)
     }
     if (reprobe.exists) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "abort-cherry-pick", "Cherry-pick is still in progress after abort", 1)
     }
-    current = await captureSnapshot(workDir, context.signal, opts)
+    current = await captureSnapshot(workDir, host.signal, opts)
     const currentProbeFailure = probeFailureOutput(workDir, expectedBranch, current)
     if (currentProbeFailure) return currentProbeFailure
   }
 
   if (current.porcelain.trim() !== "") {
-    const reset = await git(workDir, ["reset", "--hard", "HEAD"], context.signal, opts)
+    const reset = await git(workDir, ["reset", "--hard", "HEAD"], host.signal, opts)
     if (!reset.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "reset", `git reset --hard HEAD failed: ${reset.combinedOutput}`, reset.exitCode)
     }
-    const clean = await git(workDir, ["clean", "-fd"], context.signal, opts)
+    const clean = await git(workDir, ["clean", "-fd"], host.signal, opts)
     if (!clean.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "clean", `git clean -fd failed: ${clean.combinedOutput}`, clean.exitCode)
     }
-    current = await captureSnapshot(workDir, context.signal, opts)
+    current = await captureSnapshot(workDir, host.signal, opts)
     const currentProbeFailure = probeFailureOutput(workDir, expectedBranch, current)
     if (currentProbeFailure) return currentProbeFailure
   }
 
   if (current.head.ref !== expectedBranch) {
-    const checkout = await git(workDir, ["checkout", expectedBranch], context.signal, opts)
+    const checkout = await git(workDir, ["checkout", expectedBranch], host.signal, opts)
     if (!checkout.success) {
-      const after = await captureSnapshot(workDir, context.signal, opts)
+      const after = await captureSnapshot(workDir, host.signal, opts)
       return failureOutput(workDir, expectedBranch, after, "checkout", `git checkout ${expectedBranch} failed: ${checkout.combinedOutput}`, checkout.exitCode)
     }
   }
 
-  const verify = await captureSnapshot(workDir, context.signal, opts)
+  const verify = await captureSnapshot(workDir, host.signal, opts)
   const verifyProbeFailure = probeFailureOutput(workDir, expectedBranch, verify)
   if (verifyProbeFailure) return verifyProbeFailure
   if (verify.residual.rebaseMerge || verify.residual.rebaseApply) {

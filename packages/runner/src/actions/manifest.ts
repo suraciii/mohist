@@ -1,5 +1,6 @@
 import type { ActionError, ActionResult, JsonObject, JsonValue } from "../core/types.js"
-import type { ValidatedActionContext } from "./context.js"
+import type { ValidatedWith } from "./context.js"
+import type { ActionHostFor } from "./host.js"
 
 export type ActionInputKind = "string" | "number" | "boolean" | "object" | "array"
 
@@ -9,11 +10,29 @@ export function canonicalKindOrder(): ReadonlyArray<ActionInputKind> {
   return CANONICAL_KIND_ORDER
 }
 
+export type ActionCapability = "agent-turn" | "issue-fields" | "workflow-checkpoint" | "add-tasks" | "write-vars"
+
+const VALID_CAPABILITIES: ReadonlyArray<ActionCapability> = [
+  "agent-turn",
+  "issue-fields",
+  "workflow-checkpoint",
+  "add-tasks",
+  "write-vars",
+]
+
+export function validCapabilities(): ReadonlyArray<ActionCapability> {
+  return VALID_CAPABILITIES
+}
+
+export type InputRenderTiming = "immediate" | "deferred"
+
 export interface ActionInputDeclaration {
   readonly types: ReadonlyArray<ActionInputKind>
   readonly required?: true
   readonly default?: JsonValue
   readonly description?: string
+  readonly render?: InputRenderTiming
+  readonly engineSource?: "prompts.build"
 }
 
 export interface ActionOutputDeclaration {
@@ -32,12 +51,15 @@ export interface ActionManifest {
   readonly inputs: Readonly<Record<string, ActionInputDeclaration>>
   readonly outputs: ReadonlyArray<ActionOutputDeclaration>
   readonly errors: ReadonlyArray<ActionErrorDeclaration>
+  readonly capabilities?: ReadonlyArray<ActionCapability>
 }
 
 export interface ActionDefinition<M extends ActionManifest = ActionManifest> {
   readonly manifest: M
-  readonly run: (context: ValidatedActionContext<M>) => Promise<ActionResult>
+  run(inputs: ValidatedWith<M>, host: ActionHostFor<M>): Promise<ActionResult>
 }
+
+export type ActionCapabilitySet = ReadonlySet<ActionCapability>
 
 export interface ActionTombstone {
   readonly name: string

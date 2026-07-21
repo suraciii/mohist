@@ -1,5 +1,5 @@
 import type { ActionResult, JsonObject } from "../core/types.js"
-import type { ActionInvocationContext } from "./context.js"
+import type { ActionHost } from "./host.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
@@ -11,27 +11,22 @@ import { parseGitHubRepository } from "./github-pr-repository.js"
 import { fail as actionFail, succeed } from "./action-result.js"
 type GhRunner = typeof runCommand
 
-/**
- * `source` tag recorded against every captured `mohist/create-github-pr`
- * action body line. Phase-distinguished so the web viewer can tell
- * which ops phase produced which line.
- */
 const ACTION_SOURCE = "action:create-github-pr"
 
-function networkGhOptions(context: ActionInvocationContext): CommandLineOptions | undefined {
-  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
-  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+function networkGhOptions(host: ActionHost): CommandLineOptions | undefined {
+  if (!host.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => host.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
-export async function createGitHubPrAction(context: ActionInvocationContext): Promise<ActionResult> {
-  const repositoryUrl = typeof context.with?.["repositoryUrl"] === "string" ? context.with["repositoryUrl"] : undefined
-  const source = typeof context.with?.["source"] === "string" ? context.with["source"] : undefined
-  const target = typeof context.with?.["target"] === "string" ? context.with["target"] : undefined
+export async function createGitHubPrAction(inputs: JsonObject, host: ActionHost): Promise<ActionResult> {
+  const repositoryUrl = typeof inputs["repositoryUrl"] === "string" ? inputs["repositoryUrl"] : undefined
+  const source = typeof inputs["source"] === "string" ? inputs["source"] : undefined
+  const target = typeof inputs["target"] === "string" ? inputs["target"] : undefined
   if (!repositoryUrl || !source || !target) return actionFail("invalid-input", "create-github-pr requires 'repositoryUrl', 'source', and 'target'")
   const githubRepository = parseGitHubRepository(repositoryUrl)
   if (!githubRepository) return actionFail("config-error", "create-github-pr requires a valid GitHub repository URL")
-  const draft = context.with?.["draft"] !== false
-  const workDir = context.workDir
+  const draft = inputs["draft"] !== false
+  const workDir = host.workDir
 
   const gh = getGitHubPrGh()
 
@@ -57,19 +52,19 @@ export async function createGitHubPrAction(context: ActionInvocationContext): Pr
     output: payload.output ?? message,
     steps,
   })
-  const ghOpts = networkGhOptions(context)
-  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
+  const ghOpts = networkGhOptions(host)
+  const ghPrecheck = await runGhPrecheck(gh, workDir, host.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
 
-  const text = await resolveCreatePrText(context)
+  const text = await resolveCreatePrText(inputs, host)
   if (text.kind === "failure") {
     return fail("config-error", text.message, { output: text.message })
   }
 
-  const opened = await openOrReusePr(gh, workDir, source, target, text.title, text.body, draft, context.signal, record, ghOpts, githubRepository)
+  const opened = await openOrReusePr(gh, workDir, source, target, text.title, text.body, draft, host.signal, record, ghOpts, githubRepository)
   if (opened.kind === "failure") {
     return fail(opened.errorCode, opened.message, {
       output: opened.output,
