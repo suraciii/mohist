@@ -19,7 +19,6 @@ export function LatestArtifactsPanel({
     <ArtifactOpener
       issueNumber={issueNumber}
       workflowRunId={workflowRunId}
-      mode="full"
       artifactsHook={artifactsHook}
       contentHook={contentHook}
     />

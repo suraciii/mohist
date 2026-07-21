@@ -15,6 +15,7 @@ import type { ArtifactContentHook } from './ArtifactContentViewer'
 import { CheckItem } from './CheckItem'
 import { WORKFLOW_STAGES } from './StageBar'
 import { isScriptHealthCheck } from '../model/runtime-query-helpers'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 
 export type RequestChangesHook = () => Pick<
   ReturnType<typeof useRequestChangesIssue>,
@@ -26,6 +27,8 @@ export interface StepListDependencies {
   requestChangesHook: RequestChangesHook
   artifactContentHook: ArtifactContentHook
   fileContentFn?: typeof getFileContent
+  taskLogHook?: TaskLogDataHook
+  workflowSessionsHook?: WorkflowRunSessionsHook
 }
 
 export function InlineApprovalControls({
@@ -229,12 +232,14 @@ export function StepList({
   stageStateMap,
   issue,
   readOnly,
+  workflowRunId,
   dependencies,
 }: {
   stage: WorkflowStage
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   readOnly: boolean
+  workflowRunId: string | null
   dependencies?: Partial<StepListDependencies>
 }) {
   const stageState = stageStateMap.get(stage)
@@ -264,9 +269,11 @@ export function StepList({
                 key={task.taskId}
                 task={task}
                 issueNumber={issue.number}
-                readOnly={readOnly}
+                workflowRunId={workflowRunId}
                 artifactContentHook={dependencies?.artifactContentHook}
                 fileContentFn={dependencies?.fileContentFn}
+                taskLogHook={dependencies?.taskLogHook}
+                workflowSessionsHook={dependencies?.workflowSessionsHook}
               />
             ))
           ) : (

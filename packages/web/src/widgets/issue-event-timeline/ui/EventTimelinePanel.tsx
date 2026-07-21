@@ -5,6 +5,7 @@ import { EventTimelineRow } from './EventTimelineRow'
 import {
   useEventTimeline,
   type EventTimelineHistoryHook,
+  type EventTimelineWorkflowHook,
 } from '../useEventTimeline'
 import type { TimelineCategory, TimelineEntry } from '../model/types'
 
@@ -15,6 +16,7 @@ export interface EventTimelinePanelProps {
   className?: string
   showHeader?: boolean
   historyHook?: EventTimelineHistoryHook
+  workflowHook?: EventTimelineWorkflowHook
 }
 
 interface EventTimelinePanelViewProps {
@@ -43,8 +45,9 @@ export function EventTimelinePanel({
   className,
   showHeader = true,
   historyHook,
+  workflowHook,
 }: EventTimelinePanelProps) {
-  const { entries, isLoading } = useEventTimeline(issueNumber, enabled, historyHook)
+  const { entries, isLoading } = useEventTimeline(issueNumber, enabled, historyHook, workflowHook)
 
   return (
     <EventTimelinePanelView

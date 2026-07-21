@@ -793,6 +793,7 @@ internal sealed class MohistCliApi
         RepoList,
         FeedbackList,
         FeedbackShow,
+        CommentShow,
         AgentList,
         AgentShow,
         EpicList,

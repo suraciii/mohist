@@ -52,7 +52,13 @@ function prettifyType(type: string): string {
     .join(' ')
 }
 
-export function describeEvent(type: string, payload: Record<string, unknown> = {}): string {
+export type TaskTitleResolver = (stage: string, taskId: string) => string | null
+
+export function describeEvent(
+  type: string,
+  payload: Record<string, unknown> = {},
+  resolveTaskTitle?: TaskTitleResolver,
+): string {
   const fromStage = formatStageName(getString(payload, 'from'))
   const toStage = formatStageName(getString(payload, 'to'))
   const stage = formatStageName(getString(payload, 'stage'))
@@ -61,6 +67,12 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
   const priority = getString(payload, 'priority') ?? ''
   const prerequisiteId = getString(payload, 'prerequisiteId') ?? ''
   const error = getString(payload, 'error') ?? ''
+  const taskId = getString(payload, 'taskId')
+  const taskStage = getString(payload, 'stage')
+  const taskSubject = taskId
+    ? (taskStage ? resolveTaskTitle?.(taskStage, taskId) : null) ?? taskId
+    : null
+  const artifactPath = getString(payload, 'path')
 
   switch (type) {
     case 'com.mohist.workflow.stage.started':
@@ -100,6 +112,18 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
 
     case 'com.mohist.workflow.run.rerunning':
       return 'Run rerunning'
+
+    case 'com.mohist.workflow.task.started':
+      return taskSubject ? `${taskSubject} started` : 'Task started'
+
+    case 'com.mohist.workflow.task.completed':
+      return taskSubject ? `${taskSubject} completed` : 'Task completed'
+
+    case 'com.mohist.workflow.task.failed':
+      return taskSubject ? `${taskSubject} failed` : 'Task failed'
+
+    case 'com.mohist.workflow.artifact.recorded':
+      return artifactPath ? `${artifactPath} recorded` : 'Artifact recorded'
 
     case 'com.mohist.issue.created':
       return 'Issue created'

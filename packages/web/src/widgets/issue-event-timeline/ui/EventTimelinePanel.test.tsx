@@ -5,6 +5,7 @@ import { render } from '../../../../tests/test-utils'
 import { EventTimelinePanel, EventTimelinePanelView } from './EventTimelinePanel'
 import type { TimelineEntry } from '../model/types'
 import type { EventTimelineHistoryHook } from '../useEventTimeline'
+import type { EventTimelineWorkflowHook } from '../useEventTimeline'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let timeline = { entries: [] as TimelineEntry[], isLoading: false }
@@ -16,6 +17,8 @@ const historyHook: EventTimelineHistoryHook = (issueNumber, enabled) => {
   }, [issueNumber, enabled])
   return { data: [], isLoading: false }
 }
+
+const workflowHook: EventTimelineWorkflowHook = () => ({ data: undefined })
 
 function makeEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   return {
@@ -225,6 +228,7 @@ describe('EventTimelinePanel', () => {
         issueNumber={42}
         enabled={false}
         historyHook={historyHook}
+        workflowHook={workflowHook}
       />,
     )
 
@@ -236,7 +240,7 @@ describe('EventTimelinePanel', () => {
 
   it('loads history for the issue by default', async () => {
     render(
-      <EventTimelinePanel issueNumber={42} historyHook={historyHook} />,
+      <EventTimelinePanel issueNumber={42} historyHook={historyHook} workflowHook={workflowHook} />,
     )
 
     await waitFor(() => {

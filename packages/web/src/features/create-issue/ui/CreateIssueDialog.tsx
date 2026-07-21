@@ -10,14 +10,13 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { createIssue, extractAttachmentIds, IssuePrerequisitePicker, LabelEditor, useIssues } from '../../../entities/issue'
+import { createIssue, extractAttachmentIds, IssuePrerequisitePicker, LabelEditor, partitionIssueBody, useIssues } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
-import { parseIssueFrontmatter } from '../lib/frontmatter'
 import {
   deriveEligibleParentCandidates,
   mapCreateIssueError,
@@ -146,9 +145,9 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const { data: selectedTemplate } = useIssueTemplate(selectedTemplateId)
   const queryClient = useQueryClient()
 
-  const frontmatter = useMemo(() => parseIssueFrontmatter(body), [body])
+  const frontmatter = useMemo(() => partitionIssueBody(body), [body])
   const recommendation = useMemo(() => {
-    if (frontmatter.kind === 'parsed' && frontmatter.recommendedWorkflow) {
+    if (frontmatter.kind === 'closed' && frontmatter.recommendedWorkflow) {
       return {
         workflow: frontmatter.recommendedWorkflow,
         reason: frontmatter.recommendedWorkflowReason ?? null,
@@ -156,8 +155,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
     return null
   }, [frontmatter])
-  const frontmatterRisk =
-    frontmatter.kind === 'parsed' ? frontmatter.risk ?? null : null
+  const frontmatterRisk = frontmatter.kind === 'closed' ? frontmatter.risk ?? null : null
 
   const lastInitializedProjectIdRef = useRef<string | null>(null)
   useEffect(() => {

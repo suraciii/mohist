@@ -8,6 +8,8 @@ import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelin
 interface ActivityDialogProps {
   issueNumber: number
   workflowStatus?: string | null
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   triggerLabel?: string
   triggerClassName?: string
   triggerTestId?: string
@@ -17,12 +19,15 @@ interface ActivityDialogProps {
 export function ActivityDialog({
   issueNumber,
   workflowStatus,
+  open: controlledOpen,
+  onOpenChange,
   triggerLabel = 'Activity',
   triggerClassName,
   triggerTestId = 'activity-entry',
   TimelinePanel = EventTimelinePanel,
 }: ActivityDialogProps) {
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const open = controlledOpen ?? uncontrolledOpen
   const queryClient = useQueryClient()
   const { projectId } = useProject()
 
@@ -30,7 +35,8 @@ export function ActivityDialog({
     if (next) {
       queryClient.invalidateQueries({ queryKey: ['issue-events', issueNumber, projectId] })
     }
-    setOpen(next)
+    if (controlledOpen === undefined) setUncontrolledOpen(next)
+    onOpenChange?.(next)
   }
 
   return (
@@ -51,6 +57,7 @@ export function ActivityDialog({
       </button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent
+          id="activity"
           data-testid="activity-dialog-content"
           className="top-0 left-0 w-full h-[100dvh] max-w-full translate-x-0 translate-y-0 rounded-none p-0 gap-0 flex flex-col sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[85vh] sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-0"
         >

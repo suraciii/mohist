@@ -54,7 +54,7 @@ public interface IIssueGrain : IGrainWithStringKey
     /// on the now-empty parent uses the normal single-issue path.
     /// </summary>
     Task RecomputeCompositeStatusAsync();
-    Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
+    Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
 
     Task<bool> AssignEpicAsync(int epicNumber);
@@ -170,4 +170,5 @@ public sealed record IssuePrerequisiteResult(
 [GenerateSerializer]
 public sealed record IssueCommentResult(
     [property: Id(0)] string Id,
-    [property: Id(1)] string Body);
+    [property: Id(1)] string Body,
+    [property: Id(2)] string? Author);

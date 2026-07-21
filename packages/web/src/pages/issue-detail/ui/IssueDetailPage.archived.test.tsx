@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -87,10 +87,10 @@ function makeCompletedTimeline(workflowRunId: string) {
     currentStage: 'done',
     pendingWork: null,
     stages: [
-      { stage: 'plan' as const, status: 'completed' as const, order: 0, startedAt: '2026-06-25T03:30:00Z', completedAt: '2026-06-25T04:00:00Z', durationMs: 30 * 60 * 1000, tasks: [], checks: [], approval: null },
+      { stage: 'plan' as const, status: 'completed' as const, order: 0, startedAt: '2026-06-25T03:30:00Z', completedAt: '2026-06-25T04:00:00Z', durationMs: 30 * 60 * 1000, tasks: [{ id: 'plan-history', title: 'Archived plan task', uses: 'core/script', status: 'completed' as const, startedAt: '2026-06-25T03:30:00Z', completedAt: '2026-06-25T04:00:00Z', durationMs: 30 * 60 * 1000, attempts: 1, message: null }], checks: [], approval: null },
       { stage: 'build' as const, status: 'completed' as const, order: 1, startedAt: '2026-06-25T04:00:00Z', completedAt: '2026-06-25T05:30:00Z', durationMs: 90 * 60 * 1000, tasks: [], checks: [], approval: null },
       { stage: 'check' as const, status: 'completed' as const, order: 2, startedAt: '2026-06-25T05:30:00Z', completedAt: '2026-06-25T06:00:00Z', durationMs: 30 * 60 * 1000, tasks: [], checks: [], approval: null },
-      { stage: 'integrate' as const, status: 'completed' as const, order: 3, startedAt: '2026-06-25T06:00:00Z', completedAt: '2026-06-25T07:00:00Z', durationMs: 60 * 60 * 1000, tasks: [], checks: [], approval: null },
+      { stage: 'integrate' as const, status: 'completed' as const, order: 3, startedAt: '2026-06-25T06:00:00Z', completedAt: '2026-06-25T07:00:00Z', durationMs: 60 * 60 * 1000, tasks: [{ id: 'integrate-history', title: 'Archived integrate task', uses: 'core/script', status: 'completed' as const, startedAt: '2026-06-25T06:00:00Z', completedAt: '2026-06-25T07:00:00Z', durationMs: 60 * 60 * 1000, attempts: 1, message: null }], checks: [], approval: null },
       { stage: 'done' as const, status: 'completed' as const, order: 4, startedAt: '2026-06-25T07:00:00Z', completedAt: '2026-06-25T07:00:00Z', durationMs: 0, tasks: [], checks: [], approval: null },
     ],
     availableActions: [],
@@ -195,6 +195,21 @@ describe('IssueDetailPage archived Done issue — preserved history rendering', 
     expect(archivedStageLabels).toEqual(activeStageLabels)
     expect(within(archivedBar).queryByText(/^Done$/)).not.toBeTruthy()
     expect(within(activeBar).queryByText(/^Done$/)).not.toBeTruthy()
+  })
+
+  it('allows selecting and inspecting a completed stage in archived read-only history', async () => {
+    mockIssue(archivedDoneIssue())
+
+    renderPage()
+
+    expect(await screen.findByText('Archived integrate task')).toBeVisible()
+    const stageBar = screen.getByTestId('workflow-stage-bar')
+    const plan = within(stageBar).getByRole('button', { name: /Plan/i })
+    fireEvent.click(plan)
+
+    expect(plan).toHaveAttribute('aria-current', 'step')
+    expect(screen.getByText('Archived plan task')).toBeVisible()
+    expect(screen.queryByText('Archived integrate task')).toBeNull()
   })
 
   it('renders the workflow-run YAML card labelled as preserved history for an archived issue', async () => {

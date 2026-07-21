@@ -4,6 +4,7 @@ import { render } from '../../../../tests/test-utils'
 import type { ComponentProps } from 'react'
 import { LatestArtifactsPanel as DefaultLatestArtifactsPanel, type LatestArtifactsHook } from './LatestArtifactsPanel'
 import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 import type { ArtifactContentHook } from './ArtifactContentViewer'
 import {
   IssueStatus,
@@ -17,14 +18,16 @@ import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let artifactsData: WorkflowArtifact[] = []
+let artifactsLoading = false
+let artifactsError: Error | null = null
 let artifactContent: WorkflowArtifactContentResult | null = null
 let artifactFileContent: WorkflowArtifactContentResult | null = null
 let timelineData: WorkflowTimeline | null = null
 
 const artifactsHook: LatestArtifactsHook = () => ({
   data: artifactsData,
-  isLoading: false,
-  error: null,
+  isLoading: artifactsLoading,
+  error: artifactsError,
 })
 
 const contentHook: ArtifactContentHook = (_issueNumber, _artifactId, options, enabled = true) => ({
@@ -52,13 +55,20 @@ function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 't
     <DefaultWorkflowView
       {...props}
       timelineHook={timelineHook}
-      dependencies={{ ...props.dependencies, artifactContentHook: contentHook }}
+      dependencies={{
+        ...props.dependencies,
+        artifactContentHook: contentHook,
+        taskLogHook: (() => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })) as TaskLogDataHook,
+        workflowSessionsHook: (() => ({ sessions: [], isLoading: false })) as WorkflowRunSessionsHook,
+      }}
     />
   )
 }
 
 beforeEach(() => {
   artifactsData = []
+  artifactsLoading = false
+  artifactsError = null
   artifactContent = null
   artifactFileContent = null
   timelineData = null
@@ -202,6 +212,29 @@ async function expandTaskByTitle(taskTitle: string) {
 }
 
 describe('LatestArtifactsPanel', () => {
+  it('keeps the section mounted without a workflow run', () => {
+    render(<LatestArtifactsPanel issueNumber={1} workflowRunId={null} />)
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeInTheDocument()
+    expect(screen.getByText('No workflow run or recorded artifacts yet.')).toBeInTheDocument()
+  })
+
+  it('renders loading, error, and empty states inside the same section', () => {
+    artifactsLoading = true
+    const { rerender } = render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+
+    artifactsLoading = false
+    artifactsError = new Error('unavailable')
+    rerender(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+    expect(screen.getByText('Failed to load artifacts')).toBeInTheDocument()
+
+    artifactsError = null
+    rerender(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+    expect(screen.getByText('No recorded artifacts yet.')).toBeInTheDocument()
+    expect(screen.getAllByTestId('latest-artifacts-panel')).toHaveLength(1)
+  })
+
   it('renders latest artifacts grouped by path', async () => {
     artifactsData = [
         makeFileArtifact({ artifactId: 'art-proposal', path: 'proposal.md', taskRunId: 'plan.1' }),

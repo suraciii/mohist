@@ -79,4 +79,27 @@ describe('describeEvent', () => {
     expect(describeEvent('com.mohist.workflow.stage.started', {}))
       .toBe('Stage changed')
   })
+
+  it.each([
+    ['com.mohist.workflow.task.started', 'Build the feature started'],
+    ['com.mohist.workflow.task.completed', 'Build the feature completed'],
+    ['com.mohist.workflow.task.failed', 'Build the feature failed'],
+  ])('names a resolved task subject for %s', (type, expected) => {
+    expect(describeEvent(type, { stage: 'build', taskId: 'T-004' }, (stage, taskId) =>
+      stage === 'build' && taskId === 'T-004' ? 'Build the feature' : null,
+    )).toBe(expected)
+  })
+
+  it('falls back to the stable task ID when no title resolves', () => {
+    expect(describeEvent(
+      'com.mohist.workflow.task.completed',
+      { stage: 'build', taskId: 'T-legacy' },
+      () => null,
+    )).toBe('T-legacy completed')
+  })
+
+  it('names the artifact path in the visible summary', () => {
+    expect(describeEvent('com.mohist.workflow.artifact.recorded', { path: 'artifacts/report.md' }))
+      .toBe('artifacts/report.md recorded')
+  })
 })

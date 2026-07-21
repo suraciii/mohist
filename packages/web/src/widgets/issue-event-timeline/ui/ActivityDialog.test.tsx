@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useState } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState, type ComponentProps } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
-import type { EventTimelineHistoryHook } from '../useEventTimeline'
+import type { EventTimelineHistoryHook, EventTimelineWorkflowHook } from '../useEventTimeline'
 import { ActivityDialog } from './ActivityDialog'
 import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelinePanel'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
@@ -19,8 +19,10 @@ const historyHook: EventTimelineHistoryHook = () => {
   return { data, isLoading: false }
 }
 
+const workflowHook: EventTimelineWorkflowHook = () => ({ data: undefined })
+
 function TestTimelinePanel(props: EventTimelinePanelProps) {
-  return <EventTimelinePanel {...props} historyHook={historyHook} />
+  return <EventTimelinePanel {...props} historyHook={historyHook} workflowHook={workflowHook} />
 }
 
 const projects: Project[] = [
@@ -33,12 +35,13 @@ const projects: Project[] = [
   },
 ]
 
-function renderDialog(props: { issueNumber?: number; workflowStatus?: string | null } = {}) {
+function renderDialog(props: Partial<ComponentProps<typeof ActivityDialog>> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
         <ActivityDialog
+          {...props}
           issueNumber={props.issueNumber ?? 42}
           workflowStatus={props.workflowStatus ?? null}
           TimelinePanel={TestTimelinePanel}
@@ -66,6 +69,29 @@ describe('ActivityDialog', () => {
   it('does not fetch events before the entry opens the dialog', () => {
     renderDialog()
 
+    expect(eventRequests).toBe(0)
+  })
+
+  it('supports controlled direct-open composition and reports close requests', async () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ open: true, onOpenChange })
+
+    const dialogContent = await screen.findByTestId('activity-dialog-content')
+    expect(dialogContent).toHaveAttribute('id', 'activity')
+    await waitFor(() => expect(eventRequests).toBe(1))
+
+    fireEvent.keyDown(dialogContent, { key: 'Escape' })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it('routes a controlled trigger through onOpenChange without opening independently', () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ open: false, onOpenChange })
+
+    fireEvent.click(screen.getByTestId('activity-entry'))
+
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    expect(screen.queryByTestId('activity-dialog-content')).toBeNull()
     expect(eventRequests).toBe(0)
   })
 

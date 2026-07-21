@@ -49,6 +49,13 @@ describe('canonical event types', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved)
   })
 
+  it('includes task lifecycle and artifact events used by live Activity', () => {
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.TaskFailed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.ArtifactRecorded)
+  })
+
   it('includes the reverse-DNS names for workflow run events', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed)

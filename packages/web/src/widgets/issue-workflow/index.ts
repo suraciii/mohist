@@ -3,7 +3,6 @@ export { ArtifactTextContent } from './ui/ArtifactTextContent'
 export { ArtifactOpener } from './ui/ArtifactOpener'
 export type {
   ArtifactOpenerArtifactsHook,
-  ArtifactOpenerMode,
   ArtifactOpenerProps,
 } from './ui/ArtifactOpener'
 export { BranchBar } from './ui/BranchBar'
@@ -12,7 +11,6 @@ export { FullReportModal, ResultBadge } from './ui/ReviewReportModal'
 export { LatestArtifactsPanel } from './ui/LatestArtifactsPanel'
 export { PrDeliveryIndicator, PrDeliverySummary, findPublishViaPrMetadata, isCompletedPublishViaPrTask } from './ui/PrDeliveryIndicator'
 export type { PrDeliveryIndicatorProps, PrDeliverySummaryProps } from './ui/PrDeliveryIndicator'
-export { TaskProgressPanel } from './ui/TaskProgressPanel'
 export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { WorkflowRunStatusPill } from './ui/WorkflowRunStatusPill'
 export type { WorkflowRunStatusPillProps } from './ui/WorkflowRunStatusPill'

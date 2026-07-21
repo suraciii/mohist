@@ -342,7 +342,6 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
       'issue-decision-surface',
       'runtime-decision-surface',
       'latest-artifacts-panel',
-      'diff-summary-banner',
       'reference-rail-actions',
     ]
     for (const testId of forbiddenTestIds) {

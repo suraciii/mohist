@@ -145,10 +145,10 @@ export function getFileContent(number: number, filePath: string, projectId?: str
   return request<{ base: string; head: string }>(projectApiPath(projectId, `/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`))
 }
 
-export function addComment(issueNumber: number, body: string, projectId?: string | null, attachmentIds?: string[]) {
+export function addComment(issueNumber: number, author: string, body: string, projectId?: string | null, attachmentIds?: string[]) {
   return request<Comment>(projectApiPath(projectId, `/issues/${issueNumber}/comments`), {
     method: 'POST',
-    body: JSON.stringify({ body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
+    body: JSON.stringify({ author, body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
   })
 }
 

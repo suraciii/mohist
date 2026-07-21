@@ -105,7 +105,7 @@ describe('IssueDetailPage composite parent workflow suppression', () => {
     expect(await waitFor(() => screen.getByTestId('composite-parent-overview'))).toBeTruthy()
     for (const testId of [
       'branch-bar-frame', 'workflow-view-frame', 'workflow-sessions-panel', 'task-progress-panel',
-      'diff-files-section', 'diff-summary-banner', 'commits-section', 'latest-artifacts-panel',
+      'diff-files-section', 'commits-section', 'latest-artifacts-panel',
       'pr-delivery-summary-frame', 'runtime-evidence-frame', 'workflow-yaml-dialog-frame',
        'reference-rail-workflow-profile', 'reference-rail-drift', 'reference-rail-convergence',
        'runtime-decision-surface-frame',

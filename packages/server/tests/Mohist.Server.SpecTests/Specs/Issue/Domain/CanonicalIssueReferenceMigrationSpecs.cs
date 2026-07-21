@@ -124,11 +124,12 @@ public class CanonicalIssueReferenceMigrationSpecs : CanonicalIssueReferenceMigr
         Assert.Equal("upload_alpha", pending.UploadId);
         Assert.Equal(("proj_alpha", 42), (pending.MetadataProjectId, pending.IssueNumber));
 
-        var comments = await verify.IssueComments.AsNoTracking().OrderBy(row => row.Id).ToListAsync();
-        Assert.Collection(
-            comments,
-            row => Assert.Equal(("proj_alpha", 42), (row.ProjectId, row.IssueNumber)),
-            row => Assert.Equal(("proj_beta", 42), (row.ProjectId, row.IssueNumber)));
+        var comments = await verify.Database.SqlQueryRaw<string>("""
+            SELECT "ProjectId" || ':' || "IssueNumber" AS "Value"
+            FROM "IssueComments"
+            ORDER BY "Id"
+            """).ToListAsync();
+        Assert.Equal(["proj_alpha:42", "proj_beta:42"], comments);
 
         var inbox = await verify.InboxItems.AsNoTracking().OrderBy(row => row.Id).ToListAsync();
         Assert.Collection(
