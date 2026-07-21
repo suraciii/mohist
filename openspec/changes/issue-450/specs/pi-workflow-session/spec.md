@@ -90,7 +90,7 @@ Before submitting a prompt, the Runner SHALL verify that the authoritative worki
 
 Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. The Workflow executor SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL retain one task lease through Prompt completion, successful completion checks, any worktree cleanup turn, and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current task lifecycle reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine both the physical Pi Session and the logical serialization key before the current operation leaves the boundary. Later work MUST NOT start a Prompt or runtime rebind on that logical AgentSession until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
 
-Session-command coordination is outside this requirement. This issue SHALL NOT add Runtime slot callbacks, command-admission phases, command leases, command completion callbacks, recovery receipts, or command-journal reconciliation. Existing OpenCode Session-command routes and behavior SHALL remain unchanged. Pi Follow-up, Compact, Reset, and Cancel SHALL remain unavailable and MUST NOT fall back to OpenCode. A sister Session-command change MUST integrate with the Workflow lease and Action-stream drain/seal protocol before enabling commands that mutate a Workflow binding.
+Session-command coordination is outside this requirement. This issue SHALL NOT add Runtime slot callbacks, command-admission phases, command leases, command completion callbacks, recovery receipts, or command-journal reconciliation. Current OpenCode Session-command availability, routes, and behavior SHALL remain unchanged. Workflow binding SHALL accept runtime `pi` independently of command capability; Pi Follow-up, Compact, Reset, and Cancel SHALL reject before reservation or Runner dispatch and MUST NOT fall back to OpenCode. A sister Session-command change MUST integrate with the Workflow lease and Action-stream drain/seal protocol before enabling commands that mutate a Workflow binding.
 
 #### Scenario: Concurrent tasks on one Session are serialized
 
@@ -136,7 +136,7 @@ Session-command coordination is outside this requirement. This issue SHALL NOT a
 #### Scenario: Pi Session commands remain outside this issue
 
 - **WHEN** Follow-up, Compact, Reset, or Cancel targets a Pi-bound AgentSession before Pi Session-command routing ships
-- **THEN** the existing command boundary SHALL return unavailable and MUST NOT invoke OpenCode
+- **THEN** the Server's command-capability guard SHALL return unavailable before reservation or Runner dispatch and MUST NOT invoke OpenCode
 - **AND** this issue MUST NOT add command routing, Runtime execution, command coordination, or Action-stream mutation
 
 ### Requirement: Pi turn facts populate the existing Session audit record
