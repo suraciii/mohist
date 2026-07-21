@@ -1,5 +1,5 @@
 description: |
-  Default general-purpose Mohist pipeline that delivers through a GitHub PR: plan (proposal, specs, design, tasks, self-review, open draft PR) → build (load tasks, verify) → check (AI review, push, mark PR ready) → integrate (archive, push, merge PR).
+  Default general-purpose Mohist pipeline that delivers through a GitHub PR: plan (proposal, specs, design, tasks, self-review, open draft PR) → build (load tasks, verify) → check (AI review, push, mark PR ready, verify PR checks) → integrate (archive, push, merge PR).
   Requires human approval at the plan and check stages. The workflow opens a draft PR as the last plan task, marks it ready after the check stage approves it, and squash-merges it into the repository base branch on integrate completion.
   Typical duration: 20-60 minutes for a focused change.
   Choose this over mohist/local when you want each issue to ship as a reviewable, traceable GitHub PR.
@@ -248,6 +248,33 @@ stages:
         uses: mohist/mark-github-pr-ready
         with:
           prNumber: ${{ vars.github.pr.number }}
+
+      - id: verify-pr-checks
+        title: Verify GitHub PR checks
+        uses: mohist/github-pr-checks
+        with:
+          prNumber: ${{ vars.github.pr.number }}
+        recovery:
+          budget: 2
+          handlers:
+            - when: error.code=pr-checks-failed
+              tasks:
+                - id: recover:fix-pr-checks
+                  title: Fix failing GitHub PR checks
+                  uses: mohist/opencode
+                  with:
+                    session: check
+                    prompt: ${{ prompts.fix-pr-checks }}
+                    options: ${{ vars.agent }}
+                - id: recover:push
+                  title: Push
+                  uses: mohist/push
+                  with:
+                    source: HEAD
+                    target: ${{ workspace.branch }}
+                    remote: origin
+                    force: true
+              retrySelf: true
 
     checks:
       - name: github-pr-status

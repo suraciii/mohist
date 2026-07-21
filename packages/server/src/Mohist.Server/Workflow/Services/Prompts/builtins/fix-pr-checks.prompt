@@ -1,18 +1,19 @@
 ---
 name: "Fix PR Checks"
 description: "Fixes failing GitHub PR checks"
-tags: [integrate, pr-checks]
-stage: integrate
+tags: [check, integrate, pr-checks]
 ---
 
 ## Context
 
-`mohist/merge-github-pr` rejected the merge because one or more GitHub PR checks
-failed for PR #`${{ vars.github.pr.number }}` (`${{ vars.github.pr.url }}`).
-The merge action is waiting on you to repair the checks before it can squash-merge.
+GitHub PR checks failed for PR #`${{ vars.github.pr.number }}` (`${{ vars.github.pr.url }}`).
+The workflow is gating on CI and will only advance once the failing checks pass.
 
 The failure message is `${{ failure.error.message }}`. Read it as the entry
-point, then inspect the current PR check state directly.
+point, then inspect the current PR check state directly. You may be invoked
+from either the check stage (PR just turned ready, before human review) or
+the integrate stage (just before squash-merge); the repair process is the
+same.
 
 ## Process
 
@@ -36,10 +37,10 @@ point, then inspect the current PR check state directly.
 
 - Do NOT reopen or recreate the PR. Reuse the same workflow branch and the
   same open PR (`${{ vars.github.pr.number }}`).
-- Do NOT mark the PR ready again — `merge-github-pr` only checks PR state,
-  not PR readiness. Committing the fix is enough; `recover:push` handles sync.
-- Do NOT modify the merge action's behavior. Recovery is scoped to making
-  the existing PR's checks pass.
+- Do NOT change PR state (draft/ready/merge). PR lifecycle transitions are
+  owned by other tasks; your job is to make the failing checks pass.
+- Do NOT modify workflow action behavior. Recovery is scoped to making the
+  existing PR's checks pass.
 - Do NOT run `git push`; branch synchronization is an explicit workflow task.
 - You may be interrupted at any time: commit incrementally and keep your progress
   notes current.

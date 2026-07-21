@@ -9,7 +9,7 @@ export {
 export {
   setGitHubPrChecksTimingForTest,
   setGitHubPrTransientRetryForTest,
-} from "./github-pr-merge.js"
+} from "./github-pr-checks-wait.js"
 
 export {
   classifyGhFailure,

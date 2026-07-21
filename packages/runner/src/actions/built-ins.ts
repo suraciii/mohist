@@ -7,6 +7,7 @@ import {
   markGitHubPrReadyAction,
   mergeGitHubPrAction,
 } from "./github-pr.js"
+import { githubPrChecksAction } from "./github-pr-checks-action.js"
 import { githubPrStatusAction } from "./github-pr-status.js"
 import {
   archiveChangeAction,
@@ -425,6 +426,31 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
       ],
     },
     run: async (context) => mergeGitHubPrAction(context as ActionContext),
+  }),
+  defineAction({
+    manifest: {
+      name: "mohist/github-pr-checks",
+      description: "Wait for every GitHub pull request check to pass",
+      inputs: {
+        prNumber: { types: ["number"], description: "Pull request number; falls back to variables.github.pr.number" },
+      },
+      outputs: [
+        { name: "kind", description: "Output kind discriminator" },
+        { name: "status", description: "Check status discriminator" },
+        { name: "prNumber", description: "Pull request number" },
+        { name: "pollIntervalMs", description: "Polling interval in milliseconds" },
+        { name: "message", description: "Human-readable check result" },
+        { name: "output", description: "Aggregated gh output" },
+        { name: "steps", description: "Per-step gh command results" },
+      ],
+      errors: [
+        { code: "config-error", description: "GitHub configuration is missing or invalid" },
+        { code: "pr-checks-unavailable", description: "PR checks state could not be retrieved" },
+        { code: "pr-checks-failed", description: "Required PR checks did not pass" },
+        { code: "aborted", description: "Polling was cancelled" },
+      ],
+    },
+    run: async (context) => githubPrChecksAction(context as ActionContext),
   }),
   defineAction({
     manifest: {

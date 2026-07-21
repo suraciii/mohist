@@ -303,12 +303,12 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     }
 
     [Fact]
-    public void GithubPrWorkflowDefinition_CheckStage_HasExactlyAiReviewPushMarkPrReadyAndGithubPrStatusCheck()
+    public void GithubPrWorkflowDefinition_CheckStage_HasAiReviewPushMarkPrReadyVerifyPrChecksAndGithubPrStatusCheck()
     {
         var check = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "check");
 
         var orderedIds = check.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "ai-review", "push", "mark-pr-ready" }, orderedIds);
+        Assert.Equal(new[] { "workspace-prepare", "ai-review", "push", "mark-pr-ready", "verify-pr-checks" }, orderedIds);
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
         Assert.Equal("mohist/opencode", aiReview.Uses);
@@ -338,6 +338,17 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var markPrReady = check.Tasks.Single(t => t.Id == "mark-pr-ready");
         Assert.Equal("mohist/mark-github-pr-ready", markPrReady.Uses);
         Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(markPrReady, "prNumber"));
+
+        var verifyPrChecks = check.Tasks.Single(t => t.Id == "verify-pr-checks");
+        Assert.Equal("mohist/github-pr-checks", verifyPrChecks.Uses);
+        Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(verifyPrChecks, "prNumber"));
+        var checksHandler = Assert.Single(verifyPrChecks.Recovery!.Handlers);
+        Assert.Equal("error.code=pr-checks-failed", checksHandler.When);
+        Assert.True(checksHandler.RetrySelf);
+        Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, checksHandler.Tasks.Select(t => t.Id).ToArray());
+        var checkFix = checksHandler.Tasks.Single(t => t.Id == "recover:fix-pr-checks");
+        Assert.Equal("${{ prompts.fix-pr-checks }}", checkFix.With!["prompt"]!.Value.GetString());
+        Assert.Equal("check", checkFix.With!["session"]!.Value.GetString());
 
         Assert.Single(check.Checks);
         var status = check.Checks.Single();
