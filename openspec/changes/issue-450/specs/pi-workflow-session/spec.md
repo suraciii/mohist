@@ -248,9 +248,9 @@ Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL comple
 #### Scenario: Corrupt committed outbox state is not discarded
 
 - **WHEN** startup cannot decode a committed stream snapshot
-- **THEN** that logical Session's reporting SHALL remain unavailable with an actionable diagnostic and the committed bytes SHALL be preserved
-- **AND** no Prompt or runtime rebind for that Session SHALL be admitted
-- **AND** unrelated Sessions and AgentJob work SHALL remain available
+- **THEN** the committed bytes SHALL be preserved for diagnostics and local state SHALL rebuild from Server stream authority
+- **AND** Pi SHALL reconcile retained canonical facts while OpenCode SHALL restore input-only state
+- **AND** only failed Runtime-specific reconciliation SHALL keep that logical Session unavailable; unrelated Sessions and AgentJob work SHALL remain available
 
 #### Scenario: Outbox root failure blocks global readiness
 
