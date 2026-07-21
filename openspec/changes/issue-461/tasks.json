@@ -1,0 +1,59 @@
+{
+  "project": "mohist-local",
+  "description": "Durably retain Workflow turn events and follow-up user input on the originating runner, retry them in AgentSession order across network failure and runner restart, and keep delivery independent of runtime execution.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver Workflow AgentSession events durably",
+      "spec": "specs/agent-session-runtime-event-delivery/spec.md#runtime-events-remain-pending-until-positively-accepted, specs/agent-session-runtime-event-delivery/spec.md#pending-delivery-survives-runner-restart-and-reconnection, specs/agent-session-runtime-event-delivery/spec.md#delivery-preserves-event-order-without-coupling-independent-sessions, specs/agent-session-runtime-event-delivery/spec.md#event-delivery-does-not-control-runtime-execution, specs/workflow-agent-session-transcript/spec.md, specs/workflow-agent-session-terminal-state/spec.md",
+      "description": "Implement the shared runner-local `AgentSessionRuntimeEventOutbox` with durable snapshot storage, positive receipt validation, per-AgentSession FIFO delivery, independent cross-session progress, and complete startup/reconnect/stop lifecycle. Wire Workflow OpenCode input, projected activity, and terminal close reporting through that outbox so local persistence completes without waiting for network delivery and the runtime result remains authoritative.",
+      "acceptanceCriteria": [
+        "The shared outbox durably records one-event entries containing a local record ID, binding-free Workflow or generic Session target, original `runtimeSessionId`, optional work metadata, payload, and stable sequence position before starting delivery; the physical snapshot uses atomic replacement and owner-only permissions under `.mohist/runner-state/runtime-events.json`.",
+        "Outbox behavior is separated from physical storage behind an injected persistence boundary; unit and spec tests use an in-memory store and never instantiate a physical filesystem adapter or read/write a temporary directory.",
+        "Workflow and generic runtime-event delivery each send exactly one queue head per request and remove it only when `AgentSessionRuntimeEventReceipt[]` contains the submitted type; timeout, transport failure, non-2xx, malformed or empty response, and a receipt without that type retain the head for retry.",
+        "`ServerConnection.agentSessionRuntimeEvents` returns and validates the receipt array already produced by the generic Server route, while the existing Workflow method retains the same response contract; no Server endpoint, request DTO, persistence model, deduplication behavior, or external dependency changes.",
+        "The outbox preserves FIFO order by canonical logical Session target, allows at most one in-flight head per Session, prevents input/activity/close overtaking across reused turns or bindings, never retargets a stale event, and drains other Session queues with bounded concurrency when one head remains unaccepted.",
+        "Runner startup loads the outbox before accepting commands or claiming work, kicks initial delivery without awaiting a full drain, and resumes pending work after automatic or forced reconnect; stop cancels retry timers and HTTP attempts without deleting records, and an unavailable/corrupt store prevents new work from silently falling back to best-effort upload.",
+        "`WorkflowAgentSessionReporter` no longer performs direct HTTP uploads: it persists the composed `session.input` before prompt execution, records normalized live and reconciled events in observation order, records one logical completed/failed `session.closed` after runtime completion, and settles only local persistence promises.",
+        "A completed, failed, interrupted, or timed-out Workflow turn returns the original OpenCode result without waiting for event acceptance; terminal status and failure reason remain derived from that runtime result, and event retries never invoke the OpenCode prompt again.",
+        "Focused Workflow specs prove transient and empty-receipt recovery, input/activity/close ordering, back-to-back turn boundaries, completed and failed terminal convergence, stale-binding retention, cross-session progress, non-blocking runtime completion, and restart/reconnect recovery using transport fakes, a shared in-memory store, and fake timers.",
+        "Outbox unit coverage proves serialized/coalesced persistence, matching-receipt acknowledgement, timeout retry, concurrent kick idempotency, stop/restart behavior, store failure readiness, and ambiguous-response at-least-once replay without asserting exactly-once Server persistence.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass and leave no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared AgentSession runtime-event outbox and lifecycle in `packages/runner/src`, Workflow reporter integration for durable input/activity/close delivery, receipt-aware ServerConnection methods, and focused in-memory/fake-time runner coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implement design decisions D1-D5 and D7 for the Workflow slice. Keep one host-owned outbox and one receipt/retry policy; do not send local record IDs to the Server, await network delivery from the Action, key ordering by physical runtime ID, retarget stale records, or retain the reporter's 30-second network settle path. This task is independently usable: Workflow Session transcripts and terminal state recover after upload failure and runner restart while the existing follow-up terminal outbox can remain temporarily until T-002 migrates it."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver follow-up events through the shared outbox",
+      "spec": "specs/agent-session-runtime-event-delivery/spec.md#runtime-events-remain-pending-until-positively-accepted, specs/agent-session-runtime-event-delivery/spec.md#pending-delivery-survives-runner-restart-and-reconnection, specs/agent-session-runtime-event-delivery/spec.md#event-delivery-does-not-control-runtime-execution, specs/agent-session-runtime-event-delivery/spec.md#existing-follow-up-terminal-delivery-remains-durable",
+      "description": "Move Workflow and generic follow-up `session.input` plus operation-correlated completed/failed outcomes onto T-001's shared outbox, preserving input-before-outcome order without coupling retries to runtime invocation. Idempotently import legacy `followup-failures.json` records into the new format, remove the competing terminal-only delivery path, and retain restart-safe delivery for existing pending outcomes.",
+      "acceptanceCriteria": [
+        "The follow-up handler durably enqueues `session.input` with its original discriminated Session target, `runtimeSessionId`, user text, source/kind/role fields, timestamp, and operation ID when present before invoking `runtime.followup`.",
+        "Follow-up input HTTP failure, timeout, empty receipt, or server disconnection does not reject an otherwise accepted runtime invocation, wait for network delivery, or invoke the prompt more than once; later retry makes the original input visible when positively accepted.",
+        "Operation-correlated `session.followup_completed` and `session.followup_failed` outcomes enter the same logical Session FIFO after input, preserve status/error/completion fields, and remain independently pending when both input and outcome delivery fail.",
+        "Workflow and generic follow-up targets use the same outbox route selection and receipt acknowledgement policy; stale physical bindings remain attached to their original records and do not block unrelated Session queues.",
+        "On first load, each valid version-1 `.mohist/runner-state/followup-failures.json` entry is mapped to the equivalent terminal event with deterministic ID `legacy-followup-terminal:{operationId}`, merged by ID, and persisted in the new snapshot before the legacy file is marked migrated.",
+        "A simulated crash at each migration boundary followed by another load produces one pending record per legacy operation and loses none; invalid or unreadable legacy/new state makes delivery unavailable rather than silently discarding facts or reverting to fire-and-forget behavior.",
+        "`FollowupFailureOutbox` and its direct/fire-and-forget event emission paths are removed after migration, and RunnerHost/RunnerSignalRClient use only the shared outbox for follow-up input and terminal lifecycle delivery.",
+        "Focused follow-up specs cover Workflow and generic targets, input upload failure with exactly one runtime invocation, input/outcome ordering, dual delivery failure, empty receipts, restart/reconnect recovery, idempotent legacy import, and retry isolation using in-memory persistence and fake timers only.",
+        "The obsolete real-filesystem `FollowupFailureOutbox` test is replaced, not duplicated, and existing follow-up command acceptance, unavailable/missing runtime behavior, and terminal outcome regressions remain green.",
+        "`npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass and leave no Git-visible generated changes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Follow-up input and terminal delivery through the shared AgentSession outbox, idempotent legacy terminal-state migration, removal of `FollowupFailureOutbox`, and focused Workflow/generic follow-up recovery tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Consumes T-001's outbox, lifecycle, target-key, and receipt contracts; do not add a second queue or retry `runtime.followup`. Pairwise dependency analysis: T-002 consumes T-001, T-001 consumes no task output, priorities are strictly ordered (1 then 2), and the resulting graph T-001 -> T-002 is acyclic. Preserve new-format pending state during rollback; an older runner cannot deliver newly queued Workflow/input records."
+    }
+  ]
+}
