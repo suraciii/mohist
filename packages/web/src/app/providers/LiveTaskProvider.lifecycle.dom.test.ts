@@ -15,9 +15,10 @@ import { useLiveTask } from '../../entities/issue/model/live-task'
 import { TEST_PROJECT, makeBaseIssue } from './_liveTaskProviderTestUtils'
 
 let eventsConnectionCalls: Parameters<EventsConnectionHook>[] = []
+let reconnectVersion = 0
 const eventsConnectionHook: EventsConnectionHook = (...args) => {
   eventsConnectionCalls.push(args)
-  return { status: 'disconnected', connection: null, reconnectVersion: 0 }
+  return { status: 'disconnected', connection: null, reconnectVersion }
 }
 const viewedIssueRef = { current: null as number | null }
 const viewedIssueHook: ViewedIssueHook = () => viewedIssueRef
@@ -29,6 +30,7 @@ beforeEach(() => {
   vi.mocked(toast.error).mockClear()
   vi.mocked(toast.success).mockClear()
   eventsConnectionCalls = []
+  reconnectVersion = 0
   viewedIssueRef.current = null
   pathname = '/'
 })
@@ -46,7 +48,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     return makeBaseIssue(id, number)
   }
 
-  function mountWith(queryClient: QueryClient, stateProbe?: { current: { rebaseConflict: unknown } | null }) {
+  function mountWith(queryClient: QueryClient, stateProbe?: { current: { rebaseConflict: unknown; eventsReconnectVersion: number } | null }) {
     const probe = stateProbe ?? { current: null }
     function StateProbe(): null {
       probe.current = useLiveTask()
@@ -87,7 +89,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     const rebaseEvents: RebaseEvent[] = []
     const offRebase = onRebaseEvent((event) => rebaseEvents.push(event))
 
-    const stateProbe: { current: { rebaseConflict: unknown } | null } = { current: null }
+    const stateProbe: { current: { rebaseConflict: unknown; eventsReconnectVersion: number } | null } = { current: null }
     const handleEvent = mountWith(queryClient, stateProbe)
 
     // First seed the conflict via a rebase-failed event so the subsequent
@@ -167,7 +169,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     const rebaseEvents: RebaseEvent[] = []
     const offRebase = onRebaseEvent((event) => rebaseEvents.push(event))
 
-    const stateProbe: { current: { rebaseConflict: unknown } | null } = { current: null }
+    const stateProbe: { current: { rebaseConflict: unknown; eventsReconnectVersion: number } | null } = { current: null }
     const handleEvent = mountWith(queryClient, stateProbe)
 
     act(() => {
@@ -289,6 +291,15 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 5, TEST_PROJECT.id] })
 
     offRebase()
+  })
+  it('exposes the events reconnect version through LiveTaskState', () => {
+    reconnectVersion = 3
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const stateProbe: { current: { rebaseConflict: unknown; eventsReconnectVersion: number } | null } = { current: null }
+
+    mountWith(queryClient, stateProbe)
+
+    expect(stateProbe.current?.eventsReconnectVersion).toBe(3)
   })
 })
 

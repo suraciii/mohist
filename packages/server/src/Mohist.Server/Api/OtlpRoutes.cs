@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Otel;
@@ -34,18 +33,11 @@ public static class OtlpRoutes
         if (!otelOptions.Enabled)
             return app;
 
-        var otlpPort = otelOptions.Port;
-
         var group = app.MapGroup("");
 
         group.MapPost(OtlpTracesPath, async (HttpContext context, TraceIngester ingester, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("Mohist.Server.Api.OtlpRoutes");
-
-            if (ResolveLocalPort(context) != otlpPort)
-            {
-                return Results.NotFound();
-            }
 
             var request = context.Request;
             var contentType = ResolveContentType(request.ContentType);
@@ -127,15 +119,6 @@ public static class OtlpRoutes
         return semi < 0 ? raw.Trim() : raw[..semi].Trim();
     }
 
-    private static int ResolveLocalPort(HttpContext context)
-    {
-        if (context.Connection.LocalPort > 0)
-            return context.Connection.LocalPort;
-        if (context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
-            && int.TryParse(value, out var localPort))
-            return localPort;
-        return 0;
-    }
 }
 
 /// <summary>

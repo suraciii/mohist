@@ -83,12 +83,10 @@ public sealed class OtelPortIsolationMiddleware
 
     private static int ResolveLocalPort(HttpContext context)
     {
-        if (context.Connection.LocalPort > 0)
-            return context.Connection.LocalPort;
         if (context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
             && int.TryParse(value, out var localPort))
             return localPort;
-        return 0;
+        return context.Connection.LocalPort;
     }
 
     private static bool IsOtlpPath(PathString path)
