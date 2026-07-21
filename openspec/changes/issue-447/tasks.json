@@ -1,0 +1,28 @@
+{
+  "project": "mohist-local",
+  "description": "Narrow Runner Action capability injection and route Action workflow effects through completed task results.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement capability-gated Action execution",
+      "spec": "specs/action-capabilities/spec.md#Action manifests declare non-default capabilities; specs/action-result-effects/spec.md#Capability-gated Action results request workflow effects",
+      "description": "Make manifest capabilities the Runner's executable Action boundary, replace broad Action contexts with validated inputs plus a narrow host, and migrate every built-in Action in the same switchover. Move OpenCode runtime/session work behind the agent-turn capability, replace name-based promise projection, and carry authorized OpenSpec task additions and variable writes as private result effects applied by the executor after its postconditions.",
+      "acceptanceCriteria": [
+        "Manifests validate the closed agent-turn, add-tasks, and write-vars capability set; an Action receives only the default host and its declared capabilities, with no server, runtime, variables, recovery, or dispatch metadata exposure.",
+        "mohist/opencode preserves its turn/session behavior, public output, and business errors while agent-turn capability declaration, not an Action-name list, controls private turn-fact completion projection.",
+        "Result normalization rejects malformed or unauthorized effects with unexpected-error; checks cannot silently apply effects; Action effects never enter public output, recovery matching, captured outputs, or artifacts.",
+        "mohist/openspec-tasks reports generated follow-up tasks through the completed task result without directly calling the server; failed completion or executor postconditions suppress task additions.",
+        "Authorized variable effects and declarative setVars are applied through one Run Variables patch after postconditions, with setVars taking precedence on conflicts; a patch failure fails the task and suppresses additions.",
+        "Focused Runner unit/spec coverage exercises manifest capability validation, host visibility, agent-turn projection, unauthorized effects, deferred task additions, variable patch precedence and failure, and preserved OpenSpec behavior using fakes only.",
+        "npm run typecheck -w packages/runner and npm test -w packages/runner pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Capability-gated Runner Action host, result-effect pipeline, migrated built-in Actions, and focused regression coverage under packages/runner/.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "All Action call sites must switch atomically because retaining the old ActionContext overload would preserve the forbidden capability surface. This task covers every requirement in both capability specs and design decisions 1-5."
+    }
+  ]
+}
