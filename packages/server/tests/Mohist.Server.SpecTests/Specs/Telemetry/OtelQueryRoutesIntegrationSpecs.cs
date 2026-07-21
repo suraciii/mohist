@@ -440,6 +440,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         Assert.True(
             response.StatusCode == HttpStatusCode.OK,
             $"Expected OK but got {(int)response.StatusCode}: {responseBody}");
+        AssertResponseWithinByteCap(responseBody);
 
         using var doc = JsonDocument.Parse(responseBody);
         var data = doc.RootElement.GetProperty("data");
@@ -466,7 +467,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var responseBody = await response.Content.ReadAsStringAsync();
+        AssertResponseWithinByteCap(responseBody);
+        using var doc = JsonDocument.Parse(responseBody);
         var data = doc.RootElement.GetProperty("data");
         var rows = data.GetProperty("rows");
         Assert.True(rows.GetArrayLength() < TraceQuerier.MaxQueryResponseRows);
@@ -646,5 +649,13 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     {
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return doc.RootElement.GetProperty("code").GetString();
+    }
+
+    private static void AssertResponseWithinByteCap(string responseBody)
+    {
+        Assert.InRange(
+            Encoding.UTF8.GetByteCount(responseBody),
+            0,
+            TraceQuerier.MaxQueryResponseBytes);
     }
 }

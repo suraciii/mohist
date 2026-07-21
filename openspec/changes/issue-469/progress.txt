@@ -31,6 +31,13 @@
 - CLI path (`packages/cli/.../MohistCliCommands.Otel.cs`, `SqliteOtelQueryExecutor`) is untouched: its `IOtelQueryExecutor` (the CLI-internal interface) returns `OtelQueryResult(Columns, Rows)` with no row or byte budget and no truncation indicator. The HTTP-side `IOtelQueryExecutor` (in `TraceQuerier.cs`) is the only one that applies the caps.
 - Focused OTel tests: 81 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains unrelated and fails with actual 200.
 
+## Review fix 1: complete HTTP response byte bound
+
+- Replaced the row-only byte estimate with a conservative budget for the complete `ApiResponse<QueryResult>` JSON, including the response prefix, row separators, escaped property names, and the largest truncation suffix.
+- Known scalar values are measured with the server's JSON options; unknown provider object types are rejected as byte-truncated before materialization. TEXT and BLOB values continue to use SQLite length peeks.
+- Integration coverage now asserts the actual UTF-8 response body stays within `MaxQueryResponseBytes` for the large-cell and many-row byte-bound cases.
+- Focused OTel tests: 82 passed.
+
 ## Verify-check root cause and fix
 
 - After all three task commits landed, `dotnet test` on the SpecTests project surfaced seven regressions in `OtlpRoutesIntegrationSpecs` (`POST /otel/v1/traces` returning `NotFound` instead of `OK`) plus the long-standing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` (still failing with actual `200`), and an ArchTests size-ratchet violation on `OtelQueryRoutesIntegrationSpecs.cs`.

@@ -1,5 +1,7 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
 using static SQLitePCL.raw;
 
@@ -210,8 +212,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
         }
 
         var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
-        var accumulatedBytes = 0L;
-        var rowEnvelopeBytes = ComputeRowEnvelopeBytes(fieldNames);
+        var accumulatedBytes = ResponsePrefixBytes;
         while (await reader.ReadAsync(executionToken))
         {
             if (rows.Count >= MaxQueryResponseRows)
@@ -219,7 +220,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                 return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
             }
 
-            var estimatedRowBytes = rowEnvelopeBytes;
+            var estimatedRowBytes = ComputeRowBytes(fieldNames);
             var oversizedCell = false;
             for (var i = 0; i < fieldCount; i++)
             {
@@ -235,10 +236,12 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                     oversizedCell = true;
                     break;
                 }
-                estimatedRowBytes += cellBytes ?? ScalarCellEstimate;
+                estimatedRowBytes += cellBytes ?? 0;
             }
 
-            if (oversizedCell || accumulatedBytes + estimatedRowBytes > MaxQueryResponseBytes)
+            var separatorBytes = rows.Count == 0 ? 0 : 1;
+            if (oversizedCell
+                || accumulatedBytes + separatorBytes + estimatedRowBytes + MaxResponseSuffixBytes > MaxQueryResponseBytes)
             {
                 return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
             }
@@ -249,7 +252,7 @@ public sealed class TraceQuerier : IOtelQueryExecutor
                 row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             }
             rows.Add(row);
-            accumulatedBytes += estimatedRowBytes;
+            accumulatedBytes += separatorBytes + estimatedRowBytes;
         }
         return new QueryResult(rows, Truncated: false, TruncateReason: null);
     }
@@ -349,14 +352,12 @@ public sealed class TraceQuerier : IOtelQueryExecutor
         }
     }
 
-    private static long ComputeRowEnvelopeBytes(string[] fieldNames)
+    private static long ComputeRowBytes(string[] fieldNames)
     {
-        // { "col": v, "col": v, ... }
         long total = 2;
         for (var i = 0; i < fieldNames.Length; i++)
         {
-            total += System.Text.Encoding.UTF8.GetByteCount(fieldNames[i]);
-            total += 4; // "col":
+            total += fieldNames[i].Length * 6L + 3;
             if (i > 0)
                 total += 1; // ,
         }
@@ -381,10 +382,15 @@ public sealed class TraceQuerier : IOtelQueryExecutor
             // Base64 of n bytes fits in 4 * ceil(n / 3); wrap with quotes.
             return 2L + ((byteCount + 2) / 3) * 4L;
         }
-        return null;
+        if (type == typeof(object))
+            return long.MaxValue;
+
+        var value = reader.GetValue(ordinal);
+        return JsonSerializer.SerializeToUtf8Bytes(value, JSON.Options).LongLength;
     }
 
-    private const long ScalarCellEstimate = 32;
+    private const long ResponsePrefixBytes = 32;
+    private const long MaxResponseSuffixBytes = 50;
 
     private static string NormalizeSql(string raw)
     {
