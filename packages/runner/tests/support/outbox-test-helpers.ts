@@ -54,6 +54,13 @@ export function makeRecordingOutbox(options: FakeOutboxOptions = {}): OutboxHand
       records.push(internal)
       if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
     },
+    async enqueueProducedFactBatch(batch) {
+      for (const record of batch) {
+        const internal: RuntimeEventRecord = { ...record }
+        records.push(internal)
+      }
+      if (fileSystem) await fileSystem.writeAtomicText("outbox", JSON.stringify({ version: 1, entries: records }))
+    },
     async kick() {},
     async stop() {},
     snapshot() {

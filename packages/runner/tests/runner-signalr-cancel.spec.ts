@@ -214,6 +214,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       recover: async () => {},
       enqueueBeforeExecution: async () => {},
       enqueueProducedFact: async () => {},
+      enqueueProducedFactBatch: async () => {},
       kick: async () => {},
       stop: async () => {},
       snapshot() { return [] },
