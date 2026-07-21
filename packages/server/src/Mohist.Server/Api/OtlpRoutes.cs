@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Otel;
 using Mohist.Server.Otel.OtlpProtobuf;
 
@@ -129,12 +131,13 @@ public static class OtlpRoutes
 
     private static int ResolveLocalPort(HttpContext context)
     {
-        if (context.Connection.LocalPort > 0)
-            return context.Connection.LocalPort;
-        if (context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
+        var isTesting = context.RequestServices.GetRequiredService<IHostEnvironment>()
+            .IsEnvironment(MohistHostEnvironment.Testing);
+        if (isTesting
+            && context.Request.Headers.TryGetValue("X-Mohist-Test-Local-Port", out var value)
             && int.TryParse(value, out var localPort))
             return localPort;
-        return 0;
+        return context.Connection.LocalPort;
     }
 }
 

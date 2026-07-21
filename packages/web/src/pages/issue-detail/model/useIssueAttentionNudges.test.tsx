@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { useIssueAttentionNudges } from './useIssueAttentionNudges'
+import { restoreScopedProperties, setScopedValue } from '../../../../tests/support/scoped-property'
 
 const issueNumber = 14
 
@@ -21,7 +22,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1280 })
+  restoreScopedProperties()
 })
 
 describe('useIssueAttentionNudges', () => {
@@ -88,7 +89,7 @@ describe('useIssueAttentionNudges', () => {
   })
 
   it('fires the same nudge at phone width', () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 })
+    setScopedValue(window, 'innerWidth', 390)
     const hook = renderNudges('running')
 
     act(() => hook.rerender({ currentSummary: 'blocked', currentIssueNumber: issueNumber }))
