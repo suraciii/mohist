@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
 import { renderTemplate } from "../src/core/template.js"
 import "../src/core/prompt-registry.js"
@@ -35,7 +35,10 @@ describe("mohist/openspec-tasks", () => {
     expect(output.loaded).toBe(1)
     expect((result as any).effects?.addTasks).toBeTruthy()
     expect(loadedTasks[0].uses).toBe("mohist/opencode")
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
   })
 
   it("OpenSpecTaskWithoutExplicitPrompt_PromptLoaderSpecResolvesThroughRegisteredLoader", async () => {
@@ -103,7 +106,10 @@ describe("mohist/openspec-tasks", () => {
 
     expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBe("${{ vars.agent }}")
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
   })
 
   it("OpenSpecTaskWithoutOptionsTemplate_LoadsTaskWithoutOptions", async () => {
@@ -173,7 +179,10 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.type).toBeUndefined()
     expect(loadedWith.requireFiles).toBeUndefined()
     expect(loadedWith.requireMarkers).toBeUndefined()
-    expect(loadedWith.prompt).toBeUndefined()
+    expect(loadedWith.prompt).toEqual({
+      uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+      with: { file: tasksPath, items: "tasks", taskId: "T-001", base: "${{ prompts.build }}" },
+    })
     const promptAsText = JSON.stringify(loadedWith)
     expect(promptAsText).not.toContain("${{ prompts.xxx }}")
     expect(promptAsText).not.toContain("Add skill asset manifest support")

@@ -102,7 +102,7 @@ export async function openspecTasksAction(inputs: JsonObject, host: ActionHost):
     if (!id?.trim()) return []
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
-    const mergedWith = mergeTaskWith(defaultWith, task, id)
+    const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath })
     const expect = mergeTaskExpect(task)
     return [{ id, title, uses, with: mergedWith ?? null, expect }]
   })
@@ -308,12 +308,33 @@ function mergeTaskWith(
   defaultWith: JsonObject | undefined,
   task: JsonObject,
   taskId: string | undefined,
+  loaderConfig: { file: string; items: string },
 ) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
-  if (merged.prompt !== undefined) merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
+  if (merged.prompt === undefined) {
+    merged.prompt = buildOpenSpecTaskPromptSpec(taskId, loaderConfig)
+  } else {
+    merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
+  }
   return Object.keys(merged).length === 0 ? null : merged
+}
+
+function buildOpenSpecTaskPromptSpec(
+  taskId: string | undefined,
+  loaderConfig: { file: string; items: string },
+): JsonObject {
+  const loaderWith: JsonObject = {
+    file: loaderConfig.file,
+    items: loaderConfig.items,
+    base: "${{ prompts.build }}",
+  }
+  if (taskId?.trim()) loaderWith["taskId"] = taskId
+  return {
+    uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+    with: loaderWith,
+  }
 }
 
 function mergeTaskExpect(task: JsonObject): JsonObject | null {
