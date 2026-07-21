@@ -6,15 +6,9 @@ Reviewed the final product change against issue 450's seven acceptance criteria,
 
 ## Findings
 
-### F1. Unexpected `runTurn` failures lose terminal-reporting failure diagnostics
+No blocking findings.
 
-**What**: The catch around `runtime.runTurn()` in `packages/runner/src/actions/pi.ts:84-93` now attempts to report the buffered events plus `session.closed`, but catches any failure from `reportWithTerminalSignal()` with an empty handler (`catch { /* best effort */ }`). It then returns `fail("turn-failed", actionErrorMessage(error), ...)` without recording that terminal reporting failed.
-
-**Impact**: If an unexpected runtime/SDK exception occurs after `session.input` was accepted and the terminal batch is rejected, times out, or returns malformed acceptance data, the Action result contains only the original `turn-failed` message. The Session may not be terminal, but the caller receives no sanitized `session-reporting-failed` diagnostic. This violates design D7 and the session spec requirement that terminal-reporting failure preserve the original runtime error while attaching an observable, sanitized reporting-failure diagnostic.
-
-**Where to fix**: Preserve the original `turn-failed` code/message as the primary result, but include a stable sanitized indication that terminal reporting failed in the returned error/diagnostic contract. Keep the best-effort terminal attempt and do not claim that the Session became terminal.
-
-**Severity**: Blocking — this is an explicitly specified failure semantic for a submitted turn.
+The previously reported provider-policy readiness gap is resolved: `RunnerHost` preserves invalid-policy diagnostics and prevents work polling/claiming until configuration is valid. The previously reported unexpected `runTurn` failure path is also resolved: it attempts terminal reporting and preserves the original `turn-failed` result while exposing a stable sanitized terminal-reporting failure notice when that report is rejected.
 
 ## Coverage
 
@@ -28,13 +22,13 @@ Reviewed the final product change against issue 450's seven acceptance criteria,
 
 ## Structural Checks
 
-- Runner typecheck and tests pass: 101 files, 1,177 tests.
-- Full `npm test` passes for CLI, Server, Web, and Runner suites.
+- Runner typecheck and tests pass: 101 files, 1,178 tests.
+- CLI, Server Unit, Server Arch, Web, and Runner suites pass in the completed verification runs; the full repository command also encountered four pre-existing OTEL integration host-startup timeouts in the environment.
 - Pi SDK imports remain confined to `packages/runner/src/runtime/pi/`.
 - The process-local Workflow Session coordinator remains runtime-neutral and non-durable.
 
 ## Verdict
 
-F1 is a remaining blocking failure-path gap.
+No problems must be fixed before merge.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
