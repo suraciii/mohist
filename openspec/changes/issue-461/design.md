@@ -12,7 +12,7 @@ This is runner infrastructure for reporting Session facts. The Server remains th
 
 - Durably retain Workflow turn events and follow-up user input on the originating runner until positively accepted, while preserving the existing operation-fenced settlement rule for follow-up terminal outcomes.
 - Resume pending delivery after transient failure, runner restart, and server reconnection.
-- Preserve FIFO order per logical AgentSession while allowing unrelated sessions to progress independently.
+- Preserve FIFO order within each outbox-managed Workflow or generic-follow-up producer sequence while allowing independent sequences to progress.
 - Keep network delivery and retry outside the Workflow Action result and follow-up runtime invocation.
 - Preserve the existing durable guarantee for operation-correlated follow-up terminal outcomes.
 
@@ -24,6 +24,7 @@ This is runner infrastructure for reporting Session facts. The Server remains th
 - Recovering a follow-up runtime invocation interrupted by runner process failure.
 - Recovering a Workflow event when the runner terminates before that event's asynchronous local enqueue commits.
 - A general-purpose runner outbox for work results, task logs, or other transports.
+- Migrating AgentJob input/activity reporting or imposing new cross-producer ordering between AgentJob and generic follow-up events.
 - Administrative eviction, dead-lettering, or replay controls for permanently rejected content and Workflow terminal events.
 
 ## Decisions
@@ -43,7 +44,9 @@ Alternatives considered:
 
 `enqueue(record)` assigns the record's order synchronously, appends it to the in-memory state, and resolves only after an atomic snapshot containing that record has been persisted under `.mohist/runner-state/runtime-events.json`. Adjacent mutations may be coalesced into one snapshot, but every returned enqueue promise must be covered by a completed write. The snapshot/import store depends on a narrow `RuntimeEventOutboxFileSystem` port for read, owner-only temporary write, atomic rename, and legacy-file marking. Production uses a Node filesystem adapter; tests run the same store and importer against a recording in-memory implementation of that port.
 
-The ordered entry list is the persistence authority for sequence position. A canonical sequence key is derived in one place from the logical target fields: `(projectId, workflowRunId, sessionName)` for Workflow sessions or `(projectId, sessionId)` for generic sessions. The optional binding carried by a follow-up command is not persisted as part of the target; the original `runtimeSessionId` is stored separately and is never recomputed during retry.
+The ordered entry list is the persistence authority for sequence position. A canonical sequence key is derived in one place from producer family plus target. `workflow-session:(projectId, workflowRunId, sessionName)` contains Workflow turn events and Workflow-targeted follow-ups. `generic-followup:(projectId, sessionId)` contains generic follow-up input and operation-correlated outcomes. The optional binding carried by a follow-up command is not persisted as part of the target; the original `runtimeSessionId` is stored separately and is never recomputed during retry.
+
+AgentJob input/activity remains on `AgentJobExecutor`'s existing direct serialized upload chain. It does not enter `generic-followup`, so the design preserves existing source-local order but makes no new ordering promise between concurrent AgentJob and generic follow-up producers. Moving AgentJob into the durable outbox would expand this bug fix into AgentJob execution semantics and is deferred.
 
 The outbox exposes two producer operations over the same ordered state. `enqueueBeforeExecution` attempts an atomic snapshot and, on failure, removes the uncommitted input record before rejecting so persistence recovery cannot later deliver an input whose runtime invocation never occurred. `enqueueProducedFact` retains an already-produced activity or terminal fact in memory when its snapshot fails, marks the outbox unhealthy, schedules local persistence recovery, and rejects its promise for observability.
 
@@ -75,16 +78,17 @@ Alternatives considered:
 - Batch a complete pending suffix: rejected because type-only receipts cannot identify individual repeated event types reliably and one rejected head must fence all later events in that sequence.
 - Add delivery IDs to the Server API: rejected by the issue's explicit server idempotency non-goal.
 
-### D4: Drain one FIFO per logical AgentSession with bounded cross-session concurrency
+### D4: Drain one FIFO per managed producer sequence with bounded cross-sequence concurrency
 
-At most one head per sequence key is in flight. After the head's acknowledgement policy is satisfied, acknowledgement re-enters the serialized mutation path, verifies that the same record is still the head, removes it, persists the new snapshot, and advances that sequence. A failed or unaccepted head fences later records for that logical Session, including records for a newer physical binding. Different sequence keys remain eligible and drain with a small bounded concurrency so one stale Session cannot stop all delivery.
+At most one head per managed sequence key is in flight. After the head's acknowledgement policy is satisfied, acknowledgement re-enters the serialized mutation path, verifies that the same record is still the head, removes it, persists the new snapshot, and advances that sequence. A failed or unaccepted head fences later records in that managed sequence, including records for a newer physical binding. Different sequence keys remain eligible and drain with a small bounded concurrency so one stale sequence cannot stop all delivery.
 
 The outbox uses the existing bounded request timeout and retry timer pattern. Enqueue, startup, automatic reconnect, and forced reconnect all call the same idempotent `kick()` operation. Concurrent kicks share in-flight sequence work rather than starting duplicate requests.
 
 Alternatives considered:
 
 - One global FIFO: rejected because one stale binding would block every AgentSession on the runner.
-- Key queues by `runtimeSessionId`: rejected because later turns and binding changes belong to the same logical transcript; it would allow a newer binding to overtake an older pending turn.
+- Key every queue only by logical AgentSession target: rejected because generic AgentJob reports remain outside this issue's outbox; such a key would falsely imply ordering across producers the outbox does not control. Workflow and generic-follow-up producer families are explicit in the key.
+- Key queues by `runtimeSessionId`: rejected because later Workflow turns and binding changes belong to the same logical transcript; it would allow a newer binding to overtake an older pending turn.
 - Retarget a stale head to the current binding: rejected because it could attach old content or a delayed close to the wrong turn.
 
 ### D5: Make outbox readiness part of runner lifecycle, not Action completion
@@ -113,7 +117,7 @@ Alternatives considered:
 
 Outbox unit tests will share one recording `RuntimeEventOutboxFileSystem` across two real snapshot-store/outbox instances to model restart. They will cover serialization, owner-only write options, temporary-write/rename ordering, matching and empty content receipts, successful empty terminal receipts including stale binding, timeout/retry with fake timers, per-sequence ordering, cross-sequence progress, concurrent kicks, snapshot failure, autonomous full-state recovery without a new enqueue, startup-load recovery without empty overwrite, and idempotent legacy import at every write/rename/marker boundary. No test will instantiate the Node filesystem adapter or touch a temporary directory.
 
-Runner specs will verify that Workflow input/activity/close and follow-up input/outcome enter the shared outbox in order, that runtime execution and Workflow results do not await HTTP delivery, and that retry never invokes `runtime.followup` again. Workflow integration tests will reject the input snapshot before runtime invocation and reject activity/close snapshots after multiple synchronous callbacks, proving no orphan input and preservation of the original runtime result. Host specs will prove an unhealthy outbox prevents polling/claiming and autonomous health recovery resumes it without new work; SignalR follow-up specs will prove an unhealthy outbox returns `unavailable` before runtime invocation and later health recovery admits a command. Connection tests will verify receipt parsing for both endpoint shapes, and lifecycle tests will verify startup and reconnect recovery kicks. Existing real-filesystem `FollowupFailureOutbox` tests will be replaced rather than retained beside the new suite.
+Runner specs will verify that Workflow input/activity/close and follow-up input/outcome enter their managed sequences in order, that independent sequences continue, that runtime execution and Workflow results do not await HTTP delivery, and that retry never invokes `runtime.followup` again. Workflow integration tests will reject the input snapshot before runtime invocation and reject activity/close snapshots after multiple synchronous callbacks, proving no orphan input and preservation of the original runtime result. Generic follow-up regression coverage will prove AgentJob's direct chain remains unchanged and neither producer gains a cross-producer wait. Host specs will prove an unhealthy outbox prevents polling/claiming and autonomous health recovery resumes it without new work; SignalR follow-up specs will prove an unhealthy outbox returns `unavailable` before runtime invocation and later health recovery admits a command. Connection tests will verify receipt parsing for both endpoint shapes, and lifecycle tests will verify startup and reconnect recovery kicks. Existing real-filesystem `FollowupFailureOutbox` tests will be replaced rather than retained beside the new suite.
 
 ## Risks / Trade-offs
 
@@ -126,6 +130,7 @@ Runner specs will verify that Workflow input/activity/close and follow-up input/
 - [Disk-full, permission, or corruption failures can defeat local durability] -> Use atomic replacement and restrictive file permissions, fail runner readiness when state cannot be loaded, gate host claims and follow-up acceptance on outbox health, retry full-state persistence autonomously, and never silently switch to best-effort upload.
 - [The outbox stores prompts and assistant/tool payloads on runner disk] -> Keep the file under runner-owned `.mohist/runner-state`, use owner-only permissions, and exclude payloads from diagnostics.
 - [A crash during legacy import could leave both files present] -> Use deterministic imported IDs and persist the new snapshot before marking the old file migrated, making import replay-safe.
+- [A generic follow-up can interleave with AgentJob direct reporting for the same AgentSession] -> Preserve source-local ordering and existing behavior; do not claim a cross-producer FIFO. Migrating AgentJob reporting is a separate change.
 
 ## Migration Plan
 

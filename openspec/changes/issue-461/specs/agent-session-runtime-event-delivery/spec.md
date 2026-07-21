@@ -57,9 +57,13 @@ The runner SHALL load and resume runtime-event deliveries whose local enqueue co
 - **THEN** the runner SHALL settle that terminal record under its successful-response policy
 - **AND** SHALL NOT infer that the terminal fact was persisted
 
-### Requirement: Delivery preserves event order without coupling independent sessions
+### Requirement: Delivery preserves order within each managed producer sequence
 
-For each AgentSession event sequence, the runner SHALL attempt delivery in production order. A turn's `session.input` MUST be positively accepted before its assistant, reasoning, tool, usage, model, or terminal events can be delivered, and its terminal event MUST follow all preceding events from that turn. An unaccepted event MUST prevent later events in the same sequence from overtaking it, but MUST NOT prevent pending sequences for other AgentSessions from making progress.
+For each outbox-managed producer sequence, the runner SHALL attempt delivery in production order. A Workflow sequence consists of Workflow turn events and Workflow-targeted follow-up events for one `(projectId, workflowRunId, sessionName)` target. A generic follow-up sequence consists only of follow-up input and operation-correlated outcome events for one `(projectId, sessionId)` target.
+
+A Workflow turn's `session.input` MUST be positively accepted before its assistant, reasoning, tool, usage, model, or terminal events can be delivered, and its terminal event MUST follow all preceding events from that turn. An unaccepted event MUST prevent later events in the same managed sequence from overtaking it, but MUST NOT prevent independent managed sequences from making progress.
+
+AgentJob input and activity continue through their existing direct reporting chain and are not part of the generic follow-up sequence. This change SHALL NOT promise or alter cross-producer ordering between AgentJob reports and generic follow-up events; each producer SHALL retain its existing source-local order.
 
 #### Scenario: Middle event fails during a Workflow turn
 
@@ -72,6 +76,12 @@ For each AgentSession event sequence, the runner SHALL attempt delivery in produ
 - **WHEN** one AgentSession has an unaccepted pending event while another AgentSession has deliverable pending events
 - **THEN** the first sequence SHALL preserve its order
 - **AND** the second AgentSession's sequence SHALL remain eligible for delivery
+
+#### Scenario: Generic follow-up overlaps AgentJob reporting
+
+- **WHEN** an AgentJob direct report and a generic follow-up event for the same AgentSession are concurrently in flight
+- **THEN** the AgentJob chain and generic follow-up sequence SHALL each preserve their own production order
+- **AND** this change SHALL NOT require either producer's event to overtake or wait for the other producer
 
 ### Requirement: Event delivery does not control runtime execution
 
