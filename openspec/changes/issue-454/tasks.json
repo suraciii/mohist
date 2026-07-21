@@ -61,7 +61,7 @@
         "When diff data is available, one Changes section identifies head/base and displays files changed, additions, and deletions while retaining changed-files navigation; no equivalent branch/count summary appears elsewhere in the ordinary reading flow.",
         "When workspace state prevents diff and commit inspection, one consequence-oriented Changes message identifies what cannot be inspected, IssueCommitsSection does not repeat the workspace message, and output never contains duplicated text such as Workspace unavailable / Workspace unavailable.",
         "IssueCommitsSection retains its current available and empty behavior and position but renders no separate shared-workspace failure; transport failure and available:false cases remain distinguishable in focused page tests.",
-        "LatestArtifactsPanel is the sole ordinary artifact collection at a stable reading-flow position across non-approval states, retains list/loading/error/empty/open-content behavior, and exposes the final artifacts section boundary used by navigation.",
+        "LatestArtifactsPanel is the sole ordinary artifact collection at a stable reading-flow position across non-approval states, retains list/loading/error/empty/open-content behavior, and keeps the non-approval artifacts section boundary mounted with an explicit empty state when no workflow run or artifacts exist.",
         "ArtifactOpener has one full-list contract; compact mode, compact-only props/exports/markup, and superseded tests are removed, while approval packages continue to render their required inline evidence without restoring a duplicate ordinary collection.",
         "MSW-backed issue-detail tests assert exact Changes and Artifacts section cardinality, reading-flow order, available/empty/degraded matrices, artifact opening, approval/non-approval behavior, and absence of old banner, fallback, and compact evidence paths.",
         "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, and npm run test:run -w packages/web pass with no Git-visible generated changes."
@@ -107,12 +107,13 @@
       "description": "Add route-local fragment navigation for the final Workflow, Artifacts, Activity, and Comments destinations. Use React Router location state as the sole authority, reveal query-backed sections after asynchronous rendering, and make the existing Activity dialog controlled by #activity while retaining its reusable uncontrolled mode.",
       "acceptanceCriteria": [
         "The final Workflow, Artifacts, Activity, and Comments destinations expose stable workflow, artifacts, activity, and comments DOM IDs and canonical #workflow, #artifacts, #activity, and #comments links without changing project scope, pathname, search, or the changed-files route.",
+        "Outside approval, LatestArtifactsPanel owns the sole artifacts ID; during approval, the ordinary panel is absent and ApprovalReviewPackage's inline artifact-evidence region owns the sole artifacts ID even while evidence is loading, missing, or unavailable.",
         "A route-local issue-detail model reads location.hash and reveals #workflow, #artifacts, and #comments after their asynchronous content is ready; direct-load and already-open hash changes both target the requested section without navigating away from the issue.",
         "ActivityDialog supports controlled open/onOpenChange composition while retaining its current uncontrolled default; on the issue page #activity opens and enables the timeline without a trigger click, the ordinary trigger navigates to #activity, and close clears only the hash idempotently.",
         "The URL hash is the only page-level Activity/section state, browser back/forward updates the visible destination, and no duplicate activityOpen or section-selection state can diverge from the URL.",
-        "Unknown fragments leave the issue page usable and do not open Activity or scroll to an unrelated section; composite-parent and conditionally absent workflow/artifact destinations fail safely without exceptions or redirecting the route.",
-        "Focused route-model, controlled/uncontrolled ActivityDialog, and MSW-backed IssueDetailPage tests cover all four direct fragments, async target readiness, in-page fragment changes, open/close/back behavior, project/issue identity preservation, and unknown/absent targets.",
-        "A focused production-build Playwright spec opens separate phone and desktop issue URLs for #workflow, #artifacts, #activity, and #comments and proves each destination is visible, Activity opens without a trigger click, section content is not obscured or overlapped, and the document has no horizontal overflow.",
+        "Unknown fragments leave the issue page usable and do not open Activity or scroll to an unrelated section; composite parents with no workflow destinations fail safely, while every workflow-capable approval and non-approval state provides a visible artifacts target.",
+        "Focused route-model, controlled/uncontrolled ActivityDialog, ApprovalReviewPackage, and MSW-backed IssueDetailPage tests cover all four direct fragments, non-approval and approval #artifacts ownership/cardinality, unavailable approval evidence, async target readiness, in-page fragment changes, open/close/back behavior, project/issue identity preservation, and unknown/absent targets.",
+        "A focused production-build Playwright spec opens separate phone and desktop issue URLs for #workflow, non-approval #artifacts, approval #artifacts, #activity, and #comments and proves each destination is visible, Activity opens without a trigger click, section content is not obscured or overlapped, and the document has no horizontal overflow.",
         "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
       ],
       "priority": 2,
@@ -124,7 +125,7 @@
         "T-003"
       ],
       "passes": false,
-      "notes": "Consumes T-002's final Workflow boundary and T-003's final Artifacts boundary. Keep navigation page-local; do not add nested routes, depend only on native initial anchor scrolling, or duplicate the hash in component state. The DAG has four priority-1 roots and one priority-2 leaf and is acyclic."
+      "notes": "Consumes T-002's final Workflow boundary and T-003's ordinary Artifacts boundary, and assigns the same mutually exclusive ID to ApprovalReviewPackage evidence during approval. Keep navigation page-local; do not add nested routes, allow #artifacts to no-op on workflow-capable issues, depend only on native initial anchor scrolling, or duplicate the hash in component state. The DAG has four priority-1 roots and one priority-2 leaf and is acyclic."
     }
   ]
 }

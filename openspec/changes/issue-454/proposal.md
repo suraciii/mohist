@@ -9,7 +9,7 @@ The issue detail page repeats workflow tasks, diff state, and artifacts while hi
 - Merge the inline diff summary, changed-files summary, and duplicated unavailable messages into one Changes section with one consequence-oriented degraded state.
 - Replace the compact and full artifact placements with one Artifacts section at a stable point in the reading flow, without adding approval-time inline artifact reading.
 - Separate issue-body frontmatter from description content in rendering, previews, and editing. Present recommendation fields as recommendations, keep current Issue risk and workflow profile authoritative when body defaults disagree, and keep malformed or unclosed leading envelopes out of the reading flow.
-- Give workflow, artifacts, activity, and comments stable URL anchors, including a URL-addressable Activity view that opens or scrolls to the requested content.
+- Give workflow, artifacts, activity, and comments stable URL anchors, including a URL-addressable Activity view. `#artifacts` targets the ordinary Artifacts panel outside approval and the inline approval evidence during approval, so the destination remains visible without duplicating artifact collections.
 - Make activity entries identify the task or artifact they concern. New comments require a declared author that is validated, persisted, and returned with the comment; historical comments created before attribution show `Unknown author`.
 - **BREAKING** Comment creation through Web, API, and CLI now requires a nonblank author label because the current product has no authenticated user identity to derive one from.
 

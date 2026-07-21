@@ -45,7 +45,7 @@ Alternative considered: retain horizontal scrolling and add fades or scroll butt
 
 `IssueDiffFilesSection` will become the one Changes section and receive the diff query state needed to render available, loading, empty, and unavailable states. The separate diff banner and trailing concatenated diff/commit fallback are removed. When the workspace prevents both diff and commit inspection, the Changes message states both consequences once; `IssueCommitsSection` remains a separate section only when commit data is available and does not repeat the shared workspace error.
 
-`LatestArtifactsPanel` remains the ordinary reading-flow artifact owner and receives the `id="artifacts"` section boundary. `ArtifactOpener` will collapse to one full-list behavior; the unused compact mode, compact-only API, and duplicate evidence markup are removed. Approval packages continue to render their required inline evidence directly and do not reintroduce the ordinary artifact collection.
+`LatestArtifactsPanel` remains the ordinary reading-flow artifact owner outside approval and receives the `id="artifacts"` section boundary. The section boundary remains mounted when no workflow run or artifacts exist and renders the applicable empty state rather than returning `null`. `ArtifactOpener` will collapse to one full-list behavior; the unused compact mode, compact-only API, and duplicate evidence markup are removed. During approval the ordinary panel remains omitted, and the artifact-evidence region inside `ApprovalReviewPackage` receives `id="artifacts"`. These owners are mutually exclusive, so every workflow-capable issue state has one visible artifact destination and never duplicate IDs or collections. Loading, missing, and unavailable approval evidence still render inside the target region.
 
 Alternative considered: extract shared summary primitives and render them in multiple locations. Rejected because the requirement is one fact in one place; reusable formatting would make duplication easier rather than establish ownership.
 
@@ -66,7 +66,7 @@ Alternative considered: strip frontmatter independently in the description, prev
 
 ### 5. Derive section behavior from the React Router location
 
-`IssueDetailPage` will own a route-local section-navigation helper in its `model` segment. It reads `location.hash` with `useLocation`, observes the rendered-content readiness needed by each target, and calls `scrollIntoView` for `workflow`, `artifacts`, and `comments`. Stable DOM IDs provide native anchor semantics; the effect covers the asynchronous-render case where the browser attempts fragment scrolling before query-backed sections exist.
+`IssueDetailPage` will own a route-local section-navigation helper in its `model` segment. It reads `location.hash` with `useLocation`, observes the rendered-content readiness needed by each target, and calls `scrollIntoView` for `workflow`, `artifacts`, and `comments`. Stable DOM IDs provide native anchor semantics; the effect covers the asynchronous-render case where the browser attempts fragment scrolling before query-backed sections exist. The `artifacts` target is state-selected by composition: ordinary panel for non-approval, inline approval evidence for approval-required states.
 
 Activity remains a dialog but becomes controlled when composed by the issue page. `#activity` is the source of truth for its open state; the ordinary Activity trigger navigates to the same pathname/search with that hash, and closing clears the hash without changing project or issue identity. `ActivityDialog` accepts controlled `open`/`onOpenChange` props while retaining an uncontrolled default for other consumers. No parallel `activityOpen` page state is introduced.
 
@@ -92,6 +92,7 @@ Alternative considered: derive `Operator`, `You`, Web, or CLI from the request c
 - [Selected stage resets when timeline polling updates] -> Reset selection only when the issue identity or authoritative current-stage default changes, not for every timeline object refresh.
 - [The 2x2 mobile stage grid makes labels or durations overflow] -> Use fixed grid tracks, wrapping labels, and browser coverage at the longest supported labels and phone viewport.
 - [A fragment arrives before its query-backed section exists] -> Re-run the route-local reveal effect when issue/workflow/artifact readiness changes; keep stable IDs on persistent section boundaries.
+- [Approval and ordinary artifact regions both claim `#artifacts`] -> Render the two owners mutually exclusively and assert one DOM ID in approval and non-approval page tests.
 - [Opening or closing Activity creates URL/dialog feedback loops] -> Treat the hash as the only controlled state and make callbacks perform idempotent hash navigation.
 - [Frontmatter edits lose unknown keys or line endings] -> Preserve closed envelopes verbatim and replace only the post-envelope description; for unclosed envelopes, make insertion of one closing delimiter the sole repair. Lock BOM, CRLF, block scalar, conflict precedence, bounded malformed, unclosed, empty-description, and unknown-key cases with entity tests.
 - [Task events from invalidated or old attempts cannot resolve a title] -> Use `(stage, taskId)` lookup and visibly fall back to task ID; never return an anonymous `Task Started` label.
@@ -103,7 +104,7 @@ Alternative considered: derive `Operator`, `You`, Web, or CLI from the request c
 1. Move and extend the frontmatter parser under `entities/issue`, define authoritative-field precedence and unclosed-envelope repair, update create-issue imports through the entity public API, and add partition/recomposition tests before changing consumers.
 2. Merge log inspection into the canonical workflow task row, separate inspection from mutation state, make the stage selector responsive, remove `TaskProgressPanel`, and update workflow widget tests.
 3. Consolidate Changes and Artifacts sections and remove duplicate page composition and the unused compact artifact mode.
-4. Add stable section IDs and URL-derived Activity control, then cover direct fragments, in-page hash changes, and asynchronous targets in issue-detail specs.
+4. Add state-selected stable section IDs, including the approval evidence `#artifacts` target, and URL-derived Activity control; cover direct fragments, in-page hash changes, and asynchronous targets in issue-detail specs.
 5. Add activity subject resolution; migrate nullable comment-author storage and update server, Web, and CLI comment contracts, then cover declared and historical attribution end to end.
 6. Run Web FSD checks, typecheck, and focused unit/spec suites. Use browser tests for real phone-width stage reachability, title visibility, non-overlap, and fragment landing because those depend on layout and scrolling.
 

@@ -10,7 +10,7 @@ The issue detail page SHALL provide stable fragment identifiers for its Workflow
 
 ### Requirement: Direct section URLs reveal their destination
 
-Opening an issue detail URL with a supported section fragment SHALL reveal the requested destination after the issue data and conditional page content have rendered. Workflow, Artifacts, and Comments fragments SHALL bring their section into view. The Activity fragment SHALL make the Activity content visible, whether Activity is represented inline or in an addressable dialog.
+Opening an issue detail URL with a supported section fragment SHALL reveal the requested destination after the issue data and conditional page content have rendered. Workflow, Artifacts, and Comments fragments SHALL bring their section into view. `#artifacts` SHALL target the ordinary Artifacts section outside approval and the inline artifact-evidence region during approval; exactly one Artifacts destination SHALL own the fragment in either state. The Activity fragment SHALL make the Activity content visible, whether Activity is represented inline or in an addressable dialog.
 
 #### Scenario: Direct workflow link is opened
 
@@ -20,8 +20,15 @@ Opening an issue detail URL with a supported section fragment SHALL reveal the r
 
 #### Scenario: Direct artifacts link is opened
 
-- **WHEN** the user opens an issue detail URL ending in `#artifacts`
-- **THEN** the page SHALL bring the Artifacts section into view after it renders
+- **WHEN** the user opens a non-approval issue detail URL ending in `#artifacts`
+- **THEN** the page SHALL bring the ordinary Artifacts section into view after it renders
+- **AND** the artifacts destination SHALL remain represented by `#artifacts` in the URL
+
+#### Scenario: Direct artifacts link is opened during approval
+
+- **WHEN** the user opens an approval-required issue detail URL ending in `#artifacts`
+- **THEN** the page SHALL bring the approval package's inline artifact-evidence region into view after it renders
+- **AND** the page SHALL expose exactly one `artifacts` fragment target
 - **AND** the artifacts destination SHALL remain represented by `#artifacts` in the URL
 
 #### Scenario: Direct comments link is opened
