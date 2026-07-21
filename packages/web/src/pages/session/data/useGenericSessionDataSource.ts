@@ -81,12 +81,15 @@ export function useGenericSessionDataSource(
 
   const rawStatus = summary?.status ?? ''
   const apiStatusKind = meta?.statusKind
-  const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = summary == null
+    ? true
+    : (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const terminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'stopped' || rawStatus === 'cancelled'
   const runtimeLineage = summary?.runtimeSessionLineage ?? null
   const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
   const isCurrentRuntimeView = viewedRuntimeSessionId === summary?.runtimeSessionId
   const canFollowup = !terminal && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
+  const isHistoricalRuntimeView = !!requestedRuntimeSessionId
 
   const statusKind: StatusKind = meta
     ? (meta.statusKind ?? getSessionStatusKind(rawStatus, meta.lastActivityAt, isRunning))
@@ -121,6 +124,7 @@ export function useGenericSessionDataSource(
     sessionId,
     runtimeSessionId: requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? '',
     runtime: summary?.runtime ?? null,
+    isHistoricalRuntimeView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,

@@ -1,0 +1,36 @@
+## Codebase Patterns
+
+- `useSessionTranscript` is the shared realtime event matching hook. It subscribes to `onAgentEvent` for all transcript-relevant events and uses an inline `isCurrentSessionEvent` predicate to filter.
+- Both issue and generic session pages use the same `SessionDetailShell` component but have separate data source hooks (`useIssueSessionDataSource`, `useGenericSessionDataSource`).
+- Data source tests use dependency injection via page component props (e.g. `SessionPageDependencies.dataSource.useSessionTranscript`) and capture arguments in mocked implementations.
+- Shell components in tests must return React elements (`<></>`) not `null` in React 19.
+
+## T-001 Decisions & Gotchas
+
+### useSessionTranscript changes
+- Added `isHistoricalRuntimeView?: boolean` option (default `false`).
+- Extracted `matchesSessionEvent` as a pure function implementing the 5-rule precedence:
+  1. Non-empty event `sessionId` must match canonical `sessionId`; different value → reject.
+  2. Historical view (`isHistoricalRuntimeView === true`): both page and event MUST have `runtimeSessionId` and they must match. No fallback.
+  3. Both page and event have `runtimeSessionId`: must match (including runtime field if both present).
+  4. Page has `runtimeSessionId` but event omits it → reject.
+  5. Unanchored view (no page `runtimeSessionId`): accept if logical match proven (event `sessionId` matches). Event without `sessionId` → reject (ambiguous).
+- Added `isHistoricalRuntimeView` to the useEffect dependency array.
+
+### Issue data source changes
+- `sessionId` now prefers: `detail?.id` → `session?.id` → `decodedSessionId`. Never falls back to `decodedSessionName`.
+- Added `isHistoricalRuntimeView = !!searchParams.get('rt')`.
+- `isRunning` is tentatively `true` when both `detail` and `session` are null (initial loading), allowing the transcript subscription to start early.
+
+### Generic data source changes
+- Added `isHistoricalRuntimeView = !!requestedRuntimeSessionId`.
+- `isRunning` is tentatively `true` when `summary` is null (loading), allowing early subscription.
+
+### Existing test adaption
+- Existing test "ignores runtime events that provide only the logical session id" still passes under new rules (page has runtime session ID, event omits → reject).
+- Existing test "ignores events from a replaced runtime" still passes (different runtime session ID → reject).
+
+### New tests
+- `useSessionTranscript.test.tsx`: Added 8 new tests covering unanchored fallback, conflicting session, ambiguous identity, historical view acceptance/rejection, and strict runtime matching.
+- `useIssueSessionDataSource.test.tsx`: 6 tests covering canonical ID wiring, sessionName exclusion, isRunning tentatively-true during loading, and isHistoricalRuntimeView flag.
+- `useGenericSessionDataSource.test.tsx`: 6 tests covering canonical ID, summary-loading subscription, isHistoricalRuntimeView, and runtime passthrough.

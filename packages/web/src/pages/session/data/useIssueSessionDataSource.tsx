@@ -241,8 +241,11 @@ export function useIssueSessionDataSource(
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
-  const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = detail == null && session == null
+    ? true
+    : (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const runtimeSessionId = detail?.runtimeSessionId ?? session?.runtimeSessionId ?? ''
+  const isHistoricalRuntimeView = !!searchParams.get('rt')
 
   const statusKind: StatusKind = detail
     ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
@@ -259,9 +262,10 @@ export function useIssueSessionDataSource(
     isStreaming,
   } = useTranscript({
     issueNumber,
-    sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
+    sessionId: detail?.id ?? session?.id ?? decodedSessionId ?? '',
     runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
     runtime: detail?.runtime ?? null,
+    isHistoricalRuntimeView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
