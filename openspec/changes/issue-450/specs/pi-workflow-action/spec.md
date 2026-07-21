@@ -22,7 +22,7 @@ Workflow SHALL register `mohist/pi` as a UserFacing Inline Agent Action. Task an
 
 ### Requirement: Pi Action input is explicit and recursively expanded
 
-The Action SHALL require a resolved non-empty `prompt`, accept optional `session`, and consume optional `options.model` and `options.variant`. Other option keys SHALL be ignored with sanitized diagnostics. It SHALL use normal Workflow input expansion and SHALL NOT read hidden `vars.agent` configuration.
+The Action SHALL require a resolved non-empty `prompt`, accept optional `session`, and consume optional `options.model` and `options.variant`. After the engine consumes reserved `working-directory`, `prompt`, `session`, and `options` are the only permitted top-level inputs; every other top-level key SHALL fail as `invalid-input`. Other keys nested inside `options` SHALL be ignored with sanitized diagnostics. It SHALL use normal Workflow input expansion and SHALL NOT read hidden `vars.agent` configuration.
 
 #### Scenario: Explicit options reach Pi
 
@@ -41,9 +41,15 @@ The Action SHALL require a resolved non-empty `prompt`, accept optional `session
 
 #### Scenario: Invalid input prevents execution
 
-- **WHEN** prompt is empty, session is empty after trimming, options is not an object, or model/variant has an invalid type
+- **WHEN** prompt is empty, session is empty after trimming, options is not an object, model/variant has an invalid type, or an undeclared top-level input is present
 - **THEN** the Action returns `invalid-input`
 - **AND** no logical Session, physical Session, runtime event, or prompt is created
+
+#### Scenario: Only engine-reserved working-directory bypasses the top-level allowlist
+
+- **WHEN** a task supplies engine-reserved `working-directory` with `prompt`, `session`, or `options`
+- **THEN** the engine consumes it as `workDir` before Pi Action validation
+- **AND** `timeout`, `deadline`, `agent`, `kind`, `type`, and every other undeclared top-level key fail as `invalid-input`
 
 #### Scenario: Unknown option remains diagnostic
 

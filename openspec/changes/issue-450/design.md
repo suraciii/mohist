@@ -75,12 +75,12 @@ The coordinator is a keyed promise queue with tail cleanup. It stores no runtime
 Add a standalone adapter and register it in the existing registry. Reuse only runtime-neutral prompt loading and logical Session-name helpers. The adapter:
 
 1. resolves a non-empty prompt and optional parent-issue context;
-2. validates optional `session` and consumes `options.model` / `options.variant`, while ignoring other option keys with sanitized diagnostics;
+2. validates a fail-closed top-level input allowlist of `prompt`, `session`, and `options` after the engine consumes reserved `working-directory`; consumes `options.model` / `options.variant` while ignoring other option keys with sanitized diagnostics;
 3. defaults omitted or null `session` to Work ID;
 4. opens/restores and, when needed, creates and binds the Pi physical Session through D4;
 5. obtains explicit acceptance for `session.input`, invokes `PiRuntime.runTurn`, reports final facts and `session.closed`, and returns the final text only as private `turnFact`.
 
-The adapter does not read a hidden `vars.agent`, interpret `expect`, inspect files, or synthesize public promise output. Task and check hosts call the same handler. `WorkExecutor` evaluates `_output`, `expect`, artifacts, and recovery only after Action success, then projects task output as `null | { promise }`; the check host maps the same Action success/failure to pass/fail without interpreting Pi. Cleanup reinvokes the already-resolved Action under the same coordinator key and binding.
+Any undeclared top-level key, including `timeout`, `deadline`, `agent`, `kind`, or `type`, returns `invalid-input` before Session creation or Prompt submission; unknown keys nested inside `options` remain diagnostic-only. The adapter does not read a hidden `vars.agent`, interpret `expect`, inspect files, or synthesize public promise output. Task and check hosts call the same handler. `WorkExecutor` evaluates `_output`, `expect`, artifacts, and recovery only after Action success, then projects task output as `null | { promise }`; the check host maps the same Action success/failure to pass/fail without interpreting Pi. Cleanup reinvokes the already-resolved Action under the same coordinator key and binding.
 
 Stable Action mappings include `unavailable-runtime -> runtime-unavailable`, `missing-session -> runtime-session-missing`, and `deadline-exceeded -> timeout`, plus `invalid-input`, `session-workspace-mismatch`, `session-binding-failed`, `incompatible-runtime`, `interrupted`, `turn-failed`, and `session-reporting-failed`.
 
