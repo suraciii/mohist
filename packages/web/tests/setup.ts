@@ -17,6 +17,7 @@ configure({ asyncUtilTimeout: 10_000 })
 beforeEach(() => {
   resetUnhandledRequests()
   ensureMswServerListening()
+  resetSignalrFake()
 })
 
 let _reducedMotionOverride: boolean | undefined
