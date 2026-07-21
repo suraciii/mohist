@@ -1,0 +1,62 @@
+{
+  "project": "mohist-local",
+  "description": "Replace hidden Action registration and permissive input parsing with manifest-backed built-ins, authoritative task/check input validation, structured error recovery, removed-Action tombstones, and a Runner-published Action catalog retained by the Server.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Deliver manifest-backed Actions with validated dispatch",
+      "spec": "specs/action-manifests/spec.md#Every executable Action has one declarative definition, specs/action-manifests/spec.md#The manifest collection is the Action registry authority, specs/action-manifests/spec.md#Removed Actions are represented by catalog tombstones, specs/action-manifests/spec.md#Built-in Actions are fully manifest-backed, specs/action-manifests/spec.md#Platform and Action error codes have separate ownership, specs/action-input-validation/spec.md#Rendered Action input is validated before execution, specs/action-input-validation/spec.md#Unknown input fields fail explicitly, specs/action-input-validation/spec.md#Required inputs are enforced, specs/action-input-validation/spec.md#Input types use exact JSON kinds, specs/action-input-validation/spec.md#Defaults are applied centrally, specs/action-input-validation/spec.md#Input validation failures participate in task recovery",
+      "description": "Implement finite-union Action definitions, immutable manifest/tombstone registry construction, deterministic catalog projection, shared input/result validation, and manifest-inferred `ValidatedActionContext` as one atomic Runner execution slice. Define all 17 built-ins from the audited inventory, replace bare registration and hard-coded removed-Action handling, switch task/check dispatch only after rendered input is validated/defaulted, and route structured Action-boundary failures through existing recovery without narrowing other Action capabilities.",
+      "acceptanceCriteria": [
+        "Registry construction rejects non-canonical names, empty/duplicate/unsupported input kind sets, invalid or null static defaults, `working-directory` declarations, case-insensitive duplicates, executable/tombstone collisions, and reserved platform codes in business error catalogs",
+        "`mohist/opencode.prompt` declares canonical `types: [\"string\", \"object\"]`; definition inference, exact-kind validation, and catalog projection preserve string and object forms without an Action-specific exemption",
+        "All 17 Actions previously returned by `createDefaultRegistry()` are represented by manifests whose accepted keys, aliases, requiredness, static defaults, context fallbacks, public output fields, and business errors match the design inventory",
+        "Static and dynamic built-in failure branches are manifest-coupled or exhaustively tested so every emitted business error is declared and no existing recovery code is silently omitted",
+        "Case-insensitive `uses` resolution returns an executable definition, tombstone with guidance, or unknown; no bare `ActionRegistry.register(name, handler)` production or test path remains",
+        "Task and individual-check dispatch of `mohist/acp-agent` use tombstone rerun/replacement guidance while an unknown Action remains distinguishable",
+        "Every executable `uses` in shipped stage tasks, checks, approval-feedback tasks, and recovery tasks resolves to a built-in manifest; nested prompt-loader references are excluded, and ignored `mohist/create-github-pr.with.remote` is removed from the shipped profile",
+        "Unknown fields, omitted required inputs, explicit nulls, and exact-kind mismatches fail before Action execution with `invalid-input` naming the field, accepted kinds, and actual kind; no string/number/boolean coercion occurs",
+        "Omitted static defaults are cloned into validated input, valid explicit values win, invalid explicit values are not defaulted, and `working-directory` remains engine-owned",
+        "Valid tasks/checks invoke definitions exactly once through manifest-inferred `ValidatedActionContext`; broad runtime/Server/Variable context, rawWith, conditional semantics, dynamic defaults, implicit fallbacks, and name-based OpenCode promise projection remain available",
+        "Task `invalid-input`, `unexpected-error`, and declared business errors enter normal recovery matching with original structured context",
+        "Undeclared business codes, thrown exceptions, and malformed task results normalize to recoverable `unexpected-error`; malformed/undeclared/thrown check results retain row-level `unexpected-error` with aggregate `check-failed`, while invalid successful check output retains aggregate `unexpected-error`",
+        "The deterministic catalog matches the specified arrays/order, contains finite input kinds, public output field names, business errors, and tombstones, and excludes execution functions/private output",
+        "Existing built-in and custom-profile regressions pass for aliases, context-backed omission, rawWith propagation, outputs, error codes, recovery, and the only intended generic compatibility breaks",
+        "The existing built-in Workflow Profile Server specs pass after the ignored `remote` field is removed",
+        "`npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner`, and the relevant Server test suite via `npm test` pass; new coverage introduces no real external dependency or wall-clock wait"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Manifest/catalog, registry, input/result validation, and audited built-in definitions under packages/runner/src/actions/; atomic WorkExecutor/check integration through ValidatedActionContext; profile cleanup; migrated test definitions; and inventory/dispatch/recovery regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Registry resolution, input validation, typed invocation, and all built-in manifests are intentionally one task because separating them creates an unvalidated or cast-based execution contract. Validation remains top-level only; nested/conditional/context semantics stay with each Action. Tests consume embedded/generated or in-memory profile data, never workflow YAML from the host filesystem."
+    },
+    {
+      "id": "T-002",
+      "title": "Publish and retain the Runner Action catalog",
+      "spec": "specs/action-manifests/spec.md#Runner registration publishes the serializable Action catalog",
+      "description": "Extend Runner registration state and the Server Runner published-language DTOs with the typed manifest-derived Action catalog. Make `RunnerHost` publish the catalog from the same validated registry instance used by `WorkExecutor` on registration and heartbeat repair, and retain the latest catalog through `RunnerInfo`, persistent last-known Runner state, and online registry mirroring without adding Profile validation.",
+      "acceptanceCriteria": [
+        "Initial Runner registration and heartbeat repair send the deterministic catalog from the exact registry instance used for local Action resolution and validated invocation",
+        "The wire catalog matches the specified typed array schema and ordering, including canonical finite `types` arrays, required/default metadata, public output field declarations, business errors, and tombstone guidance",
+        "Typed TypeScript and C# catalog DTOs serialize and bind the same JSON shape; only the generic static-default leaf uses a generic JSON value",
+        "Execution functions, inferred TypeScript-only values, and implementation-private output are absent from the wire catalog",
+        "RunnerInfo and RunnerWorksState.LastKnownInfo retain the latest catalog across heartbeat repair, registry re-registration, and grain reactivation; a missing pre-registration catalog remains readable until the Runner reports one",
+        "Server receipt of a catalog does not reject or otherwise validate Workflow Profile saves in this task",
+        "Runner host tests assert register and heartbeat payloads; Server API/grain specs assert binding, ordering, and persistence using in-memory infrastructure",
+        "`npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner`, and the relevant Server test suite via `npm test` pass; new coverage introduces no real external dependency or wall-clock wait"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Action catalog fields in packages/runner registration/host code, typed Server API and Orleans Runner records, retained catalog state, and Runner/Server registration persistence tests.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Do not add catalog digests, a second catalog endpoint, multi-Runner consensus, Profile save-time consumption, or Web/CLI exposure."
+    }
+  ]
+}

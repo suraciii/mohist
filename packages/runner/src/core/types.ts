@@ -1,3 +1,5 @@
+import type { ActionCatalog } from "../actions/manifest.js"
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
@@ -373,6 +375,7 @@ export interface RunnerOptions {
 
 export interface RunnerRegistration {
   capabilities: string[]
+  actionCatalog: ActionCatalog
   projectId?: string
   hostname?: string
   coderModels?: string[]

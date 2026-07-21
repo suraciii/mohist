@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models.js"
+import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
@@ -78,11 +79,30 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/actions/registry.js", () => ({
-  createDefaultRegistry: () => ({
-    resolve: (uses?: string | null) => uses === "test/block" || uses === "test/observe" ? blockingAction : undefined,
-  }),
-}))
+vi.mock("../src/actions/registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+  const definition = (name: string) => ({
+    manifest: {
+      name,
+      description: name === "test/catalog" ? "Catalog test Action" : undefined,
+      inputs: name === "test/catalog" ? {
+        prompt: { types: ["string", "object"] as const, required: true as const, description: "Prompt value" },
+        timeout: { types: ["number"] as const, default: 30, description: "Timeout in milliseconds" },
+      } : {},
+      outputs: name === "test/catalog" ? [{ name: "public", description: "Public result" }] : [],
+      errors: [{ code: "action-failed", description: "The test Action failed" }],
+    },
+    run: blockingAction,
+  }) as unknown as ActionDefinition
+  return {
+    ...actual,
+    createDefaultRegistry: () => new actual.ActionRegistry([
+      definition("test/block"),
+      definition("test/observe"),
+      definition("test/catalog"),
+    ]),
+  }
+})
 
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
@@ -145,6 +165,27 @@ function workflowVariables(): Record<string, unknown> {
   }
 }
 
+function expectedActionCatalog() {
+  const error = { code: "action-failed", description: "The test Action failed" }
+  return {
+    actions: [
+      { name: "test/block", inputs: [], outputs: [], errors: [error] },
+      {
+        name: "test/catalog",
+        description: "Catalog test Action",
+        inputs: [
+          { name: "prompt", types: ["string", "object"], required: true, description: "Prompt value" },
+          { name: "timeout", types: ["number"], required: false, default: 30, description: "Timeout in milliseconds" },
+        ],
+        outputs: [{ name: "public", description: "Public result" }],
+        errors: [error],
+      },
+      { name: "test/observe", inputs: [], outputs: [], errors: [error] },
+    ],
+    tombstones: [],
+  }
+}
+
 describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
   it("ready-claim: starts the OpenCode runtime and registers the independently discovered models", async () => {
     installFakeOpenCodeRuntimeFactory()
@@ -162,6 +203,9 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       const connectArg = connect.mock.calls[0]?.[0] as Record<string, unknown>
       expect(connectArg?.coderModels).toEqual(["openai/gpt-5", "anthropic/claude-sonnet-4"])
       expect(connectArg?.coderModelVariants).toEqual({ "openai/gpt-5": ["low", "high"] })
+      expect(connectArg?.actionCatalog).toEqual(expectedActionCatalog())
+      expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("run")
+      expect(JSON.stringify(connectArg?.actionCatalog)).not.toContain("private")
     } finally {
       controller.abort()
       await run.catch(() => undefined)
@@ -189,6 +233,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       for (const body of heartbeatBodies) {
         expect(body.coderModels).toEqual(["openai/gpt-5"])
         expect(body.coderModelVariants).toEqual({ "openai/gpt-5": ["low"] })
+        expect(body.actionCatalog).toEqual(expectedActionCatalog())
       }
     } finally {
       controller.abort()
@@ -212,7 +257,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       }
       return {}
     })
-    blockingAction.mockReset().mockResolvedValue({ status: "success", message: "ok" })
+    blockingAction.mockReset().mockResolvedValue({ output: { message: "ok" } })
     poll.mockResolvedValueOnce([{
       workflowRunId: "wr-drain",
       workId: "work-drain",
@@ -287,7 +332,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     blockingAction.mockReset().mockImplementation(async () => {
       actionStarted.resolve()
       await actionRelease.promise
-      return { status: "success", message: "ok" }
+      return { output: { message: "ok" } }
     })
     const controller = new AbortController()
     const host = new RunnerHost(hostOptions())
@@ -333,7 +378,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       observed = { openCodeRuntime: context.openCodeRuntime }
       actionStarted.resolve()
       await actionRelease.promise
-      return { status: "success", message: "ok" }
+      return { output: { message: "ok" } }
     })
     poll.mockResolvedValueOnce([{
       workflowRunId: "wr-workflow",
@@ -453,7 +498,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       agentJobId: "aj-1",
       variables: { workspace: { path: "/tmp/mohist-runner-host-opencode-runtime" } },
     }]).mockResolvedValue([])
-    blockingAction.mockReset().mockResolvedValue({ status: "success", message: "ok" })
+    blockingAction.mockReset().mockResolvedValue({ output: { message: "ok" } })
     const controller = new AbortController()
     const host = new RunnerHost(hostOptions())
     const previousWarn = console.warn

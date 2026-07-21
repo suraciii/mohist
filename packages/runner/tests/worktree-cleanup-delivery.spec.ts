@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setCleanupAgentActionForTest } from "../src/runtime/worktree-enforcement.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import { ActionRegistry } from "../src/actions/registry.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { defineTestActions, type ActionRegistry, type TestActionDefinition } from "./support/action-registry-test.js"
 
 interface FakeWorktree {
   workDir: string
@@ -87,12 +87,8 @@ function commitCleanup(state: FakeWorktree, files: string[], sha: string) {
   state.cleanupCommits.push({ files, sha })
 }
 
-function buildRegistry(handlers: Record<string, (ctx: ActionContext) => Promise<ActionResult>>): ActionRegistry {
-  const registry = new ActionRegistry()
-  for (const [uses, handler] of Object.entries(handlers)) {
-    registry.register(uses, async (ctx) => handler(ctx))
-  }
-  return registry
+function buildRegistry(handlers: Record<string, TestActionDefinition | ((ctx: ActionContext) => Promise<ActionResult>)>): ActionRegistry {
+  return defineTestActions(handlers)
 }
 
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
@@ -227,9 +223,12 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const registry = buildRegistry({
-      "mohist/opencode": async () => {
-        worktree.untracked = ["src/agent-output.ts"]
-        return { output: null }
+      "mohist/opencode": {
+        run: async () => {
+          worktree.untracked = ["src/agent-output.ts"]
+          return { output: null }
+        },
+        inputs: { prompt: { types: ["string", "object"] } },
       },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
@@ -313,9 +312,12 @@ describe("worktree cleanup before delivery", () => {
     })
 
     const registry = buildRegistry({
-      "mohist/opencode": async () => {
-        worktree.untracked = ["src/never-clean.ts"]
-        return { output: null }
+      "mohist/opencode": {
+        run: async () => {
+          worktree.untracked = ["src/never-clean.ts"]
+          return { output: null }
+        },
+        inputs: { prompt: { types: ["string", "object"] } },
       },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,

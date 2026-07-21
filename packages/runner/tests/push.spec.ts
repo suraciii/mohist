@@ -71,7 +71,9 @@ describe("mohist/push", () => {
   it("DefaultRegistry_RegistersPushAction", () => {
     const registry = createDefaultRegistry()
 
-    expect(registry.resolve("mohist/push")).toBe(pushAction)
+    const resolved = registry.resolve("mohist/push")
+    expect(resolved.kind).toBe("definition")
+    expect(resolved.kind === "definition" ? resolved.definition.manifest.name : null).toBe("mohist/push")
   })
 
   it("IssueRunWithoutRepositoryBase_FailsWithoutProjectOrMainFallback", async () => {

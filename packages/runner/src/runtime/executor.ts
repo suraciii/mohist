@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionError, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
@@ -17,7 +17,10 @@ import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.j
 import { tryRecovery } from "./recovery.js"
 import { enforceCleanWorktree, resolveCleanupAgentAction } from "./worktree-enforcement.js"
 import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
-import { isActionFailure, validateActionOutputShape } from "../actions/action-result.js"
+import { fail as actionFail, isActionFailure } from "../actions/action-result.js"
+import type { ActionDefinition } from "../actions/manifest.js"
+import { validateActionInput } from "../actions/input-validation.js"
+import { malformedToUnexpectedError, normalizeActionResult, passThroughExitCode, passThroughTurnFact } from "../actions/result-validation.js"
 import {
   evaluateCompletion,
   promiseValue,
@@ -44,25 +47,6 @@ const CHECK_WORK_TYPES = new Set(["check", "checks"])
  * (design D5).
  */
 const PROMISE_PROJECTED_ACTIONS = new Set(["mohist/opencode"])
-
-/**
- * Actions whose registration was retired by the runtime migration.
- * A dispatch whose `uses` matches one of these is a pre-cutover
- * WorkflowRun that the server never rewrote; the dispatch fails with a
- * named, actionable error pointing the user to rerun the affected stage
- * with a `mohist/opencode` profile instead of the generic "No action
- * found" miss.
- */
-const REMOVED_ACTIONS = new Set(["mohist/acp-agent"])
-
-function isRemovedAction(uses?: string | null): boolean {
-  return !!uses && REMOVED_ACTIONS.has(uses.trim().toLowerCase())
-}
-
-function removedActionMessage(uses: string): string {
-  return `Workflow task uses the removed Action '${uses}'. The Action no longer exists in this runner. ` +
-    "Rerun the affected stage with a profile that uses 'mohist/opencode' to recover this run."
-}
 
 export class WorkExecutor {
   constructor(
@@ -156,13 +140,14 @@ export class WorkExecutor {
       }
     }
 
-    const action = this.actions.resolve(work.uses)
-    if (!action) {
-      if (work.uses && isRemovedAction(work.uses)) {
-        return failure(work, removedActionMessage(work.uses))
-      }
-      return failure(work, `No action found for '${work.uses}'`)
+    const resolved = this.actions.resolve(work.uses)
+    if (resolved.kind === "unknown") {
+      return failure(work, `No action found for '${work.uses ?? ""}'`)
     }
+    if (resolved.kind === "tombstone") {
+      return failure(work, removedActionMessage(work.uses ?? resolved.canonicalName, resolved.tombstone))
+    }
+    const definition = resolved.definition
 
     try {
       const variables = await this.variables(work, resolvedWorkspace, signal)
@@ -171,6 +156,14 @@ export class WorkExecutor {
         return failure(work, formatUnresolvedError(work, unresolved))
       }
       const renderedWith = renderTemplate(work.with, variables)
+      const validation = validateActionInput(definition.manifest, renderedWith)
+      if (validation.kind === "failure") {
+        const validationFailure = validationFailureResult(work, validation.error)
+        const recoveryResult = tryRecovery(work, validationFailure, variables)
+        if (recoveryResult) return recoveryResult
+        return validationFailure
+      }
+      const validatedWith = validation.input
       const renderedExpect = renderTemplate(work.expect, variables)
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
@@ -179,33 +172,44 @@ export class WorkExecutor {
       if (startCheck.kind === "violation") {
         return startCheck.result
       }
-      const result = await action({
-        ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
-        with: renderedWith,
-        rawWith: work.with,
-        workDir,
-      })
+      let rawResult: unknown
+      try {
+        rawResult = await definition.run({
+          ...baseContext(work, variables, signal, this.connection, log, this.openCodeRuntime),
+          with: validatedWith as never,
+          rawWith: work.with,
+          workDir,
+        })
+      } catch (thrown) {
+        rawResult = malformedToUnexpectedError(
+          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+        )
+      }
       // stripRunnerPrivateFacts drops ActionResult.turnFact from the wire.
       // The fact is consumed only by completion evaluation below; it MUST
       // never be serialized into WorkItemResult.output, recovery matching,
       // setVars projections, captured outputs, or artifacts (design D4).
-      const { publicActionResult, turnFact } = stripRunnerPrivateFacts(result)
-      const validationFailure = !isActionFailure(publicActionResult)
-        ? validateActionOutputShape(publicActionResult.output)
-        : null
-      const validatedResult: ActionResult = validationFailure
-        ? failAction(publicActionResult, validationFailure)
-        : publicActionResult
+      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+      const normalized = normalizeActionResult(rawResult, definition.manifest)
+      const validatedResult: ActionResult = normalized.kind === "malformed"
+        ? (malformedToUnexpectedError(normalized.message) as ActionResult)
+        : normalized.kind === "ok"
+          ? ({ output: normalized.output } as ActionResult)
+          : ({ error: normalized.error } as ActionResult)
+      const exitCode = passThroughExitCode(rawResult)
+      if (exitCode !== undefined && exitCode !== null) {
+        ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
+      }
       const actionSucceeded = !isActionFailure(validatedResult)
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
         : null
       const projected = projectTaskOutput(work, validatedResult, completion)
-      const normalized = normalize(work, projected)
-      const recoveryResult = tryRecovery(work, normalized, variables)
+      const resultForRecovery = projected
+      const recoveryResult = tryRecovery(work, resultForRecovery, variables)
       if (recoveryResult) return recoveryResult
-      if (normalized.status !== "completed") {
-        return normalized
+      if (resultForRecovery.status !== "completed") {
+        return resultForRecovery
       }
       const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
       if (endCheck.kind === "violation") {
@@ -214,11 +218,11 @@ export class WorkExecutor {
       const worktreeResult = await enforceCleanWorktree(
         work,
         workDir,
-        normalized,
+        resultForRecovery,
         renderedWith,
         variables,
         signal,
-        resolveCleanupAgentAction(action),
+        resolveCleanupAgentAction(legacyHandler(definition)),
         { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.connection, log, this.openCodeRuntime) },
         log,
       )
@@ -305,8 +309,15 @@ export class WorkExecutor {
  * The boundary is the canonical place to enforce this invariant — see
  * `AcpSessionResult`, `ActionResult.turnFact` (core/types.ts), and
  * design D4.
+ *
+ * The current pipeline keeps the fact attached to the validated
+ * `ActionResult` until the executor's completion evaluator reads it,
+ * then discards it via `passThroughTurnFact` while building the wire
+ * result. The function is retained here so any future call site that
+ * receives a raw ActionResult can strip the fact with the documented
+ * invariant.
  */
-function stripRunnerPrivateFacts(result: ActionResult): {
+export function stripRunnerPrivateFacts(result: ActionResult): {
   publicActionResult: ActionResult
   turnFact: { finalAssistantText?: string | null } | null
 } {
@@ -378,14 +389,6 @@ function projectTaskOutput(
     }
   }
   return { status: "completed", output: result.output, exitCode: result.exitCode }
-}
-
-function failAction(result: ActionResult, message: string): ActionResult {
-  const error = { code: "unexpected-error", message }
-  if ("exitCode" in result && typeof result.exitCode === "number") {
-    return { error, exitCode: result.exitCode }
-  }
-  return { error }
 }
 
 /**
@@ -470,6 +473,22 @@ function failure(work: RenderedWorkItem, message: string): WorkItemResult {
 
 function failureStatus(work: RenderedWorkItem): "fail" | "failed" {
   return CHECK_WORK_TYPES.has(work.workType) ? "fail" : "failed"
+}
+
+function removedActionMessage(uses: string, tombstone: { name: string; guidance: string }): string {
+  return `Workflow task uses the removed Action '${uses}'. ${tombstone.guidance}`
+}
+
+function validationFailureResult(work: RenderedWorkItem, error: ActionError): WorkItemResult {
+  return {
+    status: failureStatus(work),
+    message: error.message,
+    error,
+  }
+}
+
+function legacyHandler(definition: ActionDefinition) {
+  return async (context: ActionContext): Promise<ActionResult> => definition.run(context as never)
 }
 
 function toCheckStatus(status: string) {

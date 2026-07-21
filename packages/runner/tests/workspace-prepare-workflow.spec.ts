@@ -2,13 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
 import { workspacePrepareAction, setWorkspacePrepareExistsCheckerForTest, setWorkspacePrepareGitRunnerForTest } from "../src/actions/workspace-prepare.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 
 const WORKFLOW_RUN_ID = "wr-workspace-prepare-regression"
 const EXPECTED_BRANCH = "mohist/run-wr-workspace-prepare-regression"
@@ -122,20 +122,24 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
     installWorkspacePrepareGit(residual)
     const dispatched: string[] = []
 
-    const registry = new ActionRegistry()
-    registry.register("mohist/rebase", async (ctx: ActionContext): Promise<ActionResult> => {
-      dispatched.push(ctx.workId)
-      residual.rebase = true
-      return { error: { code: "conflict", message: "rebase conflict" } }
-    })
-    registry.register("mohist/workspace-prepare", async (ctx) => {
-      dispatched.push(ctx.workId)
-      return await workspacePrepareAction(ctx)
-    })
-    registry.register("core/business", async (ctx) => {
-      dispatched.push(ctx.workId)
-      expect(residual.rebase).toBe(false)
-      return { output: { ran: ctx.workId } }
+    const registry = defineTestActions({
+      "mohist/rebase": {
+        run: async (ctx: ActionContext): Promise<ActionResult> => {
+          dispatched.push(ctx.workId)
+          residual.rebase = true
+          return { error: { code: "conflict", message: "rebase conflict" } }
+        },
+        errors: [{ code: "conflict" }],
+      },
+      "mohist/workspace-prepare": async (ctx) => {
+        dispatched.push(ctx.workId)
+        return await workspacePrepareAction(ctx)
+      },
+      "core/business": async (ctx) => {
+        dispatched.push(ctx.workId)
+        expect(residual.rebase).toBe(false)
+        return { output: { ran: ctx.workId } }
+      },
     })
 
     const executor = buildExecutor(registry)
@@ -154,8 +158,12 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
 
   it("RecoveryScheduledTasks_AreReturnedWithoutFreshWorkspacePrepare", async () => {
     installExecutorGitProbe()
-    const registry = new ActionRegistry()
-    registry.register("mohist/rebase", async () => ({ error: { code: "conflict", message: "rebase conflict" } }))
+    const registry = defineTestActions({
+      "mohist/rebase": {
+        run: async () => ({ error: { code: "conflict", message: "rebase conflict" } }),
+        errors: [{ code: "conflict" }],
+      },
+    })
     const executor = buildExecutor(registry)
 
     const result = await executor.execute(

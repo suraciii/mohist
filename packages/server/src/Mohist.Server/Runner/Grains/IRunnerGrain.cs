@@ -73,6 +73,42 @@ public static class RunnerCapacity
 }
 
 [GenerateSerializer]
+public sealed record ActionCatalog(
+    [property: Id(0)] ActionCatalogEntry[] Actions,
+    [property: Id(1)] ActionCatalogTombstone[] Tombstones);
+
+[GenerateSerializer]
+public sealed record ActionCatalogEntry(
+    [property: Id(0)] string Name,
+    [property: Id(1)] ActionCatalogInput[] Inputs,
+    [property: Id(2)] ActionCatalogOutput[] Outputs,
+    [property: Id(3)] ActionCatalogError[] Errors,
+    [property: Id(4)] string? Description = null);
+
+[GenerateSerializer]
+public sealed record ActionCatalogInput(
+    [property: Id(0)] string Name,
+    [property: Id(1)] string[] Types,
+    [property: Id(2)] bool Required,
+    [property: Id(3)] JsonElement? Default = null,
+    [property: Id(4)] string? Description = null);
+
+[GenerateSerializer]
+public sealed record ActionCatalogOutput(
+    [property: Id(0)] string Name,
+    [property: Id(1)] string? Description = null);
+
+[GenerateSerializer]
+public sealed record ActionCatalogError(
+    [property: Id(0)] string Code,
+    [property: Id(1)] string? Description = null);
+
+[GenerateSerializer]
+public sealed record ActionCatalogTombstone(
+    [property: Id(0)] string Name,
+    [property: Id(1)] string Guidance);
+
+[GenerateSerializer]
 public record RunnerInfo(
     string RunnerId,
     string[] Capabilities,
@@ -82,7 +118,8 @@ public record RunnerInfo(
     string Kind = "external",
     DateTimeOffset? RegisteredAt = null,
     string? BuildGitHash = null,
-    Dictionary<string, string[]>? CoderModelVariants = null);
+    Dictionary<string, string[]>? CoderModelVariants = null,
+    ActionCatalog? ActionCatalog = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

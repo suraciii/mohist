@@ -72,11 +72,25 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/actions/registry.js", () => ({
-  createDefaultRegistry: () => ({
-    resolve: (uses?: string | null) => uses === "test/block" || uses === "test/log" ? blockingAction : undefined,
-  }),
-}))
+vi.mock("../src/actions/registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+  const definition = (name: string) => ({
+    manifest: {
+      name,
+      inputs: {},
+      outputs: [],
+      errors: [{ code: "action-failed", description: "The test Action failed" }],
+    },
+    run: blockingAction,
+  })
+  return {
+    ...actual,
+    createDefaultRegistry: () => new actual.ActionRegistry([
+      definition("test/block"),
+      definition("test/log"),
+    ]),
+  }
+})
 
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
@@ -93,7 +107,7 @@ beforeEach(() => {
   blockingAction.mockImplementation(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
     log?.write("action:rebase", "rebasing commit a1b2c3")
     log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
-    return { output: JSON.stringify({ rebase: "ok" }) }
+    return { output: { rebase: "ok" } }
   })
 })
 

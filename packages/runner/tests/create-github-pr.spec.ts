@@ -120,9 +120,13 @@ function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): J
 describe("mohist/create-github-pr registry", () => {
   it("registers create-github-pr and exposes it under the new id only", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/create-github-pr")).toBe(createGitHubPrAction)
-    expect(registry.resolve("mohist/create-pull-request")).toBeUndefined()
-    expect(registry.resolve("mohist/publish-via-pr")).toBeUndefined()
+    const resolved = registry.resolve("mohist/create-github-pr")
+    expect(resolved.kind).toBe("definition")
+    if (resolved.kind === "definition") {
+      expect(resolved.definition.manifest.name).toBe("mohist/create-github-pr")
+    }
+    expect(registry.resolve("mohist/create-pull-request").kind).toBe("unknown")
+    expect(registry.resolve("mohist/publish-via-pr").kind).toBe("unknown")
   })
 })
 

@@ -370,6 +370,7 @@ describe("ServerConnection.buildGitHash", () => {
     await connection.connect(
       {
         capabilities: ["spec/*"],
+        actionCatalog: { actions: [], tombstones: [] },
         projectId: "project-1",
         coderModels: ["openai/gpt-4"],
         buildGitHash: hash,
@@ -391,7 +392,7 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), hash)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], projectId: "project-1", coderModels: ["openai/gpt-4"] },
+      { capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1", coderModels: ["openai/gpt-4"] },
       new AbortController().signal,
     )
 
@@ -406,7 +407,7 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), null)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], projectId: "project-1" },
+      { capabilities: ["spec/*"], actionCatalog: { actions: [], tombstones: [] }, projectId: "project-1" },
       new AbortController().signal,
     )
 

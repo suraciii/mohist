@@ -2,12 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 
 let workDir: string
 
@@ -41,12 +41,13 @@ describe("WorkExecutor mid-execution variable writes", () => {
       },
     } as Partial<ServerConnection>
 
-    const registry = new ActionRegistry()
-    registry.register("test/write-vars", async (ctx: ActionContext) => {
-      events.push("action-start")
-      await ctx.writeVars({ checkpoint: "before-failure" })
-      events.push("action-after-write")
-      return { error: { code: "action-failed", message: "boom" } }
+    const registry = defineTestActions({
+      "test/write-vars": async (ctx) => {
+        events.push("action-start")
+        await ctx.writeVars({ checkpoint: "before-failure" })
+        events.push("action-after-write")
+        return { error: { code: "action-failed", message: "boom" } }
+      },
     })
 
     const executor = new WorkExecutor(

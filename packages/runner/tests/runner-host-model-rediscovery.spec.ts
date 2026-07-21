@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(), uploadTaskLog: vi.fn(), fetchConfig: vi.fn(async () => null),
   startSignalR: vi.fn(), stopSignalR: vi.fn(), getConnectionId: vi.fn(() => "conn-1"),
   probeLiveness: vi.fn(async () => true), forceReconnect: vi.fn(async () => undefined),
-  converge: vi.fn(async () => undefined), claimAction: vi.fn(),
+  converge: vi.fn(async () => undefined),
 }))
 
 let capturedOnReconnected: (() => void) | null = null
@@ -52,9 +52,10 @@ vi.mock("../src/server/runner-signalr.js", () => ({
   },
 }))
 
-vi.mock("../src/actions/registry.js", () => ({
-  createDefaultRegistry: () => ({ resolve: () => mocks.claimAction }),
-}))
+vi.mock("../src/actions/registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/actions/registry.js")>()
+  return { ...actual, createDefaultRegistry: () => new actual.ActionRegistry([]) }
+})
 
 vi.mock("../src/runtime/workspace.js", () => ({
   WorkspaceManager: class {
@@ -105,7 +106,6 @@ describe("RunnerHost model discovery", () => {
     mocks.startSignalR.mockResolvedValue(undefined)
     mocks.stopSignalR.mockResolvedValue(undefined)
     mocks.converge.mockResolvedValue(undefined)
-    mocks.claimAction.mockResolvedValue({ status: "success", message: "ok" })
     discovery = vi.fn<OpencodeModelDiscovery>(async () => baseline)
     setOpencodeModelDiscoveryForTest(discovery)
     runtime = installFakeOpenCodeRuntimeFactory()

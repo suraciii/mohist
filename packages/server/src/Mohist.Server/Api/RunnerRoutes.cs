@@ -30,7 +30,8 @@ public static class RunnerRoutes
                 req.ProjectId,
                 req.CoderModels,
                 BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
-                CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants)));
+                CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
+                ActionCatalog: req.ActionCatalog));
             return Results.Ok();
         });
 
@@ -57,7 +58,8 @@ public static class RunnerRoutes
                     req.ProjectId,
                     req.CoderModels,
                     BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
-                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants));
+                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
+                    ActionCatalog: req.ActionCatalog);
                 await runner.HeartbeatRepairAsync(info);
 
                 if (!string.IsNullOrWhiteSpace(req.ConnectionId))
@@ -602,7 +604,8 @@ public record RunnerRegisterRequest(
     string? Hostname = null,
     string[]? CoderModels = null,
     string? BuildGitHash = null,
-    Dictionary<string, string[]>? CoderModelVariants = null);
+    Dictionary<string, string[]>? CoderModelVariants = null,
+    ActionCatalog? ActionCatalog = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
@@ -612,7 +615,8 @@ public record RunnerHeartbeatRequest(
     string[]? CoderModels = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
-    string? ConnectionId = null);
+    string? ConnectionId = null,
+    ActionCatalog? ActionCatalog = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

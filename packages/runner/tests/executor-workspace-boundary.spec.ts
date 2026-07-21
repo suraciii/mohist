@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import { WorkExecutor, baseContext } from "../src/runtime/executor.js"
@@ -10,6 +9,7 @@ import type { ServerConnection } from "../src/server/connection.js"
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { RuntimeResult, RuntimeTurnResult } from "../src/runtime/opencode/types.js"
 import { createTestTempDir } from "./support/temp-dir.js"
+import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -159,10 +159,10 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
 }
 
 function buildRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
-  const registry = new ActionRegistry()
-  registry.register("core/script", async (ctx) => handler(ctx))
-  registry.register("mohist/rebase", async (ctx) => handler(ctx))
-  return registry
+  return defineTestActions({
+    "core/script": handler,
+    "mohist/rebase": handler,
+  })
 }
 
 function fakeRuntime(): OpenCodeRuntime {

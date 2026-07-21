@@ -19,8 +19,12 @@ const { ghCalls, installGit, installGh, installMoIssueShow } = createMergeGhTest
 describe("mohist/merge-github-pr registry", () => {
   it("registers merge-github-pr and exposes it under the new id only", () => {
     const registry = createDefaultRegistry()
-    expect(registry.resolve("mohist/merge-github-pr")).toBe(mergeGitHubPrAction)
-    expect(registry.resolve("mohist/merge-pull-request")).toBeUndefined()
+    const resolved = registry.resolve("mohist/merge-github-pr")
+    expect(resolved.kind).toBe("definition")
+    if (resolved.kind === "definition") {
+      expect(resolved.definition.manifest.name).toBe("mohist/merge-github-pr")
+    }
+    expect(registry.resolve("mohist/merge-pull-request").kind).toBe("unknown")
   })
 })
 
