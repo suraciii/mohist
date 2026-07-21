@@ -32,9 +32,9 @@ Activity entries for artifact-recorded events SHALL identify the recorded artifa
 - **AND** it SHALL communicate that the identified artifact was recorded
 - **AND** the user SHALL NOT need to expand event detail to discover which artifact the event concerns
 
-### Requirement: Comment rows show author attribution
+### Requirement: Comment rows show truthful author attribution
 
-Every issue comment row SHALL display an author identity alongside its creation time. The author SHALL remain visible on desktop and phone-width viewports and SHALL be visually associated with the comment body it authored.
+Every issue comment row SHALL display its recorded author alongside its creation time when author data is available. When the comment contract provides no author, the row SHALL display the exact fallback `Unknown author`. The UI SHALL NOT infer an author from the current viewer, request channel, client type, or an unauthenticated role. Attribution SHALL remain visible on desktop and phone-width viewports and SHALL be visually associated with the corresponding comment body.
 
 #### Scenario: Comment has a recorded author
 
@@ -46,11 +46,17 @@ Every issue comment row SHALL display an author identity alongside its creation 
 #### Scenario: Comment author is unavailable
 
 - **WHEN** a historical comment has no available author identity
-- **THEN** the comment row SHALL display an explicit unavailable-author label
+- **THEN** the comment row SHALL display `Unknown author`
 - **AND** it SHALL NOT leave the attribution area blank or show only a timestamp
+
+#### Scenario: Caller has no recorded identity
+
+- **WHEN** a comment was submitted through a caller or transport that did not record an author
+- **THEN** the comment row SHALL display `Unknown author`
+- **AND** it SHALL NOT label the comment as `Operator`, `You`, a client name, or another inferred identity
 
 #### Scenario: Comment renders at phone width
 
 - **WHEN** a comment renders at a phone-width viewport
-- **THEN** the author identity SHALL remain visible without horizontal page scrolling
-- **AND** the comment body and timestamp SHALL remain readable without obscuring the author
+- **THEN** the recorded author or `Unknown author` attribution SHALL remain visible without horizontal page scrolling
+- **AND** the comment body and timestamp SHALL remain readable without obscuring the attribution
