@@ -162,7 +162,6 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 - Mohist Agent 有稳定身份，可以拥有多次执行和多个 Session。
 - 一次 dispatch 的工作所有者只能是 TaskRun 或 AgentJob 之一。
 - 每个 AgentSession 只有一个不可变来源。
-- 每个逻辑 AgentSession 同时最多运行一个工作 Prompt；切换 Runtime 不能绕过该串行边界。
 - 替换 Runtime Session 不改变 AgentSession 来源或逻辑身份。
 - `mohist/opencode` 不暴露 OpenCode 原生 agent 选择。
 - AgentJob 执行不依赖 Workflow Action 名称或 Action Input 契约。

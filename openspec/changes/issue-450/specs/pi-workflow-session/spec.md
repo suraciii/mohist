@@ -1,323 +1,189 @@
 ### Requirement: Workflow Session names identify stable logical conversations
 
-A Pi Workflow Action SHALL resolve its logical AgentSession by project, WorkflowRun, and session name. Tasks in the same WorkflowRun with the same explicit session name SHALL resolve to the same logical AgentSession; while its current physical binding remains unchanged, later tasks SHALL receive that binding's conversation context. A runtime switch SHALL preserve logical identity and lineage but SHALL start a new physical conversation without migrating old context. Different names, projects, or WorkflowRuns SHALL remain isolated even when prompt, model, variant, and working directory are identical. When `session` is omitted, the Action SHALL use the current Work ID as the session name.
+Workflow SHALL resolve a logical AgentSession from project, WorkflowRun, and normalized Session name. Reuse SHALL be independent of task ID, retry attempt, and selected runtime.
 
 #### Scenario: Same name shares one logical conversation
 
-- **WHEN** two Pi tasks in the same project and WorkflowRun use the same session name without an intervening runtime rebind
-- **THEN** both SHALL resolve to the same logical AgentSession
-- **AND** the second task SHALL receive the first task's conversation context
+- **WHEN** later tasks or checks in one WorkflowRun use the same explicit Session name
+- **THEN** they resolve the same logical AgentSession
 
-#### Scenario: Omitted name isolates unrelated work
+#### Scenario: Omitted name uses Work ID
 
-- **WHEN** two tasks omit `session` and have different Work IDs
-- **THEN** each SHALL use its own Work ID as the session name
-- **AND** their logical AgentSessions SHALL remain separate
+- **WHEN** a Pi Action omits Session
+- **THEN** its Work ID is used as the Session name
+- **AND** unrelated work IDs do not share conversation state by default
 
 ### Requirement: The physical Pi binding is persisted before the first prompt
 
-For an unbound Pi logical AgentSession, the Runner SHALL create a physical Pi Session in the authoritative working directory and SHALL persist its binding before submitting the first prompt. The binding SHALL record runtime `pi`, the owning Runner, immutable working directory, and the complete absolute Pi session-file path as `runtimeSessionId`; binding and transcript storage MUST NOT truncate that path to a legacy identifier length. The Pi internal Session UUID SHALL remain diagnostic only. If physical creation does not yield a session-file path, the turn SHALL fail as `incompatible-runtime`. If binding persistence fails, the turn SHALL fail as `session-binding-failed` and MUST NOT submit the prompt.
+Workflow AgentSession open and attach SHALL accept an explicit runtime. A first Pi attach SHALL persist the absolute session-file path before prompt admission.
 
-#### Scenario: Binding precedes first prompt admission
+#### Scenario: First attach owns the prompt
 
-- **WHEN** a Pi task targets an AgentSession with no physical binding
-- **THEN** the Runner SHALL create the physical Pi Session and persist its absolute session-file path first
-- **AND** it SHALL submit the first prompt only after persistence succeeds
+- **WHEN** a logical Session has no physical binding
+- **THEN** the Runner creates a Pi Session and atomically attaches its path as runtime `pi`
+- **AND** only a successful attach permits input reporting and prompt submission
 
-#### Scenario: Failed binding persistence prevents execution
+#### Scenario: Repeated attach is idempotent
 
-- **WHEN** the physical Pi Session is created but its logical binding cannot be persisted
-- **THEN** the Action SHALL fail with `session-binding-failed`
-- **AND** the first prompt MUST NOT be submitted
+- **WHEN** the same runtime and physical path are attached again
+- **THEN** the existing binding is returned without a duplicate lineage entry
+
+#### Scenario: Stale attach loses the race
+
+- **WHEN** attach's expected runtime or physical ID no longer matches the state observed at open
+- **THEN** the grain rejects it before replacing the current binding
 
 ### Requirement: Current Pi bindings are reused without model-driven rotation
 
-The current Pi binding SHALL be reused for the same logical AgentSession across Workflow tasks, task retries, cleanup turns, and Runner restarts. A model or variant change SHALL be applied to the existing physical Session and MUST NOT replace the session-file path, append lineage, or discard conversation context. After Runner restart, the runtime SHALL lazily restore the physical Session from the persisted absolute session-file path rather than creating a replacement. A Workflow change between Pi and another registered runtime in either direction SHALL preserve the logical AgentSession identity, establish a new physical binding under an expected-current guard, and append the new binding to lineage without migrating the previous runtime's context.
+A current Pi binding SHALL be reused by same-name tasks, checks, retries, cleanup turns, and Runner restarts. Model or variant changes SHALL apply to the bound physical Session without replacing it.
 
-#### Scenario: Retry reuses the physical Session
+#### Scenario: Runner restart restores the path
 
-- **WHEN** a Pi task is retried with the same logical session name
-- **THEN** it SHALL use the current persisted Pi session-file path
-- **AND** it MUST NOT create a new physical Session for the retry
+- **WHEN** a new Runner process opens a logical Session bound to Pi
+- **THEN** it restores the exact persisted session-file path through PiRuntime
 
-#### Scenario: Model change preserves context and binding
+#### Scenario: Model change keeps lineage stable
 
-- **WHEN** a later task on the same logical AgentSession changes `options.model` or `options.variant`
-- **THEN** the runtime SHALL apply the selection to the current physical Pi Session
-- **AND** it MUST NOT replace the binding or append lineage
+- **WHEN** a later same-name turn selects a different model or variant
+- **THEN** the physical path remains unchanged
+- **AND** no runtime lineage entry is appended
 
-#### Scenario: Runner restart restores from the binding
+#### Scenario: Cleanup retains context
 
-- **WHEN** a Runner restarts before a later task uses an already-bound Pi AgentSession
-- **THEN** the runtime SHALL restore that Session from the persisted session-file path
-- **AND** the later task SHALL continue with the prior conversation context
+- **WHEN** task cleanup reinvokes Pi
+- **THEN** it continues the same physical conversation
 
-#### Scenario: Runtime change appends physical lineage
+### Requirement: Runtime changes are guarded and preserve logical identity
 
-- **WHEN** a Workflow task selects Pi for a logical AgentSession whose current binding belongs to another runtime
-- **THEN** Mohist SHALL keep the same logical AgentSession identity and establish a new Pi binding
-- **AND** it SHALL append the Pi session-file path and runtime to the Session lineage without migrating old context
+A Workflow Session MAY change from OpenCode to Pi or Pi to OpenCode only through a guarded binding transition. The transition SHALL retain logical identity and source, append physical lineage, and start the target runtime's own context.
 
-#### Scenario: Switching from Pi to another runtime uses the same guard
+#### Scenario: Expected runtime change succeeds
 
-- **WHEN** a Workflow task selects another registered runtime for a logical AgentSession currently bound to Pi
-- **THEN** Mohist SHALL keep the same logical AgentSession identity and establish the replacement binding only when the expected Pi binding is still current
-- **AND** it SHALL append the replacement runtime binding to lineage without migrating Pi context
+- **WHEN** the current binding still matches the state observed by the caller and a different runtime is selected
+- **THEN** the new physical binding replaces the current one
+- **AND** one lineage entry is appended without migrating conversation context
+
+#### Scenario: Same-runtime replacement requires Reset
+
+- **WHEN** a caller tries to attach a different physical ID for the current runtime
+- **THEN** the attach is rejected with Reset guidance
 
 ### Requirement: Invalid persisted bindings fail without silent replacement
 
-Before submitting a prompt, the Runner SHALL verify that the authoritative working directory matches the logical AgentSession's immutable bound directory. A mismatch SHALL fail with `session-workspace-mismatch`. When a current Pi binding exists but its session file is missing, unreadable, corrupt, or otherwise cannot be restored, the task SHALL fail with `runtime-session-missing`. Its diagnostic SHALL identify Reset as the canonical same-logical-Session remedy owned by the sister Session-command issue and SHALL identify selecting a new logical `session` name as the recovery available in this issue. The runtime MUST NOT create a replacement physical Session, change lineage, or submit the prompt in either case. A binding created before Pi wrote its first assistant message SHALL follow the same missing-file rule after a Runner restart.
+Workflow Session work directory and physical identity SHALL be checked before prompt submission.
 
-#### Scenario: Missing session file requires Reset
+#### Scenario: Work directory mismatch is rejected
 
-- **WHEN** a task resolves a Pi binding whose session file no longer exists
-- **THEN** the task SHALL fail with `runtime-session-missing` and an explicit Reset instruction
-- **AND** the runtime MUST NOT create a replacement Session
+- **WHEN** a same-name logical Session is opened from a different work directory
+- **THEN** execution fails as `session-workspace-mismatch`
+- **AND** no physical Session is created, replaced, or prompted
 
-#### Scenario: Workspace mismatch rejects before prompt
+#### Scenario: Missing Pi file requires Reset
 
-- **WHEN** a Pi task's authoritative working directory differs from the logical AgentSession's bound directory
-- **THEN** the task SHALL fail with `session-workspace-mismatch`
-- **AND** no prompt SHALL be submitted and no binding SHALL be replaced
+- **WHEN** a current Pi binding points to a missing or corrupt file
+- **THEN** execution fails as `runtime-session-missing` with Reset guidance
+- **AND** no replacement Session is created implicitly
 
-#### Scenario: Pre-persistence crash follows missing-file semantics
+#### Scenario: First-prompt crash can leave a missing file
 
-- **WHEN** the first turn persisted a session-file binding but the Runner stopped before Pi created that file
-- **THEN** a later restore SHALL fail with `runtime-session-missing` and a Reset instruction
-- **AND** the runtime MUST NOT infer an empty replacement conversation
+- **WHEN** Pi has exposed a path and the binding was persisted but the Runner dies before Pi materializes the file
+- **THEN** the next attempt follows the same missing-file failure
+- **AND** Mohist does not claim continuous context or replay the uncertain prompt
 
 ### Requirement: One Workflow work turn executes per logical AgentSession
 
-Mohist SHALL admit at most one Workflow-initiated work turn at a time for a logical AgentSession, including when concurrent tasks select different Inline Agent runtimes. The Workflow executor SHALL enter the same runtime-neutral logical-Session serialization boundary before opening or rebinding the Session and SHALL retain one task lease through Prompt completion, successful completion checks, any worktree cleanup turn, and durable event persistence. Another work turn targeting that Session SHALL remain serialized until the current task lifecycle reaches a terminal outcome and the runtime confirms the physical execution stopped. An interruption-unconfirmed outcome SHALL quarantine both the physical Pi Session and the logical serialization key before the current operation leaves the boundary. Later work MUST NOT start a Prompt or runtime rebind on that logical AgentSession until stop is observed or Runner process restart makes prior in-process execution impossible. Different logical AgentSessions SHALL remain independently executable.
+One process-local coordinator SHALL serialize complete Workflow task and check turns by project, WorkflowRun, and Session name across OpenCode and Pi.
 
-Session-command coordination is outside this requirement. This issue SHALL NOT add Runtime slot callbacks, command-admission phases, command leases, command completion callbacks, recovery receipts, or command-journal reconciliation. Current OpenCode command execution and event behavior SHALL remain unchanged. Workflow binding SHALL accept runtime `pi` independently of command capability. Follow-up/Compact/Reset admission SHALL atomically reject when the current grain binding is Pi before creating a lease or reservation, and Reset MUST NOT fall back to OpenCode. Cancel SHALL use a non-mutating grain admission read: a read that observes Pi SHALL reject before Runner dispatch, while a read that admits one immutable OpenCode target MAY dispatch that old physical target after a later Workflow rebind. A sister Session-command change MUST integrate with the Workflow lease and Action-stream drain/seal protocol before enabling commands that mutate a Workflow binding.
+#### Scenario: Same-name task and check serialize
 
-#### Scenario: Concurrent tasks on one Session are serialized
+- **WHEN** a task and check concurrently target the same logical Session
+- **THEN** only one enters Action execution
+- **AND** the other waits until the first Action and its cleanup, if any, finish
 
-- **WHEN** two Workflow tasks concurrently target the same logical Pi AgentSession
-- **THEN** Mohist SHALL execute at most one of their work turns at a time
-- **AND** the second turn MUST NOT overlap the first on the physical Pi Session
+#### Scenario: Runtime switch cannot bypass serialization
 
-#### Scenario: Separate Sessions remain independent
+- **WHEN** concurrent work selects OpenCode and Pi for the same logical Session
+- **THEN** both use the same coordinator key and do not overlap
 
-- **WHEN** concurrent Pi tasks target different logical AgentSessions
-- **THEN** serialization of one Session SHALL NOT serialize the other Session
+#### Scenario: Different logical Sessions remain concurrent
 
-#### Scenario: Concurrent runtime choices share one serialization boundary
+- **WHEN** work targets different Session names
+- **THEN** the coordinator permits their turns to execute independently
 
-- **WHEN** concurrent OpenCode and Pi Workflow tasks target the same logical AgentSession
-- **THEN** both Actions SHALL enter the same logical-Session serialization boundary
-- **AND** a runtime rebind or Prompt MUST NOT overlap the other Action's active turn
+#### Scenario: Runner restart does not invent a durable lock
 
-#### Scenario: Unconfirmed stop prevents overlap
-
-- **WHEN** a turn ends with interruption unconfirmed and another Workflow task targets the same logical AgentSession
-- **THEN** the later task SHALL fail as runtime unavailable rather than start on the quarantined physical Session
-- **AND** no two Pi Prompts SHALL overlap on that physical Session
-
-#### Scenario: Runtime switching cannot bypass an unconfirmed stop
-
-- **WHEN** a Pi turn's interruption is unconfirmed and a later Workflow task selects OpenCode for the same logical AgentSession
-- **THEN** the shared logical-Session boundary SHALL reject the later task as runtime unavailable before rebind
-- **AND** no OpenCode Prompt SHALL start until Pi stop is observed or the Runner process restarts
-
-#### Scenario: Observed stop clears the logical quarantine
-
-- **WHEN** PiRuntime reports `cleared` for the generation that quarantined a physical path and logical Session key
-- **THEN** the coordinator SHALL remove that matching logical quarantine and admit later work on the key
-- **AND** it MUST NOT replay the failed Prompt
-
-#### Scenario: Runner restart starts without execution quarantine
-
-- **WHEN** the Runner process restarts after an unconfirmed in-process Pi interruption
-- **THEN** the new PiRuntime and coordinator SHALL start with empty execution-quarantine state
-- **AND** persisted reporting or missing-session state SHALL continue to apply independently
-
-#### Scenario: Pi Session commands remain outside this issue
-
-- **WHEN** Follow-up, Compact, Reset, or Cancel targets a Pi-bound AgentSession before Pi Session-command routing ships
-- **THEN** a command admission that observes the Pi binding SHALL return unavailable before reservation or Runner dispatch and MUST NOT invoke OpenCode
-- **AND** this issue MUST NOT add command routing, Runtime execution, command coordination, or Action-stream mutation
-
-#### Scenario: An admitted OpenCode Cancel may finish after rebind
-
-- **WHEN** Cancel's atomic grain admission returns an immutable OpenCode target and a Workflow rebind commits before Runner dispatch
-- **THEN** that already-admitted Cancel MAY finish against the old physical OpenCode target
-- **AND** it MUST NOT cancel the new Pi binding or be re-routed by rereading current binding state
+- **WHEN** the Runner process exits
+- **THEN** coordinator state ends with the process
+- **AND** recovery remains governed by current Workflow redelivery and persisted AgentSession binding rules
 
 ### Requirement: Pi turn facts populate the existing Session audit record
 
-The AgentSession authority SHALL issue one opaque stable Action stream identity for each physical Workflow binding and initialize its applied cursor to `0`; the Runner MUST NOT derive or choose this identity. Workflow open SHALL return current stream state and SHALL atomically backfill one stable identity at cursor `0` when a pre-change OpenCode binding has none, without changing binding or lineage. First attach and every successful runtime rebind SHALL return a fresh identity at cursor `0`; idempotent open/attach SHALL return the existing identity. An unbound Session SHALL have no stream until attach. Action events SHALL carry the route Runner identity, stream identity, and physical binding, use sequence `1` for the first event, and be accepted only when the route Runner is the current binding owner and both values identify the current binding. Stream identity MUST NOT be treated as an authorization capability.
+Pi input, assistant text, reasoning, tool lifecycle/results, model observations, status, and usage SHALL be reported through the existing Workflow AgentSession runtime-event route under the current physical binding. Usage SHALL preserve input, output, cache read, cache write, thought when supplied, cost amount, and currency as distinct facts.
 
-Every Workflow runtime binding SHALL have a durable Action event-stream manifest so Action input reporting, drain, and runtime rebind use one protocol in both directions; this issue does not require connecting OpenCode's full runtime-event observer. The sequenced Action route is distinct from existing Session-command and generic runtime-event routes, whose facts remain binding-validated but do not enter this completeness cursor. For every Pi Workflow turn, the Runner SHALL durably report the submitted prompt and required canonical Pi audit facts to the current logical AgentSession: final assistant and reasoning content retained by Pi, completed tool calls and results, resolved model observations, and final token usage including separate input, output, cache-read, cache-write, and thought token dimensions when Pi provides them. `cachedWriteTokens` SHALL remain distinct from `cachedReadTokens` through persisted Session state, runtime-event application, API/read models, and Web presentation. Live intermediate deltas MAY be reported but are provisional and SHALL NOT be required for restart completeness when Pi does not retain them. Before Prompt admission, the Runner SHALL durably create the binding's manifest with persisted projector fingerprints and an active-turn checkpoint, then `session.input` SHALL be durably accepted by the Session authority through the Action route. The Runner SHALL durably mark that checkpoint admitted before calling the Runtime. After admission, each required canonical fact and its updated fingerprints SHALL be one atomic Runner-local outbox state transition; the checkpoint SHALL close only after all required final facts are durable. Delivery SHALL retry across transport loss and Runner restart without replaying the Prompt. Each binding SHALL use one stable Action stream identity and monotonically increasing sequence. The Session authority SHALL atomically ignore an already-applied Action sequence before updating transcript, usage, or model state, reject a gap, and reject facts for a stale or sealed physical binding.
+#### Scenario: Successful turn is visible in Session views
 
-The Session authority SHALL durably persist and return the current stream's applied cursor, projector checkpoint, and latest Action-turn metadata. Every accepted Action sequence SHALL atomically update that state with its Session facts. Runner-local manifests are rebuildable crash buffers: loss or corruption at any cursor SHALL rebuild from Server stream state. Pi rebuild SHALL reconcile retained canonical facts against the Server checkpoint; OpenCode rebuild SHALL restore input-only latest-turn metadata without Runtime projection. Required facts MUST NOT depend on restoring original Runner workspace state.
+- **WHEN** a Pi turn completes and required facts are accepted
+- **THEN** existing Session transcript, tool, model, usage, cost, and runtime-lineage views expose those facts
+- **AND** no Pi-specific Session record or view is required
 
-Before registration or polling, the Runner SHALL use its existing stable `runnerId` to retrieve an inventory of current Workflow Action streams whose current binding is owned by that Runner and reconcile every returned item against local storage. The inventory SHALL include logical source identity, current physical binding/work directory, stream ID/cursor, projector checkpoint, and latest turn lifecycle. It SHALL include no stream owned by another Runner and no sealed/history/generic/AgentJob binding. Empty local storage or selective manifest loss SHALL therefore still recover every current owned prepared/admitted checkpoint before work claiming begins. The `runnerId` filter scopes recovery data under the current Runner protocol; this issue SHALL NOT introduce Runner enrollment, transport credentials, or authentication changes to unrelated Runner channels. Every Action-event write SHALL still require its request `runnerId` to equal the current binding owner.
+#### Scenario: Cache-write remains distinct
 
-Each active-turn checkpoint and Server latest-turn record SHALL include Runtime, required-fact policy, and lifecycle `prepared | admitted | closed`. Accepted `session.input` SHALL establish prepared. Before SDK Prompt invocation, the Runner SHALL append and receive Server acknowledgement for a transcript-free `turn.admitted` Action sequence; admitted means the Prompt may have been called. Required-fact completion SHALL append `turn.reporting-complete` and durably install closed plus optional recovery status. On restart, prepared SHALL close without Runtime repair; admitted Pi SHALL reconcile retained canonical facts; admitted OpenCode SHALL drain input and close as execution-outcome-unknown without invoking/querying either Runtime; closed SHALL need only pending drain. Lifecycle recovery SHALL finish before registration/polling and permit later same-Session admission/rebind. A separately redelivered work item MAY execute a duplicate turn under the accepted crash-window limitation.
+- **WHEN** Pi reports cache-read and cache-write tokens
+- **THEN** each value accumulates in its own Session usage field
+- **AND** cache-write is not folded into cache-read
 
-The Runner SHALL derive one deterministic `actionTurnId` from the authority-issued stream identity and the `session.input` sequence, persist it in the active checkpoint, and carry it on every later fact for that turn. Transcript storage SHALL address Action turns by a nullable stable key unique within the logical Session; it MUST NOT attach delayed Action evidence to the latest turn.
+#### Scenario: Cost retains currency
 
-The Session authority SHALL acknowledge an accepted Action sequence only after one durable AgentSession state/event transaction commits the applied cursor, Session state/domain effects, and ordered idempotent pending transcript evidence for every transcript fact in that sequence. Evidence SHALL persist the Action turn ID and exact projection operation: start-turn includes runtime binding, prompt text/kind, and start time; append-part includes part type, correlation/event identity, text delta, payload, and first/last timestamps. Projection SHALL process stream order, idempotently create/select the stable turn, and upsert parts only into that turn. Failed projection MUST leave evidence durable for timer or reactivation retry. A duplicate sequence MUST NOT delete pending evidence or reapply state. A crash after transcript save but before evidence removal MUST replay idempotently into the same turn. Aggregate commit failure MUST NOT acknowledge the sequence.
+- **WHEN** Pi reports a monetary cost
+- **THEN** AgentSession usage stores the amount and currency through the existing cost contract
 
-Before a runtime change, the shared logical-Session serialization boundary SHALL fence new work while the current owning Runner drains all locally issued events. The guarded bind SHALL carry that stream's final issued sequence; in the same Session transition, the authority SHALL require its applied cursor to equal that sequence, seal the old stream, and replace the binding, or SHALL reject without either mutation. A Runner MUST NOT attest another Runner's local stream. Pi message IDs and tool-call IDs SHALL suppress duplicate SDK projections before enqueue and SHALL be persisted with the stream manifest so restart reconciliation can append only missing required facts. Unknown Pi events SHALL be diagnostic only and MUST NOT change Workflow or AgentSession state. AgentSession events SHALL record execution facts and MUST NOT decide TaskRun completion or Workflow advancement.
+#### Scenario: Duplicate Pi callback is idempotent
 
-If a durable outbox append fails after Prompt admission, the Action SHALL fix `session-reporting-failed`, request interruption when the turn is still active, and quarantine the physical Session from later Prompt or rebind admission until reporting repair completes. The Runner SHALL retain the fact in memory while alive. On restart, durable Server stream state and persisted Pi Session messages SHALL drive reconstruction and reconciliation; required missing final facts SHALL be appended and drained before quarantine clears. Corrupt local manifest bytes SHALL remain preserved for diagnostics but SHALL NOT block successful rebuild or unrelated Sessions/AgentJob work. Failure to initialize/list the outbox root or provide atomic same-directory rename and file/directory sync SHALL instead make global Action reporting not-ready and SHALL prevent Runner registration or new work claiming. Repair MUST NOT replay the Prompt.
+- **WHEN** Pi emits the same message or tool identity more than once within a turn
+- **THEN** the Runner projector reports the logical fact once
 
-The guarded rebind's expected-current state SHALL include the authority-issued stream identity as well as the physical binding. In the same transition that verifies `drainedThroughSequence`, the authority SHALL remove the old stream from current admission and create the replacement binding's fresh stream at cursor `0` with an empty projector checkpoint and no latest Action turn; a current stream with no events is valid at sequence `0` and MUST NOT require a synthetic event. A missing/corrupt local manifest MAY be rebuilt at any returned cursor with next sequence `cursor + 1` only after Runtime-specific reconciliation against the Server checkpoint completes.
+#### Scenario: Stale physical binding is rejected
 
-Every later Workflow Prompt or runtime rebind on a Workflow binding SHALL complete the current Action stream's required drain before Runtime entry. Rebind SHALL retain the stream fence through its atomic binding/stream transition. Session-command integration with this protocol remains sister-issue work.
+- **WHEN** a runtime-event batch names a physical ID that is no longer current
+- **THEN** AgentSession rejects the entire batch before transcript, model, or usage state changes
 
-#### Scenario: Session view shows a completed Pi turn
+### Requirement: Required Session reporting completes before work success
 
-- **WHEN** a Pi turn emits assistant text, tool execution, resolved model, and usage facts
-- **THEN** the AgentSession transcript and usage read model SHALL expose those facts for the Session view
-- **AND** the facts SHALL remain associated with the current Pi session-file binding
+The Runner SHALL complete required input and final-fact writes before returning Action success. Reporting has one completion point and no durable background success mode.
 
-#### Scenario: First binding receives an authority-issued empty stream
+#### Scenario: Input failure blocks prompt admission
 
-- **WHEN** a Workflow AgentSession receives its first physical binding
-- **THEN** the AgentSession authority SHALL create and return one opaque Action stream identity with applied cursor `0`
-- **AND** the Runner SHALL use that identity with first event sequence `1`
+- **WHEN** `session.input` cannot be accepted
+- **THEN** the prompt is not submitted and work fails as `session-reporting-failed`
 
-#### Scenario: Legacy OpenCode binding is bootstrapped once
+#### Scenario: Final-fact failure blocks completion evaluation
 
-- **WHEN** Workflow open resolves a pre-change OpenCode physical binding with no Action stream state
-- **THEN** the AgentSession authority SHALL atomically create one stream identity at cursor `0` without changing binding or lineage
-- **AND** concurrent or repeated opens SHALL return that same identity
+- **WHEN** the prompt completed but a required assistant, tool, model, usage, or cost write cannot be flushed
+- **THEN** work fails as `session-reporting-failed`
+- **AND** promise, expectation, and artifact evaluation do not run
 
-#### Scenario: Empty stream can be rebound without a synthetic event
+#### Scenario: No hidden replay protocol exists
 
-- **WHEN** the owning Runner requests rebind of a current Action stream that has issued no events
-- **THEN** it SHALL attest that stream's identity and drained-through sequence `0`
-- **AND** successful rebind SHALL replace it with a fresh stream identity at cursor `0`
-
-#### Scenario: Missing local history with nonzero cursor is rebuilt
-
-- **WHEN** Workflow open returns a nonzero applied cursor but the Runner has no matching local manifest
-- **THEN** the Runner SHALL reconstruct next sequence, projector state, and latest-turn metadata from the authority response
-- **AND** Pi SHALL reconcile retained canonical facts against that checkpoint while OpenCode SHALL restore input-only state without Runtime projection
-- **AND** admission/rebind SHALL resume only after required reconciliation and drain complete
-
-#### Scenario: Empty local storage discovers owned streams before polling
-
-- **WHEN** a Runner restarts with an empty local outbox root while the Server has nonzero current Workflow Action streams owned by that Runner
-- **THEN** the Runner SHALL obtain every owned current stream from the Runner-scoped inventory and rebuild/recover each before registration or polling
-- **AND** streams owned by another Runner or not originating from a Workflow Action SHALL not appear in the response
-
-#### Scenario: Cache-write usage remains a distinct dimension
-
-- **WHEN** Pi reports different cache-read and cache-write token counts
-- **THEN** AgentSession state and API SHALL expose them as `cachedReadTokens` and `cachedWriteTokens` respectively
-- **AND** the Web Session view SHALL render both supplied values without merging or dropping cache-write tokens
-
-#### Scenario: Duplicate Pi events are idempotent
-
-- **WHEN** the same Pi message or tool event is delivered more than once
-- **THEN** the Session projection SHALL use its message ID or tool-call ID to avoid duplicate transcript or usage facts
-
-#### Scenario: Post-admission transport failure is retried durably
-
-- **WHEN** a Pi event cannot reach the Server after the Prompt has been admitted
-- **THEN** the Runner SHALL retain the ordered event in its durable outbox and preserve the Action result
-- **AND** it SHALL retry delivery without replaying the Prompt, including after Runner restart
-
-#### Scenario: Post-admission local append failure quarantines reporting
-
-- **WHEN** a required Pi fact cannot be atomically appended after the Prompt has been admitted
-- **THEN** the Action SHALL fail with `session-reporting-failed` and the physical Session SHALL reject later Prompt and rebind admission
-- **AND** the Runner SHALL interrupt an active turn and MUST NOT replay its Prompt
-
-#### Scenario: Restart repairs an incomplete manifested turn
-
-- **WHEN** the Runner restarts with a pre-created stream manifest whose turn did not durably append every required final fact
-- **THEN** it SHALL reconcile the persisted Pi Session messages through the manifest's projector fingerprints
-- **AND** it SHALL append and drain missing required facts before admitting later work on that Session
-
-#### Scenario: Outbox repair is distinct from Workflow redelivery
-
-- **WHEN** Runner restart repairs an admitted checkpoint and the Server separately redelivers its still-Running Workflow work item
-- **THEN** outbox repair SHALL reconcile and drain audit facts without submitting a Prompt
-- **AND** the separately delivered execution MAY run a duplicate turn under the canonical crash-window limitation
-
-#### Scenario: Restart closes an admitted OpenCode checkpoint without Runtime repair
-
-- **WHEN** Runner restart finds an admitted input-only OpenCode checkpoint that did not close before process loss
-- **THEN** startup SHALL drain its durable input records and close it as execution-outcome-unknown before polling
-- **AND** it MUST NOT invoke OpenCode or Pi, quarantine the stream indefinitely, or block later same-Session admission/rebind after drain
-
-#### Scenario: Admitted checkpoint without a Pi file follows missing-session recovery
-
-- **WHEN** restart finds an admitted checkpoint but the bound Pi session file was never created or is unreadable
-- **THEN** recovery SHALL record the uncertain-submission diagnostic and leave the binding failed as `runtime-session-missing` with Reset guidance
-- **AND** it MUST NOT create a replacement Session or replay the Prompt
-
-#### Scenario: Corrupt committed outbox state is not discarded
-
-- **WHEN** startup cannot decode a committed stream snapshot
-- **THEN** the committed bytes SHALL be preserved for diagnostics and local state SHALL rebuild from Server stream authority
-- **AND** Pi SHALL reconcile retained canonical facts while OpenCode SHALL restore input-only state
-- **AND** only failed Runtime-specific reconciliation SHALL keep that logical Session unavailable; unrelated Sessions and AgentJob work SHALL remain available
-
-#### Scenario: Outbox root failure blocks global readiness
-
-- **WHEN** startup cannot initialize or list the outbox root or cannot provide the required atomic replace operations
-- **THEN** Action reporting SHALL be globally not-ready and the Runner SHALL NOT register or claim new work
-- **AND** it SHALL expose a credential-redacted actionable storage diagnostic
-
-#### Scenario: Outbox readiness recovery clears its diagnostic
-
-- **WHEN** a later initialization attempt can list the outbox root and provide every required atomic operation
-- **THEN** Action reporting SHALL become ready and clear `workflow-session-outbox-unavailable`
-- **AND** Runner registration and new work claiming MAY resume when the other readiness gates pass
-
-#### Scenario: Ambiguous delivery does not duplicate usage or transcript
-
-- **WHEN** the Server applies an event but the acknowledgement is lost and the Runner sends the same stream sequence again
-- **THEN** the Session authority SHALL acknowledge the repeated sequence without applying it again
-- **AND** transcript text, tool facts, and usage totals SHALL remain unchanged by the duplicate
-
-#### Scenario: Action acknowledgement survives a transcript-store failure
-
-- **WHEN** the Session authority commits an Action sequence but transcript projection fails before or after its acknowledgement
-- **THEN** the applied cursor, Session state, domain effects, and idempotent pending transcript evidence SHALL survive grain reactivation
-- **AND** retrying the same sequence SHALL NOT duplicate state or discard the evidence
-- **AND** later evidence projection SHALL restore the transcript fact exactly once
-
-#### Scenario: Delayed evidence remains attached to its original Action turn
-
-- **WHEN** transcript projection for one Action turn fails, a later turn is admitted, and the grain reactivates before or after the first turn's transcript save
-- **THEN** each start-turn and append-part evidence item SHALL select its deterministic Action turn rather than the latest turn
-- **AND** text, reasoning, tools, and prompt metadata SHALL appear exactly once on the correct turn
-- **AND** a crash after transcript save but before evidence removal SHALL NOT duplicate the turn or part
-
-#### Scenario: Event sequence gaps are rejected
-
-- **WHEN** the Session authority receives a current-binding event whose sequence skips an unapplied predecessor
-- **THEN** it SHALL reject that event without changing Session state
-- **AND** the Runner SHALL retain and resend the missing ordered outbox entries
-
-#### Scenario: Runtime rebind atomically replaces the drained stream
-
-- **WHEN** the owning Runner requests a guarded runtime rebind with the old stream's expected identity and final issued sequence
-- **THEN** the Session authority SHALL replace the binding only when both equal the current stream identity and applied cursor
-- **AND** it SHALL remove the old stream from current admission and create a fresh current stream in the same transition so later old-binding events are rejected
-
-#### Scenario: Stale binding events are rejected
-
-- **WHEN** a runtime event identifies a physical Session that is no longer the logical AgentSession's current binding
-- **THEN** the Session authority SHALL reject that event
-- **AND** it MUST NOT alter the current transcript, usage, or Workflow state
-
-#### Scenario: A non-owning Runner cannot append Action events
-
-- **WHEN** an Action-event request names the current stream and physical binding but its route Runner differs from the binding owner
-- **THEN** the Session authority SHALL reject it before duplicate/gap handling or state mutation
-- **AND** possession of the stream identity MUST NOT authorize the write
+- **WHEN** reporting fails or the Runner process dies
+- **THEN** no Action stream, local outbox, cursor, inventory, checkpoint, or projector recovery is consulted
+- **AND** a later normal Workflow redelivery may repeat the turn
 
 #### Scenario: Session facts do not complete Workflow work
 
-- **WHEN** AgentSession receives a Pi end event or final assistant text
-- **THEN** it SHALL record the facts for audit and display
-- **AND** it MUST NOT complete the TaskRun or advance the Workflow
+- **WHEN** AgentSession accepts all runtime facts
+- **THEN** Workflow status remains unchanged until the ordinary Action result is reported
+
+### Requirement: Pi registration does not enable out-of-scope Session commands
+
+The Server SHALL recognize `pi` as a valid stored runtime while Pi Follow-up, Compact, Reset, and Cancel routing remains unavailable in issue #450.
+
+#### Scenario: Registered Pi command is unavailable
+
+- **WHEN** Follow-up, Compact, Reset, or Cancel admission observes a current Pi binding before its sister issue is delivered
+- **THEN** command admission returns unavailable without reserving or dispatching the command
+- **AND** OpenCode is not invoked and the binding is unchanged
+
+#### Scenario: Historical Reset fallback remains intact
+
+- **WHEN** Reset targets an unregistered historical runtime value
+- **THEN** the existing fallback behavior remains unchanged

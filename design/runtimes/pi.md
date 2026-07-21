@@ -26,7 +26,7 @@ Action。它与 Agent / Session 的所有权模型（Inline Agent、工作所有
 与 OpenCode 的责任边界差异：Pi 是 Runner 的 npm 依赖，随 Runner 发布并锁定版本，
 安装者不需要提供 Pi CLI。provider 凭证走 Pi 自己的机制（环境变量与 Pi auth
 存储），Mohist 不管理 API key。SDK authentication manager 是凭证值的唯一读取者；
-Mohist 自有 request/result、事件、outbox、注册和 smoke artifact 都不携带凭证字段。
+Mohist 自有 request/result、事件、注册和 smoke artifact 都不携带凭证字段。
 
 ## Action 输入输出契约
 
@@ -187,21 +187,16 @@ Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执�
 `PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。调用者必须声明工作
 回合的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
 固定提供 60 分钟，`mohist/pi` Action Input 不可见也不能覆盖。Action 完成 open/bind、输入
-确认与 model/thinking 应用后，把 duration 交给 `runTurn`；Runtime 在调用
-`session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与 outbox preflight
-不占 Prompt 预算；cleanup Prompt 是独立回合并取得新的 60 分钟。AgentJob executor 的期限
-由其所属 issue 单独定义。
+报告与 model/thinking 应用后，把 duration 交给 `runTurn`；Runtime 在调用
+`session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与输入报告不占 Prompt
+预算；cleanup Prompt 是独立回合并取得新的 60 分钟。AgentJob executor 的期限由其所属
+issue 单独定义。
 
 in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明的期限是单一
 回合期限权威。期限到达时 Runtime 将回合结果固定为 `deadline-exceeded`，随后调用
 `session.abort()` 收尾；迟到 resolve 的 `prompt()` 不能翻转该结果。任何失败都不
 自动重放提交状态不确定的 Prompt；redelivery 在 crash window 内可能造成重复回合，
 这是与 OpenCode 一致的已接受限制。
-
-外部取消信号遵守同一顺序：先把结果固定为 `interrupted`，再调用 `session.abort()` 并
-确认停止。无法确认停止时，当前物理 Session 与它对应的逻辑 AgentSession 执行 key 都进入
-隔离状态；后续 Prompt 与 Runtime rebind 被拒绝，直到订阅观察到停止或 Runner 进程重启。
-取消路径同样不自动重放 Prompt。
 
 ## 回合期限与两段式收尾
 
@@ -237,23 +232,6 @@ compaction 事实：
 Runner 进程终止即事件通道与执行中回合一并终止（见「进程拓扑与就绪」），重启后不
 重建「回合仍在执行」的假象。
 
-Workflow Inline Agent 路径不能把最终审计事实当作 best-effort UI 事件。Runner 为每个
-OpenCode 或 Pi Workflow 物理绑定建立同一种持久事件流 manifest，以统一输入报告、drain 与
-Runtime rebind；本 issue 只为 Pi 接通完整 Runtime 事件。Pi 最终 assistant/reasoning、完成的
-tool/result、model 与 usage 事实及 projector 去重状态先原子写入本地 outbox，再按单调
-sequence 报告给 AgentSession。中间进度 delta 可以展示，但 Pi 未保留的 delta 不属于重启后
-完整性契约。AgentSession 对当前绑定持久化最后应用的 sequence，重复 sequence 只确认不重复
-应用，gap、旧绑定与已封口流在修改状态前拒绝。传输失败只延迟 outbox drain，不触发 Prompt
-replay。
-
-本地 outbox 的格式、sequence 与恢复由 outbox 模块拥有，物理文件 adapter 只实现字节级
-原子替换。Prompt 后本地持久化失败时，Action 返回 `session-reporting-failed` 并隔离该物理
-Session；后续 Prompt 与 Runtime rebind 都被拒绝。manifest 先于 Prompt 存在，因此 Runner
-重启后可以用已保存的 projector 状态核对 `session.messages`，补齐最终 assistant、tool、
-model 与 usage 事实后再解除隔离；修复过程不重放 Prompt。Runtime rebind 由共享的逻辑
-Session 串行边界围住，只有当前 Runner 的 outbox 已 drain，且 Server 在同一绑定事务中
-核对 final sequence、封口旧流并替换绑定时才能成功。
-
 ## Provider 错误失败策略
 
 判定规则与 [`opencode.md`](opencode.md) 的「Provider 错误失败策略」相同：可恢复
@@ -274,9 +252,7 @@ Session 串行边界围住，只有当前 Runner 的 outbox 已 drain，且 Serv
 
 命中不可恢复判定时执行 `session.abort()` 并确认停止（见上节），随后向调用者返回
 带原始 provider message 的失败事实。AgentSession 与物理 Session 绑定保持不变，不
-提示 Reset。若停止无法确认，主结果仍为 `turn-failed`，诊断附加
-interruption-unconfirmed；Runtime 先隔离物理路径，Action 再隔离逻辑 Session key，
-之后才返回。其它物理/逻辑 Session 不受影响。
+提示 Reset。
 
 ## Session 命令
 
@@ -329,12 +305,11 @@ Pi 唯一的「批准」概念是 project trust：是否加载工作目录项目
 一致：它们影响提示词上下文，不改变 Runner 的执行配置。Runner 用户的全局配置
 （`~/.pi/agent`）正常加载。该取值不提供配置项，是无人值守执行的确定性保证。
 
-Pi 边界复用 Runner 的 `CredentialMasker`：host 启动时注册名称匹配 credential/token/
-secret/API key 的环境变量值；SDK auth 文件内容只交给 SDK manager，Mohist 不读取。
-SDK/provider 文本在进入 task log、diagnostic、runtime event 或 smoke artifact 前统一脱敏，
-结构化 outbox 与 Runner registration 使用字段白名单而非序列化 SDK 对象。Action output
-本身不含 diagnostic。真实 smoke 只记录版本、operation 名、布尔结果和脱敏后的字段名/
-类型摘要；不记录环境、auth 文件、原始 provider 响应、Prompt 或消息正文。
+Pi 边界复用 Runner 现有的 credential masking：SDK/provider 文本进入 task log、
+diagnostic 或 runtime event 前统一脱敏，结构化 request/result 与 Runner registration
+使用 Mohist 字段白名单而非序列化 SDK 对象。Action output 不含 diagnostic。真实 smoke
+只记录版本、operation 名、布尔结果和脱敏后的字段名/类型摘要；不记录环境值、auth 文件、
+原始 provider 响应、Prompt 或消息正文。
 
 在 `PiRuntime` 边界把 SDK error 规范化为少量 Mohist result（kebab-case，与 wire 值
 一致）：`invalid-input`、`unavailable-runtime`、`missing-session`、

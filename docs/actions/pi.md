@@ -137,14 +137,8 @@ provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohis
 保持不变；Session 回到空闲后，可以选择其他模型继续，无需 Reset。只有当前物理
 Session 已不存在，或用户明确要求清空上下文时才使用 Reset。
 
-如果 provider 失败后的中断无法确认，本次 task 仍报告 provider 对应的 `turn-failed`，
-同时附带中断未确认诊断，并隔离该逻辑 AgentSession；在观察到停止或 Runner 重启前，
-不能继续同一 Session 或通过切换 Runtime 绕过隔离。
-
 如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的回合
-显示为已经安全停止，也不会允许同一逻辑 AgentSession 通过原 Pi 绑定或切换执行后端开始
-后续回合。Runner 观察到回合停止或进程重启后才恢复该 Session 的执行资格。取消与期限
-中断遵守相同的停止确认和防重放规则。
+显示为已经安全停止。
 
 ## Pi 责任边界
 
@@ -176,7 +170,7 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 | `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `session-reporting-failed` | Session 执行事实无法可靠持久化；后续回合被阻止 |
+| `session-reporting-failed` | Session 执行事实无法在本次回合内可靠写入 |
 | `incompatible-runtime` | Pi 版本或数据与 Mohist 不兼容 |
 | `timeout` | 回合超过执行期限被中断 |
 | `interrupted` | 回合被 Runner 外部信号中断 |
