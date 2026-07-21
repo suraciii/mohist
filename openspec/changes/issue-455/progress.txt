@@ -19,3 +19,8 @@
 - Desktop approval action hints are passed through `IssueDecisionSurface` and are shown only while the corresponding action is enabled and no request is pending. These bindings remain outside the application-wide shortcut registry.
 - Added focused component tests and a controlled browser scenario covering approval shortcuts, editable-field safety, hints, send-back Command+Enter, comment submission, invalid/pending guards, plain Enter, and one request per keypress.
 - Verification completed: Web typecheck, full Web Vitest suite (4982 tests), and focused issue decision-surface Playwright suite (11 tests).
+
+## Review Follow-up
+
+- The approval shortcut guard now detects editable ancestors, preventing `a` or `m` from escaping a nested contenteditable or role-textbox child. A focused regression test covers the nested contenteditable case.
+- Verification completed: focused ApprovalReviewPackage Vitest file and Web typecheck.

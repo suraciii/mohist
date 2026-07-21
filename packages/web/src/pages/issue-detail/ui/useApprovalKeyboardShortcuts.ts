@@ -11,10 +11,7 @@ interface UseApprovalKeyboardShortcutsOptions {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable || target.getAttribute('role') === 'textbox') return true
-  return target instanceof HTMLInputElement
-    || target instanceof HTMLTextAreaElement
-    || target instanceof HTMLSelectElement
+  return target.closest('input, textarea, select, [contenteditable], [role="textbox"]') !== null
 }
 
 export function useApprovalKeyboardShortcuts({

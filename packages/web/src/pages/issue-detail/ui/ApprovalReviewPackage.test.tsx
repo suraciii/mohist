@@ -134,6 +134,15 @@ describe('ApprovalReviewPackage', () => {
     fireEvent.keyDown(input, { key: 'a' })
     expect(controller.runAction).not.toHaveBeenCalled()
     input.remove()
+
+    const editor = document.createElement('div')
+    editor.setAttribute('contenteditable', 'true')
+    const editorChild = document.createElement('span')
+    editor.append(editorChild)
+    document.body.append(editor)
+    fireEvent.keyDown(editorChild, { key: 'a' })
+    expect(controller.runAction).not.toHaveBeenCalled()
+    editor.remove()
   })
 
   it('submits send-back feedback from Command+Enter once and keeps plain Enter multiline', () => {
