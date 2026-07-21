@@ -12,3 +12,11 @@
 - Added typed `TaskStarted`, `TaskCompleted`, `TaskFailed`, and `ArtifactRecorded` payloads and routes. All four routes invalidate `['issues']`, matching the existing stage cascade.
 - Added focused coverage for task/artifact route invalidation, reconnect signal exposure, and absence of a timeline polling interval.
 - Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 375 files and 5052 tests.
+
+## T-002
+
+- Added `useIssueAttentionNudges` as a page-owned edge trigger over the already-derived `decision.summary`; the first available summary is the baseline, and navigation to another issue resets that baseline without a mount toast.
+- Approval-required transitions use the existing informational approval copy; blocked transitions use an error toast naming the blocked issue. Failed and routine summaries remain silent, and repeated renders of the same target summary do not duplicate the nudge.
+- Wired the hook into `IssueDetailPage`; `handle-event.ts` and its viewed-issue global-toast suppression remain unchanged, so the page nudge is the viewed-issue notice.
+- Added hook coverage for approval, blocked, duplicate suppression, routine/failed transitions, mount/navigation behavior, and phone-width parity.
+- Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 376 files and 5062 tests; `git diff --check` passed with no generated changes.

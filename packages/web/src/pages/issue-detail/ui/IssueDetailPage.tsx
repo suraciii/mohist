@@ -26,6 +26,7 @@ import {
 } from '../model/issueDecisionActions'
 import { getStopConsequenceCopy, useIssueDecisionActionController } from '../model/useIssueDecisionActions'
 import { useIssueDetailSectionNavigation } from '../model/useIssueDetailSectionNavigation'
+import { useIssueAttentionNudges } from '../model/useIssueAttentionNudges'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
@@ -167,6 +168,7 @@ export function IssueDetailPage({
   }
 
   const decision = decisionInputs ? deriveRuntimeDecision(decisionInputs) : null
+  useIssueAttentionNudges({ issueNumber, summary: decision?.summary ?? null })
   const issueBody = useMemo(() => partitionIssueBody(issue?.body), [issue?.body])
 
   const decisionActions = useMemo(() => {
