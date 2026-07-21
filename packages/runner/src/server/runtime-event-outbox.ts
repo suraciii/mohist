@@ -57,6 +57,7 @@ const DEFAULT_DELIVERY_TIMEOUT_MS = 5_000
 const DEFAULT_RETRY_DELAY_MS = 2_000
 const DEFAULT_LOCAL_RETRY_DELAY_MS = 1_000
 const DEFAULT_BOUNDED_CONCURRENCY = 4
+let temporaryFileSequence = 0
 
 export type RuntimeEventAcknowledgementPolicy = "matching-receipt" | "successful-response"
 
@@ -175,7 +176,7 @@ export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileS
     const { mkdir, rename, writeFile, constants } = await import("node:fs/promises")
     const { dirname } = await import("node:path")
     await mkdir(dirname(path), { recursive: true })
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+    const temporary = nextTemporaryFilePath(path)
     await writeFile(temporary, body, {
       mode: constants.S_IRUSR | constants.S_IWUSR,
     })
@@ -186,6 +187,11 @@ export class NodeRuntimeEventOutboxFileSystem implements RuntimeEventOutboxFileS
     const { rename } = await import("node:fs/promises")
     await rename(path, `${path}.migrated`)
   }
+}
+
+export function nextTemporaryFilePath(path: string): string {
+  temporaryFileSequence += 1
+  return `${path}.${process.pid}.${Date.now()}.${temporaryFileSequence}.tmp`
 }
 
 export function createAgentSessionRuntimeEventOutbox(
