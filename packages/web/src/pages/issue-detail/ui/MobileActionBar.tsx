@@ -70,8 +70,6 @@ export function MobileActionBar({
   const [sendBackOpen, setSendBackOpen] = useState(false)
   const [sendBackText, setSendBackText] = useState('')
 
-  if (!primary && actions.length === 0) return null
-
   const pendingKind = controller.pendingKind
   const error = controller.error
 
@@ -98,9 +96,6 @@ export function MobileActionBar({
     const sendBackAction = actions.find((a) => a.kind === 'send-back')
     if (!sendBackAction) return
     controller.runAction(sendBackAction, { sendBackBody: sendBackText })
-    setSendBackOpen(false)
-    setSendBackText('')
-    setSheetOpen(false)
   }
 
   const launcherLabel = primary
@@ -169,8 +164,9 @@ export function MobileActionBar({
           <div className="space-y-2" data-testid="mobile-action-sheet-actions">
             {actions.map((action) => {
               const isPending = pendingKind === action.kind
-              const reason = describeReason(action)
-              const isDisabled = !action.enabled || isPending
+              const isBusy = pendingKind !== null
+              const reason = isBusy ? PENDING_BUSY_MESSAGE : describeReason(action)
+              const isDisabled = !action.enabled || isBusy
               const descriptionId = isDisabled ? describeIdFor(action.kind) : undefined
               const label = isPending
                 ? (PENDING_BUSY_LABEL[action.kind] ?? action.pendingLabel)
@@ -226,7 +222,6 @@ export function MobileActionBar({
                   return
                 }
                 controller.runAction(action)
-                handleSheetClose()
               }
 
               return (
@@ -344,7 +339,6 @@ export function MobileActionBar({
                 onClick={() => {
                   const stopAction = actions.find((a) => a.kind === 'stop')
                   if (stopAction) controller.runAction(stopAction)
-                  setSheetOpen(false)
                 }}
                 disabled={pendingKind === 'stop'}
               >

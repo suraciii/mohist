@@ -193,3 +193,26 @@
 - Focused `BranchBar.test.tsx` — 11 / 11 tests pass, covering loading, incomplete status, upstream errors, conflict resolution, enabled execution, visible reasons, accessible linkage, and enabled/disabled classes.
 - `npm run typecheck -w packages/web` — green.
 - `npm run test:run -w packages/web` — 5035 / 5035 tests pass across 372 files.
+
+# Review Fixes — Restore Pending and No-Action Decision Contracts
+
+## Decisions
+
+- The active issue-detail controller rejects all dispatch while any decision mutation is pending.
+  Both desktop and mobile render every displayed decision action as unavailable during that period,
+  with the same visible, `aria-describedby`-linked explanation. The initiating command retains its
+  operation-specific progress label.
+- The mobile sheet stays open after dispatch so its pending state and mutation error remain visible.
+  A zero-action state still exposes an enabled `Open actions` launcher whose sheet contains the
+  rationale, next action, and no-action explanation; the desktop decision surface likewise renders
+  its context when a runtime decision has no commands.
+- Removed the obsolete `RuntimeDecisionSurface`, its handler/types/tests, and the unused page
+  models that only fed that renderer. Runtime decisions now contain workflow actions only; concrete
+  transcript routing remains in `deriveIssueDecisionActions`. Unavailable workflow reasons use
+  product language and contain no implementation terminology.
+
+## Focused Verification
+
+- `npm run typecheck -w packages/web` — green.
+- Focused Vitest run for controller, desktop/mobile decision renderers, narrow-page behavior, and
+  runtime presentations — 62 / 62 tests pass.

@@ -116,8 +116,9 @@ function ActionButton({
   onClick: () => void
 }) {
   const isPending = pendingKind === action.kind
-  const reason = describeReason(action)
-  const isDisabled = !action.enabled || isPending
+  const isBusy = pendingKind !== null
+  const reason = isBusy ? PENDING_BUSY_MESSAGE : describeReason(action)
+  const isDisabled = !action.enabled || isBusy
   const descriptionId = isDisabled ? describeIdFor(action.kind) : undefined
 
   if (isNavAction(action)) {

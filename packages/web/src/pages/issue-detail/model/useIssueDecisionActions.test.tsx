@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import type { IssueDetailMutations } from './useIssueDetailMutations'
 import {
   buildIssueDecisionActionController,
+  getStopConsequenceCopy,
   runControllerAction,
   useIssueDecisionActionController,
   type IssueDecisionControllerContext,
@@ -124,6 +125,19 @@ describe('buildIssueDecisionActionController', () => {
 })
 
 describe('runControllerAction', () => {
+  it('does not dispatch another action while a decision mutation is pending', () => {
+    const approveMutation = mutation({ isPending: true })
+    const sendBackMutation = mutation()
+
+    runControllerAction(
+      makeCtx({ mutations: mutations({ approveMutation, sendBackMutation }), approvalStage: 'check' }),
+      makeAction('send-back'),
+      { sendBackBody: 'Do not send this.' },
+    )
+
+    expect(sendBackMutation.mutate).not.toHaveBeenCalled()
+  })
+
   it('invokes approve mutation on approve action', () => {
     const approveMutation = mutation()
     const ctx = makeCtx({ mutations: mutations({ approveMutation }) })
@@ -244,6 +258,18 @@ describe('useIssueDecisionActionController hook', () => {
 
     act(() => result.current.openStopConfirm())
     act(() => result.current.closeStopConfirm())
+    expect(result.current.stopConfirming).toBe(false)
+  })
+
+  it('does not open stop confirmation while another decision mutation is pending', () => {
+    const { result } = renderController({
+      mutations: mutations({ approveMutation: { isPending: true } }),
+      stopRecoverable: true,
+      approvalStage: null,
+      getStopConsequenceCopy,
+    })
+
+    act(() => result.current.openStopConfirm())
     expect(result.current.stopConfirming).toBe(false)
   })
 

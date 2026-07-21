@@ -54,9 +54,13 @@ function renderBar(props: Partial<React.ComponentProps<typeof MobileActionBar>> 
 afterEach(() => cleanup())
 
 describe('MobileActionBar', () => {
-  it('renders nothing when there are no actions and no primary', () => {
-    const { container } = renderBar({ actions: [], primary: null })
-    expect(container.firstChild).toBeNull()
+  it('keeps no-action context reachable from the launcher', () => {
+    renderBar({ actions: [], primary: null })
+
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(screen.getByTestId('mobile-action-sheet-rationale')).toHaveTextContent('The workflow is currently executing.')
+    expect(screen.getByTestId('mobile-action-sheet-next-action')).toHaveTextContent('No action required right now.')
+    expect(screen.getByTestId('mobile-sheet-no-action')).toBeInTheDocument()
   })
 
   it('renders the launcher with the primary label', () => {
@@ -121,16 +125,25 @@ describe('MobileActionBar', () => {
     expect(reason).toHaveTextContent('Mark the issue ready before starting.')
   })
 
-  it('shows the pending label and aria-live polite announcement when a mutation is in flight', () => {
+  it('locks every action with a visible associated reason while a mutation is in flight', () => {
     renderBar({
       primary: makeAction('approve', { pendingLabel: 'Approving...', primary: true }),
-      actions: [makeAction('approve', { pendingLabel: 'Approving...', primary: true })],
+      actions: [
+        makeAction('approve', { pendingLabel: 'Approving...', primary: true }),
+        makeAction('send-back', { label: 'Send back' }),
+      ],
       controller: buildController({ pendingKind: 'approve' }),
     })
     fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
     const approve = screen.getByTestId('mobile-sheet-action-approve')
     expect(approve).toBeDisabled()
     expect(approve).toHaveTextContent('Approving...')
+    expect(approve).toHaveAttribute('aria-describedby', 'mobile-sheet-action-approve-reason')
+    expect(screen.getByTestId('mobile-sheet-action-approve-reason')).toHaveTextContent(/another request is in progress/i)
+    const sendBack = screen.getByTestId('mobile-sheet-action-send-back')
+    expect(sendBack).toBeDisabled()
+    expect(sendBack).toHaveAttribute('aria-describedby', 'mobile-sheet-action-send-back-reason')
+    expect(screen.getByTestId('mobile-sheet-action-send-back-reason')).toHaveTextContent(/another request is in progress/i)
     const pending = screen.getByTestId('mobile-sheet-action-approve-pending')
     expect(pending).toHaveAttribute('aria-live', 'polite')
     expect(pending.textContent ?? '').toMatch(/another request/i)
@@ -146,6 +159,7 @@ describe('MobileActionBar', () => {
     fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
     fireEvent.click(screen.getByTestId('mobile-sheet-action-approve'))
     expect(runAction).toHaveBeenCalledWith(expect.objectContaining({ kind: 'approve' }))
+    expect(screen.getByTestId('mobile-action-sheet')).toBeInTheDocument()
   })
 
   it('opens the stop confirmation when stop is clicked and routes through runAction on confirm', () => {
@@ -211,11 +225,6 @@ describe('MobileActionBar', () => {
     const error = screen.getByTestId('mobile-action-error')
     expect(error).toHaveAttribute('role', 'alert')
     expect(error).toHaveTextContent('Approve failed')
-  })
-
-  it('renders nothing when there are no applicable actions and no primary', () => {
-    const { container } = renderBar({ primary: null, actions: [], controller: buildController() })
-    expect(container.firstChild).toBeNull()
   })
 
   it('renders a launcher primary label that uses pending copy when a runtime action is pending', () => {

@@ -32,6 +32,19 @@ export interface IssueDecisionControllerOptions {
   getStopConsequenceCopy: (stopRecoverable: boolean | null) => { title: string; body: string }
 }
 
+export function getStopConsequenceCopy(stopRecoverable: boolean | null): { title: string; body: string } {
+  if (stopRecoverable) {
+    return {
+      title: 'Stop (recoverable)',
+      body: 'Stop will preserve progress so this workflow can be resumed later.',
+    }
+  }
+  return {
+    title: 'Stop (irreversible)',
+    body: 'Stop is irreversible for this workflow run; progress cannot be resumed.',
+  }
+}
+
 function pickPendingKind(mutations: IssueDetailMutations): IssueDecisionActionKind | null {
   if (mutations.approveMutation.isPending) return 'approve'
   if (mutations.sendBackMutation.isPending) return 'send-back'
@@ -95,6 +108,8 @@ export function runControllerAction(
   action: IssueDecisionAction,
   options?: { sendBackBody?: string },
 ): void {
+  if (pickPendingKind(ctx.mutations)) return
+
   switch (action.kind) {
     case 'approve':
       ctx.mutations.approveMutation.mutate()
@@ -181,7 +196,9 @@ export function useIssueDecisionActionController({
     }, action, options)
   }, [mutations, stopRecoverable, approvalStage, navigate, stopCopy, stopConfirmOpen])
 
-  const openStopConfirm = useCallback(() => setStopConfirmOpen(true), [])
+  const openStopConfirm = useCallback(() => {
+    if (!pendingKind) setStopConfirmOpen(true)
+  }, [pendingKind])
   const closeStopConfirm = useCallback(() => {
     if (mutations.stopMutation.isPending || mutations.forceStopMutation.isPending) return
     setStopConfirmOpen(false)

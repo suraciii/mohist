@@ -252,7 +252,7 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
     expect(reason.textContent ?? '').toMatch(/runner is not available|no runner is connected/i)
   })
 
-  it('done state renders no mobile bar', async () => {
+  it('done state keeps the no-action decision context reachable on mobile', async () => {
     mockIssue(baseIssue({
       status: 'done',
       workflowStage: 'done',
@@ -269,10 +269,13 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(screen.getByTestId('mobile-action-sheet-rationale')).toHaveTextContent(/completed/i)
+    expect(screen.getByTestId('mobile-action-sheet-next-action')).toHaveTextContent(/no further action required/i)
+    expect(screen.getByTestId('mobile-sheet-no-action')).toBeInTheDocument()
   })
 
-  it('archived state renders no mobile bar', async () => {
+  it('archived state keeps the no-action decision context reachable on mobile', async () => {
     mockIssue(baseIssue({
       status: 'done',
       workflowStage: 'done',
@@ -290,7 +293,9 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
-    expect(screen.queryByTestId('mobile-action-bar')).toBeNull()
+    fireEvent.click(screen.getByTestId('mobile-action-sheet-launcher'))
+    expect(screen.getByTestId('mobile-action-sheet-rationale')).toHaveTextContent(/completed/i)
+    expect(screen.getByTestId('mobile-sheet-no-action')).toBeInTheDocument()
   })
 
   it('narrow viewport reserves bottom padding only when a decision surface exists', async () => {

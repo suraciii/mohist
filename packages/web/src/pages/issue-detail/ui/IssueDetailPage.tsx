@@ -9,7 +9,7 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundState } from '@/shared/ui/not-found-state'
-import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision, getStopConsequenceCopy } from '../../../widgets/issue-workflow'
+import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -24,7 +24,7 @@ import {
   deriveIssueDecisionActions,
   type IssueDecisionAction,
 } from '../model/issueDecisionActions'
-import { useIssueDecisionActionController } from '../model/useIssueDecisionActions'
+import { getStopConsequenceCopy, useIssueDecisionActionController } from '../model/useIssueDecisionActions'
 import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
@@ -256,7 +256,7 @@ export function IssueDetailPage({
     ?? 'No action required right now.'
 
   const showDecisionSurface = !isNarrowViewport
-    && (decision !== null || (issueActions.length > 0))
+    && (decision !== null || issueOnlyContext !== null)
   const showMobileActionBar = isNarrowViewport
   const showWorkflowSections = !isCompositeParent
 
@@ -401,7 +401,7 @@ export function IssueDetailPage({
               </div>
             </div>
 
-            {showDecisionSurface && issueActions.length > 0 && (
+            {showDecisionSurface && (
               <div data-testid="issue-decision-surface-frame">
                 <IssueDecisionSurface
                   actions={issueActions}
