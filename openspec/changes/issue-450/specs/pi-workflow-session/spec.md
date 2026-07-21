@@ -16,7 +16,7 @@ A Pi Workflow Action SHALL resolve its logical AgentSession by project, Workflow
 
 ### Requirement: The physical Pi binding is persisted before the first prompt
 
-For an unbound Pi logical AgentSession, the Runner SHALL create a physical Pi Session in the authoritative working directory and SHALL persist its binding before submitting the first prompt. The binding SHALL record runtime `pi`, the owning Runner, immutable working directory, and the absolute Pi session-file path as `runtimeSessionId`; the Pi internal Session UUID SHALL remain diagnostic only. If physical creation does not yield a session-file path, the turn SHALL fail as `incompatible-runtime`. If binding persistence fails, the turn SHALL fail as `session-binding-failed` and MUST NOT submit the prompt.
+For an unbound Pi logical AgentSession, the Runner SHALL create a physical Pi Session in the authoritative working directory and SHALL persist its binding before submitting the first prompt. The binding SHALL record runtime `pi`, the owning Runner, immutable working directory, and the complete absolute Pi session-file path as `runtimeSessionId`; binding and transcript storage MUST NOT truncate that path to a legacy identifier length. The Pi internal Session UUID SHALL remain diagnostic only. If physical creation does not yield a session-file path, the turn SHALL fail as `incompatible-runtime`. If binding persistence fails, the turn SHALL fail as `session-binding-failed` and MUST NOT submit the prompt.
 
 #### Scenario: Binding precedes first prompt admission
 
