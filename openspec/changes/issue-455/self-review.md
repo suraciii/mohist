@@ -2,27 +2,18 @@
 
 ## Findings
 
-### 1. High: The mobile action contract no longer guarantees the issue's one-gesture approval flow
+### 1. High: The approval-specific phone bar can drop applicable secondary actions
 
-The current issue says the owner should read the approval evidence and then approve or open send-back in one gesture; its Product Shape places Approve and Send back alongside the content and says nothing requires opening a dialog. That constraint is weakened to mere reachability in the proposal (`proposal.md:7-10`) and capability spec (`specs/issue-decision-surface/spec.md:51-65`). The design then explicitly retains the existing fixed mobile action control (`design.md:34`), and T-001 only requires both actions to be reachable through it (`tasks.json:16`).
+The issue says this review package mounts onto issue 453's unified decision surface. That prerequisite guarantees that a narrow viewport exposes the complete applicable action list, not only the primary action. Current `deriveIssueDecisionActions` appends Ask Agent for an active issue and View transcript when a workflow session exists, including while approval is pending.
 
-The existing `MobileActionBar` is a launcher that opens a modal action drawer before exposing Approve and Send back. The plan can therefore satisfy every written spec and task while preserving the extra gesture and disclosure that this issue is meant to remove.
+The revised design replaces the approval-mode `MobileActionBar` with a fixed bar containing only direct Approve and Send back controls and explicitly removes the generic action sheet (`design.md:34`). The capability spec only requires “every authorized approval action” (`specs/issue-decision-surface/spec.md:3`), and T-001 likewise specifies a two-column bar with those two controls and no sheet (`tasks.json:16`). Neither artifact says where other applicable descriptors remain reachable. The phone Playwright criteria verify only Approve and Send back (`tasks.json:23-24`).
 
-The proposal, spec, design, and T-001 acceptance criteria must state the direct mobile interaction: Approve is visible alongside the review package and executes in one tap; Send back is visible there and opens its structured form in one tap; neither requires opening the generic action drawer or another dialog. Non-approval states may retain the existing mobile action sheet.
-
-### 2. High: Browser verification omits the phone Plan package and mobile action completion
-
-The spec independently requires Plan and Check packages to work at phone width (`specs/issue-decision-surface/spec.md:55-65`). T-001's Playwright criterion instead covers Plan on desktop and Check on a phone (`tasks.json:22`). This does not verify phone rendering of `tasks.json`, the artifact most likely to expose long-token horizontal overflow, nor the complete phone Plan package with both actions.
-
-The same criterion checks only fixed-action reachability and location; it does not execute mobile Approve or open and submit mobile Send back. A broken, multi-step, or still drawer-mediated primary workflow could pass.
-
-T-001 must require real-browser phone scenarios for both Plan and Check. Those scenarios must verify inline evidence, no horizontal document overflow, safe-area clearance, direct Approve execution, one-tap opening and successful submission of structured Send back, and absence of an intervening action drawer/dialog.
+The plan can therefore satisfy every new criterion while making Ask Agent or View transcript disappear during approval on a phone. The proposal and spec must preserve the complete applicable action list while keeping Approve and Send back direct. The design must define a non-blocking location for secondary descriptors that does not add a disclosure before either approval action, and T-001 must cover secondary action reachability and navigation in approval mode at phone width.
 
 ## Confirmed
 
-- The two capability specs correspond to the proposal capabilities and use testable normative scenarios.
-- The design preserves the existing approval and text-feedback API contracts and keeps the server authoritative.
-- The two-task split is coherent: T-002 consumes T-001's package and controlled form, and `T-001 -> T-002` is an acyclic dependency with strictly increasing priority.
-- Each task includes its relevant test and typecheck verification rather than creating standalone test tasks.
+- The earlier one-tap mobile action finding is fixed: approval no longer uses the generic action drawer, and Send back opens an inline form.
+- The earlier browser coverage finding is fixed: T-001 now requires phone-width Plan and Check evidence plus real Approve and Send back completion.
+- The artifact/API boundaries, structured feedback contract, keyboard requirements, two-task split, and `T-001 -> T-002` dependency remain coherent.
 
 <promise>FAIL</promise>
