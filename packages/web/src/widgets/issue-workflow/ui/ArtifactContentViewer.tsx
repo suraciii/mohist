@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { FileIcon, FolderIcon, ArrowLeftIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
-import { MarkdownReader } from '@/shared/ui'
+import { ArtifactTextContent } from './ArtifactTextContent'
 import { useIssueWorkflowArtifactContent, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
 
 export interface ArtifactContentViewerProps {
@@ -195,13 +195,7 @@ export function ArtifactContentViewer({
                   <span>{formatBytes(selectedEntry.size)}</span>
                 </div>
               )}
-{data.contentType === 'text/markdown' ? (
-                <MarkdownReader content={data.content} baseHeadingLevel={2} />
-              ) : (
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-700 bg-gray-50 rounded-md p-3 border">
-                  {data.content}
-                </pre>
-              )}
+              <ArtifactTextContent content={data.content} contentType={data.contentType} />
             </div>
           )}
         </div>

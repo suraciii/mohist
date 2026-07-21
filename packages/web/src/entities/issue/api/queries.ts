@@ -50,13 +50,28 @@ export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | nu
   return useQuery(issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, params, enabled, workflowRunId))
 }
 
-export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
-  const { projectId } = useProject()
-  return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', params],
+export function issueWorkflowArtifactsQueryOptions(
+  projectId: string | null | undefined,
+  issueNumber: number,
+  params: IssueWorkflowArtifactListParams = {},
+  enabled: boolean = true,
+  workflowRunId?: string | null,
+) {
+  return {
+    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', workflowRunId ?? null, params] as const,
     queryFn: () => getIssueWorkflowArtifacts(issueNumber, params, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
-  })
+  } as const
+}
+
+export function useIssueWorkflowArtifacts(
+  issueNumber: number,
+  params: IssueWorkflowArtifactListParams = {},
+  enabled: boolean = true,
+  workflowRunId?: string | null,
+) {
+  const { projectId } = useProject()
+  return useQuery(issueWorkflowArtifactsQueryOptions(projectId, issueNumber, params, enabled, workflowRunId))
 }
 
 export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId: string | null, options: { file?: string } = {}, enabled: boolean = true) {

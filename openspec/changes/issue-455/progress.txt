@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- Issue 453 owns the ordered `IssueDecisionAction` descriptors and `IssueDecisionActionController`; approval composition must consume those values rather than derive a second action model.
+- `useIssueWorkflowArtifacts` keeps the existing HTTP parameters and now accepts an optional run scope only for the TanStack Query key.
+- `ArtifactTextContent` is shared by the dialog and inline review package; Markdown uses `MarkdownReader`, while other recorded text stays raw in a wrapping `pre`.
+
+## T-001
+
+- Added `ApprovalReviewPackage` at the existing top decision slot. Plan uses exact `proposal.md` and `tasks.json` artifact paths; Check uses exact `review.md` plus diff state.
+- Approval phone layouts use direct fixed Approve and Send back controls and an optional non-modal More actions menu. Non-approval phone layouts still use `MobileActionBar` and its action sheet.
+- Desktop and phone send-back use one package-owned controlled draft serialized as `Category: <Title case>`, a blank line, and trimmed text. No server contract changed.
+- Existing approval tests that asserted the generic drawer or bare feedback were updated to the new product contract.
+- Verification completed: Web typecheck, full Web Vitest suite, FSD/test-boundary checks, and focused issue decision-surface Playwright suite.

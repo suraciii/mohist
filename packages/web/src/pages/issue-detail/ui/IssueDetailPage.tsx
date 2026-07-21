@@ -46,6 +46,7 @@ import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
 import { IssueCommitsSection } from './sections/IssueCommitsSection'
 import { IssueCommentsSection } from './sections/IssueCommentsSection'
 import { MobileActionBar } from './MobileActionBar'
+import { ApprovalReviewPackage } from './ApprovalReviewPackage'
 
 export interface IssueDetailPageComponents {
   EventTimelinePanel: ComponentType<EventTimelinePanelProps>
@@ -98,7 +99,8 @@ export function IssueDetailPage({
   const isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0
   const workflowDataEnabled = !!issue && !isCompositeParent
   const { data: agentStatus } = useAgentStatus()
-  const { data: diffData } = useIssueDiff(issueNumber, workflowDataEnabled)
+  const diffQuery = useIssueDiff(issueNumber, workflowDataEnabled)
+  const { data: diffData } = diffQuery
   const { data: workflowTimeline } = useWorkflowTimeline(
     issueNumber,
     workflowDataEnabled && !!issue && issue.status !== IssueStatus.Backlog,
@@ -255,9 +257,11 @@ export function IssueDetailPage({
     ?? issueOnlyContext?.nextAction
     ?? 'No action required right now.'
 
+  const isApproval = decision?.summary === 'approval-required'
   const showDecisionSurface = !isNarrowViewport
     && (decision !== null || issueOnlyContext !== null)
-  const showMobileActionBar = isNarrowViewport
+  const showMobileActionBar = isNarrowViewport && !isApproval
+  const showMobileReservedBar = isNarrowViewport && (isApproval || showMobileActionBar)
   const showWorkflowSections = !isCompositeParent
 
   return (
@@ -265,12 +269,12 @@ export function IssueDetailPage({
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
         <div
           className={
-            showMobileActionBar
+            showMobileReservedBar
               ? 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 pt-6 pb-[calc(8rem+env(safe-area-inset-bottom))]'
               : 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6'
           }
           data-testid="issue-detail-content-column"
-          data-bar-reserved={showMobileActionBar ? 'true' : 'false'}
+          data-bar-reserved={showMobileReservedBar ? 'true' : 'false'}
         >
           <div data-testid="status-header-tier" className="space-y-4">
             {isCompositeParent && issueOnlyContext ? (
@@ -401,7 +405,21 @@ export function IssueDetailPage({
               </div>
             </div>
 
-            {showDecisionSurface && (
+            {isApproval ? (
+              <ApprovalReviewPackage
+                issueNumber={issueNumber}
+                workflowRunId={issue.workflowRunId ?? null}
+                approvalStage={decision?.approvalStage || null}
+                actions={issueActions}
+                controller={controller}
+                rationale={surfaceRationale}
+                nextAction={surfaceNextAction}
+                isNarrowViewport={isNarrowViewport}
+                diffData={diffData}
+                diffIsLoading={diffQuery.isLoading}
+                diffError={diffQuery.error}
+              />
+            ) : showDecisionSurface && (
               <div data-testid="issue-decision-surface-frame">
                 <IssueDecisionSurface
                   actions={issueActions}
@@ -445,7 +463,7 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              {showWorkflowSections && (
+              {showWorkflowSections && !isApproval && (
                 <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
               )}
 
@@ -472,7 +490,7 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              {showWorkflowSections && diffData?.available === true && (
+              {showWorkflowSections && !isApproval && diffData?.available === true && (
                 <div
                   className="min-w-0 px-4 py-3 text-sm"
                   data-testid="diff-summary-banner"

@@ -385,7 +385,7 @@ test.describe('Issue decision surface browser layout', () => {
     expect(boxesOverlap(stopBox, transcriptBox)).toBe(false)
   })
 
-  test('phone width surfaces an enabled launcher whose sheet exposes every applicable action and the rationale / next-action text', async ({ page }) => {
+  test('phone width surfaces direct approval actions without the generic launcher', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 820 })
     const issue = makeIssue({
       number: 406,
@@ -409,18 +409,10 @@ test.describe('Issue decision surface browser layout', () => {
     await mockIssueDetailApi(page, issue, [])
     await page.goto(`/${project.name}/issues/${issue.number}`)
 
-    const launcher = page.getByTestId('mobile-action-sheet-launcher')
-    await expect(launcher).toBeVisible()
-    await expect(launcher).toBeEnabled()
-    await launcher.click()
-
-    const sheet = page.getByTestId('mobile-action-sheet')
-    await expect(sheet).toBeVisible()
-    await expect(sheet.getByTestId('mobile-action-sheet-rationale')).toBeVisible()
-    await expect(sheet.getByTestId('mobile-action-sheet-next-action')).toBeVisible()
-    await expect(sheet.getByTestId('mobile-sheet-action-approve')).toBeVisible()
-    await expect(sheet.getByTestId('mobile-sheet-action-send-back')).toBeVisible()
-    await expect(sheet.getByTestId('mobile-sheet-action-ask-agent')).toBeVisible()
+    await expect(page.getByTestId('approval-mobile-approve')).toBeVisible()
+    await expect(page.getByTestId('approval-mobile-send-back')).toBeVisible()
+    await expect(page.getByTestId('approval-review-evidence')).toBeVisible()
+    await expect(page.getByTestId('mobile-action-sheet-launcher')).not.toBeVisible()
   })
 
   test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({ page }) => {

@@ -17,6 +17,9 @@ export interface IssueDecisionSurfaceProps {
   nextAction: string
   controller: IssueDecisionActionController
   evidence?: React.ReactNode
+  sendBackOpen?: boolean
+  onSendBackOpen?: () => void
+  sendBackForm?: React.ReactNode
   className?: string
 }
 
@@ -227,13 +230,17 @@ export function IssueDecisionSurface({
   nextAction,
   controller,
   evidence,
+  sendBackOpen: controlledSendBackOpen,
+  onSendBackOpen,
+  sendBackForm,
   className,
 }: IssueDecisionSurfaceProps) {
   const presentation = SUMMARY_PRESENTATION[summary]
-  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [uncontrolledSendBackOpen, setUncontrolledSendBackOpen] = useState(false)
   const [sendBackText, setSendBackText] = useState('')
   const pendingKind = controller.pendingKind
   const error = controller.error
+  const sendBackOpen = controlledSendBackOpen ?? uncontrolledSendBackOpen
 
   const primaryKind = actions.find((a) => a.primary)?.kind ?? null
   const visibleActions = [...actions]
@@ -246,7 +253,8 @@ export function IssueDecisionSurface({
       return
     }
     if (action.kind === 'send-back' && action.enabled) {
-      setSendBackOpen(true)
+      onSendBackOpen?.()
+      if (!onSendBackOpen) setUncontrolledSendBackOpen(true)
       return
     }
     controller.runAction(action)
@@ -352,7 +360,7 @@ export function IssueDecisionSurface({
         </div>
       )}
 
-      {sendBackOpen && (
+       {sendBackOpen && sendBackForm ? sendBackForm : sendBackOpen && (
         <div
           data-testid="decision-send-back-form"
           className="mt-3 rounded-md border border-border bg-muted p-3"
@@ -379,7 +387,7 @@ export function IssueDecisionSurface({
               size="sm"
               data-testid="decision-send-back-cancel"
               onClick={() => {
-                setSendBackOpen(false)
+                 setUncontrolledSendBackOpen(false)
                 setSendBackText('')
               }}
               disabled={pendingKind === 'send-back'}
