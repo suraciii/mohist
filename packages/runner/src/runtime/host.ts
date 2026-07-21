@@ -26,7 +26,7 @@ import {
   opencodeModelSetsEqual,
   type DiscoveredOpencodeModels,
 } from "./opencode-models.js"
-import { getPiRuntimeFactory, type PiRuntime } from "./pi/index.js"
+import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -348,18 +348,23 @@ export class RunnerHost {
     // Construct the shared OpenCode runtime. The factory seam returns a
     // real `OpenCodeRuntime` (production) or a fake the test injected
     // via `setOpenCodeRuntimeFactoryForTest`. `start()` runs the health
-    // check and establishes the global event subscription before it
-    // flips `ready()` true; until then the host's `pollOnce` gate keeps
-    // the runner from claiming work.
+    // check + catalog load and only flips `ready()` true after both
+    // pass; until then the host's `pollOnce` gate keeps the runner
+    // from claiming work.
+    const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
+    if (!policy.ok) {
+      console.error("provider error policy is invalid; using defaults:", policy.error.message)
+    }
     const factory = getOpenCodeRuntimeFactory()
     this.openCodeRuntime = factory({
       directory: process.cwd(),
+      ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
     })
     const startResult = await this.openCodeRuntime.start(signal)
     if (!startResult.ok) {
       console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
     }
-    this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot })
+    this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot, ...(policy.ok ? { providerErrorPolicy: policy.value } : {}) })
     const piStart = await this.piRuntime.start()
     if (!piStart.ok) {
       console.error("pi runtime not ready at startup; claiming gated until it recovers:", piStart.error.message)
