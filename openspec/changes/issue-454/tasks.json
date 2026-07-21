@@ -1,18 +1,19 @@
 {
   "project": "mohist-local",
-  "description": "Deduplicate the issue detail reading flow, separate issue metadata from description content, make core sections deep-linkable, and restore subject and author identity across workflow history.",
+  "description": "Deduplicate the issue detail reading flow, separate issue metadata from description content, make core sections deep-linkable, and restore truthful subject and comment attribution across workflow history.",
   "tasks": [
     {
       "id": "T-001",
       "title": "Separate issue metadata from description content",
-      "spec": "specs/issue-metadata-presentation/spec.md#requirement-recognized-issue-frontmatter-is-presented-as-metadata, specs/issue-metadata-presentation/spec.md#requirement-description-rendering-excludes-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-collapsed-description-hints-exclude-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-description-editing-does-not-expose-raw-frontmatter",
-      "description": "Move issue-body partitioning into the Issue entity and make create, detail, preview, Details metadata, and edit flows consume that one contract. Preserve the original frontmatter envelope during description-only edits while ensuring raw metadata never enters the rendered description, collapsed hint, or description textarea.",
+      "spec": "specs/issue-metadata-presentation/spec.md#requirement-recognized-issue-frontmatter-is-presented-without-overriding-issue-state, specs/issue-metadata-presentation/spec.md#requirement-description-rendering-excludes-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-collapsed-description-hints-exclude-frontmatter, specs/issue-metadata-presentation/spec.md#requirement-malformed-leading-frontmatter-does-not-enter-the-reading-flow, specs/issue-metadata-presentation/spec.md#requirement-description-editing-does-not-expose-raw-frontmatter",
+      "description": "Move issue-body partitioning into the Issue entity and make create, detail, preview, Details metadata, and edit flows consume that one contract. Keep authoritative Issue state ahead of conflicting body defaults, preserve closed envelopes during description-only edits, and deterministically hide and repair unclosed envelopes while raw metadata stays out of every description surface.",
       "acceptanceCriteria": [
-        "The Issue entity public API owns one deterministic partition/recomposition contract that returns recognized recommended_workflow, recommended_workflow_reason, and risk metadata, post-envelope description content, and the original raw envelope; create-issue no longer owns a competing parser.",
-        "Parser coverage preserves existing quoted scalar and literal/folded block behavior and adds BOM, CRLF, unknown-key, bounded malformed-envelope, empty-description, and lossless recomposition cases without adding a YAML dependency.",
-        "IssueDetailPage partitions the body once, passes only description content to IssueDescriptionSection and its collapsed-preview builder, and passes only present recognized values to labeled rows in the Details area; absent metadata is not fabricated.",
+        "The Issue entity public API owns one deterministic partition/recomposition contract that returns recognized recommended_workflow, recommended_workflow_reason, and risk metadata, post-envelope description content, original raw envelope, and none/closed/unclosed state; create-issue no longer owns a competing parser.",
+        "Parser coverage preserves existing quoted scalar and literal/folded block behavior and adds BOM, CRLF, unknown-key, bounded malformed-envelope, unclosed-envelope, empty-description, lossless closed recomposition, and one-delimiter unclosed repair cases without adding a YAML dependency.",
+        "IssueDetailPage partitions the body once and passes only description content to IssueDescriptionSection and its collapsed-preview builder; bounded malformed envelopes retain post-delimiter description, while an unclosed leading envelope renders no description or preview and exposes no raw text in the editor.",
+        "IssueDetailsCard labels body workflow/reason as recommendation metadata, retains the selected workflow profile as current state, and renders exactly one Risk value using issue.risk before parsed body risk; overridden risk and recommended-versus-selected workflow tests prove stale defaults cannot replace or duplicate authoritative fields.",
         "An issue containing only a frontmatter envelope renders no Description body while its recognized values remain visible in Details, and raw delimiters/keys never render as Markdown headings or preview text.",
-        "EditIssueDialog initializes its description textarea with post-envelope content only and recombines the untouched raw envelope with edited content before PATCH; description-only saves preserve recognized values, unknown envelope lines, line endings, and attachment extraction from the final body.",
+        "EditIssueDialog initializes its description textarea with post-envelope content only and recombines the raw envelope with edited content before PATCH; closed-envelope saves preserve recognized values, unknown lines, and line endings, while an unclosed envelope receives exactly one closing delimiter before new description content and reopens as a valid hidden envelope.",
         "CreateIssueDialog retains its current recommendation and risk behavior through the entity parser, with existing frontmatter tests migrated rather than duplicated across feature slices.",
         "Focused entity, create-issue, edit-issue, IssueDescriptionSection, IssueDetailsCard, and MSW-backed issue-detail tests cover display, preview, editing, preservation, partial metadata, and no-description behavior.",
         "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, and npm run test:run -w packages/web pass with no Git-visible generated changes."
@@ -20,10 +21,10 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Entity-owned issue-body partition/recomposition API, migrated create flow, sanitized detail/preview/edit presentations, structured Details metadata, and focused Web coverage.",
+      "output": "Entity-owned issue-body partition/recomposition API with precedence and malformed-envelope semantics, migrated create flow, sanitized detail/preview/edit presentations, structured Details metadata, and focused Web coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep the raw envelope as the persisted source and preserve it byte-for-byte during description-only edits. Do not add Issue columns, a YAML package, same-layer feature imports, or independent stripping regular expressions. This slice is independent of T-002 through T-004."
+      "notes": "Treat selected workflow profile and Issue risk as current state; body workflow/reason are recommendations and body risk is fallback only. Preserve closed envelopes byte-for-byte, and make insertion of one missing delimiter the only unclosed-envelope repair. Do not add Issue columns, a YAML package, same-layer feature imports, or independent stripping regular expressions. This slice is independent of T-002 through T-004."
     },
     {
       "id": "T-002",
@@ -75,27 +76,27 @@
     },
     {
       "id": "T-004",
-      "title": "Restore subject and author identity in issue history",
-      "spec": "specs/issue-history-attribution/spec.md#requirement-task-activity-names-its-task-subject, specs/issue-history-attribution/spec.md#requirement-artifact-activity-names-its-artifact-subject, specs/issue-history-attribution/spec.md#requirement-comment-rows-show-author-attribution",
-      "description": "Resolve workflow task and artifact subjects in the Activity presentation while keeping durable event payloads identity-based. Add truthful role-level comment attribution through the existing single-operator read contract and render an explicit fallback when author data is absent.",
+      "title": "Restore truthful attribution in issue history",
+      "spec": "specs/issue-history-attribution/spec.md#requirement-task-activity-names-its-task-subject, specs/issue-history-attribution/spec.md#requirement-artifact-activity-names-its-artifact-subject, specs/issue-history-attribution/spec.md#requirement-comment-rows-show-truthful-author-attribution",
+      "description": "Resolve workflow task and artifact subjects in the Activity presentation while keeping durable event payloads identity-based. Render recorded comment authors when responses provide them and the exact Unknown author fallback for the current actor-free contract, without changing server data or inferring identity from the caller.",
       "acceptanceCriteria": [
         "When Activity is enabled, the widget obtains the existing workflow timeline and builds a stage-plus-task-ID title lookup; task started/completed/failed summaries name the resolved title and fall back to the stable task ID rather than an anonymous Task Started/Completed/Failed label.",
         "Artifact-recorded summaries name the event's displayable path directly, and both task and artifact subjects are visible in the row summary without opening raw event detail.",
         "Historical and live events use the same subject-aware formatter and retain existing classification, attention, detail, deduplication, ordering, filters, and live-status behavior; no task title is added to durable domain event payloads or generic stored-event APIs.",
-        "IssueCommentDto exposes an additive author value of Operator from the single-operator read projection without adding a persistence column or accepting a caller-supplied author, and focused server projection/API serialization tests cover it.",
-        "The Web Comment model accepts author, IssueCommentsSection renders author and creation time with the matching body, and a missing/blank author renders Unknown author rather than a blank attribution or timestamp-only row.",
+        "The Web Comment model accepts an optional nullable author without changing AddCommentRequest, IssueCommentRow, IssueCommentDto, or API serialization; controlled responses with a nonblank recorded author render that exact value.",
+        "IssueCommentsSection renders author and creation time with the matching body, and every missing/blank author renders the exact label Unknown author rather than Operator, You, a client/channel name, blank attribution, or a timestamp-only row.",
         "Comment author, timestamp, body, attachment rendering, deletion, composition, and Command+Enter behavior remain readable and functional at desktop and phone width.",
-        "Focused describeEvent/useEventTimeline/EventTimelinePanel tests cover title resolution, stage-key disambiguation, ID fallback, artifact path, historical/live parity, and unchanged event behavior; comment component and issue-detail tests cover Operator and fallback attribution.",
+        "Focused describeEvent/useEventTimeline/EventTimelinePanel tests cover title resolution, stage-key disambiguation, ID fallback, artifact path, historical/live parity, and unchanged event behavior; comment component and issue-detail tests cover recorded, missing, blank, and inferred-identity rejection cases.",
         "A focused production-build phone Playwright scenario shows comment author, timestamp, and body without clipping, overlap, or horizontal document overflow.",
-        "npm test, npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
+        "npm run check:fsd -w packages/web, npm run typecheck -w packages/web, npm run test:run -w packages/web, and the focused issue-detail Playwright spec pass with no Git-visible generated changes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Subject-aware Activity formatting backed by workflow timeline titles, additive Operator comment attribution, responsive comment metadata, and focused server/Web/browser coverage.",
+      "output": "Subject-aware Activity formatting backed by workflow timeline titles, recorded-or-unknown comment attribution, responsive comment metadata, and focused Web/browser coverage.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep workflow events immutable and enrich only the Web read presentation. Operator is a role label under the current identity model; do not persist spoofable person strings, add user accounts, or display You. T-005 may change ActivityDialog control but does not consume this slice's formatter output."
+      "notes": "Keep workflow events immutable and enrich only the Web read presentation. Current server comments have no author and therefore render Unknown author; do not modify the server contract, persist spoofable strings, add user accounts, or infer Operator/You/client/channel identities. T-005 may change ActivityDialog control but does not consume this slice's formatter output."
     },
     {
       "id": "T-005",
