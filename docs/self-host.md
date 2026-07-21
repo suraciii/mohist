@@ -71,7 +71,7 @@ mo install runner
 
 ### 步骤
 
-1. **装系统依赖**：.NET 11 SDK、Node 22、opencode（按官方文档）
+1. **装系统依赖**：.NET 11 SDK、Node.js 22.19.0 或更高版本、opencode（按官方文档）
 2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm install && npm run build`
 3. **创建专用用户**（推荐）：`sudo useradd -m -s /bin/bash mohist`
 4. **装为 systemd user service**（在专用用户下运行）：
@@ -177,6 +177,17 @@ SERVER_URL=http://localhost:3456 RUNNER_ID=my-runner npm start
 ```
 
 务必显式设 `RUNNER_ID`——容器化后 server 的主机名/网络变了，runner id 默认基于 hostname，漂移会让 workflow 的 sticky assignment 失配。
+
+### Pi provider retry policy
+
+Runner validates these optional settings before it claims work. The default policy treats quota, credit, billing, and usage-limit messages as terminal and allows five consecutive provider retry attempts. Additional patterns are JSON regex sources and are appended to the defaults; the threshold must be a positive integer.
+
+```bash
+MOHIST_PROVIDER_ERROR_PATTERNS='["account suspended","provider-specific limit"]'
+MOHIST_PROVIDER_RETRY_THRESHOLD=5
+```
+
+Invalid JSON, regular expressions, or thresholds prevent Runner startup with a diagnostic. Credentials remain managed by Pi and are not copied into Mohist settings.
 
 ---
 

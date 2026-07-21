@@ -139,7 +139,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Id).HasMaxLength(512);
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.RunnerId).HasMaxLength(256);
-            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
+            entity.Property(e => e.AgentSessionId);
             entity.Property(e => e.Status).HasMaxLength(64).IsRequired().HasConversion<string>();
             entity.HasIndex(e => e.AgentSessionId);
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
@@ -208,7 +208,7 @@ public class MohistDbContext : DbContext
             entity.ToTable("AgentSessionTranscriptTurns");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.RuntimeSessionId).HasMaxLength(256);
+            entity.Property(e => e.RuntimeSessionId);
             entity.Property(e => e.PromptText).IsRequired();
             entity.Property(e => e.PromptKind).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();

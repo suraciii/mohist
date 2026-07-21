@@ -189,6 +189,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
                 title = $"session for {name}",
                 issueNumber = issue.Number,
                 workDir = WorkDirFor(project.Id),
+                runtime = "opencode",
             });
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();

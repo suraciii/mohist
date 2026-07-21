@@ -68,7 +68,9 @@ public sealed record AttachPhysicalSessionCommand(
     [property: Id(2)] string? WorkDir = null,
     [property: Id(3)] string? ChangeDir = null,
     [property: Id(4)] int? ProcessPid = null,
-    [property: Id(5)] string? Runtime = null);
+    [property: Id(5)] string? Runtime = null,
+    [property: Id(6)] string? ExpectedRuntime = null,
+    [property: Id(7)] string? ExpectedAgentSessionId = null);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
@@ -169,7 +171,8 @@ public sealed record AgentSessionInfo(
     [property: Id(19)] string? FailureCategory,
     [property: Id(20)] int? ToolCallCount,
     [property: Id(21)] int? ToolErrorCount,
-    [property: Id(22)] string? Runtime);
+    [property: Id(22)] string? Runtime,
+    [property: Id(23)] long? CachedWriteTokens);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

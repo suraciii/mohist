@@ -93,6 +93,8 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
 
   const sessionName = sessionNameFromContext(context)
   let binding: { runtimeSessionId: string | null; workDir: string } | null = null
+  let expectedRuntime: string | null = null
+  let expectedRuntimeSessionId: string | null = null
   if (sessionName && context.serverConnection && context.projectId) {
     try {
       const opened = await context.serverConnection.openWorkflowAgentSession(
@@ -107,6 +109,7 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
           issueNumber: context.issueNumber,
           epicNumber: context.epicNumber,
           workDir: context.workDir,
+          runtime: OPENCODE_USES.slice("mohist/".length),
         },
         context.signal,
       )
@@ -117,6 +120,8 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
         runtimeSessionId: opened.runtimeSessionId ?? null,
         workDir: context.workDir,
       }
+      expectedRuntime = opened.runtime ?? "opencode"
+      expectedRuntimeSessionId = opened.runtimeSessionId ?? null
     } catch (error) {
       return fail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${actionErrorMessage(error)}`)
     }
@@ -125,7 +130,7 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
     binding = { runtimeSessionId: null, workDir: context.workDir }
   }
 
-  if (binding.runtimeSessionId === null && sessionName && context.serverConnection && context.projectId) {
+  if ((binding.runtimeSessionId === null || expectedRuntime !== "opencode") && sessionName && context.serverConnection && context.projectId) {
     const created = await runtime.createSession({
       target: { runtime: "opencode", runtimeSessionId: null, workDir: binding.workDir },
       model: runtimeModel(options),
@@ -144,6 +149,9 @@ export async function opencodeAction(context: ActionInvocationContext): Promise<
           processPid: null,
           model: options?.model ?? null,
           workId: context.workId,
+          runtime: "opencode",
+          expectedRuntime,
+          expectedRuntimeSessionId,
         },
         context.signal,
       )

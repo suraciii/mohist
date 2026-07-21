@@ -1063,7 +1063,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("AgentSessionId")
-                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1279,7 +1278,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RuntimeSessionId")
-                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<long>("Sequence")

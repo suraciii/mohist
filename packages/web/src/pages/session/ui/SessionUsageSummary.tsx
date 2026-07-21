@@ -12,6 +12,7 @@ function hasAnyUsage(usage: AgentSessionUsage): boolean {
     usage.outputTokens != null ||
     usage.totalTokens != null ||
     usage.cachedReadTokens != null ||
+    usage.cachedWriteTokens != null ||
     usage.thoughtTokens != null ||
     usage.costAmount != null ||
     usage.contextWindowUsed != null
@@ -47,6 +48,9 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
           )}
           {shouldShowToken(usage.cachedReadTokens) && (
             <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
+          )}
+          {shouldShowToken(usage.cachedWriteTokens) && (
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cache-write">· {formatCompact(usage.cachedWriteTokens)} cache write</span>
           )}
           {shouldShowToken(usage.thoughtTokens) && (
             <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>

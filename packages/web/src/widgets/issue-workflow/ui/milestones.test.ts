@@ -37,6 +37,10 @@ describe('isInlineAgentTask', () => {
     expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
   })
 
+  it('returns true for the Pi Workflow Action when sessionName is non-empty', () => {
+    expect(isInlineAgentTask({ origin: { uses: 'mohist/pi' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
+  })
+
   it('does not require classification for eligibility; classification is retained context only', () => {
     expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
     expect(isInlineAgentTask({ origin: { uses: 'mohist/opencode' }, sessionName: 'plan-1', classification: null })).toBe(true)
@@ -75,7 +79,7 @@ describe('isInlineAgentTask', () => {
       { origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'agent' },
     ]
     for (const input of inputs) {
-      expect(isInlineAgentTask(input as never)).toBe((input as { origin?: { uses?: string } }).origin?.uses === 'mohist/opencode')
+      expect(isInlineAgentTask(input as never)).toBe(['mohist/opencode', 'mohist/pi'].includes((input as { origin?: { uses?: string } }).origin?.uses ?? ''))
     }
   })
 })

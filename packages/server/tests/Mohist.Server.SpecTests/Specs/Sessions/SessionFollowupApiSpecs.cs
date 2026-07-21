@@ -273,7 +273,8 @@ public class SessionFollowupApiSpecs
             workType = work.WorkType,
             stage = work.Stage,
             title,
-            issueNumber
+            issueNumber,
+            runtime = "opencode"
         });
 
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);

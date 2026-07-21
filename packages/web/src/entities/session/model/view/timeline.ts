@@ -180,6 +180,16 @@ export function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
       })
       continue
     }
+
+    if (event.type === 'provider.retry') {
+      current.recovery.push({
+        status: 'recovering',
+        attempt: getNumberProp(payload, 'attempt'),
+        reason: getStringProp(payload, 'message') ?? 'Provider retry',
+        at: event.createdAt,
+      })
+      continue
+    }
   }
 
   if (current) {

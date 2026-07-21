@@ -102,6 +102,7 @@ public class WorkflowSessionSpecs
             stage = "plan",
             title = "Generate proposal",
             issueNumber = issue.Number,
+            runtime = "opencode",
         });
         await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
         {
@@ -109,6 +110,9 @@ public class WorkflowSessionSpecs
             workDir = "/workspace",
             model = "openai/gpt-4o",
             processPid = 123,
+            runtime = "opencode",
+            expectedRuntime = "opencode",
+            expectedRuntimeSessionId = (string?)null,
         });
         var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath("runner-1", projectId, workflowRunId, sessionName));
 
@@ -197,6 +201,9 @@ public class WorkflowSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             runtimeSessionId = sessionId,
+            runtime = "opencode",
+            expectedRuntime = "opencode",
+            expectedRuntimeSessionId = (string?)null,
             workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });

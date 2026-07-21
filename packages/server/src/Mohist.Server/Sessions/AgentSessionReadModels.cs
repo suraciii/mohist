@@ -15,7 +15,8 @@ public sealed record AgentUsageDto(
     long? ContextWindowSize,
     double? ContextUsagePercent,
     string? HealthStatus,
-    [property: JsonPropertyName("contextUsageHistory")] IReadOnlyList<ContextUsageHistoryEntryDto>? ContextUsageHistory = null);
+    [property: JsonPropertyName("contextUsageHistory")] IReadOnlyList<ContextUsageHistoryEntryDto>? ContextUsageHistory = null,
+    [property: JsonPropertyName("cachedWriteTokens")] long? CachedWriteTokens = null);
 
 /// <summary>
 /// DTO projection of <see cref="Mohist.Server.Sessions.Domain.ContextUsageHistoryEntry"/>.

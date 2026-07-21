@@ -283,13 +283,15 @@ public static class RunnerRoutes
             AgentSessionOpenRequest req, AgentSessionResolver sessions,
             CancellationToken ct) =>
         {
+            if (!IsWorkflowRuntime(req.Runtime))
+                return ApiResults.BadRequest("runtime must be 'opencode' or 'pi'", "runtime_invalid");
             var context = WorkflowSessionContext(projectId, workflowRunId, sessionName, req);
             var lookupLabels = WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName);
             var sessionId = await sessions.ResolveByLabelsAsync(lookupLabels, ct) ?? sessions.NewSessionId();
             var grain = sessions.GetGrain(sessionId);
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
                 runnerId,
-                "opencode",
+                req.Runtime!,
                 WorkDir: req.WorkDir,
                 Metadata: WorkflowAgentSessionMetadata.Metadata(context)));
             return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
@@ -302,11 +304,13 @@ public static class RunnerRoutes
         {
             var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
-
             try
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid, Runtime: "opencode"));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
+                    Runtime: req.Runtime ?? "opencode",
+                    ExpectedRuntime: req.ExpectedRuntime,
+                    ExpectedAgentSessionId: req.ExpectedRuntimeSessionId));
                 return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
@@ -541,6 +545,10 @@ public static class RunnerRoutes
             session.ResolvedModel,
             session.Runtime);
 
+    private static bool IsWorkflowRuntime(string? runtime) =>
+        string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(runtime, "pi", StringComparison.OrdinalIgnoreCase);
+
     private static string? NormalizeBuildGitHash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -659,7 +667,8 @@ public record AgentSessionOpenRequest(
     string? Title = null,
     int? IssueNumber = null,
     string? WorkDir = null,
-    int? EpicNumber = null);
+    int? EpicNumber = null,
+    string? Runtime = null);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
 /// call. Generic (non-workflow) AgentSessions are identified by
@@ -694,7 +703,10 @@ public record AgentSessionAttachRequest(
     string? ChangeDir = null,
     int? ProcessPid = null,
     string? WorkId = null,
-    string? AgentJobId = null);
+    string? AgentJobId = null,
+    string? Runtime = null,
+    string? ExpectedRuntime = null,
+    string? ExpectedRuntimeSessionId = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

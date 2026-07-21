@@ -65,8 +65,9 @@ Action Input 展开后的值是本次执行的唯一配置事实。`mohist/pi` �
 ## Workflow Session
 
 `session` 标识 Workflow 来源的逻辑 AgentSession，语义与 `mohist/opencode` 一致：
-同一 WorkflowRun 中使用相同名称的 task 共享对话上下文；不同名称相互隔离；省略时
-使用 Work ID。
+同一 WorkflowRun 中使用相同名称的 task 解析到同一个逻辑 AgentSession；只要当前物理
+绑定不变，它们共享对话上下文。Runtime 切换仍保留逻辑身份和 lineage，但新物理 Session
+从空上下文开始，不迁移旧 Runtime 对话。不同名称相互隔离；省略时使用 Work ID。
 
 ### 物理 Session 复用不变量
 
@@ -81,7 +82,8 @@ AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重�
 | `options.model` 或 `options.variant` 变化 | 保持不变 |
 | Compact | 保持不变 |
 | Reset | 建立新的空 Session，并记录会话沿革 |
-| 工作目录或执行后端变化 | 建立新 Session，并记录会话沿革 |
+| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
+| 执行后端变化 | 建立新物理 Session，并记录会话沿革 |
 
 如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
 新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而
@@ -94,6 +96,9 @@ AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重�
 同一 AgentSession 同时只执行一个由 Workflow 发起的回合。不同 AgentSession 可以并行。
 用户在 Session 页面提交的 follow-up 是例外：当前回合仍在执行时，它会进入当前回合；
 Session 空闲时，它会开始下一回合。
+
+Session 用量分别记录 input、output、cache read、cache write 与 thought tokens（Pi 提供时）；
+cache write 不会并入 cache read，也不会因事件重投而重复累加。
 
 ## Pi Session 操作
 
@@ -121,7 +126,9 @@ Action Output 与 `mohist/opencode` 相同：只在命中 promise marker 时返�
 `{ "promise": "..." }`，否则为 `null`。
 
 Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许
-的操作直接执行。执行超时会中断当前回合；提交结果不确定时不会自动重放 Prompt，避免
+的操作直接执行。每次 Workflow Prompt 回合的期限固定为 60 分钟，从向 Pi 提交 Prompt
+前开始计时；绑定和审计输入准备不占用该预算，收尾 Prompt 是新的回合并获得新的 60 分钟。
+本 issue 不提供 Action Input 覆盖；期限到达会中断当前回合。提交结果不确定时不会自动重放 Prompt，避免
 同一任务被执行两次。Runner 主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，
 不能用缺少 marker 覆盖 timeout，也不会替换当前 Session 绑定或自动 Reset。
 
@@ -163,6 +170,7 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 | `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
+| `session-reporting-failed` | Session 执行事实无法在本次回合内可靠写入 |
 | `incompatible-runtime` | Pi 版本或数据与 Mohist 不兼容 |
 | `timeout` | 回合超过执行期限被中断 |
 | `interrupted` | 回合被 Runner 外部信号中断 |
@@ -170,6 +178,10 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 
 ## 实装差距
 
-`mohist/pi` 尚未实装，本篇是产品契约的目标形态。落地前，`uses: mohist/pi` 的 task
-会在开始执行时以「未知 Action」失败。与之配套的 Mohist Agent 执行后端选择（在
-Agent 配置中选择 Pi）同样未实装，当前 Mohist Agent 固定使用 OpenCode 执行。
+直接 Workflow 路径已经实装：`uses: mohist/pi` 的 task/check 可执行回合，复用
+Workflow AgentSession，并在现有 Session 页面展示 transcript、工具、状态、压缩、模型、
+用量、成本与 lineage。以下能力仍属于后续工作：
+
+- Mohist Agent 的 AgentJob 执行后端选择仍未实装，当前 Mohist Agent 固定使用 OpenCode。
+- Pi 的 Follow-up、Compact、Reset、Cancel 等 Session 命令仍未实装。
+- 面向 runtime 的模型 catalog 与 Web 模型选择 UI 仍未实装。
