@@ -1,38 +1,25 @@
 # Self-Review - Issue #450 Pi Workflow Path
 
-Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner/Server execution and transcript persistence behavior, repository architecture, and testing rules. This review modifies no other file.
+Scope: issue #450 and `openspec/changes/issue-450/{proposal.md,design.md,tasks.json,specs/}`, checked against the issue-designated product/runtime contracts, current Runner/Server APIs, repository architecture, and testing rules. This review modifies no other file.
 
-## Findings
+## Finding
 
-### F-1 High: Check-stage `mohist/pi` execution has no lease acquisition path
+### F-1 High: Startup cannot discover Server streams whose local manifest is missing
 
-The plan registers `mohist/pi` in the shared Action registry and requires check contexts to carry an already-held `WorkflowSessionTurnLease` (`design.md:66-76`; `tasks.json:156`). D6 defines acquisition only around an Inline Agent task lifecycle owned by `WorkExecutor` (`design.md:121-125`). Current check execution resolves arbitrary registered Actions and runs checks concurrently (`packages/runner/src/runtime/check-execution.ts:39-68`), while Server check parsing does not exclude `mohist/pi`.
+The corrected plan makes Runner-local manifests rebuildable at any Server cursor and requires lifecycle recovery before Runner registration/polling (`design.md:166-174`; `specs/pi-workflow-session/spec.md:154-156`; `tasks.json:104,109,170`). That works when a valid/corrupt local file identifies the logical Session, but total root loss or selective deletion leaves startup with no key for a Server point lookup. Current Runner APIs open a Workflow Session only when `(projectId, workflowRunId, sessionName)` or `sessionId` is already known (`packages/runner/src/server/connection.ts:259-274`; `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:253-319`).
 
-No task defines a logical Session identity, lease acquisition/release, cleanup ownership, or same-session serialization for checks. Registering the Action therefore makes a path callable without the held token its type requires and can overlap Prompts for one logical Session. Either reject `mohist/pi` in check definitions before dispatch and remove it from check contexts, or explicitly specify check work ownership/session naming and assign per-check lease coordination plus concurrent same-session tests.
-
-### F-2 High: Admitted OpenCode checkpoints have no restart transition
-
-Every Workflow OpenCode/Pi binding owns the same manifest and active-turn checkpoint, even though this issue connects only Pi's full runtime observer (`design.md:9,156-162`; `tasks.json:102-105,160`). T-004 defines restart handling for prepared-but-not-admitted checkpoints and admitted Pi checkpoints only (`tasks.json:109`). A Runner crash after the OpenCode Action marks admission but before checkpoint closure leaves no specified transition.
-
-Builders must currently choose between quarantining the stream forever, incorrectly invoking Pi repair, discarding the checkpoint, or expanding into OpenCode transcript reconciliation. Define the admitted-OpenCode rule consistent with the accepted crash-redelivery limitation: drain its durable pre-admission facts, record/retain an execution-outcome-unknown diagnostic if required, close the checkpoint without invoking either Runtime, and allow separately redelivered Workflow work to follow normal at-least-once behavior. Add crash-after-OpenCode-admission, startup drain, later same-session admission, and OpenCode-to-Pi rebind tests.
-
-### F-3 High: Pending transcript evidence cannot identify or reconstruct the exact Action turn
-
-The revised durable acknowledgement protocol commits pending evidence before responding (`design.md:168`; `specs/pi-workflow-session/spec.md:154`; `tasks.json:74`), but its key `{ actionStreamId, sequence, factIndex }` identifies an Action fact, not the transcript turn that must receive it. Current `session.input` opens a turn with prompt metadata, text/reasoning facts need text delta/correlation/timestamps, and transcript idempotency is scoped to the selected turn (`packages/server/src/Mohist.Server/Sessions/Services/TranscriptAccumulator.cs:59-99,194-230`; `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionTranscriptStore.cs:45-87`). Existing `AgentSessionTranscriptEvidence` lacks the operation shape and stable turn target, and its retry path always uses `StartNewTurn: false` with `TextDelta: null` (`AgentSession.cs:324-330`; `AgentSessionGrain.cs:657-707`).
-
-"Extend the evidence model" does not select a safe addressing protocol. Persist a deterministic Action-turn key from `session.input` through all facts and the exact projection operation (`start-turn` or `append-part`), prompt metadata, text delta, correlation identity, payload, and timestamps. Transcript storage must enforce idempotency against that stable turn key so a crash after transcript save but before evidence removal cannot attach/duplicate evidence on a later turn. Add a two-successive-turn test with transcript failure/reactivation between turns and a crash between transcript save and evidence-removal commit.
+No plan artifact assigns a Runner-scoped authoritative inventory route. After total local loss, startup can therefore report ready and poll before discovering admitted Pi/OpenCode turns, contradicting the pre-registration recovery and host test. Add a Server query authenticated/scoped by `runnerId` that enumerates current Workflow Action streams owned by that Runner with logical identity, physical binding, stream ID, cursor, projector checkpoint, and latest lifecycle. Assign the Server contract to T-003, inventory/local reconciliation to T-004, pre-registration composition to T-006, and tests for empty local storage with nonzero admitted Pi/OpenCode streams plus selective manifest loss.
 
 ## Structural Checks
 
 - `tasks.json` parses as valid JSON; all seven task IDs and dependencies resolve and the graph is acyclic.
 - All referenced spec files and requirement anchors resolve.
 - All three proposal capabilities and the issue's seven acceptance criteria are represented.
-- WorkExecutor-only lease ownership, command admission linearization, Reset fallback removal, and crash-redelivery semantics are now coherent.
-- Runtime/outbox no-resubmission is correctly distinguished from accepted at-least-once Workflow redelivery duplication.
+- Check-stage rejection, OpenCode/Pi checkpoint recovery, stable transcript-turn projection, rebuildable local state, Action-event ownership, lifecycle persistence, and exact schema migrations are otherwise coherent.
 - Catalog reporting/UI, Pi AgentJob and Session-command implementation, ACP/RPC, and a generic `AgentRuntime` remain outside scope.
 
 ## Verdict
 
-The primary task path is covered, but builders still lack executable contracts for check dispatch, OpenCode checkpoint recovery, and durable transcript turn reconstruction.
+The plan is otherwise implementation-ready, but pre-registration recovery still needs an authoritative Runner-scoped stream discovery contract.
 
 <promise>FAIL</promise>
