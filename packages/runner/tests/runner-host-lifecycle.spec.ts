@@ -517,6 +517,28 @@ describe("RunnerHost", () => {
     })
   })
 
+  it("ClaimReadiness_RequiresHealthyRuntimeEventOutbox", () => {
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as {
+      openCodeRuntime: { ready(): boolean } | null
+      agentSessionRuntimeEventOutbox: { ready(): boolean }
+      isOpenCodeReadyForClaim(): boolean
+    }
+    host.openCodeRuntime = { ready: () => true }
+    host.agentSessionRuntimeEventOutbox = { ready: () => false }
+
+    expect(host.isOpenCodeReadyForClaim()).toBe(false)
+
+    host.agentSessionRuntimeEventOutbox = { ready: () => true }
+    expect(host.isOpenCodeReadyForClaim()).toBe(true)
+  })
+
   it("GenericFollowupResolver_NonOpencodeBinding_IsMissingTarget", () => {
     new RunnerHost({
       serverUrl: "http://localhost:3456",

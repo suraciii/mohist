@@ -470,7 +470,7 @@ export class RunnerHost {
 
   private isOpenCodeReadyForClaim(): boolean {
     const runtime = this.openCodeRuntime
-    return runtime !== null && runtime.ready()
+    return runtime !== null && runtime.ready() && this.agentSessionRuntimeEventOutbox.ready()
   }
 
   /**
