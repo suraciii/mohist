@@ -5,7 +5,17 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
-import { mockIssue, mockIssueCommits, mockIssueDiff, mountIssueDetail } from './_issueDetailMsw'
+import {
+  mockArtifactContent,
+  mockArtifacts,
+  mockArtifactsError,
+  mockIssue,
+  mockIssueCommits,
+  mockIssueDiff,
+  mockIssueDiffError,
+  mockIssueDiffPending,
+  mountIssueDetail,
+} from './_issueDetailMsw'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 
@@ -111,6 +121,7 @@ function renderPage() {
         <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
           <Routes>
             <Route path="/issues/:number" element={<IssueDetailPage />} />
+            <Route path="/:project/issues/:number/files" element={<div data-testid="changed-files-destination" />} />
           </Routes>
         </ProjectProvider>
       </MemoryRouter>
@@ -148,7 +159,7 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
     mockIssueCommits(FULL_COMMITS_DATA)
   })
 
-  it('orders workflow progress/outputs before changes/diff, commits, description, and comments', async () => {
+  it('orders one artifacts and one changes section before commits, description, and comments', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
       workflowStage: 'build',
@@ -177,7 +188,7 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
     const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
     const workflowFrame = await waitFor(() => screen.getByTestId('workflow-view-frame'))
     const activeRunYamlTrigger = screen.getByTestId('active-run-yaml-trigger')
-    const diffSummaryBanner = await waitFor(() => screen.getByTestId('diff-summary-banner'))
+    const artifacts = await waitFor(() => screen.getByTestId('latest-artifacts-panel'))
     const diffFiles = screen.getByTestId('diff-files-section')
     const commits = screen.getByTestId('commits-section')
     const description = screen.getByTestId('description-section')
@@ -185,15 +196,15 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
 
     expect(readingFlow.contains(workflowFrame)).toBe(true)
     expect(readingFlow.contains(activeRunYamlTrigger)).toBe(true)
-    expect(readingFlow.contains(diffSummaryBanner)).toBe(true)
+    expect(readingFlow.contains(artifacts)).toBe(true)
     expect(readingFlow.contains(diffFiles)).toBe(true)
     expect(readingFlow.contains(commits)).toBe(true)
     expect(readingFlow.contains(description)).toBe(true)
     expect(readingFlow.contains(comments)).toBe(true)
 
-    expectPreceding(workflowFrame, diffSummaryBanner)
     expectPreceding(workflowFrame, activeRunYamlTrigger)
-    expectPreceding(activeRunYamlTrigger, diffSummaryBanner)
+    expectPreceding(workflowFrame, artifacts)
+    expectPreceding(artifacts, activeRunYamlTrigger)
     expectPreceding(activeRunYamlTrigger, diffFiles)
     expectPreceding(activeRunYamlTrigger, commits)
     expectPreceding(activeRunYamlTrigger, description)
@@ -203,11 +214,6 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
     expectPreceding(workflowFrame, description)
     expectPreceding(workflowFrame, comments)
 
-    expectPreceding(diffSummaryBanner, diffFiles)
-    expectPreceding(diffSummaryBanner, commits)
-    expectPreceding(diffSummaryBanner, description)
-    expectPreceding(diffSummaryBanner, comments)
-
     expectPreceding(diffFiles, commits)
     expectPreceding(diffFiles, description)
     expectPreceding(diffFiles, comments)
@@ -216,9 +222,13 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
     expectPreceding(commits, comments)
 
     expectPreceding(description, comments)
+    expect(screen.getAllByRole('heading', { name: 'Changes' })).toHaveLength(1)
+    expect(screen.getAllByRole('heading', { name: 'Artifacts' })).toHaveLength(1)
+    expect(screen.queryByTestId('diff-summary-banner')).toBeNull()
+    expect(screen.queryByTestId('runtime-evidence-list')).toBeNull()
   })
 
-  it('places workflow progress ahead of description and comments even when changes/diff and commits are absent', async () => {
+  it('keeps explicit Changes and Artifacts boundaries when comparison data and a workflow run are absent', async () => {
     mockIssueDiff(null)
     mockIssueCommits(null)
     mockIssue(makeIssue({
@@ -226,7 +236,6 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
       workflowStage: 'build',
       workflowStatus: 'running',
       health: 'active',
-      workflowRunId: 'wr-1',
       body: LONG_BODY,
       comments: [
         {
@@ -249,13 +258,172 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
     const workflowFrame = await waitFor(() => screen.getByTestId('workflow-view-frame'))
     const description = screen.getByTestId('description-section')
     const comments = screen.getByTestId('comments-section')
+    await screen.findByText(/Changed files and diff cannot be inspected/)
 
+    const changes = await screen.findByTestId('diff-files-section')
+    const artifacts = screen.getByTestId('latest-artifacts-panel')
+    expect(within(changes).getByText(/Changed files and diff cannot be inspected/)).toBeTruthy()
+    expect(within(artifacts).getByText('No workflow run or recorded artifacts yet.')).toBeTruthy()
     expect(screen.queryByTestId('diff-summary-banner')).toBeNull()
-    expect(screen.queryByTestId('diff-files-section')).toBeNull()
     expect(screen.queryByTestId('commits-section')).toBeNull()
 
-    expectPreceding(workflowFrame, description)
+    expectPreceding(workflowFrame, artifacts)
+    expectPreceding(artifacts, changes)
+    expectPreceding(changes, description)
     expectPreceding(description, comments)
+  })
+})
+
+describe('IssueDetailPage Changes ownership', () => {
+  it('keeps the sole Changes section mounted while diff data loads', async () => {
+    const resolveDiff = mockIssueDiffPending()
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
+
+    renderPage()
+
+    const changes = await screen.findByTestId('diff-files-section')
+    expect(within(changes).getByText('Loading changes...')).toBeTruthy()
+    expect(screen.getAllByRole('heading', { name: 'Changes' })).toHaveLength(1)
+
+    resolveDiff({ available: false, reason: 'not_started', message: 'Workspace unavailable' })
+    expect(await within(changes).findByTestId('changes-unavailable')).toBeTruthy()
+  })
+
+  it('shows branches and scale once while preserving changed-files navigation and available commits', async () => {
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build', workflowRunId: 'wr-1' }))
+    mockIssueDiff(FULL_DIFF_DATA)
+    mockIssueCommits(FULL_COMMITS_DATA)
+
+    renderPage()
+
+    const changes = await screen.findByTestId('diff-files-section')
+    await within(changes).findByTestId('changes-head')
+    expect(screen.getAllByRole('heading', { name: 'Changes' })).toHaveLength(1)
+    expect(within(changes).getByTestId('changes-head')).toHaveTextContent(FULL_DIFF_DATA.head)
+    expect(within(changes).getByTestId('changes-base')).toHaveTextContent(FULL_DIFF_DATA.base)
+    expect(within(changes).getByTestId('diff-files-scale')).toHaveTextContent('7 files changed · +142 −38')
+    expect(screen.getByTestId('commits-section')).toHaveTextContent('Commits (3)')
+    fireEvent.click(within(changes).getByRole('button', { name: 'View files' }))
+    expect(screen.getByTestId('changed-files-destination')).toBeTruthy()
+    expect(screen.queryByTestId('diff-summary-banner')).toBeNull()
+  })
+
+  it('keeps zero-change and empty-commit states visible', async () => {
+    const emptyComparison = {
+      ...FULL_DIFF_DATA,
+      ahead: 0,
+      summary: { filesChanged: 0, commits: 0, additions: 0, deletions: 0 },
+      files: [],
+    }
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
+    mockIssueDiff(emptyComparison)
+    mockIssueCommits({ ...emptyComparison, commits: [] })
+
+    renderPage()
+
+    const changes = await screen.findByTestId('diff-files-section')
+    await within(changes).findByText('No files changed yet')
+    expect(within(changes).getByText('No files changed yet')).toBeTruthy()
+    expect(screen.getByTestId('commits-section')).toHaveTextContent('No commits yet.')
+  })
+
+  it('renders one consequence-oriented workspace message and no commits failure', async () => {
+    const unavailable = { available: false, reason: 'workspace_removed', message: 'Workspace unavailable' }
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
+    mockIssueDiff(unavailable)
+    mockIssueCommits(unavailable)
+
+    renderPage()
+
+    const changes = await screen.findByTestId('diff-files-section')
+    await within(changes).findByTestId('changes-unavailable')
+    expect(within(changes).getByTestId('changes-unavailable')).toHaveTextContent(
+      'Workspace unavailable. Changed files and diff cannot be inspected, and commits cannot be inspected.',
+    )
+    expect(screen.getAllByText(/Workspace unavailable/)).toHaveLength(1)
+    expect(screen.queryByText(/Workspace unavailable \/ Workspace unavailable/)).toBeNull()
+    expect(screen.queryByTestId('commits-section')).toBeNull()
+  })
+
+  it('distinguishes a diff transport failure from an available:false workspace response', async () => {
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build' }))
+    mockIssueDiffError()
+    mockIssueCommits({ available: false, reason: 'runner_unavailable', message: 'Workspace unavailable' })
+
+    renderPage()
+
+    const changes = await screen.findByTestId('diff-files-section')
+    await within(changes).findByText('Changes could not be loaded. Changed files and diff cannot be inspected.')
+    expect(within(changes).getByText('Changes could not be loaded. Changed files and diff cannot be inspected.')).toBeTruthy()
+    expect(within(changes).queryByTestId('changes-unavailable')).toBeNull()
+    expect(screen.queryByText('Workspace unavailable')).toBeNull()
+  })
+})
+
+describe('IssueDetailPage Artifacts ownership', () => {
+  const artifact = {
+    artifactId: 'artifact-review',
+    workflowRunId: 'wr-1',
+    taskRunId: 'build.1',
+    path: 'review.md',
+    displayName: 'review.md',
+    kind: 'file',
+    contentType: 'text/markdown',
+    size: 12,
+    recordedAt: '2026-01-02T00:00:00Z',
+  }
+
+  it('renders one ordinary collection and opens recorded content from it', async () => {
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build', workflowRunId: 'wr-1' }))
+    mockArtifacts([artifact])
+    mockArtifactContent(artifact.artifactId, '# Review\n\nPASS')
+
+    renderPage()
+
+    const panel = await screen.findByTestId('latest-artifacts-panel')
+    await within(panel).findByText('review.md')
+    expect(screen.getAllByRole('heading', { name: 'Artifacts' })).toHaveLength(1)
+    expect(screen.getAllByTestId('latest-artifacts-panel')).toHaveLength(1)
+    fireEvent.click(within(panel).getByText('review.md'))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Review' })).toBeTruthy()
+    expect(screen.getByText('PASS')).toBeTruthy()
+    expect(screen.queryByTestId('runtime-evidence-list')).toBeNull()
+  })
+
+  it('renders artifact transport failure inside the ordinary section', async () => {
+    mockIssue(makeIssue({ status: 'in_progress', workflowStage: 'build', workflowRunId: 'wr-1' }))
+    mockArtifactsError()
+
+    renderPage()
+
+    const panel = await screen.findByTestId('latest-artifacts-panel')
+    expect(await within(panel).findByText('Failed to load artifacts')).toBeTruthy()
+    expect(screen.getAllByRole('heading', { name: 'Artifacts' })).toHaveLength(1)
+  })
+
+  it('omits the ordinary collection during approval while retaining inline evidence', async () => {
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'check',
+      workflowRunId: 'wr-1',
+      health: 'paused',
+      approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: null,
+        workflowSummaryState: 'awaiting-approval',
+        allowedActions: ['approve', 'reject'],
+      },
+    }))
+    mockArtifacts([artifact])
+    mockArtifactContent(artifact.artifactId, '# Review\n\nPASS')
+
+    renderPage()
+
+    expect(await screen.findByTestId('approval-review-evidence')).toBeTruthy()
+    expect(screen.getByTestId('approval-artifact-review.md')).toBeTruthy()
+    expect(screen.queryByTestId('latest-artifacts-panel')).toBeNull()
+    expect(screen.queryByTestId('runtime-evidence-list')).toBeNull()
   })
 })
 
@@ -359,7 +527,8 @@ describe('IssueDetailPage reading-flow — lightest chrome', () => {
 
     renderPage()
 
-    const diffFiles = await waitFor(() => screen.getByTestId('diff-files-section'))
+    const diffFiles = await screen.findByTestId('diff-files-section')
+    await within(diffFiles).findByTestId('diff-files-summary')
     expect(diffFiles.className).not.toMatch(/\bbg-card\b/)
     expect(diffFiles.className).not.toContain('rounded-lg')
 
@@ -472,7 +641,8 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
 
     renderPage()
 
-    const diffFiles = await waitFor(() => screen.getByTestId('diff-files-section'))
+    const diffFiles = await screen.findByTestId('diff-files-section')
+    await within(diffFiles).findByTestId('diff-files-scale')
     const summary = within(diffFiles).getByTestId('diff-files-summary')
     const scale = within(diffFiles).getByTestId('diff-files-scale')
 
@@ -507,8 +677,8 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
 
     renderPage()
 
-    const diffFiles = await waitFor(() => screen.getByTestId('diff-files-section'))
-    const scale = within(diffFiles).getByTestId('diff-files-scale')
+    const diffFiles = await screen.findByTestId('diff-files-section')
+    const scale = await within(diffFiles).findByTestId('diff-files-scale')
     expect(scale.textContent ?? '').toMatch(/No files changed yet/i)
   })
 })

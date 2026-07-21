@@ -82,3 +82,20 @@
 - All completed, pending, read-only, archived, Done, and Cancelled stages remain selectable with `aria-current="step"`; mutation controls retain their prior guards.
 - Added focused canonical-row log integration, selection/polling/identity regression, issue-detail uniqueness, archived-history, responsive stage, output/artifact, and phone-width production Playwright coverage.
 - Verification completed: `npm run check:fsd -w packages/web`, `npm run typecheck -w packages/web`, full `npm run test:run -w packages/web` (371 files, 5004 tests), and `npm run test:browser -w packages/web -- tests/browser/workflow-task-inspector.spec.ts` all passed. Verification left no generated Git-visible changes.
+
+# T-003: Consolidate Changes and Artifacts in the reading flow
+
+## Codebase Patterns
+
+- `IssueDiffFilesSection` is the persistent page-level Changes boundary. It receives diff query loading/error/data plus whether commit inspection is unavailable, so branch comparison and degraded consequences have one owner.
+- `IssueCommitsSection` remains independently mounted only for `available: true`; empty available data renders `No commits yet`, while shared workspace failures stay in Changes.
+- `LatestArtifactsPanel` is the sole ordinary artifact collection outside approval. Its `ArtifactOpener` section remains mounted without a workflow run and owns list/loading/error/empty/content-opening states.
+- Approval evidence is independently composed by `ApprovalReviewPackage`; ordinary artifacts are omitted during approval, so preserving its artifact slots does not require an `ArtifactOpener` compact mode.
+
+## Completed implementation
+
+- Removed the standalone diff-summary banner and trailing diff/commit message concatenation. Changes now identifies head/base, displays file/addition/deletion scale, retains changed-files navigation, and distinguishes loading, transport failure, zero-change, and consequence-oriented unavailable states.
+- Preserved available and empty commit presentation in its existing reading-flow position while removing all shared-workspace failure duplication.
+- Collapsed `ArtifactOpener` to one full-list contract by deleting compact mode, compact-only props/type export, slicing, evidence markup, and compact test IDs. The ordinary panel now has one `Artifacts` heading and explicit no-run/empty states.
+- Added MSW-backed issue-detail coverage for exact section cardinality/order, Changes state matrices, available/empty commits, artifact list/open/error/no-run behavior, approval versus non-approval ownership, and absence of old banner/fallback/compact paths. Component coverage locks artifact loading/error/empty behavior.
+- Verification completed: baseline focused tests passed before refactoring (4 files, 63 tests); final `npm run check:fsd -w packages/web`, `npm run typecheck -w packages/web`, and full `npm run test:run -w packages/web` passed (371 files, 5014 tests). Verification left no generated Git-visible changes.

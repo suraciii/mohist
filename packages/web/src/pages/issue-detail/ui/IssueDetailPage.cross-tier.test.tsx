@@ -425,7 +425,6 @@ describe('IssueDetailPage cross-tier verification: unique tier assignment', () =
     const readingFlowBlocks = [
       'workflow-view-frame',
       'pr-delivery-summary-frame',
-      'diff-summary-banner',
       'diff-files-section',
       'commits-section',
       'description-section',

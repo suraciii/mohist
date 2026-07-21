@@ -3,7 +3,6 @@ export { ArtifactTextContent } from './ui/ArtifactTextContent'
 export { ArtifactOpener } from './ui/ArtifactOpener'
 export type {
   ArtifactOpenerArtifactsHook,
-  ArtifactOpenerMode,
   ArtifactOpenerProps,
 } from './ui/ArtifactOpener'
 export { BranchBar } from './ui/BranchBar'

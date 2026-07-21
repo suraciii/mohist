@@ -483,49 +483,12 @@ export function IssueDetailPage({
                 </div>
               )}
 
-              {showWorkflowSections && !isApproval && diffData?.available === true && (
-                <div
-                  className="min-w-0 px-4 py-3 text-sm"
-                  data-testid="diff-summary-banner"
-                  data-tier-weight="reading-flow"
-                >
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-                    <span className="min-w-0 text-muted-foreground break-words">
-                      <span className="font-medium text-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
-                      {' wants to merge into '}
-                      <span className="font-medium text-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
-                    </span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-foreground">{diffData.ahead}</span> ahead
-                    </span>
-                    {diffData.behind > 0 && (
-                      <>
-                        <span className="text-muted-foreground/40">·</span>
-                        <span className="text-muted-foreground">
-                          <span className="font-medium text-foreground">{diffData.behind}</span> behind
-                        </span>
-                      </>
-                    )}
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-foreground">{diffData.summary.filesChanged}</span> files changed
-                    </span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-success">+{diffData.summary.additions}</span>
-                    <span className="text-danger">-{diffData.summary.deletions}</span>
-                  </div>
-                  <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
-                    <span>·</span>
-                    <span>Workspace retained</span>
-                  </div>
-                </div>
-              )}
-
               {showWorkflowSections && (
                 <IssueDiffFilesSection
                   diffData={diffData}
+                  isLoading={diffQuery.isLoading}
+                  error={diffQuery.error}
+                  commitsUnavailable={commitsData?.available === false}
                   onViewFiles={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
                 />
               )}
@@ -535,16 +498,6 @@ export function IssueDetailPage({
                   commitsData={commitsData}
                   onViewAllCommits={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
                 />
-              )}
-
-              {showWorkflowSections && (diffData?.available === false || commitsData?.available === false) && (
-                <div className="text-sm text-muted-foreground" data-tier-weight="reading-flow">
-                  <p>
-                    {diffData?.available === false && diffData.message}
-                    {diffData?.available === false && commitsData?.available === false && ' / '}
-                    {commitsData?.available === false && commitsData.message}
-                  </p>
-                </div>
               )}
 
               <IssueDescriptionSection

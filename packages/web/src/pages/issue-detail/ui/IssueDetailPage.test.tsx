@@ -328,13 +328,14 @@ describe('IssueDetailPage repository metadata containment', () => {
 
     renderPage()
 
-    const banner = await waitFor(() => screen.getByTestId('diff-summary-banner'))
+    const changes = await screen.findByTestId('diff-files-section')
+    await screen.findByTestId('changes-head')
     expect(screen.getByTestId('issue-detail-page-container')).not.toHaveClass('overflow-x-hidden')
-    expect(banner).toHaveClass('min-w-0')
-    expect(screen.getByTestId('diff-summary-head')).toHaveClass('break-all')
-    expect(screen.getByTestId('diff-summary-head')).toHaveAttribute('title', head)
-    expect(screen.getByTestId('diff-summary-base')).toHaveClass('break-all')
-    expect(screen.getByTestId('diff-summary-base')).toHaveAttribute('title', base)
+    expect(changes).toHaveClass('min-w-0')
+    expect(screen.getByTestId('changes-head')).toHaveClass('break-all')
+    expect(screen.getByTestId('changes-head')).toHaveAttribute('title', head)
+    expect(screen.getByTestId('changes-base')).toHaveClass('break-all')
+    expect(screen.getByTestId('changes-base')).toHaveAttribute('title', base)
   })
 })
 
