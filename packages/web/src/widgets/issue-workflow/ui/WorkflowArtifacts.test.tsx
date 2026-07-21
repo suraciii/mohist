@@ -4,6 +4,7 @@ import { render } from '../../../../tests/test-utils'
 import type { ComponentProps } from 'react'
 import { LatestArtifactsPanel as DefaultLatestArtifactsPanel, type LatestArtifactsHook } from './LatestArtifactsPanel'
 import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
+import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
 import type { ArtifactContentHook } from './ArtifactContentViewer'
 import {
   IssueStatus,
@@ -52,7 +53,12 @@ function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 't
     <DefaultWorkflowView
       {...props}
       timelineHook={timelineHook}
-      dependencies={{ ...props.dependencies, artifactContentHook: contentHook }}
+      dependencies={{
+        ...props.dependencies,
+        artifactContentHook: contentHook,
+        taskLogHook: (() => ({ data: { lines: [], nextCursor: null, truncated: false }, isLoading: false, isError: false })) as TaskLogDataHook,
+        workflowSessionsHook: (() => ({ sessions: [], isLoading: false })) as WorkflowRunSessionsHook,
+      }}
     />
   )
 }

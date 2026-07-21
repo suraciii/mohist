@@ -41,6 +41,9 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
     ),
     http.get(`${ISSUES}/events`, () => HttpResponse.json({ success: true, data: [] })),
     http.get(`${ISSUES}/workflow/artifacts`, () => HttpResponse.json({ success: true, data: [] })),
+    http.get(`${ISSUES}/workflow/tasks/:taskId/logs`, () =>
+      HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
+    ),
     http.get(`${ISSUES}/workflow-profile/variables`, () =>
       HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
     ),

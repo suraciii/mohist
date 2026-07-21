@@ -9,7 +9,7 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundState } from '@/shared/ui/not-found-state'
-import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
+import { BranchBar, WorkflowView, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -474,14 +474,6 @@ export function IssueDetailPage({
 
               {showWorkflowSections && (!isBacklog || issue.workflowRunId) && (
                 <div data-testid="runtime-evidence-frame" className="space-y-4">
-                  {!isBacklog && workflowStage && (
-                    <TaskProgressPanel
-                      issueNumber={issueNumber}
-                      currentStage={workflowStage}
-                      isAgentRunning={isAgentRunningOnThis}
-                    />
-                  )}
-
                   {!isBacklog && issue.workflowRunId && (
                     <WorkflowSessionsPanel
                       issueNumber={issueNumber}

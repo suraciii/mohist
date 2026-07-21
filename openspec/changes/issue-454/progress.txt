@@ -63,3 +63,22 @@
 - `IssueDetailPage` partitions once for display. `IssueDescriptionSection` receives description content only and suppresses empty/whitespace-only content; `IssueDetailsCard` shows recommendation labels and computes one risk value as `issue.risk ?? bodyMetadata.risk`.
 - `EditIssueDialog` exposes only `partition.description`, recombines before PATCH, and extracts attachment IDs from the recombined body. Create Issue now consumes the entity parser and retains recommendation/risk behavior.
 - Verification completed: Web FSD boundaries and typecheck passed; focused T-001 tests passed (80), and the complete Web suite passed (372 files, 5009 tests).
+
+# T-002: Deliver one responsive workflow task inspector
+
+## Codebase Patterns
+
+- `WorkflowView` is now the sole timeline-to-stage task mapper and selected-stage owner. `StepList` remains the composition owner for tasks, checks, approval evidence, and feedback history.
+- Workflow inspection and workflow mutation are separate capabilities: `readOnly` still gates mutation notices/failure controls, but no longer gates stage selection or task disclosure.
+- Task logs are queried by the canonical `TaskItem` so terminal rows can expose a disclosure only when captured lines exist. Running rows remain inspectable while initially empty so `TaskLogPanel` can subscribe to live lines.
+- Stage selection resets only when the project-scoped Issue identity (`projectId` + `number`) or authoritative default stage changes; timeline object replacement from polling does not reset a user's selection.
+- The four fixed workflow stages use a CSS `grid-cols-2 sm:grid-cols-4` selector. There is no viewport hook, connector markup, or horizontal stage scrolling.
+
+## Completed implementation
+
+- Removed `TaskProgressPanel`, its public export, page composition, duplicate timeline mapping, and superseded tests. `IssueDetailPage` now renders one task list through `WorkflowView` / `StepList`.
+- Moved task-log inspection into `TaskItem` while preserving structured output, mapped execution errors and delivery guidance, required files, artifact summaries/content, session links, attempts, runtime origin, lifecycle time, checks, approval evidence, and feedback history.
+- Canonical rows now use semantic `aria-expanded` / `aria-controls` disclosure buttons only when details exist. Plain rows contain no button, and artifact/session actions are siblings rather than nested controls. Titles wrap as the primary row text and metadata occupies a separate secondary row.
+- All completed, pending, read-only, archived, Done, and Cancelled stages remain selectable with `aria-current="step"`; mutation controls retain their prior guards.
+- Added focused canonical-row log integration, selection/polling/identity regression, issue-detail uniqueness, archived-history, responsive stage, output/artifact, and phone-width production Playwright coverage.
+- Verification completed: `npm run check:fsd -w packages/web`, `npm run typecheck -w packages/web`, full `npm run test:run -w packages/web` (371 files, 5004 tests), and `npm run test:browser -w packages/web -- tests/browser/workflow-task-inspector.spec.ts` all passed. Verification left no generated Git-visible changes.

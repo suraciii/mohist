@@ -87,6 +87,9 @@ useMswServer(
   http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow/tasks/:taskId/logs', () =>
+    HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
+  ),
   http.get('*/api/workflow-runs/:runId/sessions', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
@@ -966,13 +969,65 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(referenceRail.contains(screen.getByTestId('reference-rail-configuration'))).toBe(true)
     expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
     expect(readingFlow.contains(screen.getByText('Latest Artifacts', { selector: 'h3' }))).toBe(true)
-    expect(readingFlow.contains(screen.getByText('Task Progress'))).toBe(true)
+    expect(readingFlow.contains(screen.getByText('Tasks', { selector: 'h3' }))).toBe(true)
+    expect(screen.queryByText('Task Progress')).toBeNull()
     expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
     expect(referenceRail.contains(screen.queryByText('Latest Artifacts', { selector: 'h3' })!)).toBe(false)
 
     const configurationCard = findRailCard('Configuration')
     expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()
     expect(within(configurationCard).getByText('Per-stage overrides')).toBeInTheDocument()
+  })
+
+  it('renders each selected-stage workflow task exactly once with no progress-panel duplicate', async () => {
+    const taskTitle = 'Canonical page-level workflow task'
+    _issueData = makeIssue({
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Build,
+      workflowRunId: 'run-123',
+    })
+    server.use(http.get('*/api/projects/:projectId/issues/:number/workflow/status', () =>
+      HttpResponse.json({
+        success: true,
+        data: {
+          workflow: {
+            workflowRunId: 'run-123',
+            status: 'Running',
+            currentStage: WorkflowStage.Build,
+            pendingWork: null,
+            stages: [{
+              stage: WorkflowStage.Build,
+              status: 'running',
+              order: 1,
+              startedAt: '2026-01-01T00:00:00Z',
+              completedAt: null,
+              durationMs: null,
+              tasks: [{
+                id: 'build-task-1',
+                title: taskTitle,
+                uses: 'core/script',
+                status: 'running',
+                startedAt: '2026-01-01T00:00:00Z',
+                completedAt: null,
+                durationMs: null,
+                attempts: 1,
+                message: null,
+              }],
+              checks: [],
+              approval: null,
+            }],
+            availableActions: [],
+          },
+        },
+      }),
+    ))
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    await waitFor(() => expect(screen.getByText(taskTitle)).toBeInTheDocument())
+    expect(screen.getAllByText(taskTitle)).toHaveLength(1)
+    expect(screen.getAllByTestId('workflow-task-item')).toHaveLength(1)
+    expect(screen.queryByText('Task Progress')).toBeNull()
   })
 
   it('groups backlog prerequisite controls with configuration instead of a separate rail card', async () => {
