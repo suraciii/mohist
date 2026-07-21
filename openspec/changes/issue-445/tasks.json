@@ -6,13 +6,15 @@
       "id": "T-001",
       "title": "Remove hidden OpenCode and OpenSpec Variable inputs",
       "spec": "specs/action-input-sourcing/spec.md#Built-in Action inputs have one source",
-      "description": "Migrate the non-delivery OpenCode and OpenSpec Action paths away from effective Variables while preserving their declared prompt and task behavior. Remove the prompt-loader Variable bag, rely on the profile-declared nested build prompt, and make archive retry idempotence derive from workspace/archive state instead of Run Variable persistence.",
+      "description": "Migrate the non-delivery OpenCode and OpenSpec Action paths away from effective Variables while preserving their declared prompt and task behavior. Remove the prompt-loader Variable bag, rely on the profile-declared nested build prompt, and replace archive-name Variables with a versioned atomic checkpoint in Git-private workspace metadata.",
       "acceptanceCriteria": [
         "`mohist/opencode` prompt resolution and every registered prompt loader receive declared loader input and host workDir but no effective or Run Variables",
         "`mohist/openspec-tasks` does not read `variables.prompts.build`; after the rendered top-level `task` object passes manifest validation, it copies only the corresponding declared raw subtree without inspecting or rendering it, and the generated task resolves `${{ prompts.build }}` during its own dispatch",
         "`mohist/archive-change` neither reads `_actions.archiveChange.destination` or `openspecArchiveName` nor writes archive-name retry state to Run Variables",
-        "Archive retries after a completed move locate the intended archive deterministically across collision suffixes and date rollover, and ambiguous matches fail without staging or committing the wrong directory",
-        "Focused OpenCode prompt-loader, OpenSpec task generation, archive first-run, retry-after-move, collision, and failure tests use fake filesystem/process boundaries and no wall-clock waits",
+        "Before moving a change, archive-change atomically writes a versioned checkpoint under the Git-private path keyed by SHA-256 of `workflowRunId + NUL + workspace-relative source`; the checkpoint records and validates that run, source, and exact selected destination",
+        "Retry follows only its run/source-bound checkpoint destination: source-only resumes move, destination-only resumes Git completion, both reports `partial-archive`, neither reports `missing-source`, and malformed/mismatched/escaping state fails before mutation",
+        "The checkpoint is cleared only after successful commit or confirmed no-change, so process restart, pre-move failure, post-move failure, and an existing base archive followed by a `-v2` destination all resume the same operation",
+        "Focused OpenCode prompt-loader, OpenSpec task generation, archive first-run/retry/collision/corruption tests use fake filesystem/process boundaries and `vi.useFakeTimers` or an injected clock for midnight rollover; they do not depend on wall-clock time",
         "`npm run typecheck -w packages/runner` and `npm run test:ci -w packages/runner` pass"
       ],
       "priority": 1,
@@ -21,7 +23,7 @@
       "output": "Variable-independent OpenCode prompt loading and OpenSpec task/archive implementations with focused Runner regressions under packages/runner/.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Keep rawWith only as an opaque syntax carrier for the already validated top-level task input. It must not affect the generating Action's current behavior or expose Variables. Do not add buildPrompt/archiveName compatibility inputs or change template syntax."
+      "notes": "Keep rawWith only as an opaque syntax carrier for the already validated top-level task input. It must not affect the generating Action's current behavior or expose Variables. The archive checkpoint is private rebuildable operation state, not an Action input; use no buildPrompt/archiveName compatibility input or old Variable reader."
     },
     {
       "id": "T-002",

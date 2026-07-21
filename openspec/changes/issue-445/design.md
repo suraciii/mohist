@@ -74,7 +74,11 @@ Alternative considered: retain the issue-backed cross-check as defense in depth.
 
 `mohist/openspec-tasks` will stop synthesizing a build prompt from `variables.prompts.build`. The bundled profiles already place `${{ prompts.build }}` in the declared nested task prompt input. After the rendered `task` object passes manifest validation, `openspec-tasks` copies only that declared object's raw syntax into generated tasks; it does not inspect or render the raw object itself. Each generated task resolves and validates the copied template at its own dispatch.
 
-`mohist/archive-change` will stop reading legacy `_actions.archiveChange.destination` and `openspecArchiveName` Variables. Retry idempotence will use the existing source/archive filesystem state: before moving, choose the unique date/name destination; after a move, locate the matching archived change when the source is absent and continue Git staging/commit. Variable persistence used only to feed the removed read path will be deleted. Tests will cover retry after move and collision suffixes, including a date-boundary-independent lookup.
+`mohist/archive-change` will stop reading legacy `_actions.archiveChange.destination` and `openspecArchiveName` Variables. Instead it will persist operation state in a versioned JSON checkpoint under Git-private metadata, resolved through `git rev-parse --git-path mohist/archive-change/<key>.json`. The key is SHA-256 of `workflowRunId + NUL + workspace-relative source path`; the checkpoint records that run ID, source path, and the exact workspace-relative destination selected for this archive operation.
+
+On the first attempt, the Action chooses the unique date/name destination, validates that both paths remain under their expected roots, and atomically writes the checkpoint through a temporary file plus rename before moving the directory. A retry validates the checkpoint and follows its exact destination: source present/destination absent resumes the move, source absent/destination present resumes staging and commit, both present reports `partial-archive`, and neither present reports `missing-source`. A malformed, mismatched, or escaping checkpoint fails before filesystem or Git mutation. The checkpoint is removed only after successful commit or confirmed no-change completion.
+
+This private checkpoint is internal idempotence state, not Action input and not a workflow Variable. It survives Runner process restart in the same workspace and is discarded with that rebuildable workspace. Deployment drains old in-flight runs, so no compatibility reader for the removed Variable state is added. Date generation remains injectable or controlled with `vi.useFakeTimers`; retry tests cover failure before move, failure after move, collision suffixes, process restart, and crossing midnight without using real time.
 
 `mohist/opencode` will resolve structured prompt loaders without a Variable bag. Model options and prompt text continue to arrive explicitly through `with`, including `${{ vars.agent }}` and `${{ prompts.* }}` expansion performed before invocation.
 
@@ -95,16 +99,17 @@ Alternative considered: inject these values automatically in the executor based 
 - [Existing custom profiles omit newly required inputs] -> Treat this as the declared breaking change; manifest validation returns field-specific `invalid-input`, and documentation lists each required binding.
 - [In-flight runs hold old definition snapshots] -> Deploy only after draining or stopping active runs, or rerun affected stages with a current profile after deployment; do not add fallback compatibility.
 - [Server and Runner versions disagree during rollout] -> Deploy them as one version because the bundled YAML and Runner manifests must agree; registration catalog changes use the existing wire shape.
-- [Archive retry chooses the wrong collision destination] -> Match the full archived change basename/suffix convention, fail on ambiguity instead of guessing, and test retries after rename, collision suffixes, and date rollover.
+- [Archive checkpoint is stale or corrupt] -> Version it, bind it to the WorkflowRun and workspace-relative source in both its hash key and recorded payload, validate source/destination containment before mutation, and fail closed on malformed or mismatched state.
+- [Archive retry crosses a date boundary or follows a collision suffix] -> Write the exact selected destination atomically before rename and test retries with fake time before/after midnight and with pre-existing archive names.
 - [Removing issue-backed checks permits a profile to target another accessible repository or branch] -> Make the target visible in `with`; credentials and repository permissions remain the security boundary. A central policy requires a separate issue.
 - [A hidden Variable read reappears through a helper] -> Remove Variables from the invocation and prompt-loader objects at runtime, then add boundary tests rather than relying only on source searches.
 
 ## Migration Plan
 
-1. Update the invocation-context and prompt-loader types/projection so built-in code no longer receives Variables; adjust focused executor tests first.
-2. Change manifests and handlers, delete delivery fallback/cross-check helpers, and replace OpenSpec Variable-dependent behavior with explicit input or local idempotence logic.
-3. Update both bundled profile YAML files and their parsed-definition tests in the same commit set.
-4. Update Action/workflow documentation and catalog expectations, then run Runner typecheck/tests and Server tests.
+1. Migrate OpenCode/OpenSpec readers first: remove prompt-loader Variables, switch archive retry to the private checkpoint, and verify generated-task template propagation.
+2. Change workspace/local Git manifests and handlers together with every affected binding in both bundled profiles; verify the local delivery flow.
+3. Change GitHub PR manifests and handlers, remove the remaining delivery fallback/cross-check helpers, and update the GitHub PR profile; verify its full delivery and recovery flow.
+4. After every concrete reader is gone, remove Variables from the Action invocation type and runtime object, audit catalog/documentation, and run Runner plus Server tests. This is the same dependency order encoded by T-001 through T-004 in `tasks.json`.
 5. Before deployment, drain or stop in-flight workflow runs whose snapshots use the old contracts. Deploy Server and Runner from the same build, confirm the Runner registers the stricter catalog, and run both bundled profile regressions.
 
 Rollback requires rolling back Server and Runner together. Runs created from the new profile definitions must not be dispatched to an old Runner because their new fields may be unknown there; stop them before rollback and rerun from a compatible profile snapshot after the previous version is restored.
