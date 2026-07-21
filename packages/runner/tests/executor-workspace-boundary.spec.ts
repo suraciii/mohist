@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import type { ActionResult, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
@@ -159,7 +160,7 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
   }
 }
 
-function buildRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
+function buildRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise<ActionResult>): ActionRegistry {
   return defineTestActions({
     "core/script": handler,
     "mohist/rebase": handler,

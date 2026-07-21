@@ -142,6 +142,7 @@ describe("mohist/openspec-artifacts", () => {
       with: {} as never,
       workDir,
       signal: new AbortController().signal,
+      variables: {},
       writeVars: vi.fn(),
     })
     expect(result.error).toBeDefined()
