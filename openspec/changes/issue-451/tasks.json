@@ -1,0 +1,85 @@
+{
+  "project": "mohist-local",
+  "description": "Pi Session commands (Follow-up / Compact / Reset / Cancel) routed to PiRuntime end-to-end, reusing the #407 command contract and OpenCode's existing behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Verify Pi SDK command surface and extend the runtime boundary",
+      "spec": "specs/pi-session-channels/spec.md",
+      "description": "Smoke-verify the pinned @earendil-works/pi-coding-agent SDK exposes the command surfaces the channels depend on: prompt preflight reception callback, session.compact(), and abort/isStreaming stop-confirmation; record findings. Extend the PiSdkSession boundary interface (runtime/pi/sdk.ts) with compact() and a prompt preflight option, and add Pi Follow-up/Cancel/Compact/Reset request+result boundary types (runtime/pi/types.ts) mirroring the OpenCode RuntimeFollowup/RuntimeCancel shapes. This delivers the boundary contract the channel tasks implement against.",
+      "acceptanceCriteria": [
+        "openspec/changes/issue-451/sdk-smoke-verification.json records the verified compact() and prompt preflight signatures (or documented assumptions if the Pi environment is unavailable)",
+        "PiSdkSession exposes compact(): Promise<void> and prompt accepts a preflight reception callback option",
+        "PiFollowupRequest/Result, PiCancelRequest/Result, PiCompactRequest/Result, PiResetRequest/Result are added to packages/runner/src/runtime/pi/types.ts",
+        "npm run typecheck -w packages/runner passes with the extended boundary types"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "openspec/changes/issue-451/sdk-smoke-verification.json; updated packages/runner/src/runtime/pi/sdk.ts and packages/runner/src/runtime/pi/types.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "If the configured Pi environment is unavailable, extend the interface from SDK type definitions and record the assumptions in the smoke file. Per design D9, escalate (do not substitute) if preflight or compact() is absent from the pinned SDK — idle-Follow-up reception confirmation and native Compact both depend on them. Precedent: openspec/changes/archive/2026-07-21-issue-450/sdk-smoke-verification.json."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement PiRuntime Follow-up and Cancel channels",
+      "spec": "specs/pi-session-channels/spec.md#follow-up-uses-the-pi-steer-channel-while-busy-and-the-prompt-channel-while-idle",
+      "description": "Add PiRuntime.followup and PiRuntime.cancel. followup branches on the physical session's isStreaming: busy → await session.steer(text) (projection stays owned by the active runTurn); idle → session.prompt with preflight, resolving accepted when preflight confirms reception and failing (no replay) when preflight rejects, while a background continuation projects the new turn's events through an observer until prompt resolves. cancel calls session.abort() and confirms stop via isStreaming/event sequence, reporting interrupt-unconfirmed when stop cannot be confirmed. Both surface missing-session with a Reset hint when the bound Pi session file is absent.",
+      "acceptanceCriteria": [
+        "followup fake-SDK unit tests pass: busy → steer (no new turn), idle → prompt+preflight accepted on reception, idle preflight rejected → failure with no retry/replay, missing session file → missing-session + Reset hint",
+        "idle followup projects turn events through the observer until prompt resolves, then tears down the subscription",
+        "cancel fake-SDK unit tests pass: abort confirmed → cancelled, stop unconfirmed → interrupt-unconfirmed diagnostic (never reports a possibly-running turn as safely stopped), missing session → missing-session + Reset hint",
+        "Follow-up never rotates the physical Pi Session binding (runtimeSessionId unchanged) on either branch",
+        "npm run typecheck -w packages/runner passes; npm test -w packages/runner passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/pi/runtime.ts with followup() and cancel() (+ unit tests in packages/runner/tests)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuses the existing createPiProjector, abortAndDiagnose, and resetDiagnostic helpers. Observer is a second argument to followup (request shape stays aligned with RuntimeFollowupRequest). See design D5/D6."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement PiRuntime Compact and Reset channels",
+      "spec": "specs/pi-session-channels/spec.md#compact-uses-pi-native-compaction-and-preserves-the-session-identity",
+      "description": "Add PiRuntime.compact and PiRuntime.reset. compact guards isStreaming (→ conflict), subscribes a projector, calls session.compact() natively, returns ok with no runtimeSessionId, and on compact failure returns a failure carrying the underlying error — never synthesizes a summary or fabricates a compaction record. reset best-effort reads the current model/thinking level, calls services.createSession(workDir) for a new empty session, applies the carried model/thinking onto it, caches the new PiSdkSession under the new path, and returns the new session-file path as runtimeSessionId (the Server grain performs the binding replacement and lineage append). compact surfaces missing-session with a Reset hint; reset still succeeds when the prior session file is missing (it is the recovery operation).",
+      "acceptanceCriteria": [
+        "compact fake-SDK unit tests pass: native compact() invoked, runtimeSessionId unchanged after compaction, compaction events projected, compact failure → failure with no synthetic summary, busy (isStreaming) → conflict, missing session → missing-session + Reset hint",
+        "reset fake-SDK unit tests pass: new empty session created in the same workDir, current model/thinking carried over when available, returned runtimeSessionId is non-empty and differs from request.runtimeSessionId, prior session file retained for audit, missing prior session still succeeds and skips carry-over",
+        "result shapes satisfy SessionCommand validation: compact omits runtimeSessionId; reset returns a non-empty runtimeSessionId that differs from request.runtimeSessionId",
+        "npm run typecheck -w packages/runner passes; npm test -w packages/runner passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/pi/runtime.ts with compact() and reset() (+ unit tests in packages/runner/tests)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Does not perform lineage append itself — the Server-side CompleteResetAsync commits the rebind using the returned id (existing contract). See design D7/D8."
+    },
+    {
+      "id": "T-004",
+      "title": "Route session commands to the bound runtime end-to-end",
+      "spec": "specs/pi-session-command-routing/spec.md#the-server-admits-session-commands-for-pi-bound-agentsessions",
+      "description": "Lift the Server Pi gate (AgentSessionGrain.EnsureCommandRuntimeAvailable admits pi). Thread a piRuntime accessor into RunnerSignalRClient/RunnerHost alongside openCodeRuntime and add a resolveCommandRuntime(binding) selector. Make followup-handler and cancel-handler dispatch on binding.runtime, and have RunnerHost.resolveFollowupTarget admit pi. Wire registerSessionCommandHandler into RunnerSignalRClient.registerHandlers() with a router that sends pi targets to PiRuntime.compact/reset and returns unavailable for opencode (preserving current OpenCode behavior). Remove the stale Pi-session-command gap entries in docs/actions/pi.md and design/runtimes/pi.md.",
+      "acceptanceCriteria": [
+        "Server spec tests pass: compact, reset, follow-up, and cancel on a pi-bound session are admitted (no InvalidOperationException) and flow through the existing contract, including idle-conflict rejection, missing-binding Reset hint, and expected-binding guard for reset",
+        "Runner handler tests pass: follow-up, cancel, and SessionCommand handlers dispatch pi bindings → PiRuntime and opencode bindings → OpenCodeRuntime unchanged; regression tests assert OpenCode command behavior (request/result/error vocabulary) is unchanged",
+        "resolveCommandRuntime returns the existing unavailable/notStarted vocabulary for unknown or not-ready runtimes (no silent drop or synthesized success)",
+        "Routing selects the runtime from the persisted binding.runtime (a post-Reset replaced binding is honored immediately)",
+        "docs/actions/pi.md and design/runtimes/pi.md no longer list Pi session commands as unimplemented",
+        "npm test (server) passes; npm run typecheck -w packages/runner passes; npm test -w packages/runner passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs; packages/runner/src/server/runner-signalr.ts, runtime/host.ts, followup-handler.ts, cancel-handler.ts, session-command-handler wiring; docs/actions/pi.md, design/runtimes/pi.md",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "OpenCode compact/reset is intentionally left as-is: through the canonical Runner-dispatched path it is already effectively Unavailable today (the runner has no SessionCommand handler; the grain's server-side summary CompactAsync has no route caller), so the opencode router branch returns unavailable immediately — same semantic outcome, no regression. Implementing real OpenCode native compact/reset on the Runner is out of scope (non-goal). See design D1–D4 and Risks."
+    }
+  ]
+}
