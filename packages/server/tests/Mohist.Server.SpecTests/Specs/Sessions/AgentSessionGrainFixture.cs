@@ -22,6 +22,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public IGrainFactory Grains => Cluster.Client;
     public FakeAgentSessionStore StateStore { get; } = new();
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
+    public RecordingTranscriptEventPublisher TranscriptPublisher { get; } = new();
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
@@ -30,6 +31,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     {
         StateStore.Reset();
         TranscriptStore.Reset();
+        TranscriptPublisher.Clear();
         Logger.Entries.Clear();
     }
 
@@ -50,7 +52,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
-            siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(new NoopTranscriptEventPublisher());
+            siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
             siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
         });
@@ -65,9 +67,17 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
+    public sealed class RecordingTranscriptEventPublisher : ITranscriptEventPublisher
     {
-        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+        public List<TranscriptEnvelope> Published { get; } = [];
+
+        public void Clear() => Published.Clear();
+
+        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default)
+        {
+            Published.Add(envelope);
+            return Task.CompletedTask;
+        }
     }
 }
 
@@ -170,8 +180,15 @@ public sealed class TestLogger<T> : ILogger<T>
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        Entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
+        var structuredState = state is IEnumerable<KeyValuePair<string, object?>> values
+            ? values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
+            : new Dictionary<string, object?>(StringComparer.Ordinal);
+        Entries.Add(new LogEntry(logLevel, formatter(state, exception), exception, structuredState));
     }
 }
 
-public sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+public sealed record LogEntry(
+    LogLevel Level,
+    string Message,
+    Exception? Exception,
+    IReadOnlyDictionary<string, object?> State);
