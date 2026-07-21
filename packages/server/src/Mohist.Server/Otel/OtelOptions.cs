@@ -51,8 +51,8 @@ public sealed class OtelOptions
     /// <summary>
     /// Master switch for the entire OTel subsystem. When <c>false</c> the
     /// OTLP port is not bound and <c>/otel/api/*</c> routes are not
-    /// registered. Defaults to <c>true</c> so the collector is on by
-    /// default.
+    /// registered. Defaults to <c>false</c> until the collector's resource
+    /// limits and degradation reporting are complete.
     /// </summary>
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 }
