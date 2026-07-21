@@ -1,6 +1,6 @@
 import type { ActionError, ActionResult, JsonObject, JsonValue } from "../core/types.js"
 import type { ValidatedWith } from "./context.js"
-import type { ActionHost } from "./host.js"
+import type { ActionHostFor } from "./host.js"
 
 export type ActionInputKind = "string" | "number" | "boolean" | "object" | "array"
 
@@ -55,7 +55,7 @@ export interface ActionManifest {
 
 export interface ActionDefinition<M extends ActionManifest = ActionManifest> {
   readonly manifest: M
-  readonly run: (inputs: ValidatedWith<M>, host: ActionHost) => Promise<ActionResult>
+  run(inputs: ValidatedWith<M>, host: ActionHostFor<M>): Promise<ActionResult>
 }
 
 export type ActionCapabilitySet = ReadonlySet<ActionCapability>

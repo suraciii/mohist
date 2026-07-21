@@ -5,7 +5,6 @@ import type {
   ActionCapabilitySet,
 } from "./manifest.js"
 import type { TaskLogger } from "../runtime/task-log.js"
-import type { InferInputShape, ValidatedWith } from "./context.js"
 import type { ActionResult } from "../core/types.js"
 import type { IssueFields } from "./issue-fields.js"
 
@@ -56,15 +55,26 @@ export interface ActionHost {
 
 export type ActionInputs = Record<string, JsonValue>
 
-export type ActionHostFor<M extends ActionManifest> = M extends { capabilities: infer C }
-  ? C extends ReadonlyArray<ActionCapability>
-    ? Omit<ActionHost, "agent" | "issue" | "checkpoint"> & {
-        agent?: C extends readonly (infer T)[] ? T extends "agent-turn" ? "agent-turn" extends C ? AgentTurn : never : never : never
-        issue?: C extends readonly (infer T)[] ? T extends "issue-fields" ? "issue-fields" extends C ? IssueFieldsHost : never : never : never
-        checkpoint?: C extends readonly (infer T)[] ? T extends "workflow-checkpoint" ? "workflow-checkpoint" extends C ? CheckpointHost : never : never : never
-      }
-    : ActionHost
-  : ActionHost
+type ActionHostBase = Omit<ActionHost, "agent" | "issue" | "checkpoint">
+
+type ManifestCapability<M extends ActionManifest> = M extends {
+  readonly capabilities: infer C extends ReadonlyArray<ActionCapability>
+}
+  ? C[number]
+  : never
+
+type IsBroadActionManifest<M extends ActionManifest> = [ActionManifest] extends [M]
+  ? [M] extends [ActionManifest] ? true : false
+  : false
+
+type CapabilityHost<C> =
+  ("agent-turn" extends C ? { agent: AgentTurn } : { agent?: never }) &
+  ("issue-fields" extends C ? { issue: IssueFieldsHost } : { issue?: never }) &
+  ("workflow-checkpoint" extends C ? { checkpoint: CheckpointHost } : { checkpoint?: never })
+
+export type ActionHostFor<M extends ActionManifest> = IsBroadActionManifest<M> extends true
+  ? ActionHost
+  : ActionHostBase & CapabilityHost<ManifestCapability<M>>
 
 export interface ActionEffects {
   addTasks?: AddTaskEffect[]
