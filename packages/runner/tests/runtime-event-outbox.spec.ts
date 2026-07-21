@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createAgentSessionRuntimeEventOutbox,
   LEGACY_FOLLOWUP_FAILURE_FILE,
+  nextTemporaryFilePath,
   RUNTIME_EVENT_OUTBOX_FILE,
   type AgentSessionRuntimeEventOutbox,
   type RuntimeEventRecord,
@@ -127,6 +128,12 @@ async function flushMicrotasks(count = 4) {
 }
 
 describe("AgentSessionRuntimeEventOutbox — durable storage", () => {
+  it("uses distinct temporary paths for writes in the same millisecond", () => {
+    vi.setSystemTime(new Date("2026-07-21T06:48:03.000Z"))
+
+    expect(nextTemporaryFilePath("runtime-events.json")).not.toBe(nextTemporaryFilePath("runtime-events.json"))
+  })
+
   it("persists one-event entries with a local record ID, binding-free target, runtime session id, payload, acknowledgement policy, and sequence position", async () => {
     const { outbox, fileSystem } = makeOutbox({})
     await outbox.load()
