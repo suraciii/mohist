@@ -10,11 +10,11 @@ namespace Mohist.Server.UnitTests.SystemSpecs.Otel;
 public class OtelOptionsTests
 {
     [Fact]
-    public void Defaults_EnabledIsTrue_EndpointIsLocalCollector()
+    public void Defaults_TracingIsDisabled_EndpointIsLocalCollector()
     {
         var options = new OtelOptions();
 
-        Assert.True(options.Enabled);
+        Assert.False(options.Enabled);
         Assert.Equal("http://localhost:4318/otel", options.Endpoint);
         Assert.Equal("Mohist:Otel", OtelOptions.SectionName);
     }
@@ -44,7 +44,7 @@ public class OtelOptionsTests
 
         var options = config.GetSection(OtelOptions.SectionName).Get<OtelOptions>() ?? new OtelOptions();
 
-        Assert.True(options.Enabled);
+        Assert.False(options.Enabled);
         Assert.Equal(OtelOptions.DefaultEndpoint, options.Endpoint);
     }
 

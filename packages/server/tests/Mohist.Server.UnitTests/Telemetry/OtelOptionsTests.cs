@@ -9,12 +9,12 @@ namespace Mohist.Server.UnitTests.Telemetry;
 public class OtelOptionsTests
 {
     [Fact]
-    public void Defaults_ExposePortAndEnabledSensibly()
+    public void Defaults_CollectorIsDisabled()
     {
         var options = new OtelOptions();
 
         Assert.Equal(4318, options.Port);
-        Assert.True(options.Enabled);
+        Assert.False(options.Enabled);
         Assert.Null(options.DbPath);
         Assert.Equal("Mohist:Otel", OtelOptions.SectionName);
         Assert.Equal("MOHIST_OTEL_DB_PATH", OtelOptions.DbPathEnvironmentVariable);
@@ -59,7 +59,7 @@ public class OtelOptionsTests
         var bound = provider.GetRequiredService<IOptions<OtelOptions>>().Value;
 
         Assert.Equal(4318, bound.Port);
-        Assert.True(bound.Enabled);
+        Assert.False(bound.Enabled);
         Assert.Null(bound.DbPath);
     }
 }
