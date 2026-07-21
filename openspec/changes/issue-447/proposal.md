@@ -4,15 +4,16 @@ Actions currently receive a broad execution context that lets any implementation
 
 ## What Changes
 
-- Declare the non-default capabilities an Action requires in its manifest, including agent turns, appending workflow tasks, and writing workflow variables.
+- Declare the non-default capabilities an Action requires in its manifest, including agent turns, issue-field access, workflow checkpoint identity, appending workflow tasks, and writing workflow variables.
 - Replace the broad Action invocation context with a default host limited to workspace access, cancellation, logging, and command execution; inject only manifest-declared capabilities.
+- Let Action manifests mark inputs whose templates must remain deferred, so an Action can carry a task template into later dispatch without receiving raw dispatch context.
 - Return requested task additions and variable writes through an Action result, then have the task executor apply and report those effects through its existing engine-owned paths.
 - Make the executor's promise-output projection depend on the `agent-turn` capability rather than a hard-coded Action-name list.
 - Preserve the current externally observable OpenSpec follow-up tasks, variable values, OpenCode turn behavior, Action outputs, and error codes.
 
 ## Capabilities
 
-- `action-capabilities`: Manifest-declared Action capabilities, narrow default host access, conditional agent/task/variable capability injection, and capability-driven agent-turn completion projection.
+- `action-capabilities`: Manifest-declared Action capabilities, narrow default host access, opaque issue and workflow metadata operations, deferred-template inputs, conditional capability injection, and capability-driven agent-turn completion projection.
 - `action-result-effects`: Structured Action-result requests for adding tasks and writing variables, with executor-owned persistence and reporting of those effects.
 
 ## Impact

@@ -1,5 +1,5 @@
 ### Requirement: Action manifests declare non-default capabilities
-Every executable Action manifest SHALL declare the complete set of non-default capabilities required by its execution function. The supported capability names SHALL be `agent-turn`, `add-tasks`, and `write-vars`; an Action without a declaration SHALL have no non-default capabilities. The Runner MUST reject an Action definition with an unknown or duplicate capability name.
+Every executable Action manifest SHALL declare the complete set of non-default capabilities required by its execution function. The supported capability names SHALL be `agent-turn`, `issue-fields`, `workflow-checkpoint`, `add-tasks`, and `write-vars`; an Action without a declaration SHALL have no non-default capabilities. The Runner MUST reject an Action definition with an unknown or duplicate capability name.
 
 #### Scenario: Declare an agent-turn Action
 - **WHEN** an Action manifest declares `agent-turn`
@@ -23,8 +23,22 @@ The Action execution function SHALL receive validated `with` input and a host wh
 - **THEN** the Action SHALL receive the agent-turn capability
 - **AND** it MUST NOT receive task-addition or variable-write capabilities
 
+### Requirement: Private workflow context is available only through declared operations
+An Action declaring `issue-fields` SHALL receive an operation that returns the current Issue title and body. An Action declaring `workflow-checkpoint` SHALL receive an operation that returns an opaque, stable checkpoint token for a supplied scope. The Runner SHALL resolve both operations from private dispatch context. Neither operation MUST expose project, issue, workflow-run, work, stage, title, recovery, or parent-issue identity to the Action.
+
+#### Scenario: Resolve issue fields without dispatch identity
+- **WHEN** an Action declaring `issue-fields` requests the current Issue title and body
+- **THEN** the Runner SHALL return the fields for the dispatched Issue
+- **AND** the Action host MUST NOT expose the project id or issue number used to resolve them
+
+#### Scenario: Create a workflow-scoped archive checkpoint
+- **WHEN** an Action declaring `workflow-checkpoint` requests a checkpoint token for the same scope across a retry of the same workflow run
+- **THEN** the Runner SHALL return the same opaque token
+- **AND** a different workflow run MUST receive a distinct token for that scope
+- **AND** the Action host MUST NOT expose either workflow-run identity
+
 ### Requirement: Agent turns are a capability-owned operation
-An Action declaring `agent-turn` SHALL receive an operation that executes an Agent turn from the Action's prompt, optional logical session, and options. The capability implementation SHALL own runtime readiness, session opening or attachment, runtime execution, runtime-event reporting, cancellation, and session closure. The Action MUST NOT receive the runtime or server implementation used to perform those responsibilities.
+An Action declaring `agent-turn` SHALL receive an operation that executes an Agent turn from the Action's prompt, optional logical session, and options. The capability implementation SHALL own parent-Issue prompt composition, runtime readiness, session opening or attachment, runtime execution, runtime-event reporting, cancellation, and session closure. The Action MUST NOT receive the runtime, server, or dispatch identity implementation used to perform those responsibilities.
 
 #### Scenario: Run an OpenCode agent turn
 - **WHEN** `mohist/opencode` executes with a ready OpenCode runtime and valid turn input
@@ -35,6 +49,15 @@ An Action declaring `agent-turn` SHALL receive an operation that executes an Age
 - **WHEN** an Action invokes its declared `agent-turn` capability while the required runtime is unavailable or not ready
 - **THEN** the Action SHALL receive the existing runtime-unavailable failure behavior
 - **AND** the Action MUST NOT receive a raw runtime handle as a fallback
+
+### Requirement: Manifests control template rendering timing for Action inputs
+Each Action input declaration SHALL use immediate template rendering unless it declares deferred rendering. The Runner SHALL render immediate inputs before Action input validation and invocation. For a deferred input, the Runner SHALL validate its declared top-level JSON kind without expanding nested templates and SHALL pass that original input value to the Action. An Action uses deferred input only through its validated `with` input; the Runner MUST NOT inject a raw dispatch field selected by Action name.
+
+#### Scenario: Preserve OpenSpec task defaults for generated tasks
+- **WHEN** `mohist/openspec-tasks` receives its deferred `task` input containing `${{ vars.agent }}` or another nested template
+- **THEN** the Action SHALL receive that template unchanged in `with.task`
+- **AND** generated follow-up tasks SHALL retain the template for their own dispatch-time expansion
+- **AND** the Action host MUST NOT contain `rawTask` or another Action-name-specific raw input field
 
 ### Requirement: Promise output projection follows the agent-turn capability
 For a successful task executed by an Action declaring `agent-turn`, the task executor SHALL evaluate the final assistant text for the task's completion contract and project public output as `null` or `{ "promise": value }`. For every Action not declaring `agent-turn`, the executor SHALL preserve the successful Action output through completion evaluation. The executor MUST NOT select either behavior from an Action name list.
