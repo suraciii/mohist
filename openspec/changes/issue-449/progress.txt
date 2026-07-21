@@ -100,3 +100,11 @@
 
 - `npm test` green: 1365 CLI + 1256 server unit + 30 arch + 2891 server spec
   + 4993 web + 1159 runner tests all pass.
+
+## T-002 Implementation Discoveries
+
+- WorkflowRun ownership is persisted in `WorkflowRunRow.MetadataProjectId` and `IssueNumber` computed columns; deserializing `WorkflowRun` alone is insufficient for routed ownership validation. `WorkflowRunQuerier.LoadRoutingContextAsync` now returns the run plus those persisted ownership values.
+- Explicit workflow-run lineage is authoritative. Issue-only resolution reads the IssueRow binding, rejects terminal/stale or mismatched runs, and never falls forward to another run. All unresolved routed contexts become an idempotent `workspace-unavailable` AgentJob plan with issue/epic and Agent snapshot metadata retained.
+- `RoutedPlan` remains persisted as the canonical first-writer record after Runner acceptance for replay identity, but activation/reminder recovery must gate on `RunnerAccepted`; otherwise a later activation could repeat prepared dispatch. The durable reminder is removed at the acceptance fence.
+- The routed activation spec uses `DeactivateOnIdle` on the target grain so the OnActivate recovery path is exercised deterministically while the reminder remains registered.
+- Verification is green: focused routed-launch/launcher specs, `npm test`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner`.

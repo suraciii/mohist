@@ -5,7 +5,9 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
@@ -73,7 +75,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!_state.RecordExists)
             await _state.ReadStateAsync();
 
-        if (State.Input is null)
+        _log.LogInformation("AgentJob {Id} OnActivateAsync: status={Status}, input={Input}, routedPlan={RoutedPlan}",
+            Key, State.Status, State.Input is not null, State.RoutedPlan is not null);
+
+        if (State.Input is null && State.RoutedPlan is null)
             return;
 
         if (IsTerminal)
@@ -92,6 +97,18 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EnsureRecoveryReminderAsync();
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             }
+            return;
+        }
+
+        // Routed-launch preparation recovery: the plan is durable but
+        // Session open / LaunchReady / Pending dispatch have not yet
+        // converged. Advance the persisted plan idempotently; this
+        // branch is hit after a process loss before Session open,
+        // before LaunchReady persisted, or before Runner acceptance.
+        if (State.RoutedPlan is not null && !State.RunnerAccepted)
+        {
+            await EnsureRecoveryReminderAsync();
+            await AdvancePreparedLaunchAsync();
             return;
         }
 
@@ -338,6 +355,190 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await SubmitAsync(input);
     }
 
+    /// <summary>
+    /// Idempotent routed-launch preparation (issue-449 design decisions
+    /// 1-3). Registers the durable <c>agent-job-recovery</c> reminder
+    /// BEFORE persisting the canonical plan so a crash between
+    /// reminder registration and plan persistence still leaves an
+    /// orphan reminder that self-cleans on its first tick. The reminder
+    /// keeps serving <see cref="AdvancePreparedLaunchAsync"/> (and the
+    /// terminal-delivery retry loop) until the job reaches Runner
+    /// acceptance or a durable terminal close.
+    ///
+    /// <para>
+    /// On replay the canonical plan (the one currently persisted on
+    /// state) is returned even when the caller's resolved values
+    /// differ — first-writer semantics. Redelivery cannot overwrite
+    /// the workspace, lineage, or preflight outcome that the first
+    /// delivery decided.
+    /// </para>
+    /// </summary>
+    public async Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (State.RoutedPlan is { } existing)
+        {
+            // First-writer: replay returns the persisted canonical
+            // plan, not the caller's newly resolved values. Ensure the
+            // recovery reminder is registered so OnActivate / the
+            // reminder tick can advance the plan if the silo was
+            // restarted between preparation and the caller calling
+            // AdvancePreparedLaunchAsync.
+            await EnsureRecoveryReminderAsync();
+            return existing;
+        }
+
+        // Register reminder first so a crash between registration and
+        // plan persistence still leaves a recoverable reminder. The
+        // tick self-cleans when State.RoutedPlan is null and there is
+        // no terminal pending close — covering the rare
+        // reminder-before-failed-write edge case.
+        await EnsureRecoveryReminderAsync();
+
+        State.RoutedPlan = plan;
+        await SaveAsync();
+        return plan;
+    }
+
+    /// <summary>
+    /// Advance the durable prepared launch plan (issue-449 design
+    /// decisions 1-3). Idempotent across immediate, OnActivate, and
+    /// reminder-recovery paths. Opens the AgentSession from the
+    /// persisted plan only — never from caller's newly resolved
+    /// values — and either persists LaunchReady and submits the
+    /// AgentJobInput (executable disposition) or enters the durable
+    /// preflight terminal-delivery protocol.
+    /// </summary>
+    public async Task AdvancePreparedLaunchAsync()
+    {
+        var plan = State.RoutedPlan;
+        _log.LogInformation("AgentJob {Id} AdvancePreparedLaunchAsync: plan={Plan}, disposition={Disp}",
+            Key, plan is not null, plan?.Disposition);
+        if (plan is null)
+            return;
+
+        if (State.RunnerAccepted)
+        {
+            await UnregisterSelfAsync(RecoveryReminderName);
+            return;
+        }
+
+        if (IsTerminal)
+        {
+            // Terminal state already covers either a successful runner
+            // report or the preflight-failed terminal close; the
+            // reminder self-cleans via ReceiveReminder when there is no
+            // pending delivery.
+            return;
+        }
+
+        // Ensure reminder is registered across all advance paths so a
+        // crash between steps is recoverable without event redelivery.
+        await EnsureRecoveryReminderAsync();
+
+        var sessionGrain = GrainFactory.GetGrain<IAgentSessionGrain>(plan.SessionId);
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = plan.ProjectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [GenericAgentSessionMetadata.AgentId] = plan.AgentId ?? string.Empty,
+            [GenericAgentSessionMetadata.AgentName] = plan.AgentName ?? string.Empty,
+            [GenericAgentSessionMetadata.TriggerEventId] = plan.EventId,
+            [GenericAgentSessionMetadata.TriggerRuleId] = plan.RuleId,
+        };
+        if (plan.IssueNumber is > 0)
+            labels[GenericAgentSessionMetadata.IssueNumber] = plan.IssueNumber.Value.ToString();
+        if (plan.EpicNumber is > 0)
+            labels[GenericAgentSessionMetadata.EpicNumber] = plan.EpicNumber.Value.ToString();
+        if (!string.IsNullOrWhiteSpace(plan.WorkspacePath))
+            labels[GenericAgentSessionMetadata.WorkspacePath] = plan.WorkspacePath!;
+        var metadata = new AgentSessionMetadata(labels, null);
+
+        await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: plan.WorkspacePath,
+            Metadata: metadata));
+
+        if (plan.Disposition == RoutedLaunchDisposition.PreflightFailed)
+        {
+            // Persist LaunchReady so subsequent state reads reflect the
+            // Session has been opened from the canonical plan. Then
+            // enter the durable terminal-delivery protocol; the
+            // reminder stays active until Session-close acknowledgement.
+            State.LaunchReady = true;
+            // Surface the session id via the AgentJobInput.AgentSessionId
+            // field even for the preflight branch so the durable
+            // terminal-delivery helper can route the close to the
+            // AgentSession grain we just opened above. The job will
+            // never reach dispatch because the terminal transition
+            // happens immediately afterwards.
+            State.AgentConfigJson = plan.AgentConfigJson;
+            State.Input = new AgentJobInput(
+                Prompt: plan.Prompt ?? string.Empty,
+                Model: plan.Model,
+                WorkspacePath: plan.WorkspacePath,
+                ProjectId: plan.ProjectId,
+                AgentId: plan.AgentId,
+                AgentInstructions: plan.AgentInstructions,
+                AgentConfig: null,
+                AgentSessionId: plan.SessionId,
+                Variant: plan.Variant);
+            await SaveAsync();
+
+            var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
+            var category = plan.PreflightCategory ?? AgentJobFailureReasons.WorkspaceUnavailable;
+            await EnterTerminalStateAsync(
+                AgentJobStatus.Failed,
+                null,
+                reason,
+                category,
+                reason,
+                reason,
+                null,
+                null,
+                null);
+            return;
+        }
+
+        if (State.Input is null && !string.IsNullOrWhiteSpace(plan.Prompt))
+        {
+            var input = new AgentJobInput(
+                Prompt: plan.Prompt!,
+                Model: plan.Model,
+                WorkspacePath: plan.WorkspacePath,
+                ProjectId: plan.ProjectId,
+                AgentId: plan.AgentId,
+                AgentInstructions: plan.AgentInstructions,
+                AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
+                AgentSessionId: plan.SessionId,
+                Variant: plan.Variant);
+            State.AgentConfigJson = plan.AgentConfigJson;
+            State.Input = input with { AgentConfig = null };
+            State.SubmittedAt = _timeProvider.GetUtcNow();
+            State.NextDispatchDelay = TimeSpan.Zero;
+            State.DispatchAttempts = 0;
+        }
+
+        if (!State.LaunchReady)
+        {
+            State.LaunchReady = true;
+            await SaveAsync();
+        }
+
+        // Either the input was newly persisted or it was already
+        // there from an earlier advance. TryDispatchAsync is the
+        // existing dispatch loop; it is a no-op for terminal jobs and
+        // idempotent for Pending ones.
+        await TryDispatchAsync();
+    }
+
+    private static System.Text.Json.JsonElement? DeserializeAgentConfig(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? null
+            : System.Text.Json.JsonDocument.Parse(json).RootElement.Clone();
+
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
@@ -546,6 +747,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await SaveAsync();
         DisposeDispatchTimer();
         ArmJobTimeout();
+        // Durable Runner-acceptance fence: clear the prepared/pending-dispatch
+        // obligation by unregistering the recovery reminder. The next
+        // obligation is the terminal Session-close delivery, which
+        // (re-)registers its own reminder via EnterTerminalStateAsync.
+        await UnregisterSelfAsync(RecoveryReminderName);
         _log.LogInformation(
             "AgentJob {Id} assigned to runner {Runner} as work {Work}",
             Key, runnerId, State.WorkId);
@@ -858,38 +1064,47 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Durable reminder tick driving the terminal-delivery retry loop.
-    /// Self-removes when the grain has no pending close so a leftover
-    /// reminder after a successful delivery does not spin (e.g., the
-    /// reminder was registered before the post-state-save clear call
-    /// succeeded but the unregister call then failed).
+    /// Durable reminder tick driving two recovery loops:
+    /// terminal-delivery retry (issue-449 design decision 2) and
+    /// prepared-launch advancement (design decisions 1-3). A single
+    /// reminder name covers both so the grain keeps a durable wake-up
+    /// until either Runner acceptance is persisted (preparation) or the
+    /// Session-close acknowledgement clears the pending payload
+    /// (terminal). The tick self-cleans when there is no recoverable
+    /// obligation left.
     /// </summary>
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
         if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
             return;
 
-        if (State.Input is null)
+        if (State.Input is null && State.RoutedPlan is null)
         {
             await UnregisterSelfAsync(reminderName);
             return;
         }
 
-        if (!IsTerminal)
+        if (IsTerminal)
         {
-            // Reminder registered before terminal save committed but
-            // the save then failed; the orphan tick self-cleans.
-            await UnregisterSelfAsync(reminderName);
+            if (State.PendingSessionClose is null)
+            {
+                await UnregisterSelfAsync(reminderName);
+                return;
+            }
+            await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             return;
         }
 
-        if (State.PendingSessionClose is null)
+        if (State.RoutedPlan is not null && !State.RunnerAccepted)
         {
-            await UnregisterSelfAsync(reminderName);
+            await AdvancePreparedLaunchAsync();
             return;
         }
 
-        await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+        // Non-terminal, non-prepared state: no recoverable obligation.
+        // Reminder was registered before terminal save committed but
+        // the save then failed; the orphan tick self-cleans.
+        await UnregisterSelfAsync(reminderName);
     }
 
     private async Task UnregisterSelfAsync(string reminderName)

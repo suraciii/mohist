@@ -17,4 +17,6 @@ public sealed class AgentJobState
     [Id(11)] public bool RunnerAccepted { get; set; }
     [Id(12)] public string? RuntimeSessionId { get; set; }
     [Id(13)] public PendingSessionClose? PendingSessionClose { get; set; }
+    [Id(14)] public RoutedAgentLaunchPlan? RoutedPlan { get; set; }
+    [Id(15)] public bool LaunchReady { get; set; }
 }
