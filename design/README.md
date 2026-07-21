@@ -97,6 +97,7 @@
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
 - [cli.md](cli.md) — 面向人和 Agent 的命令语言：领域归属、渐进式 help / Skill 上下文、字段选择输出、错误与可靠性契约。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
+- [observability.md](observability.md) — 观测信号分工、资源预算、降级规则和高频路径成本约束。
 - [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知。
 - [event-protocol.md](event-protocol.md) — 事件协议（**WIP**）：三轴信封模型、业务谱系 stamping 矩阵、匹配表达式（CEL 子集）与 conformance。
 
