@@ -331,6 +331,7 @@ export const builtInActions: ReadonlyArray<ActionDefinition> = [
         source: { types: ["string"], description: "Source branch; falls back to delivery context" },
         target: { types: ["string"], description: "Target branch; falls back to delivery context" },
         baseBranch: { types: ["string"], description: "Alias of target" },
+        remote: { types: ["string"], description: "Git remote name from the delivery profile" },
         draft: { types: ["boolean"], default: true, description: "Open the PR as a draft" },
         title: { types: ["string"], description: "Literal PR title" },
         message: { types: ["string"], description: "Alias of title" },
