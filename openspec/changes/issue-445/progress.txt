@@ -23,6 +23,7 @@
 - Both bundled profiles bind every workspace-prepare task explicitly. Local merge-ready now binds base, source, and remote; shared Git recovery and publish tasks retain explicit bindings.
 - Added manifest, handler, profile, and Server parsed-profile regressions for missing inputs, Variable disagreement, host workDir, and local flow routing. Added `docs/actions/git.md` for the final Git Action contracts.
 - Verification: `npm run test:ci -w packages/runner` passed (103 files, 1,212 tests); `npm test` passed (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, and 1,212 Runner tests).
+- Re-verified on the per-run branch: `npm run typecheck -w packages/runner`, `npm run test:ci -w packages/runner` (103 files, 1,212 tests), and `npm test` (1,366 CLI, 1,266 Server unit, 30 architecture, 2,934 Server spec, 4,972 Web, 1,212 Runner) all green against the existing T-002 commit. No new code or spec changes were required.
 
 ## T-003
 
