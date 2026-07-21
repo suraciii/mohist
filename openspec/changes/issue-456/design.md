@@ -38,11 +38,17 @@ Alternative considered: read the reconnect signal inside `useWorkflowTimeline` s
 
 Alternative considered: keep the 5 s poll but only while the connection is `disconnected`/`reconnecting`. Rejected because it reintroduces a timer in the error/reconnecting window and races the reconnect-driven catch-up; an explicit one-shot catch-up on reconnect is deterministic.
 
-### D2. Rely on the existing `['issues']` invalidation cascade; add no new invalidation keys
+### D2. Ride the existing `['issues']` cascade for stage/workflow/approval events, and add ROUTE entries for task (and artifact) events the client already receives but currently drops
 
-Workflow, stage, issue, and approval handlers in `handle-event.ts` already invalidate `['issues']`. TanStack Query invalidates by prefix, so that single call re-touches every key the page reads: `['issues', n, projectId]` (issue), `['issues', n, projectId, 'workflow-timeline']`, `['issues', n, projectId, 'diff']`, and `['issues', n, projectId, 'commits']`. The page therefore already receives incremental, event-driven updates for every transition the spec names (stage, task, approval, blocked) once D1 removes the competing timer. No new invalidation keys are introduced.
+Stage, workflow-run, issue, and approval handlers in `handle-event.ts` already invalidate `['issues']`. TanStack Query invalidates by prefix, so that single call re-touches every key the page reads: `['issues', n, projectId]` (issue), `['issues', n, projectId, 'workflow-timeline']`, `['issues', n, projectId, 'diff']`, and `['issues', n, projectId, 'commits']`. Once D1 removes the competing 5 s timer, those coarse-grained transitions reach the page incrementally with no further work.
 
-Rationale: the cascade is already correct and minimal; adding keys would duplicate invalidations and risk over-refetching. The only key not covered is `['issue-events', n, projectId]` (Activity history), which is intentionally out of scope.
+Task transitions are the exception and must be wired explicitly. `TaskStarted`/`TaskCompleted`/`TaskFailed` (and `ArtifactRecorded`) are canonical, subscribed events (`canonical-event-types.ts:15-18,87-91`), so the hub delivers them and `LiveTaskProvider.handleEvent` receives them — but they are absent from the `ROUTE` table (`handle-event.ts:237-274`) and from `AGENT_ACTIVITY_EVENT_NAMES` (`handle-event.ts:55-71`), so today they only forward to the Activity timeline bus (`dispatchTimelineEvent`) and never invalidate the page's queries. Because the page's task-progress UI reads solely from the `useWorkflowTimeline` cache (`StageBar.tsx:48-59`, `WorkflowView.tsx:2,9-16`), removing the 5 s poll without this wiring would leave task completions stale until some other routed event happens to fire — directly violating AC line 1 and spec Requirement 1. Add a `taskHandler` (and `artifactHandler`, or one shared handler) to `ROUTE` that invalidates `['issues']`, matching the `stageHandler` pattern. This is purely client-side invalidation wiring for events the client already subscribes to and receives; it is not a server-side event-routing change and not a new event type, so it stays within the issue's "no new event types / no server-side event changes" boundary. The issue's "event routing" non-goal is read as the server-side subscription/routing topology, not the web client's invalidation-side-effect table, which stage/workflow/approval events already populate.
+
+Rationale: the cascade covers the coarse-grained transitions; task/artifact events are the only subscribed events the page's queries silently drop. Reusing the existing ROUTE + invalidation mechanism keeps a single invalidation model instead of introducing a parallel local-merge path. The only key not covered is `['issue-events', n, projectId]` (Activity history), which is intentionally out of scope.
+
+Alternative considered: have the page merge task events locally off the `onTimelineEvent` bus into the task UI, the way `useEventTimeline` does. Rejected because it splits the page's task data between the query cache and a local merge, diverges from the single-source-of-truth timeline query, and duplicates status-merging logic. (`useEventTimeline`'s bus-merge is reused only by the Activity dialog, which serves evidence, not the page's task UI.)
+
+Alternative considered: narrow the spec to drop task start/completion from the live guarantee. Rejected because it contradicts the issue's headline acceptance criterion ("a task completion … appear without reload").
 
 ### D3. Page-owned, edge-triggered attention nudge on `decision.summary` transition
 
@@ -57,6 +63,8 @@ Rationale: reusing the canonical adjudication avoids duplicating "what counts as
 Alternative considered: fire the nudge from `handle-event.ts` by removing the `viewedIssue` suppression for approval/blocked events. Rejected because it duplicates the cause-to-summary mapping at the event layer, risks per-event (not per-transition) firing, and entangles global and per-page concerns in one handler.
 
 Alternative considered: fire on mount when the page loads into an approval-waiting state. Rejected; navigating to an issue that needs approval already shows the approval surface, so a toast would be redundant and noisy. The nudge is for transitions that occur while the page is open.
+
+Nudge set scope: the hook toasts only on transitions into `approval-required` and `blocked`, matching the issue's acceptance criteria. A run that enters the separate `failed` summary while the page is open is deliberately not toasted for the viewed issue: the failure is presented inline by the decision surface, and the existing global cross-issue toast (`notifyRunLifecycleToast` kind `'error'`, `handle-event.ts:164-167`) still covers failed runs on other issues. This is a recorded scoping decision; expanding the set is out of scope for this change and can be revisited if owners report missing failed-run transitions.
 
 ### D4. Reading stability is an audit, not a rewrite — stable keys + first-load-only loading guard
 
@@ -76,9 +84,23 @@ Alternative considered: a dedicated `EventsConnectionContext`. Rejected as a sep
 
 The events connection, query invalidation, reconnect signal, derived decision summary, and toast surface are all viewport-independent. The narrow-viewport renderers (`MobileActionBar`, the mobile padding/offset paths) consume the same query data and the same `decision` object as desktop. Live updates, scroll/section stability, reconnect catch-up, and attention nudges therefore hold on a phone-width viewport by construction. The spec coverage asserts each behavior at a phone-width viewport to lock the parity rather than rely on it being obvious.
 
+### D7. Blocked-state coverage is the union of event-driven invalidations and the retained workspace-status poll
+
+The nudge (D3) is edge-triggered off `decision.summary`, which recomputes whenever the issue or timeline query data changes. The causes of a transition into `blocked` map to different update feeds, and each must be accounted for so coverage is honest rather than assumed:
+
+- **Run failure** (`WorkflowRunFailed`) — routed via `workflowRunHandler` → invalidates `['issues']`. Event-driven; covered by D2.
+- **Approval gate** (`StageApprovalRequested`) — routed via `approvalHandler` → invalidates `['issues']`. Event-driven; covered by D2.
+- **Stage failure / stage transitions that flip the summary** — routed via `stageHandler` → invalidates `['issues']`. Event-driven; covered by D2.
+- **Drift needs-attention and convergence blocking** — there is no canonical reverse-DNS event for these; `issue.drift` and `issue.convergence` are part of the issue projection and are also surfaced through `useWorkspaceStatus`, which retains its own `refetchInterval` (5 s / 30 s) in `entities/issue/api/queries.ts:170-180`. These update when the issue query refetches on any `['issues']` invalidation, or when the workspace-status poll fires.
+
+Implication: a drift/convergence-driven block is not guaranteed to be event-driven; its timeliness is bounded by the retained `useWorkspaceStatus` poll plus whatever `['issues']` invalidation happens to fire. D1 removes only the *timeline* poll; the workspace-status poll is intentionally retained so drift-driven blocks continue to surface without introducing a new event type (a non-goal). The spec's blocked requirement is therefore satisfied on the same terms it is today — no regression — and the nudge fires once `decision.summary` actually transitions. The event-driven causes (failure / approval / stage) become timely through D2.
+
+This is an explicit acknowledgement, not a new mechanism: blocked coverage is no worse than today, and the event-driven causes become timely.
+
 ## Risks / Trade-offs
 
 - `[Risk] Removing the steady-state poll lets a missed event leave the page stale` -> The events stream is the primary path; the D1 reconnect catch-up refetch covers the drop/reconnect window. A poll-free design is the spec's explicit target.
+- `[Risk] Adding task/artifact ROUTE entries over-refetches the page on frequent task events` -> Task transitions are low-frequency (a few per stage) and fire only on actual change; the removed 5 s poll refetched unconditionally every 5 s, so event-driven invalidation is strictly less traffic. The broad `['issues']` cascade is reused intentionally for consistency with `stageHandler`.
 - `[Risk] A flaky events connection triggers repeated catch-up refetches, thrashing the timeline` -> Reconnect catch-up is edge-triggered off `reconnectVersion`, which increments only on a successful `onreconnected`, not on each transient `reconnecting` tick; exponential backoff in `createEventsConnection` bounds reconnect frequency.
 - `[Risk] The attention nudge double-fires with the global cross-issue toast` -> The global path already suppresses for `viewedIssue`; the page nudge is the only viewed-issue toast. Asserted in spec coverage.
 - `[Risk] The nudge fires on mount for an issue already awaiting approval` -> The hook initialises its previous-summary ref to the current summary on mount and fires only on a subsequent transition; asserted in tests.
@@ -91,13 +113,14 @@ The events connection, query invalidation, reconnect signal, derived decision su
 
 1. Extend `LiveTaskState` (and `useLiveEvents`) to carry the events reconnect signal from the existing `useEventsConnection` return; expose it through the live-task context.
 2. Set `useWorkflowTimeline` `refetchInterval` to `false`; add the page-owned reconnect catch-up `useEffect` in `IssueDetailPage` keyed on the new signal.
-3. Add `useIssueAttentionNudges` (edge-triggered off `decision.summary` into `approval-required` / `blocked`, previous-summary ref initialised on mount) and wire it into `IssueDetailPage`.
-4. Audit and lock reading stability: confirm the loading guard remains first-load only (no `isFetching` early return) and page-critical lists keep identity-stable keys.
-5. Add spec coverage: incremental update without re-render (task completion + stage transition), scroll-position and section-state survival across a live update, no steady-state poll + reconnect catch-up, attention toast on approval-waiting and on blocked (and not on routine transitions, not on mount, not duplicated with the global toast), each repeated at a phone-width viewport.
-6. Update existing `pages/issue-detail/ui/IssueDetailPage.*` tests where the update-flow change affects them; preserve existing `data-testid` anchors.
+3. Add the task/artifact ROUTE entries to `handle-event.ts` (a `taskHandler`/`artifactHandler`, or one shared handler, that invalidates `['issues']` per the `stageHandler` pattern) so `TaskStarted`/`TaskCompleted`/`TaskFailed`/`ArtifactRecorded` events the client already receives drive live updates of the page's task progress and artifacts. Verify a `TaskCompleted` event (distinct from any stage/workflow-run event) updates the page with no poll and no reload.
+4. Add `useIssueAttentionNudges` (edge-triggered off `decision.summary` into `approval-required` / `blocked`, previous-summary ref initialised on mount) and wire it into `IssueDetailPage`.
+5. Audit and lock reading stability: confirm the loading guard remains first-load only (no `isFetching` early return) and page-critical lists keep identity-stable keys.
+6. Add spec coverage: incremental update without re-render (task completion driven by the new ROUTE entry + stage transition via the existing cascade), scroll-position and section-state survival across a live update, no steady-state poll + reconnect catch-up, attention toast on approval-waiting and on blocked (and not on routine transitions, not on mount, not duplicated with the global toast, not fired on a `failed`-only transition), each repeated at a phone-width viewport. Blocked-cause coverage asserts the event-driven causes (run failure, approval, stage failure) trip the nudge via D2, and acknowledges drift/convergence ride the retained workspace-status poll per D7.
+7. Update existing `pages/issue-detail/ui/IssueDetailPage.*` tests where the update-flow change affects them; preserve existing `data-testid` anchors.
 
 No data migration, feature flag, or staged rollout is required. The change ships in one Web bundle against unchanged APIs. Rollback is a Web-code revert; no data repair or compatibility step is needed.
 
 ## Open Questions
 
-None. The proposal and capability specs fix the update source (the existing stream), the polling posture (reconnect fallback only), the nudge trigger set (approval-waiting and blocked, edge-triggered off the canonical summary), and the unchanged API/event boundary needed for implementation.
+None. The proposal and capability specs fix the update source (the existing stream plus the existing task/artifact events newly wired into client-side invalidation), the polling posture (reconnect fallback only), the nudge trigger set (approval-waiting and blocked, edge-triggered off the canonical summary), and the unchanged API/event boundary. Two scoping decisions are recorded in the body rather than left open: the nudge set is intentionally approval + blocked per the AC with `failed` excluded (D3), and the "event routing" non-goal is read as server-side routing/new event types, with client-side invalidation wiring for already-received task/artifact events in scope (D2).
