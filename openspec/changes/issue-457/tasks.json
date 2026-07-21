@@ -1,0 +1,137 @@
+{
+  "project": "mohist-local",
+  "description": "Issue detail page consistency and polish batch: nine localized presentation fixes (copy, theme tokens, shared selects, labels, rail, async states, disabled affordance).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "English copy and truthful session usage on issue detail",
+      "spec": "specs/issue-detail-copy/spec.md#single-language-ui-copy",
+      "description": "Replace the remaining Chinese strings on the issue detail page with English copy — the branch bar upstream-unknown state (BranchBar.tsx `未能检查上游`) and the PR delivery indicator (`经由 PR #N 合并`) — and stop the sessions panel from showing 'No usage yet' when token figures are absent (WorkflowSessionsPanel.tsx `usageText` returns 'Usage unavailable'). Covers both copy requirements: single-language UI copy and truthful session usage copy.",
+      "acceptanceCriteria": [
+        "No CJK characters remain anywhere in BranchBar.tsx, PrDeliveryIndicator.tsx, or WorkflowSessionsPanel.tsx.",
+        "The PR delivery indicator renders English copy containing the PR number (e.g. 'Merged via PR #N').",
+        "The branch bar upstream-unknown state renders an English message conveying that upstream could not be checked.",
+        "A session row with no token figures renders 'Usage unavailable' rather than 'No usage yet'.",
+        "npm run test:run -w packages/web passes with the coupled string assertions updated in BranchBar.test.tsx, PrDeliveryIndicator.test.tsx, and WorkflowSessionsPanel.test.tsx."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated BranchBar.tsx, PrDeliveryIndicator.tsx, WorkflowSessionsPanel.tsx and their tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1 (inline English literals, no i18n layer) and D2 (replace the false 'No usage yet' placeholder with 'Usage unavailable')."
+    },
+    {
+      "id": "T-002",
+      "title": "Semantic theme tokens for branch bar and workflow status/task presentation",
+      "spec": "specs/issue-detail-theme-tokens/spec.md#stateful-blocks-use-semantic-theme-tokens",
+      "description": "Replace literal palette utilities (amber/blue/red/green/gray tints) in BranchBar.tsx and the workflow status/task progress presentation (WorkflowRunStatusPill.tsx, TaskLogPanel.tsx) with the existing semantic token families (success/warning/info/danger/muted plus -subtle/-border/-foreground) so every state renders correctly in dark theme. The RebaseAction enabledClassName/reasonClassName strings become token-based.",
+      "acceptanceCriteria": [
+        "No literal palette utilities (bg-/border-/text- on amber, blue, red, green, or gray numeric scales) remain in BranchBar.tsx, WorkflowRunStatusPill.tsx, or TaskLogPanel.tsx.",
+        "BranchBar behind/rebase states use warning tokens, rebasing uses info tokens, upstream-unknown uses muted tokens, and error/conflict blocks use danger tokens.",
+        "WorkflowRunStatusPill maps running to info, blocked/waiting to warning, failed to danger, done to success, and idle to muted.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass with the class assertions in BranchBar.test.tsx and WorkflowRunStatusPill.test.tsx updated to the new token classes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Tokenized BranchBar.tsx, WorkflowRunStatusPill.tsx, TaskLogPanel.tsx and updated tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D3. Depends on T-001 because both tasks edit BranchBar.tsx and BranchBar.test.tsx; sequencing avoids edit conflicts."
+    },
+    {
+      "id": "T-003",
+      "title": "Migrate session panel filters to the shared Select",
+      "spec": "specs/issue-detail-shared-selects/spec.md#shared-select-component-everywhere",
+      "description": "Replace the three native <select> elements in WorkflowSessionsPanel SessionFilterControls (status, stage, sort) with the shared base-ui Select component (SelectTrigger size=\"sm\"/SelectContent/SelectItem), modeling the 'All …' null option as an empty-string value (fall back to a __all__ sentinel if base-ui rejects empty values) and preserving the existing data-testid hooks. Reuse STATUS_LABELS/STAGE_LABELS/SORT_LABELS.",
+      "acceptanceCriteria": [
+        "No native <select> elements remain in WorkflowSessionsPanel.tsx; all three filters render via SelectTrigger/SelectContent/SelectItem.",
+        "Each filter still clears to its 'All …' (null) option and applies filtering/sorting correctly.",
+        "The data-testid hooks workflow-sessions-status-filter, workflow-sessions-stage-filter, and workflow-sessions-sort remain present and drive the controls.",
+        "npm run test:run -w packages/web passes with WorkflowSessionsPanel.test.tsx updated for the shared Select."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowSessionsPanel.tsx using the shared Select and updated tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D4. Depends on T-001 because both tasks edit WorkflowSessionsPanel.tsx; sequencing avoids edit conflicts. Confirm base-ui Select accepts an empty-string value during implementation."
+    },
+    {
+      "id": "T-004",
+      "title": "Distinct Details card row labels for parent reference and children",
+      "spec": "specs/issue-detail-metadata-labels/spec.md#row-labels-describe-their-data",
+      "description": "In IssueDetailsCard.tsx, relabel the duplicate 'Parent Issue' row that describes child issues (the 'is a parent (N child issues)' row) to a distinct label such as 'Parent of', so the parent-reference row and the child-issues row no longer share the same label.",
+      "acceptanceCriteria": [
+        "IssueDetailsCard renders the parent-reference row labeled 'Parent Issue' and the child-issues row labeled distinctly (e.g. 'Parent of').",
+        "An issue that is a parent no longer renders two rows both labeled 'Parent Issue'.",
+        "npm run test:run -w packages/web passes with IssueDetailsCard.test.tsx asserting the distinct child-issues label."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueDetailsCard.tsx with corrected labels and updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D5. Minimal relabel; do not merge/restructure the child rows (that belongs to the sibling reading-flow issue)."
+    },
+    {
+      "id": "T-005",
+      "title": "Untruncated rail headers and sticky desktop reference rail",
+      "spec": "specs/issue-detail-rail-presentation/spec.md#rail-card-headers-render-untruncated",
+      "description": "Stop truncating rail card titles in CollapsibleRailCard.tsx (drop truncate on the title span, keep it on the collapsed summary) so 'Configuration' renders in full at desktop width, and make the desktop reference rail in IssueDetailPage.tsx stay visible while scrolling using lg:sticky/lg:top/lg:self-start with a capped max-height and internal overflow.",
+      "acceptanceCriteria": [
+        "CollapsibleRailCard title renders in full at desktop width ('Configuration' is not cut to 'CONF…'); collapsed summaries may still elide.",
+        "On a desktop viewport the reference rail (Details/Configuration/Actions) remains visible while a long page scrolls; narrow-viewport stacking/collapsing behavior is unchanged.",
+        "npm run test:run -w packages/web passes with the reference-rail layout/contents tests updated for the untruncated header and sticky rail."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CollapsibleRailCard.tsx and IssueDetailPage.tsx rail column with updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D6. Covers both rail-presentation requirements: untruncated headers and sticky desktop rail."
+    },
+    {
+      "id": "T-006",
+      "title": "Per-section loading skeletons and retry distinct from 404",
+      "spec": "specs/issue-detail-async-states/spec.md#per-section-loading-skeletons",
+      "description": "Replace the bare 'Loading…' line in IssueDetailPage.tsx with a skeleton shell (using the existing Skeleton primitive) mirroring page structure, and split the isError path: a 404 (ApiError.status === 404) renders NotFoundState, while any other error renders a new shared ErrorState component with a Retry button wired to useIssue refetch().",
+      "acceptanceCriteria": [
+        "Initial page load renders skeleton placeholders instead of a bare 'Loading…' line.",
+        "A 404 response renders the not-found state; a non-404 (transient) error renders a retryable ErrorState that is visually distinct from not-found.",
+        "The ErrorState Retry button triggers the useIssue refetch.",
+        "npm run test:run -w packages/web passes with IssueDetailPage loading/error tests updated, including a 404-versus-transient distinction case."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueDetailPage.tsx loading/error branches, new IssueDetailPageSkeleton and shared ErrorState, plus tests",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Design D7. Depends on T-005 because both tasks edit IssueDetailPage.tsx; sequencing avoids edit conflicts. Do not tokenize NotFoundState's own literal palette (out of scope)."
+    },
+    {
+      "id": "T-007",
+      "title": "Unmistakable disabled button affordance",
+      "spec": "specs/issue-detail-disabled-affordance/spec.md#disabled-buttons-are-visually-unmistakable",
+      "description": "Strengthen the shared Button disabled state in button.tsx beyond opacity-50 to an unmistakable inert neutral (disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed) leveraging :disabled specificity, so disabled issue-detail buttons outside the decision surface (empty-comment submit, in-flight delete) read as disabled at a glance.",
+      "acceptanceCriteria": [
+        "A disabled Button renders with a neutral muted background and muted foreground, not merely reduced opacity, and is distinguishable at a glance from its enabled state.",
+        "The empty-comment submit button and the in-flight delete-comment button render visibly disabled.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass, with any existing disabled-style button assertions updated."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "button.tsx disabled styling and updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D8. Shared primitive change; only affects the :disabled state, so enabled buttons are unchanged. Verification focuses on the issue-detail buttons in scope."
+    }
+  ]
+}
