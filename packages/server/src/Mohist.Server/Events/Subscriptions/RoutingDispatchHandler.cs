@@ -128,7 +128,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             Disposition: RoutedLaunchDisposition.PreflightFailed,
             PreflightReason: reason,
             PreflightCategory: category,
-            PreparedAt: DateTimeOffset.UtcNow,
+            PreparedAt: services.GetRequiredService<TimeProvider>().GetUtcNow(),
             AgentId: agent.Id,
             AgentName: agent.Name,
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,

@@ -94,6 +94,8 @@ public sealed class IssueEventFeedAssembler : IScopedService
                 && part.Type == TranscriptPartTypes.SessionClosed
                 && part.PayloadStatus == "failed"
                 && part.CorrelationKey.StartsWith("agent-job:")
+                && part.CorrelationKey.EndsWith(":terminal")
+                && part.CorrelationId == part.CorrelationKey
             select new { Part = part, Session = session })
             .ToListAsync(ct);
 
@@ -126,7 +128,8 @@ public sealed class IssueEventFeedAssembler : IScopedService
         if (payload.ValueKind != JsonValueKind.Object
             || !TryGetString(payload, "deliveryId", out var deliveryId)
             || !string.Equals(deliveryId, part.CorrelationKey, StringComparison.Ordinal)
-            || !deliveryId.StartsWith("agent-job:", StringComparison.Ordinal)
+            || !string.Equals(deliveryId, part.CorrelationId, StringComparison.Ordinal)
+            || !IsAgentJobTerminalDeliveryId(deliveryId)
             || !TryGetString(payload, "status", out var status)
             || !string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -171,6 +174,11 @@ public sealed class IssueEventFeedAssembler : IScopedService
         value = GetNullableString(payload, name) ?? string.Empty;
         return !string.IsNullOrWhiteSpace(value);
     }
+
+    private static bool IsAgentJobTerminalDeliveryId(string value) =>
+        value.StartsWith("agent-job:", StringComparison.Ordinal)
+        && value.EndsWith(":terminal", StringComparison.Ordinal)
+        && value.Length > "agent-job::terminal".Length;
 
     private static string? GetNullableString(JsonElement payload, string name) =>
         payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

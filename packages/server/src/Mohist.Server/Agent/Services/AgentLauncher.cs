@@ -40,13 +40,16 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 {
     private readonly AgentSessionResolver _sessions;
     private readonly IGrainFactory _grains;
+    private readonly TimeProvider _timeProvider;
 
     public AgentLauncher(
         AgentSessionResolver sessions,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        TimeProvider timeProvider)
     {
         _sessions = sessions;
         _grains = grains;
+        _timeProvider = timeProvider;
     }
 
     public async Task<AgentLaunchResult> LaunchAsync(
@@ -184,7 +187,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Disposition: RoutedLaunchDisposition.Executable,
             PreflightReason: null,
             PreflightCategory: null,
-            PreparedAt: DateTimeOffset.UtcNow,
+            PreparedAt: _timeProvider.GetUtcNow(),
             AgentId: agent.Id,
             AgentName: agent.Name,
             AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,

@@ -56,6 +56,7 @@ public sealed class IssueEventFeedAssemblerTests
         {
             Id = 9,
             CorrelationKey = "agent-job:job-1:terminal",
+            CorrelationId = "agent-job:job-1:terminal",
             Type = "session.closed",
             PayloadStatus = "failed",
             PayloadJson = JsonSerializer.Serialize(new
@@ -101,6 +102,34 @@ public sealed class IssueEventFeedAssemblerTests
             CorrelationKey = "runtime-close",
             PayloadStatus = "failed",
             PayloadJson = "{\"deliveryId\":\"runtime-close\",\"status\":\"failed\"}",
+        };
+
+        Assert.Null(IssueEventFeedAssembler.ProjectRoutedFailure(session, part));
+    }
+
+    [Fact]
+    public void ProjectRoutedFailureExcludesAgentJobPrefixedNonTerminalClose()
+    {
+        var session = new AgentSessionRow
+        {
+            Id = "session-1",
+            LabelProjectId = "proj-1",
+            LabelAgentLaunchIssueNumber = "42",
+            LabelTriggerEventId = "evt-1",
+            LabelTriggerRuleId = "rule-1",
+        };
+        var deliveryId = "agent-job:job-1:not-terminal";
+        var part = new AgentSessionTranscriptPartRow
+        {
+            Type = "session.closed",
+            CorrelationKey = deliveryId,
+            CorrelationId = deliveryId,
+            PayloadStatus = "failed",
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                deliveryId,
+                status = "failed",
+            }),
         };
 
         Assert.Null(IssueEventFeedAssembler.ProjectRoutedFailure(session, part));

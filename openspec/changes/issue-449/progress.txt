@@ -108,6 +108,9 @@
   so a terminal job cannot be saved without a durable wake-up.
 - Routed workspace resolution now treats missing run issue/epic lineage as a
   mismatch when the triggering envelope supplies that lineage.
+- Routed-plan timestamps now use injected time. Issue-feed projection requires
+  a matching AgentJob correlation key/id with a non-empty `:terminal` delivery
+  identity, excluding lookalike close facts.
 
 ## T-002 Implementation Discoveries
 
