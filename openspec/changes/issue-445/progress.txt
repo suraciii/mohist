@@ -1,0 +1,17 @@
+## Codebase Patterns
+
+- Runner action handlers still receive `ActionContext.variables` until T-004; T-001 removes only the OpenCode prompt-loader and OpenSpec/archive-owned Variable channels.
+- `rawWith` is the server-expanded, nested-template-preserving form. `mohist/openspec-tasks` reads its declared `task` subtree from `rawWith` and leaves nested expressions for the generated task dispatch.
+- Git-private operation state is resolved through the action's fakeable Git runner with `git rev-parse --git-path`; filesystem writes use a temporary file plus rename.
+
+## T-001
+
+- Removed `variables` from `PromptLoaderContext`; `buildPromptLoaderContext` now passes only declared loader `with` and host prompt metadata.
+- OpenSpec task generation no longer synthesizes a prompt from `variables.prompts.build`. A declared nested prompt, including `${{ prompts.build }}`, is copied from the raw task subtree and resolves when the generated task is dispatched.
+- Archive retry state is a version-1 JSON checkpoint keyed by SHA-256 of `workflowRunId + NUL + workspace-relative source`. It records and validates the exact selected destination, survives move/stage failures, and clears after commit or confirmed no-change.
+- Replaced legacy Variable-based archive tests with focused checkpoint first-run, retry, collision, corruption, path-safety, partial, and missing-source coverage.
+
+## Verification
+
+- `npm run typecheck -w packages/runner`
+- `npm run test:ci -w packages/runner` (102 files, 1,204 tests)

@@ -5,7 +5,6 @@ import { stringInput } from "../core/json.js"
 export function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
   return {
     with: {},
-    variables: context.variables ?? {},
     workDir: context.workDir,
     workId: context.workId,
     title: context.title ?? null,

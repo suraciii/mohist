@@ -5,6 +5,7 @@ import { openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions
 import type { ActionContext } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
+import { renderTemplate } from "../src/core/template.js"
 import "../src/core/prompt-registry.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "../src/actions/openspec-task-prompt.js"
 import { createTestTempDir } from "./support/temp-dir.js"
@@ -35,12 +36,7 @@ describe("mohist/openspec-tasks", () => {
     expect(output.loaded).toBe(1)
     expect(addTasks).toHaveBeenCalledWith("workflow-1", expect.any(Array))
     expect(loadedTasks[0].uses).toBe("mohist/opencode")
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with).toEqual({
-      file: tasksPath,
-      items: "tasks",
-      taskId: "T-001",
-    })
+    expect(loadedWith.prompt).toBeUndefined()
   })
 
   it("OpenSpecTaskWithoutExplicitPrompt_PromptLoaderSpecResolvesThroughRegisteredLoader", async () => {
@@ -59,23 +55,31 @@ describe("mohist/openspec-tasks", () => {
     }))
 
     const addTasks = vi.fn()
-    await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks, {
-      prompts: { build: "<base>build instructions</base>" },
-    }))
+    await openspecTasksAction(context(workDir, {
+      path: tasksPath,
+      task: {
+        with: {
+          prompt: {
+            uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+            with: { file: tasksPath, items: "tasks", base: "${{ prompts.build }}" },
+          },
+        },
+      },
+    }, addTasks, { prompts: { build: "<base>build instructions</base>" } }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     setPromptLoaderRegistryForTest(null)
-    const resolved = await resolvePrompt(loadedWith.prompt, {
+    const renderedWith = renderTemplate(loadedWith, { prompts: { build: "<base>build instructions</base>" } }) as Record<string, unknown>
+    const resolved = await resolvePrompt(renderedWith.prompt as never, {
       with: {},
-      variables: {},
       workDir,
       workId: "load-build",
     })
     expect(resolved).toContain("Implement workflow recovery")
     expect(resolved).toContain("Requeue runnable workflows on server startup.")
     expect(resolved).toContain("runner can claim recovered work")
-    expect(resolved).toContain("<base>build instructions</base>")
+    expect(resolved).toContain("<base_instructions><base>build instructions</base></base_instructions>")
   })
 
   it("OpenSpecTaskWithOptionsTemplate_LoadsTaskWithTemplatePreservedForLateExpansion", async () => {
@@ -102,9 +106,7 @@ describe("mohist/openspec-tasks", () => {
 
     expect(result.error).toBeUndefined()
     expect(loadedWith.options).toBe("${{ vars.agent }}")
-    // Default prompt is still injected as the loader spec.
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with.taskId).toBe("T-001")
+    expect(loadedWith.prompt).toBeUndefined()
   })
 
   it("OpenSpecTaskWithoutOptionsTemplate_LoadsTaskWithoutOptions", async () => {
@@ -176,16 +178,7 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.type).toBeUndefined()
     expect(loadedWith.requireFiles).toBeUndefined()
     expect(loadedWith.requireMarkers).toBeUndefined()
-    // The default prompt is now a loader spec, not a literal string, so the
-    // task description (including literal `${{ prompts.xxx }}` text) is
-    // preserved inside tasks.json and is never embedded into generated `with`
-    // values.
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with).toEqual({
-      file: tasksPath,
-      items: "tasks",
-      taskId: "T-001",
-    })
+    expect(loadedWith.prompt).toBeUndefined()
     const promptAsText = JSON.stringify(loadedWith)
     expect(promptAsText).not.toContain("${{ prompts.xxx }}")
     expect(promptAsText).not.toContain("Add skill asset manifest support")
@@ -318,9 +311,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with.base).toBe("<build>build prompt</build>")
-    expect(loadedWith.prompt.with.taskId).toBe("T-001")
+    expect(loadedWith.prompt).toBeUndefined()
   })
 
   it("OpenSpecTaskWithoutBuildPromptVariable_OmitsBaseInLoaderSpec", async () => {
@@ -341,13 +332,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with.base).toBeUndefined()
-    expect(loadedWith.prompt.with).toEqual({
-      file: tasksPath,
-      items: "tasks",
-      taskId: "T-001",
-    })
+    expect(loadedWith.prompt).toBeUndefined()
   })
 
   it("OpenSpecTaskWithCustomItemsPath_PropagatesItemsInLoaderSpec", async () => {
@@ -371,8 +356,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.error).toBeUndefined()
-    expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-    expect(loadedWith.prompt.with.items).toBe("items.nested")
+    expect(loadedWith.prompt).toBeUndefined()
   })
 
   it("OpenSpecTaskWithMultipleTasks_InjectsPerTaskSelectors", async () => {
@@ -393,12 +377,8 @@ describe("mohist/openspec-tasks", () => {
 
     expect(result.error).toBeUndefined()
     expect(loadedTasks).toHaveLength(3)
-    expect(loadedWithList[0].prompt.with.taskId).toBe("T-001")
-    expect(loadedWithList[1].prompt.with.taskId).toBe("T-002")
-    expect(loadedWithList[2].prompt.with.taskId).toBe("T-003")
     for (const with_ of loadedWithList) {
-      expect(with_.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
-      expect(with_.prompt.with.file).toBe(tasksPath)
+      expect(with_.prompt).toBeUndefined()
     }
   })
 
