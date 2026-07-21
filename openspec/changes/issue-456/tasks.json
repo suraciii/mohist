@@ -1,0 +1,51 @@
+{
+  "project": "mohist-local",
+  "description": "Issue detail page consumes the live event stream as its primary update source (no steady-state timeline polling, reconnect-fallback catch-up, preserved scroll and section state) and raises attention toasts when the viewed issue enters an approval-waiting or blocked state.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Issue detail live updates from the event stream with reading stability",
+      "spec": "specs/issue-detail-live-updates/spec.md#the-issue-detail-page-applies-workflow-transitions-from-the-live-event-stream-without-a-reload-or-wholesale-re-render",
+      "description": "Make the existing live event stream the issue detail page's primary update source. Remove the steady-state `refetchInterval` from `useWorkflowTimeline`; expose the events reconnect signal (reconnectVersion) through `LiveTaskState` and add a page-owned one-shot catch-up `refetch()` in `IssueDetailPage` keyed on that signal so a dropped-then-reconnected connection recovers anything missed. Rely on the existing `['issues']` prefix-cascade invalidation for incremental updates (no new invalidation keys). Lock reading stability: keep the loading guard first-load only (no `isFetching`-based early return that unmounts the tree) and keep page-critical lists on identity-stable keys so scroll position and expanded/collapsed section state survive every live update. Covers every requirement in specs/issue-detail-live-updates/spec.md.",
+      "acceptanceCriteria": [
+        "A task-completion event and a stage-transition event for the viewed issue arrive over the event stream and the resulting state appears without a page reload and without a full-tree re-render (only the affected region updates).",
+        "When a workflow transition arrives while the reader has scrolled within the open page, the reader's scroll position remains at the same reading point (the page does not scroll to top/anchor/any element as a side effect).",
+        "A section the reader expanded or collapsed keeps its state across a subsequent live update; no expanded section collapses and no collapsed section expands as a side effect of the update.",
+        "While the events connection is connected, `useWorkflowTimeline` does not refetch on a recurring timer; after the connection drops and reconnects it refetches once to catch up and does not resume a recurring timer.",
+        "All of the above behaviors hold at a phone-width viewport identically to the desktop viewport.",
+        "New focused spec tests cover: incremental update without re-render (task completion + stage transition), scroll-position survival mid-read, toggled section-state survival across a live update, no steady-state poll, reconnect-driven catch-up refetch, and the phone-width parity for each; existing `pages/issue-detail/ui/IssueDetailPage.*` tests are updated where the update-flow change affects them and existing `data-testid` anchors are preserved.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass with no Git-visible generated changes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `useWorkflowTimeline` (no steady-state poll), `LiveTaskState`/`LiveTaskProvider` exposing the events reconnect signal, `IssueDetailPage` reconnect catch-up wiring plus reading-stability invariants, and focused spec/unit coverage under packages/web.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implementation per design.md D1, D2, D4, D5. The reconnect signal already exists on the `useEventsConnection` return (`reconnectVersion`); surface it through `LiveTaskState` rather than a new context. All current `useWorkflowTimeline` consumers live on the issue detail page (IssueDetailPage, useEventTimeline in the Activity dialog, StageBar/WorkflowView) so removing the timer regresses none of them; the Activity dialog already merges live events itself."
+    },
+    {
+      "id": "T-002",
+      "title": "Attention nudges when the viewed issue enters approval-waiting or blocked",
+      "spec": "specs/issue-detail-attention-nudges/spec.md#an-approval-waiting-transition-on-the-viewed-issue-raises-a-toast-while-the-page-is-open",
+      "description": "Add a page-owned attention-nudge hook (e.g. `pages/issue-detail/model/useIssueAttentionNudges`) that watches the already-computed `decision.summary` and raises a toast when it transitions INTO `approval-required` or `blocked`. The hook keeps a previous-summary ref initialised to the current summary on mount (so navigating to an already-approval-waiting/blocked issue does not toast on arrival) and fires only on a subsequent transition. Reuse `deriveRuntimeDecision` as the single adjudication source and the existing `toast` (sonner) surface. Wire it into `IssueDetailPage`. Leave the global cross-issue toasts in `handle-event.ts` unchanged (they remain suppressed for `viewedIssue`), so the page nudge is the sole viewed-issue toast and there is no double-notice. Covers every requirement in specs/issue-detail-attention-nudges/spec.md.",
+      "acceptanceCriteria": [
+        "When the viewed issue enters an approval-waiting state (e.g. a check stage completes and requests approval) while the issue detail page is open, a toast naming the approval-waiting situation is raised, even though the issue is the one currently being viewed.",
+        "When the viewed issue enters a blocked state while the page is open, a toast naming the blocked situation is raised.",
+        "Exactly one toast is raised for a given viewed-issue transition; the global cross-issue toast for the same transition remains suppressed for the viewed issue (no duplication).",
+        "Routine progress transitions (task start, task completion, non-approval stage advance) on the viewed issue do not raise an attention toast while the page is open.",
+        "Navigating to an issue that is already approval-waiting or blocked does not fire a toast on mount; the nudge fires only on a transition that occurs while the page is open.",
+        "The approval-waiting and blocked nudges fire at a phone-width viewport identically to the desktop viewport.",
+        "New focused unit/spec tests cover: approval-waiting transition toasts, blocked transition toasts, exactly-once (no duplicate with the suppressed global toast), no toast on routine transitions, no toast on mount, and phone-width parity.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass with no Git-visible generated changes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `useIssueAttentionNudges` hook under `pages/issue-detail/model/`, its wiring in `IssueDetailPage`, and focused unit/spec coverage under packages/web.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implementation per design.md D3. Adjudicate off the derived `decision.summary` rather than wiring to raw event types, so the nudge matches the page's own presentation and fires once per meaningful transition. Layered on T-001: the nudge's timeliness ('the moment something happens') is only demonstrable against the live event-driven update flow, and both tasks edit `IssueDetailPage.tsx`, so sequencing also avoids concurrent-edit conflicts."
+    }
+  ]
+}
