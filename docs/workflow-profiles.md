@@ -192,6 +192,10 @@ Runner 所在机器需要安装 GitHub CLI，并登录目标仓库。
 编辑 Definition 会影响使用该 Profile 的进行中 Workflow 的后续 Stage。保存前应确认这些
 变化也适用于当前活动的运行。
 
+保存前可用 `mo workflow validate --file <path>` 纯本地检查 Definition 的结构、字段类型
+和模板表达式；`--file -` 从 stdin 读取。Action 是否可用及其输入契约由保存入口结合当前
+Runner 的 Action 契约继续检查。
+
 CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只需在所属 Project
 内唯一，可以包含 `/`；通过 CLI 传递时仍是一个完整参数。内置 Profile 使用
 `mohist/<name>`，自定义 Profile 使用能稳定表达用途的 ID。

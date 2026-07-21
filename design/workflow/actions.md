@@ -157,6 +157,10 @@ engine 对结果的通用处理不解释任何 Action 的业务语义。唯一�
 - **退役 Action**:dispatch 命中 tombstone → 以 tombstone 指引文案失败;profile
   保存命中 → 拒绝保存。
 
+Profile 保存先由 Workflow Definition 校验器产生语义模型，再使用 catalog 判断 `uses` 与
+`with`。Definition 校验器只递归检查 `with` 值中的模板表达式；catalog 不重复判断
+Definition 字段或模板命名空间。两类诊断都使用 YAML path，并在返回结果中区分来源。
+
 ### setVars
 
 把 Action output 字段投影到 Run Variables:

@@ -56,8 +56,10 @@ PromptTemplateEngine.Render(body, variables)
   ${{ path.to.value }} -> dispatch context lookup
 ```
 
-渲染使用本次 task dispatch 携带的 Effective Stage Variables 与 runtime context。未解析
-表达式保持原样；递归展开必须有确定的深度上限。
+渲染使用本次 task dispatch 携带的 Effective Stage Variables 与 runtime context，并与
+Workflow Definition 的模板表达式共享同一语法：根命名空间封闭；任一表达式解析不出值
+时本次 task 失败；嵌入字符串的值必须是 scalar，对象或数组会失败；表达式占据整个值时
+保留 JSON 类型；`\${{` 产生字面 `${{`。递归展开必须有确定的深度上限。
 
 Prompt 不保存 revision 或 body snapshot。每次执行都使用当时读取到的最新 Prompt；同一个
 TaskRun 被 redeliver 或 retry 产生新 TaskRun 时也重新读取。Action 收到渲染后的 Prompt
@@ -72,8 +74,9 @@ Builtin `.prompt` 是产品化内容，随产品分发、面向任意项目：
 
 - 一律使用英文。
 - 保持产品与技术栈通用：不引用 Mohist 仓库自身的命令面、目录结构或开发历史示例。
-- 可以引用 Mohist 产品面（`mo` CLI、`openspecChangeDir`、workflow 变量），它们在任何受管
-  项目中都成立。
+- 可以引用 Mohist 产品面（`mo` CLI、文档列出的模板命名空间、workflow 变量），它们在
+  任意受管项目中都成立。OpenSpec 路径约定直接写成
+  `openspec/changes/issue-${{ issue.number }}`，不依赖额外命名空间。
 - 只声明任务、输入输出与机器可校验的契约（产出路径、marker）；不规定过程细节、问题
   分类或报告模板——执行者是足够聪明的 agent，报告的读者主要是下一个任务的 agent。
 - review 类 prompt 只诊断不修复；修复由独立的 fix 类 prompt 承担，review 报告是两者
@@ -109,3 +112,6 @@ Issue 和 WorkflowRun 不提供 Prompt API。
   只保留 Project `/prompts` resource。
 - 当前部分 Profile 解析代码会预先组装 Prompt map；目标实现只传 key，并在执行时读取
   单个 Project Prompt。
+- 当前 builtin Prompt 仍使用 `openspecChangeDir`、`project`、`approvalFeedback` 等表外根，
+  且未解析表达式仍可能保留原文；目标是与 Workflow Definition 使用同一封闭语言与失败
+  语义。
