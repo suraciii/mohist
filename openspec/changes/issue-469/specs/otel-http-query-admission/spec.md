@@ -1,6 +1,6 @@
 ### Requirement: The endpoint admits only single SELECT or WITH statements on a read-only connection
 
-`POST /otel/api/query` SHALL admit only SQL whose every top-level statement begins with `SELECT` or `WITH`, and SHALL reject any top-level statement that begins with another keyword. Multi-statement input where any statement is not `SELECT`/`WITH` SHALL be rejected at the keyword layer before execution. Write attempts that survive the keyword layer SHALL still be rejected by the SQLite engine because the connection is physically read-only. This is the existing three-layer safety net (keyword allow-list, read-only connection, command timeout) and SHALL continue to hold after this change.
+`POST /otel/api/query` SHALL admit only SQL whose every top-level statement begins with `SELECT` or `WITH`, and SHALL reject any top-level statement that begins with another keyword. Multi-statement input where any statement is not `SELECT`/`WITH` SHALL be rejected at the keyword layer before execution. The keyword allow-list is the first line of defense, and the physically read-only connection is a defense-in-depth backstop: any write or schema-change operation that does reach execution SHALL still be refused by the SQLite engine, so an admitted query SHALL never mutate `otel.db`. This is the existing layered safety net (keyword allow-list, read-only connection, command timeout) and SHALL continue to hold after this change.
 
 #### Scenario: Non-SELECT top-level statements are rejected with the query_not_select code
 
@@ -14,11 +14,11 @@
 - **THEN** the endpoint SHALL return HTTP 400 with code `query_not_select`
 - **AND** SHALL NOT execute any of the statements
 
-#### Scenario: Write attempts that bypass the keyword layer are rejected by the read-only engine
+#### Scenario: The read-only connection is the physical backstop against writes
 
-- **WHEN** a request body contains a statement that the keyword layer does not reject on its head but that the SQLite engine treats as a write or schema change (for example `ATTACH DATABASE ':memory:' AS attached`)
-- **THEN** the endpoint SHALL return HTTP 400 with code `query_sqlite_error`
-- **AND** the physically read-only connection SHALL refuse the operation at the SQLite engine level
+- **WHEN** a request body contains a write or schema-change statement (for example `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/`ATTACH`/`PRAGMA`)
+- **THEN** the endpoint SHALL reject it before any mutation occurs — at the keyword layer with code `query_not_select`, or at the SQLite engine with code `query_sqlite_error` if the keyword layer did not recognize the form
+- **AND** the physically read-only connection SHALL ensure `otel.db` is never mutated by any admitted query
 
 #### Scenario: Single SELECT and WITH statements are admitted
 

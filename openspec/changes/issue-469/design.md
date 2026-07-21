@@ -38,6 +38,8 @@ Constraints carried forward:
 
 The bounded query path registers a cancellation callback on the execution token that calls `raw.sqlite3_interrupt(connection.Handle)` (guarding `null`). Because the interrupt is registered on the linked token, both client disconnect and execution-budget exhaustion flow through the same mechanism and actually break into `sqlite3_step`. The reader then throws `SqliteException` (`SQLITE_INTERRUPT`) or `OperationCanceledException`, and the existing `await using` on the connection/command/reader releases the connection immediately.
 
+`raw.sqlite3_interrupt` is reached via `using static SQLitePCL.raw;`. `SQLitePCLRaw.core` is already a transitive dependency of `Microsoft.Data.Sqlite`, so its types normally flow to consumers; the build must confirm `SQLitePCL.raw` resolves at compile time and, if it does not, add a direct `<PackageReference Include="SQLitePCLRaw.core" />` using the version pinned in `Directory.Packages.props`. `SqliteConnection.Handle` is `public virtual sqlite3?` in the pinned `Microsoft.Data.Sqlite` 11 preview, so no reflection is involved; the build should assert this with a guard test (a trivial unit test that reads `connection.Handle` on an open in-memory connection) so a future library update that changes visibility fails loudly instead of silently disabling interruption.
+
 `CommandTimeout` is retained at its current 5 s purely as defense-in-depth for `SQLITE_BUSY` lock-wait; it is not relied on as the long-query bound (see `otel-query-execution-budget` spec). The doc comments on `ExecuteRawQuery` are updated to describe the new four-layer safety net (admission, read-only connection, execution-budget interrupt, row/byte response budgets) and to stop citing the removed `design.md` Decision 5/8.
 
 **Alternatives considered:**
@@ -50,12 +52,13 @@ The bounded query path registers a cancellation callback on the execution token 
 
 The budget is a `CancellationTokenSource` created via `timeProvider.CreateCancellationTokenSource(budget)`, linked (`CreateLinkedTokenSource`) with the request-aborted token from the route handler. The linked token is what gets passed to the reader and what is registered for `sqlite3_interrupt`. `TimeProvider` is injected into `TraceQuerier` (and resolved through DI as `FakeTimeProvider` in spec tests), satisfying the banned-API rules and letting tests drive budget exhaustion by advancing the fake clock rather than sleeping.
 
-The default budget is a named constant on `OtelOptions` (propose 10 s; see Open Questions) — kept as a safety constant, not a general performance knob. `OtelOptions` is extended with the OTel-query budget group (body size, row count, byte size, execution budget) as read-only-at-runtime constants; they are not exposed as tunable user knobs to avoid weakening the safety bound.
+The four OTel-query budgets (request body size, row count, byte size, execution budget) are `public const` static fields on `TraceQuerier`, mirroring the existing `TraceQuerier.MaxListLimit` pattern. They are deliberately NOT `OtelOptions` properties: `OtelOptions` is an `IOptions` class bound from `Mohist:Otel` config (`services.Configure<OtelOptions>(…)`), so any property there is config-overridable, which would let `MOHIST__Otel__*` weaken the body/row/byte/execution ceilings — an unacceptable regression vector for a safety bound on a high-risk issue. The proposed defaults are body size 64 KiB, row count 1000, byte size 4 MiB, execution budget 10 s (see Open Questions). `OtelOptions` is not extended by this change.
 
 **Alternatives considered:**
 
 - *`cts.CancelAfter(TimeSpan)`:* uses the system timer (not faking-friendly) and skirts the spirit of the banned `new CancellationTokenSource(TimeSpan)`; rejected for testability.
 - *Reuse `CommandTimeout` as the budget:* explicitly forbidden by the issue and specs — it cannot interrupt running work.
+- *Budgets as `OtelOptions` properties marked "not tunable":* rejected — `IOptions` properties are inherently config-bound, so the safety bound could be weakened by misconfiguration; `public const` is the only placement that cannot be overridden.
 
 ### Decision 3: Reject oversized request bodies before buffering via `Content-Length` + per-route request size limit
 
@@ -100,30 +103,43 @@ This is a **contract change** for `/otel/api/query`: `data` moves from a bare ar
 
 `mo otel query` continues to use `SqliteOtelQueryExecutor` against a directly-opened read-only `otel.db`. The row/byte/body budgets and the `QueryResult` wrapper are server-HTTP-only. No code is shared by force; the only shared contract remains the `otel.db` DDL column constants in `OtelDb.cs`.
 
+### Decision 6: Deterministic interruption testing via a server-side executor seam
+
+The execution-budget and client-cancel requirements must be verifiable without wall-clock (`design/testing.md`) and without depending on a real slow query. Real `Microsoft.Data.Sqlite` reads against the in-memory fixture complete before any fake-clock advance, so there is no in-flight reader to interrupt unless the test can hold execution at a controlled point. The plan therefore introduces a server-side `IOtelQueryExecutor` seam for the free-SQL path, mirroring the CLI's existing `IOtelQueryExecutor` in `MohistCliCommands.Otel.cs`: the `/query` route depends on `IOtelQueryExecutor.Execute(sql, linkedCt) → QueryResult`; `TraceQuerier` is the registered production implementation and owns the read-only connection, the `sqlite3_interrupt` registration on the linked token, and the bounded read loop; the spec test fixture (`OtlpRoutesWebApplicationFactory`) registers a `FakeOtelQueryExecutor` that blocks on a `TaskCompletionSource` until its cancellation token fires.
+
+This yields two complementary, deterministic verification paths:
+
+- *Route-handler contract (fake executor):* the fake blocks until cancelled, so the test advances `FakeTimeProvider` past the budget (or cancels the request-aborted token) and asserts the endpoint returns `query_execution_budget_exhausted` and never a partial row array — no real SQLite, no wall-clock.
+- *Real interruption wiring (production executor vs. in-memory SQLite):* seed a large bounded row set via a recursive CTE (`WITH RECURSIVE …`), run the production executor under a `FakeTimeProvider` budget, advance the fake clock once the task is in-flight, and assert the reader terminated early (did not consume all rows; observed `SQLITE_INTERRUPT`/`OperationCanceledException`) and the connection was disposed. The assertion is on the outcome (loop terminated early, connection released), never on elapsed duration; no `Stopwatch`, no `Thread.Sleep`. The interrupt is checked per `sqlite3_step`, and the large bounded row set gives a wide deterministic window in which advancing the fake clock fires `sqlite3_interrupt` before the query could finish.
+
+**Alternatives considered:**
+
+- *Recursive CTE + wall-clock:* rejected — depending on real elapsed time to keep the query in-flight is exactly the banned flaky pattern (`design/testing.md`).
+- *No seam, assert only on the route mapping with an already-cancelled token:* rejected — it never exercises the real `sqlite3_interrupt` registration and would not catch a wiring regression such as `Handle` going null or the callback being registered against the wrong token.
+
 ## Risks / Trade-offs
 
 - **[Risk] `sqlite3_interrupt` is best-effort — SQLite checks it at safe internal points, so an already-in-flight atomic step may still complete briefly** → Mitigation: for multi-row producers the row/byte budgets bound the work regardless; for the genuine single-step-long case the interrupt is the only mechanism and is "as prompt as SQLite allows". Document this in code comments and the spec scenario stays about "interrupts the running reader / releases the connection", which the `await using` disposal guarantees.
 - **[Risk] Response contract change breaks `/otel/api/query` consumers** → Mitigation: only diagnostic consumers exist; update Web UI caller and integration specs in the same change. No external API consumers.
 - **[Risk] Per-row byte estimation under/over-counts vs. actual JSON** → Mitigation: peek actual column bytes for cells before materializing; stop conservatively (pre-check the next row's estimated addition against the budget rather than recovering after exceeding it). The 4 MiB ceiling is checked against accumulated bytes, never trustingly.
 - **[Risk] `connection.Handle` is `null` in an unexpected connection state** → Mitigation: null-guard the interrupt registration; the linked-token cancellation still flows to `ReadAsync`'s entry check and to disposal as a fallback.
-- **[Risk] In-memory test DB makes read-only mode a no-op (`InMemoryOtelDb`)** → Mitigation: pre-existing limitation, unrelated to this change; interruption is still exercisable because `Handle` is non-null on the in-memory connection and the interrupt callback fires. The admission-layer tests continue to cover the SELECT-only invariant at the keyword level; the engine-level rejection stays covered by `PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode` against the file-backed path.
+- **[Risk] In-memory test DB makes read-only mode a no-op (`InMemoryOtelDb`)** → Mitigation: pre-existing limitation, unrelated to this change; the read-only-engine backstop stays covered by `PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode` against the file-backed path, and the keyword-layer admission is covered in-memory. Interruption is exercised deterministically through the `IOtelQueryExecutor` seam (Decision 6): the route-level contract uses the fake executor (no real SQLite needed), and the real `sqlite3_interrupt` wiring runs against the in-memory connection where `Handle` is non-null. The `Handle`-visibility guard test (Decision 1) catches the case where a library update silently disables interruption.
 - **[Trade-off] Two response shapes (`/traces`, `/status` stay array; `/query` becomes `QueryResult`)** → accepted; the other two endpoints are already bounded and have no truncation semantics.
 
 ## Migration Plan
 
 Server-only change; no database schema change, no runner/web contract migration.
 
-1. Extend `OtelOptions` with the OTel-query budget constants (body size, row count, byte size, execution budget) and the `TimeProvider` registration is already in place.
-2. Implement interruption + budgets in `TraceQuerier.ExecuteBoundedQuery` and wire `TimeProvider` through DI.
-3. Update `OtelQueryRoutes` `/query` handler: `Content-Length` pre-check + per-route size limit → `413`; on admission, call `ExecuteBoundedQuery`; map the linked-token / interrupt outcome to stable codes (`query_cancelled`, `query_execution_budget_exhausted`).
-4. Update `/otel/api/query` consumers (Web UI query view) to read `data.rows` / `data.truncated` / `data.truncate_reason` and surface a truncation notice.
-5. Extend `OtelQueryRoutesIntegrationSpecs` and `TraceQuerierSpecs`: oversized body → 413; > 1000 rows → truncation; large single cell and many-moderate-rows → byte truncation; recursive CTE bounded; client-cancel and budget-exhaustion interrupt the reader and release the connection, driven by explicit tokens / `FakeTimeProvider` — never wall-clock.
+1. Add the four OTel-query budget `public const` fields to `TraceQuerier` (mirroring `MaxListLimit`): body size (~64 KiB), row count (1000), byte size (4 MiB), execution budget (~10 s). Do NOT add these as `OtelOptions` properties. Inject `TimeProvider` into `TraceQuerier` (the DI registration pattern is already in place elsewhere).
+2. Implement interruption + budgets in `TraceQuerier.ExecuteBoundedQuery` and wire `TimeProvider` through DI. Introduce the server-side `IOtelQueryExecutor` seam and register `TraceQuerier` as its production implementation.
+3. Update `OtelQueryRoutes` `/query` handler: `Content-Length` pre-check + per-route size limit → `413`; on admission, build the linked token and call `IOtelQueryExecutor.Execute`; map budget exhaustion to `query_execution_budget_exhausted`. Client disconnect produces no response (the request channel is gone), so no `query_cancelled` body is returned to the disconnecting caller — the linked-token cancellation still flows to `sqlite3_interrupt` and releases the connection.
+4. `/otel/api/query` has no current Web UI or CLI HTTP consumer, so no consumer updates are required; the response-shape change touches only integration tests.
+5. Extend `OtelQueryRoutesIntegrationSpecs` and `TraceQuerierSpecs`: oversized body → 413; > 1000 rows → truncation; large single cell and many-moderate-rows → byte truncation; recursive CTE bounded; client-cancel and budget-exhaustion interrupt the reader and release the connection via the `FakeOtelQueryExecutor` seam and `FakeTimeProvider` — never wall-clock; plus a guard test asserting `SqliteConnection.Handle` is non-null on an open in-memory connection.
 
 **Rollback:** single-commit revert; no persisted state. If a config gate is desired for staged rollout, `OtelOptions.Enabled` already gates the whole subsystem and can be used as an emergency switch.
 
 ## Open Questions
 
-- **Execution budget default value.** Propose 10 s (2× the legacy 5 s `CommandTimeout`, comfortable for legitimate aggregates, tight enough to protect the process). Confirm against representative OTel queries during build.
-- **Expose budgets as `OtelOptions` knobs or hard constants?** Proposal says "small and explicit". Recommend hard constants (not user-tunable) so the safety bound cannot be weakened by misconfiguration; confirm with maintainers.
+- **Execution budget default value.** Decision 2 fixes the placement as a `public const` on `TraceQuerier`; the proposed default is 10 s (2× the legacy 5 s `CommandTimeout`, comfortable for legitimate aggregates, tight enough to protect the process). Confirm against representative OTel queries during build.
 - **Exact body-size constant.** Propose 64 KiB; confirm nothing in current diagnostic usage approaches it.
-- **Truncation-reason string taxonomy.** Spec names `row_limit` / `byte_limit`; confirm the Web UI wants those literal strings vs. localizable display text (the wire string should stay the stable machine code; localization happens in the UI).
+- **Truncation-reason string taxonomy.** Spec names `row_limit` / `byte_limit`; confirm the wire string stays the stable machine code (localization happens in any future UI consumer; none exists today).

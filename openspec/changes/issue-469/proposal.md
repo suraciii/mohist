@@ -18,8 +18,8 @@
 
 ## Impact
 
-- **Server query API** (`packages/server/src/Mohist.Server/Api/OtelQueryRoutes.cs`, `packages/server/src/Mohist.Server/Telemetry/TraceQuerier.cs`): add request body limit, response row/byte budgets with a truncation indicator, and an execution-cancellation boundary that interrupts SQLite via cancellation rather than `CommandTimeout`; preserve read-only connection and `ValidateSelectOnly`.
-- **Read-only connection factory** (`packages/server/src/Mohist.Server/Telemetry/OtelDb.cs`): contract unchanged; reused for the bounded execution path.
+- **Server query API** (`packages/server/src/Mohist.Server/Api/OtelQueryRoutes.cs`, `packages/server/src/Mohist.Server/Otel/TraceQuerier.cs`): add request body limit, response row/byte budgets with a truncation indicator, and an execution-cancellation boundary that interrupts SQLite via cancellation rather than `CommandTimeout`; preserve read-only connection and `ValidateSelectOnly`.
+- **Read-only connection factory** (`packages/server/src/Mohist.Server/Otel/OtelDb.cs`): contract unchanged; reused for the bounded execution path.
 - **CLI** (`packages/cli/Mohist.Cli/MohistCliCommands.Otel.cs`): no behavioral change; `mo otel query` continues to read `otel.db` directly through its own read-only connection.
 - **Web UI**: any consumer of `/otel/api/query` must surface truncation when the indicator is present; concrete placement decided in design.
 - **Tests** (`packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/`): extend coverage to large row counts, single large cell values, recursive CTE amplification, oversized request body, and cancellation-driven interruption; assertions use operation counts and explicit cancellation, not wall-clock timing.
