@@ -47,9 +47,9 @@ The Runner's Follow-up, Cancel, and SessionCommand handlers SHALL select the exe
 - **THEN** the Runner SHALL invoke the Pi runtime's Compact or Reset operation
 - **AND** for a binding carrying `runtime: "opencode"` SHALL preserve the existing OpenCode Compact/Reset behavior
 
-### Requirement: OpenCode session command behavior is unchanged
+### Requirement: OpenCode session command behavior is unchanged in outcome
 
-Admitting the Pi runtime SHALL NOT alter the behavior of any session command on an OpenCode-bound AgentSession. OpenCode Follow-up, Cancel, Compact, and Reset SHALL observe the same request shape, result shape, error vocabulary, and side effects as before this change, and SHALL NOT route through any Pi runtime code path.
+Admitting the Pi runtime SHALL NOT alter the user-visible outcome of any session command on an OpenCode-bound AgentSession. OpenCode Follow-up, Cancel, Compact, and Reset SHALL observe the same request shape, result shape, error vocabulary, and side effects as before this change, and SHALL NOT route through any Pi runtime code path. Where the Runner's `SessionCommand` handler newly returns an explicit `unavailable` for OpenCode compact/reset in place of the prior null/transport-resolution path, the semantic outcome (the command being unavailable) SHALL be identical to before this change.
 
 #### Scenario: OpenCode Follow-up is unchanged
 
@@ -57,10 +57,10 @@ Admitting the Pi runtime SHALL NOT alter the behavior of any session command on 
 - **THEN** the request and result SHALL match the pre-change OpenCode Follow-up behavior
 - **AND** no Pi runtime code path SHALL be invoked
 
-#### Scenario: OpenCode Compact and Reset are unchanged
+#### Scenario: OpenCode Compact and Reset preserve the same outcome
 
 - **WHEN** Compact or Reset is issued on an OpenCode-bound session
-- **THEN** the operation SHALL behave identically to before this change
+- **THEN** the user-visible outcome SHALL match the pre-change behavior
 - **AND** SHALL NOT route through any Pi runtime path
 
 ### Requirement: Routing selects the runtime from the persisted binding, not from a cached or hardcoded source
@@ -82,3 +82,13 @@ When a command targets a runtime that the Runner cannot dispatch (an unrecognize
 - **WHEN** a command targets a session binding whose `runtime` is neither `pi` nor `opencode`
 - **THEN** the Runner SHALL return an error result using the existing vocabulary
 - **AND** SHALL NOT execute the command against any runtime
+
+### Requirement: Pi compact/reset recovery preserves one operation across interrupted delivery
+
+Pi compact and reset SHALL reuse the recovery semantics already established for session commands: the Server persists one recovery operation before dispatching, and the Runner `SessionCommand` handler deduplicates repeated delivery of the same operation by `(sessionId, operationId)` through its journal. After a Runner restart that leaves a Pi operation "started" in the journal, the handler SHALL NOT blindly re-execute it; an indeterminate outcome SHALL be reported through the existing vocabulary so the Server-side recovery drives redelivery, preserving at most one committed effect per operation.
+
+#### Scenario: Interrupted Pi compact/reset does not double-execute
+
+- **WHEN** a Pi compact or reset is dispatched and delivery is interrupted (timeout, transport loss, or Runner restart) after the operation may have started
+- **THEN** a later redelivery SHALL reuse the same recovery operation
+- **AND** the Pi session SHALL observe at most one committed effect for that operation

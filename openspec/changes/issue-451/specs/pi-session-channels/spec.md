@@ -33,6 +33,22 @@ For an idle Follow-up, the Pi runtime SHALL use Pi's reception confirmation as t
 - **AND** SHALL NOT report the Follow-up as accepted
 - **AND** SHALL NOT automatically retry or replay the Follow-up
 
+### Requirement: Prompt-initiating operations are serialized per physical Pi session
+
+The Pi runtime SHALL enforce at most one in-flight `prompt()` (and at most one in-flight `compact()`) per physical Pi session regardless of the caller path — a Workflow turn, an idle user Follow-up, or a concurrent operation. A second prompt-initiating operation on a session that already has one in progress SHALL wait for the first to release, and MUST NOT issue a concurrent second prompt. Busy Follow-up (`steer`) and Reset are not prompt-initiating operations on the existing session and are not subject to this serialization.
+
+#### Scenario: Concurrent idle Follow-up and Workflow turn do not produce a second prompt
+
+- **WHEN** an idle Follow-up starts a turn on a Pi session while a Workflow turn is queued or starting on the same physical session
+- **THEN** the Pi runtime SHALL serialize the two prompt calls
+- **AND** SHALL NOT issue a second concurrent `prompt()` on the same physical session
+
+#### Scenario: Two concurrent idle Follow-ups are serialized
+
+- **WHEN** two idle Follow-ups are submitted to the same Pi session at the same time
+- **THEN** the Pi runtime SHALL execute their prompt calls one at a time
+- **AND** SHALL NOT issue concurrent prompts on the same physical session
+
 ### Requirement: Compact uses Pi native compaction and preserves the session identity
 
 Compact SHALL compact the Pi Session using Pi's native compaction operation. The Pi runtime MUST NOT substitute a synthetic summary or fabricated compaction when Pi compaction is unavailable or fails; a compaction failure SHALL be reported as a command failure. After Compact, the physical Pi Session identity (`runtimeSessionId`) SHALL be unchanged and the compacted transcript SHALL remain visible through the existing session event channel.
@@ -74,20 +90,22 @@ Reset SHALL establish a new, empty Pi Session in the same working directory by c
 - **WHEN** Reset is applied to a Pi session that has a current model and thinking level set
 - **THEN** the Pi runtime SHALL apply the same model and thinking level onto the new session
 
-### Requirement: Cancel aborts the active turn and reports stop confirmation honestly
+### Requirement: Cancel aborts the active turn and reports stop confirmation honestly to the user
 
-Cancel SHALL request interruption of the active Pi turn via the Pi abort operation. The Pi runtime SHALL determine whether the turn actually stopped by observing the Pi session's streaming state and event sequence, not merely from the resolution of the abort call. When stop cannot be confirmed, the Pi runtime SHALL report the cancel as interrupt-unconfirmed, and MUST NOT portray a possibly-still-running turn as safely stopped.
+Cancel SHALL request interruption of the active Pi turn via the Pi abort operation. The Pi runtime SHALL determine whether the turn actually stopped by observing the Pi session's streaming state and event sequence, not merely from the resolution of the abort call. The cancel result SHALL carry a `stopConfirmed` flag reflecting that determination. When stop cannot be confirmed, the cancel reply SHALL surface an interrupt-unconfirmed indication that reaches the API/user (not merely a runtime diagnostic), and MUST NOT portray a possibly-still-running turn as a clean/safely-stopped cancel.
 
 #### Scenario: Cancel confirms the turn stopped
 
 - **WHEN** Cancel is requested on a Pi session with an active turn and the Pi session's streaming state and event sequence confirm the turn stopped
-- **THEN** the Pi runtime SHALL report a confirmed cancel
+- **THEN** the Pi runtime SHALL report `stopConfirmed: true`
+- **AND** the cancel reply SHALL NOT carry an interrupt-unconfirmed indication
 
 #### Scenario: Cancel reports interrupt-unconfirmed when stop is unknown
 
 - **WHEN** Cancel is requested on a Pi session with an active turn and the stop cannot be confirmed from the Pi session's streaming state or event sequence
-- **THEN** the Pi runtime SHALL report the cancel as interrupt-unconfirmed
-- **AND** SHALL NOT report the turn as safely stopped
+- **THEN** the Pi runtime SHALL report `stopConfirmed: false`
+- **AND** the cancel reply SHALL surface an interrupt-unconfirmed indication (for example `interruptUnconfirmed: true`) that reaches the API/user
+- **AND** SHALL NOT report the turn as a clean/safely-stopped cancel
 
 ### Requirement: A missing Pi session fails explicitly with a Reset hint
 
