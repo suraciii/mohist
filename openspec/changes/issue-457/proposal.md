@@ -5,7 +5,7 @@ The issue detail page has accumulated a batch of small, independently verifiable
 ## What Changes
 
 - Replace the remaining Chinese strings on the issue detail page with English copy: the PR delivery indicator (`经由 PR #N 合并`) and the branch bar's upstream-unknown state (`未能检查上游`).
-- Replace literal palette utilities (amber/blue/red/green/gray tints) on the branch bar and workflow status/task progress presentation with semantic theme tokens so every listed block renders correctly in dark theme.
+- Replace literal light-theme-tinted palette utilities (amber/blue/red/green/gray/purple/slate tints) on the branch bar and the per-task execution/progress log chrome with semantic theme tokens so the listed stateful blocks render correctly in dark theme. The execution log's deliberate dark console surface is preserved; other on-page literal palette is out of scope (see Impact).
 - Replace the three native `<select>` filters in the sessions panel with the shared select component used elsewhere in the app.
 - Correct the Details card label that duplicates "Parent Issue" for the child-issues row so each row's label describes its content.
 - Stop truncating rail card headers so titles like "Configuration" render in full (or use a sensible abbreviation) at desktop rail width.
@@ -17,7 +17,7 @@ The issue detail page has accumulated a batch of small, independently verifiable
 ## Capabilities
 
 - `issue-detail-copy`: Single-language (English) and truthful copy on the issue detail page — no Chinese strings leak, and no copy asserts a state the data contradicts (e.g. "No usage yet" when usage exists).
-- `issue-detail-theme-tokens`: Stateful blocks (branch bar, workflow status and task progress presentation) use semantic theme tokens instead of literal palette utilities so they render correctly in dark theme.
+- `issue-detail-theme-tokens`: The branch bar and the per-task execution/progress log chrome use semantic theme tokens instead of literal light-theme-tinted palette utilities so the listed stateful blocks render correctly in dark theme; the execution log's deliberate dark console surface is preserved.
 - `issue-detail-shared-selects`: Every select control on the issue detail page uses the shared select component rather than native `<select>` elements.
 - `issue-detail-metadata-labels`: Details card row labels describe the data in their row; the parent reference and the child-issues rows are not both labeled "Parent Issue".
 - `issue-detail-rail-presentation`: Rail card headers render untruncated at desktop width, and the desktop reference rail stays in view while the page scrolls.
@@ -27,7 +27,8 @@ The issue detail page has accumulated a batch of small, independently verifiable
 ## Impact
 
 - **Web issue detail page** (`packages/web/src/pages/issue-detail`): the page-level loading/error branching (`IssueDetailPage.tsx`), the reference rail container stickiness, and the Details metadata labels (`cards/IssueDetailsCard.tsx`) change; the comment submit disabled affordance (`sections/IssueCommentsSection.tsx`) changes.
-- **Web workflow widgets** (`packages/web/src/widgets/issue-workflow`): `BranchBar.tsx` (copy + theme tokens), `PrDeliveryIndicator.tsx` (copy), `WorkflowSessionsPanel.tsx` (native selects → shared component, "No usage yet" copy), and the workflow status/task progress presentation blocks (theme tokens) change.
+- **Web workflow widgets** (`packages/web/src/widgets/issue-workflow`): `BranchBar.tsx` (copy + theme tokens), `PrDeliveryIndicator.tsx` (copy), `WorkflowSessionsPanel.tsx` (native selects → shared component, "No usage yet" copy), and `TaskLogPanel.tsx` execution-log chrome (theme tokens; the dark console interior is preserved) change.
+- **Theme-token scope reconciliation**: AC #2's "no literal palette utilities remain on the issue detail page; every listed block renders correctly in dark theme" is interpreted as scoping to the listed stateful blocks (branch bar + task execution/progress log). The stage-aware task list (`StageBar`/`StepList`/`TaskItem`) is already tokenized. The remaining on-page literal palette is intentionally out of scope: `WorkflowRunStatusPill` (not rendered on the page), `WorkflowSessionsPanel` status-icon colors and `PrDeliveryIndicator`/`ReviewSummary`/`ReviewReportModal`/`ArtifactContentViewer`/`ArtifactTextContent`/`CompositeParentOverview` containers and the composite-parent violet badge — these are either mid-saturation colors legible in dark theme or surfaces adjacent to the approval/artifact/composite concerns, and are tracked as follow-up rather than bundled here.
 - **Web shared rail card** (`packages/web/src/pages/issue-detail/ui/cards/CollapsibleRailCard.tsx`): header truncation behavior changes.
 - **Web shared primitives**: disabled affordance may touch the shared `Button` (`packages/web/src/shared/ui/components/button.tsx`) or per-button overrides; the shared `Select` (`packages/web/src/shared/ui/components/select.tsx`) is consumed, not changed. Loading skeletons may reuse or extend shared skeleton primitives.
 - **Scope boundaries**: no server, runner, CLI, API, persistence, or routing contract changes; no behavior redesign or section restructuring (those belong to sibling reading-flow and decision-surface issues). Risk is rated low — scattered localized fixes, no contracts touched.

@@ -24,22 +24,23 @@
     },
     {
       "id": "T-002",
-      "title": "Semantic theme tokens for branch bar and workflow status/task presentation",
-      "spec": "specs/issue-detail-theme-tokens/spec.md#stateful-blocks-use-semantic-theme-tokens",
-      "description": "Replace literal palette utilities (amber/blue/red/green/gray tints) in BranchBar.tsx and the workflow status/task progress presentation (WorkflowRunStatusPill.tsx, TaskLogPanel.tsx) with the existing semantic token families (success/warning/info/danger/muted plus -subtle/-border/-foreground) so every state renders correctly in dark theme. The RebaseAction enabledClassName/reasonClassName strings become token-based.",
+      "title": "Semantic theme tokens for branch bar and task execution/progress log chrome",
+      "spec": "specs/issue-detail-theme-tokens/spec.md#stateful-container-blocks-use-semantic-theme-tokens",
+      "description": "Replace literal light-theme-tinted palette utilities in BranchBar.tsx and the TaskLogPanel.tsx light-surface chrome (panel background/border, search control, source-filter chips, amber truncation badge) with the existing semantic token families (warning/info/danger/muted + -subtle/-border/-foreground) so the listed stateful blocks render correctly in dark theme. WorkflowRunStatusPill.tsx is NOT a target (not rendered on the page). The TaskLogPanel deliberate dark log-console interior is preserved unchanged.",
       "acceptanceCriteria": [
-        "No literal palette utilities (bg-/border-/text- on amber, blue, red, green, or gray numeric scales) remain in BranchBar.tsx, WorkflowRunStatusPill.tsx, or TaskLogPanel.tsx.",
+        "No literal light-theme-tinted palette utilities (bg-/border-/text- on amber, blue, red, green, gray, purple, or slate numeric scales) remain in BranchBar.tsx or in TaskLogPanel.tsx's light-surface chrome (panel, search control, source chips, amber truncation badge).",
         "BranchBar behind/rebase states use warning tokens, rebasing uses info tokens, upstream-unknown uses muted tokens, and error/conflict blocks use danger tokens.",
-        "WorkflowRunStatusPill maps running to info, blocked/waiting to warning, failed to danger, done to success, and idle to muted.",
-        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass with the class assertions in BranchBar.test.tsx and WorkflowRunStatusPill.test.tsx updated to the new token classes."
+        "The TaskLogPanel deliberate dark log-console surface (the dark terminal background and its light foreground line colors, e.g. text-slate-100/sky-300/violet-200/red-300) is preserved unchanged.",
+        "WorkflowRunStatusPill.tsx is not modified by this task (it is not rendered on the issue detail page); other on-page literal-palette blocks remain untouched (documented out of scope).",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass with BranchBar.test.tsx updated to the new token classes and a TaskLogPanel test asserting the dark console surface is preserved."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Tokenized BranchBar.tsx, WorkflowRunStatusPill.tsx, TaskLogPanel.tsx and updated tests",
+      "output": "Tokenized BranchBar.tsx and TaskLogPanel.tsx chrome (dark console preserved), WorkflowRunStatusPill.tsx unchanged, and updated tests",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Design D3. Depends on T-001 because both tasks edit BranchBar.tsx and BranchBar.test.tsx; sequencing avoids edit conflicts."
+      "notes": "Design D3 + scope reconciliation. Depends on T-001 because both tasks edit BranchBar.tsx and BranchBar.test.tsx; sequencing avoids edit conflicts. Do NOT tokenize the TaskLogPanel dark console interior or other on-page literal-palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview) — these are documented out of scope."
     },
     {
       "id": "T-003",
@@ -85,7 +86,7 @@
       "description": "Stop truncating rail card titles in CollapsibleRailCard.tsx (drop truncate on the title span, keep it on the collapsed summary) so 'Configuration' renders in full at desktop width, and make the desktop reference rail in IssueDetailPage.tsx stay visible while scrolling using lg:sticky/lg:top/lg:self-start with a capped max-height and internal overflow.",
       "acceptanceCriteria": [
         "CollapsibleRailCard title renders in full at desktop width ('Configuration' is not cut to 'CONF…'); collapsed summaries may still elide.",
-        "On a desktop viewport the reference rail (Details/Configuration/Actions) remains visible while a long page scrolls; narrow-viewport stacking/collapsing behavior is unchanged.",
+        "On a desktop viewport the reference rail (Details, Configuration, and the other rail cards) remains visible while a long page scrolls; narrow-viewport stacking/collapsing behavior is unchanged.",
         "npm run test:run -w packages/web passes with the reference-rail layout/contents tests updated for the untruncated header and sticky rail."
       ],
       "priority": 2,
