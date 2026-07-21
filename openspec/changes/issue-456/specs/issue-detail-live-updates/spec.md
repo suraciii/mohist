@@ -1,6 +1,6 @@
 ### Requirement: The issue detail page applies workflow transitions from the live event stream without a reload or wholesale re-render
 
-While the issue detail page is open, the page SHALL subscribe to the live event stream that the Activity view already consumes and SHALL apply workflow transitions — stage transitions, task starts, task completions, approval requests, and blocked states — incrementally as those events arrive. Each transition SHALL appear without navigating or reloading the page, and the page SHALL NOT perform a wholesale re-render of its content tree on each event; only the region affected by the transition SHALL update.
+While the issue detail page is open, the page SHALL subscribe to the live event stream that the Activity view already consumes and SHALL apply workflow transitions — stage transitions, task starts, task completions, approval requests, and blocked states — incrementally as those transitions occur. Each transition SHALL appear without navigating or reloading the page, and the page SHALL NOT perform a wholesale re-render of its content tree on each event; only the region affected by the transition SHALL update.
 
 #### Scenario: A task completion appears without reload or full re-render
 
