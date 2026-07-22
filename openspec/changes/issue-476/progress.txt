@@ -164,3 +164,20 @@
 - `npm test` passed all .NET solution tests (CLI 1360, server unit 1290,
   architecture 30, spec 3008), then failed in optional JS workspace checks
   because this workspace has no installed `tsx`/`tsc` binaries.
+
+## Verification repair
+
+- Reproduced the JS failure after dependencies became available: Web Vitest
+  failed 16 existing jsdom tests under default file parallelism, mostly with
+  30-second timeouts and shared-state `act` diagnostics. The same focused
+  files passed with one worker.
+- `packages/web/vite.config.ts` now disables file parallelism. This matches the
+  existing `isolate: false` configuration and shared process-level test fakes.
+- Re-ran Web and Runner workspace CI checks: Web 388 files / 5156 tests passed;
+  Runner 117 files / 1370 tests passed. Issue-476 CLI-focused selection passed
+  110 tests.
+- A later full `npm test` run reached the server spec suite but timed out in
+  `RunnerGrainConcurrencySpecs.ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate`.
+  The test passes alone in 420 ms. The shared host had unrelated long-running
+  server test processes from other workspaces, so this remaining timeout is
+  external to issue-476 and was not changed here.
