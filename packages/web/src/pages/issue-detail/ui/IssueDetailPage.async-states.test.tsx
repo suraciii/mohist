@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -98,6 +99,9 @@ describe('IssueDetailPage error state', () => {
     server.use(
       http.get('*/api/projects/:projectId/issues/:number', () => {
         issueFetchCount += 1
+        if (issueFetchCount > 1) {
+          return HttpResponse.json({ success: true, data: makeIssue() })
+        }
         return HttpResponse.json(
           { success: false, error: 'Transport failed', code: 'transport_error' },
           { status: 503 },
@@ -108,11 +112,11 @@ describe('IssueDetailPage error state', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('error-state')).toBeTruthy())
-    const initialFetchCount = issueFetchCount
 
-    fireEvent.click(screen.getByTestId('error-state-retry'))
+    await userEvent.setup().click(screen.getByTestId('error-state-retry'))
 
-    await waitFor(() => expect(issueFetchCount).toBeGreaterThan(initialFetchCount))
+    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeTruthy())
+    expect(issueFetchCount).toBe(2)
   })
 
   it('renders the not-found state and not the ErrorState when 404 is returned, distinguishing it from transient errors', async () => {

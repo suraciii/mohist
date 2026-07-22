@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import { cn } from '@/shared/lib/utils'
 
@@ -20,6 +20,11 @@ function getCodeText(node: unknown): string {
 
 export function CopyCodeButton({ text, className }: CopyCodeButtonProps) {
   const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current)
+  }, [])
 
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -27,7 +32,11 @@ export function CopyCodeButton({ text, className }: CopyCodeButtonProps) {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       void navigator.clipboard.writeText(text).then(() => {
         setCopied(true)
-        window.setTimeout(() => setCopied(false), 1500)
+        if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = window.setTimeout(() => {
+          resetTimerRef.current = null
+          setCopied(false)
+        }, 1500)
       })
     }
   }
