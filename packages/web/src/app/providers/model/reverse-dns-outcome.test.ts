@@ -102,7 +102,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-completed arm)', 
     })
     expect(outcome).toEqual({
       handled: true,
-      invalidations: [['issues']],
       rebaseConflict: null,
       rebaseEvent: { type: 'rebase_completed', issueNumber: 7, rebased: true },
     })
@@ -143,14 +142,13 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-completed arm)', 
 })
 
 describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-success arm)', () => {
-  it('returns handled=true with toast.success message and ["issues"] invalidation for IssueCompleted + merge payload', () => {
+  it('returns handled=true with toast.success message for IssueCompleted + merge payload', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
       issueNumber: 13,
       outcome: 'merge_completed',
     })
     expect(outcome).toEqual({
       handled: true,
-      invalidations: [['issues']],
       toast: { tone: 'success', message: 'Issue #13 merged successfully' },
     })
   })
@@ -179,7 +177,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-conflict arm)', (
     })
     expect(outcome).toEqual({
       handled: true,
-      invalidations: [['issues']],
       rebaseConflict: {
         issueNumber: 21,
         conflicts: ['src/a.ts', 'src/b.ts'],
@@ -205,7 +202,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-conflict arm)', (
     })
     expect(outcome).toMatchObject({
       handled: true,
-      invalidations: [['issues']],
       rebaseConflict: { issueNumber: 33, conflicts: [], status: 'failed' },
       rebaseEvent: { type: 'rebase_conflict', issueNumber: 33, conflicts: [], status: 'failed' },
       toast: { tone: 'error', message: 'Rebase conflict on Issue #33' },
@@ -248,7 +244,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-failure arm)', () 
     })
     expect(outcome).toEqual({
       handled: true,
-      invalidations: [['issues']],
       toast: { tone: 'error', message: 'Merge failed for Issue #99' },
     })
   })
@@ -284,11 +279,7 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-failure arm)', () 
 })
 
 describe('reverse-dns-outcome: decideReverseDnsOutcome (independence of sinks)', () => {
-  it('returns all four sink slots atomically — caller drives the application order; decider does not', () => {
-    // The decider returns the four sinks; the caller applies them in canonical
-    // order. Verifying they are all present on the rebase-conflict arm proves
-    // they are co-returned (so the caller can guarantee application order),
-    // not that they are co-applied.
+  it('returns all reverse-DNS side-effect slots atomically', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
       issueNumber: 21,
       outcome: 'rebase_conflict',
@@ -297,7 +288,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (independence of sinks)',
     })
     expect(outcome.handled).toBe(true)
     if (outcome.handled) {
-      expect(outcome.invalidations).toEqual([['issues']])
       expect(outcome.rebaseConflict).toBeDefined()
       expect(outcome.rebaseEvent).toBeDefined()
       expect(outcome.toast).toBeDefined()

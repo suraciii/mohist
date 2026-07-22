@@ -13,6 +13,7 @@ import {
 } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
 import { useMswServer } from '../../../../tests/support/msw'
+import { issueListKeys } from '../../../entities/issue/api/query-keys'
 let _projects: unknown[] = []
 let _agentStatus: AgentStatus
 let _agentStatusLoading = false
@@ -139,11 +140,11 @@ function renderPage() {
   }
   if (!_issuesLoading) {
     const issueParams = { projectId: 'p1' }
-    queryClient.setQueryDefaults(['issues', issueParams], { staleTime: Infinity })
-    queryClient.setQueryData(['issues', issueParams], _issuesData)
-    queryClient.setQueryDefaults(['archived-issues', issueParams], { staleTime: Infinity })
+    queryClient.setQueryDefaults(issueListKeys.list(issueParams), { staleTime: Infinity })
+    queryClient.setQueryData(issueListKeys.list(issueParams), _issuesData)
+    queryClient.setQueryDefaults(issueListKeys.archived('p1'), { staleTime: Infinity })
     queryClient.setQueryData(
-      ['archived-issues', issueParams],
+      issueListKeys.archived('p1'),
       _issuesData.filter((issue) => (issue as { archivedAt?: string | null }).archivedAt != null),
     )
   }

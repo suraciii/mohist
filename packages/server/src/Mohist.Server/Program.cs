@@ -65,6 +65,7 @@ await DatabaseInitializer.InitializeAsync(app.Services);
 // 同时拦截主端口上的 /otel/v1/ 路径，避免 SPA fallback 把它们误当成
 // 静态资源。详见 OtelPortIsolationMiddleware。
 app.UseOtelPortIsolation();
+app.UseResponseCompression();
 
 app.MapMohistApi();
 app.MapMohistWeb();
@@ -124,6 +125,7 @@ static async Task<WebApplication> BuildAlternateApp(string[] args)
     fresh.Services.AddMohistServerCore(fresh.Configuration);
     var alt = fresh.Build();
     await DatabaseInitializer.InitializeAsync(alt.Services);
+    alt.UseResponseCompression();
     alt.UseOtelPortIsolation();
     alt.MapMohistApi();
     alt.MapMohistWeb();

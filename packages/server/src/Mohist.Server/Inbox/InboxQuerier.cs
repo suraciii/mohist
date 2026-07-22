@@ -36,6 +36,19 @@ public sealed class InboxQuerier : IScopedService
         return ListCoreAsync(projectId, ct);
     }
 
+    public Task<int> CountUnreadAsync(string projectId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) throw new ArgumentException("projectId required", nameof(projectId));
+        return CountUnreadCoreAsync(projectId, ct);
+    }
+
+    private async Task<int> CountUnreadCoreAsync(string projectId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.InboxItems.AsNoTracking()
+            .CountAsync(r => r.ProjectId == projectId && r.ArchivedAt == null && r.ReadAt == null, ct);
+    }
+
     private async Task<IReadOnlyList<InboxItemView>> ListCoreAsync(string projectId, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

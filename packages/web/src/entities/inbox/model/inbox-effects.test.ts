@@ -70,7 +70,7 @@ describe('parseInboxItemPersistedHint', () => {
 })
 
 describe('applyInboxHint', () => {
-  it('invalidates the ["inbox", projectId] query key when the hint matches the current project', () => {
+  it('invalidates the list and count query keys when the hint matches the current project', () => {
     const queryClient = makeQueryClient()
 
     const result = applyInboxHint(makeHint({ projectId: 'proj-1' }), queryClient, {
@@ -78,8 +78,9 @@ describe('applyInboxHint', () => {
     })
 
     expect(result).toEqual({ applied: true, projectId: 'proj-1' })
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(1)
-    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2)
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('does NOT invalidate when the hint targets a different project', () => {
@@ -111,7 +112,8 @@ describe('applyInboxHint', () => {
       currentProjectId: 'proj-with-dashes',
     })
 
-    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-with-dashes'] })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-with-dashes'] })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-with-dashes'] })
   })
 
   it('does NOT mutate the cache or push synthetic items (invalidation only)', () => {
@@ -132,7 +134,7 @@ describe('applyInboxHint', () => {
 
     applyInboxHint(makeHint(), queryClientFull, { currentProjectId: 'proj-1' })
 
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(1)
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2)
     expect(setQueryDataSpy).not.toHaveBeenCalled()
     expect(setQueriesDataSpy).not.toHaveBeenCalled()
     expect(cancelQueriesSpy).not.toHaveBeenCalled()
@@ -146,9 +148,11 @@ describe('applyInboxHint', () => {
     applyInboxHint(makeHint({ itemId: 'inb-1' }), queryClient, { currentProjectId: 'proj-1' })
     applyInboxHint(makeHint({ itemId: 'inb-2' }), queryClient, { currentProjectId: 'proj-1' })
 
-    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2)
-    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(1, { queryKey: ['inbox', 'proj-1'] })
-    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(2, { queryKey: ['inbox', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(4)
+    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(1, { queryKey: ['inbox-list', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(2, { queryKey: ['inbox-count', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(3, { queryKey: ['inbox-list', 'proj-1'] })
+    expect(queryClient.invalidateQueries).toHaveBeenNthCalledWith(4, { queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('uses the injected invalidate callback when provided (test seam)', () => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Command as CommandRoot } from 'cmdk'
 import { useAvailableModelIds, useModelVariants, useOpencodeModel } from '../../../entities/settings'
-import { getIssueWorkflowVariables, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
+import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
 import { variantListFor } from '../../../shared/ui/model-variants'
@@ -197,8 +197,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(null)
         addRecent(modelId)
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
         setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to update issue model:', err)
@@ -215,8 +215,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(variant)
         addRecent(modelId)
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
         setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to update issue model with variant:', err)
@@ -232,8 +232,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null, variant: null }, projectId)
         setLocalWorkflowModel(null)
         setLocalWorkflowVariant(null)
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
         setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to clear issue model:', err)
@@ -254,8 +254,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           delete next[stage]
           return next
         })
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       } catch (err) {
         console.error('Failed to update stage model:', err)
       }
@@ -276,8 +276,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           delete next[stage]
           return next
         })
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       } catch (err) {
         console.error('Failed to clear stage model:', err)
       }
@@ -301,8 +301,8 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           else delete next[stage]
           return next
         })
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+        queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       } catch (err) {
         console.error('Failed to update stage model variant:', err)
       }

@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
@@ -62,6 +64,15 @@ public static class MohistServiceRegistration
         {
             options.ConstraintMap["notstaticfile"] = typeof(NotStaticFileConstraint);
         });
+
+        services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.Providers.Add<BrotliCompressionProvider>();
+            options.Providers.Add<GzipCompressionProvider>();
+        });
+        services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Optimal);
+        services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
 
         // IAgentLauncher is an interface on top of the concrete
         // AgentLauncher (registered by conventional services via

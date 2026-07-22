@@ -80,8 +80,14 @@ describe('canonical event types', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCompleted)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueDraftChanged)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueWorkflowProfileChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueParentChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueRepositoryChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCompositeStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCompositeStatusChanged)
   })
 
   it('does NOT contain the legacy IssueClosed or IssueWorkCompleted ids or constants', () => {
@@ -158,8 +164,14 @@ describe('canonical event types', () => {
       REVERSE_DNS_EVENT_TYPES.IssueCompleted,
       REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged,
       REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged,
+      REVERSE_DNS_EVENT_TYPES.IssueDraftChanged,
       REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded,
       REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved,
+      REVERSE_DNS_EVENT_TYPES.IssueWorkflowProfileChanged,
+      REVERSE_DNS_EVENT_TYPES.IssueParentChanged,
+      REVERSE_DNS_EVENT_TYPES.IssueRepositoryChanged,
+      REVERSE_DNS_EVENT_TYPES.IssueCompositeStarted,
+      REVERSE_DNS_EVENT_TYPES.IssueCompositeStatusChanged,
       REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
       REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
       REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,

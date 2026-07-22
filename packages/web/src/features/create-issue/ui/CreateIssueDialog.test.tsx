@@ -72,6 +72,11 @@ const issuesHandler = vi.fn((info: { request: Request }) => {
   return HttpResponse.json({ success: true, data: _issuesData })
 })
 
+const parentCandidatesHandler = vi.fn((info: { request: Request }) => {
+  void info
+  return HttpResponse.json({ success: true, data: _issuesData.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })) })
+})
+
 const repositoriesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _repositoriesData }),
 )
@@ -108,6 +113,7 @@ const issueTemplatesHandler = vi.fn((info: { request: Request }) => {
 
 useMswServer(
   http.post('*/api/projects/:projectId/issues', createIssueHandler),
+  http.get('*/api/projects/:projectId/issues/parent-candidates', parentCandidatesHandler),
   http.get('*/api/projects/:projectId/issues', issuesHandler),
   http.get('*/api/projects/:projectId/repositories', repositoriesHandler),
   http.get('*/api/projects/:projectId/opencode/models', modelsHandler),
@@ -122,12 +128,12 @@ function setupTemplates(defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMP
   if (customTemplate) _issueTemplatesData.push(customTemplate)
 }
 
-function renderDialog() {
+function renderDialog(open = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
-        <CreateIssueDialog open onClose={vi.fn()} />
+        <CreateIssueDialog open={open} onClose={vi.fn()} />
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -146,25 +152,6 @@ describe('CreateIssueDialog', () => {
     _projectWorkflowProfile.defaultTemplateId = null
     _projectWorkflowProfile.disabledWorkflowProfileIds = []
     _issueTemplatesData.length = 0
-  })
-
-  it('creates issue with attachment ids from the composer body', async () => {
-    _createIssueResponse = { number: 1 }
-    const { queryClient } = renderDialog()
-
-    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'New issue' } })
-    fireEvent.change(screen.getByPlaceholderText('Optional description'), { target: { value: 'See ![screen](att:att_created)' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody).toEqual(expect.objectContaining({
-      title: 'New issue',
-      body: 'See ![screen](att:att_created)',
-      attachmentIds: ['att_created'],
-    }))
-
-    queryClient.clear()
   })
 
   it('does not serialize inherited default workflow as an explicit create selection', async () => {

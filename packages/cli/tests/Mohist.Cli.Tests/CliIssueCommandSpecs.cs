@@ -87,6 +87,38 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueList_Json_AcceptsSummaryFieldsWithoutDetailBody()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new
+                    {
+                        number = 7,
+                        title = "Summary issue",
+                        status = "in_progress",
+                        workflowStage = "build",
+                        approvalState = new { status = "awaiting" },
+                        workflowStageProgress = new { stage = "build", total = 1, completed = 0, running = 1, failed = 0 },
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "list", "--output", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var stdout = output.ToString();
+        Assert.Contains("\"approvalState\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"workflowStageProgress\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"body\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task IssueShow_Table_RendersStoredRepositoryWithoutMetadata()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

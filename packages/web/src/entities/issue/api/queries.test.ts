@@ -22,11 +22,11 @@ function recordIssueEventsRequests() {
 useMswServer()
 
 describe('issueEventsQueryOptions', () => {
-  it('uses the non-[issues] query key ["issue-events", number, projectId]', () => {
+  it('uses the issue-workflow namespace for issue events', () => {
     const options = issueEventsQueryOptions('proj-1', 42)
 
-    expect(options.queryKey).toEqual(['issue-events', 42, 'proj-1'])
-    expect(options.queryKey[0]).toBe('issue-events')
+    expect(options.queryKey).toEqual(['issue-workflow', 'proj-1', 42, 'events'])
+    expect(options.queryKey[0]).toBe('issue-workflow')
     expect(options.queryKey).not.toContain('issues')
   })
 
@@ -35,7 +35,7 @@ describe('issueEventsQueryOptions', () => {
 
     expect(options.queryKey[0]).not.toBe('issues')
     expect(options.queryKey).not.toEqual(expect.arrayContaining(['issues', 42, 'proj-1', 'events']))
-    expect(options.queryKey[0]).toBe('issue-events')
+    expect(options.queryKey[0]).toBe('issue-workflow')
   })
 
   it('fetches the issue events endpoint for (number, projectId)', async () => {
@@ -67,8 +67,8 @@ describe('issueEventsQueryOptions', () => {
     const first = issueEventsQueryOptions('proj-1', 42)
     const second = issueEventsQueryOptions('proj-1', 43)
 
-    expect(first.queryKey).toEqual(['issue-events', 42, 'proj-1'])
-    expect(second.queryKey).toEqual(['issue-events', 43, 'proj-1'])
+    expect(first.queryKey).toEqual(['issue-workflow', 'proj-1', 42, 'events'])
+    expect(second.queryKey).toEqual(['issue-workflow', 'proj-1', 43, 'events'])
   })
 })
 
@@ -76,7 +76,7 @@ describe('workspaceStatusQueryOptions', () => {
   it('is enabled by default when issue number and project id are set', () => {
     const options = workspaceStatusQueryOptions('proj-1', 161)
 
-    expect(options.queryKey).toEqual(['issues', 161, 'proj-1', 'workspace-status'])
+    expect(options.queryKey).toEqual(['issue-workflow', 'proj-1', 161, 'workspace'])
     expect(options.enabled).toBe(true)
   })
 
@@ -99,7 +99,7 @@ describe('issueWorkflowTaskLogQueryOptions', () => {
     const first = issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', { limit: 5000 }, true, 'wr-1')
     const second = issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', { limit: 5000 }, true, 'wr-2')
 
-    expect(first.queryKey).toEqual([161, 'build.1', 'proj-1', 'wr-1', 'workflow-task-log', { limit: 5000 }])
-    expect(second.queryKey).toEqual([161, 'build.1', 'proj-1', 'wr-2', 'workflow-task-log', { limit: 5000 }])
+    expect(first.queryKey).toEqual(['issue-workflow', 'proj-1', 161, 'task-log', 'build.1', 'wr-1', { limit: 5000 }])
+    expect(second.queryKey).toEqual(['issue-workflow', 'proj-1', 161, 'task-log', 'build.1', 'wr-2', { limit: 5000 }])
   })
 })

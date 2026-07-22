@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { inboxQueryKey } from '../api/queries'
+import { inboxCountQueryKey, inboxListQueryKey } from '../api/queries'
 
 /**
  * Identity-only payload of the `com.mohist.inbox.item-persisted` realtime hint.
@@ -92,7 +92,8 @@ export function applyInboxHint(
   if (options.invalidate) {
     options.invalidate(target)
   } else {
-    queryClient.invalidateQueries({ queryKey: inboxQueryKey(target) })
+    queryClient.invalidateQueries({ queryKey: inboxListQueryKey(target) })
+    queryClient.invalidateQueries({ queryKey: inboxCountQueryKey(target) })
   }
   return { applied: true, projectId: target }
 }

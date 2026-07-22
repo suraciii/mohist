@@ -56,28 +56,46 @@ public class IssueReadModelLoader : IScopedService
         string projectId,
         ProjectInfo? project = null)
     {
-        var rows = await db.Issues
-            .AsNoTracking()
-            .Where(row => row.ProjectId == projectId)
-            .ToListAsync();
-
-        if (rows.Count == 0)
-        {
-            return new List<IssueReadModel>();
-        }
-
-        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
-        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
-
-        var list = IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(BuildInfo(issue, project, _effectiveProfileResolver.Resolve(
-                issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds))))
-            .ToList();
+        var list = await LoadBaseProjectedAsync(db, projectId, project);
+        if (list.Count == 0) return list;
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
         ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
 
         return list;
+    }
+
+    public async Task<List<IssueReadModel>> LoadListProjectedAsync(
+        MohistDbContext db,
+        string projectId,
+        ProjectInfo? project = null)
+    {
+        var list = await LoadBaseProjectedAsync(db, projectId, project);
+        if (list.Count == 0) return list;
+
+        ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        return list;
+    }
+
+    private async Task<List<IssueReadModel>> LoadBaseProjectedAsync(
+        MohistDbContext db,
+        string projectId,
+        ProjectInfo? project)
+    {
+        var rows = await db.Issues
+            .AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+
+        if (rows.Count == 0) return [];
+
+        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+
+        return IssueRowMapper.ByNumber(rows, projectId)
+            .Select(issue => ToReadModel(BuildInfo(issue, project, _effectiveProfileResolver.Resolve(
+                issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds))))
+            .ToList();
     }
 
     /// <summary>

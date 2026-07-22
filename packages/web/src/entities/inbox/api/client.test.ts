@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { archiveInboxItem, getInbox, getInboxSubscription, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
+import { archiveInboxItem, getInbox, getInboxSubscription, getUnreadInboxCount, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
 
 useMswServer()
 
@@ -52,6 +52,25 @@ describe('getInbox', () => {
     const items = await getInbox('proj-1')
 
     expect(items).toEqual(payload)
+  })
+})
+
+describe('getUnreadInboxCount', () => {
+  it('requests only the project-scoped unread count and forwards AbortSignal', async () => {
+    const controller = new AbortController()
+    let observedRequest: Request | undefined
+    server.use(
+      http.get('*/api/projects/:projectId/inbox/unread-count', ({ request }) => {
+        observedRequest = request
+        return successResponse({ unreadCount: 3 })
+      }),
+    )
+
+    await expect(getUnreadInboxCount('proj-1', controller.signal)).resolves.toEqual({ unreadCount: 3 })
+    expect(requestPath(observedRequest!)).toBe('/api/projects/proj-1/inbox/unread-count')
+    expect(observedRequest!.signal.aborted).toBe(false)
+    controller.abort()
+    expect(observedRequest!.signal.aborted).toBe(true)
   })
 })
 

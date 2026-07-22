@@ -5,6 +5,7 @@ import {
   type IssueDetailMutationDependencies,
   type UseIssueDetailMutationsOptions,
 } from './useIssueDetailMutations'
+import { issueDetailKeys, issueListKeys } from '../../../entities/issue/api/query-keys'
 
 interface MutationConfig {
   mutationFn: (...args: unknown[]) => unknown
@@ -36,6 +37,9 @@ const apiMocks = {
 }
 
 let mutationConfigs: ReturnType<typeof createIssueDetailMutationOptions>
+
+const listInvalidation = { queryKey: issueListKeys.project('proj-x') }
+const detailInvalidation = { queryKey: issueDetailKeys.detail('proj-x', 7), exact: true }
 
 const queryClient = {
   invalidateQueries: invalidateQueriesMock,
@@ -103,13 +107,13 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     start.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
 
     invalidateQueriesMock.mockClear()
     const waitingErr = new Error('Issue is waiting for #99')
     start.onError?.(waitingErr)
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
 
     invalidateQueriesMock.mockClear()
     start.onError?.(new Error('other failure'))
@@ -124,8 +128,8 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     markReady.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
   it('approve / send-back: call approval APIs and invalidate runtime plus approval wait queries', () => {
@@ -136,8 +140,8 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     approve.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
@@ -154,8 +158,8 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     sendBack.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
@@ -169,8 +173,8 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     add.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
   it('removePrerequisite: passes the prerequisite number and invalidates ["issues"] + ["issues", issueNumber] on success', () => {
@@ -181,11 +185,11 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     remove.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
-  it('close: invalidates ["issues"] only on success', () => {
+  it('close: invalidates the scoped list and detail only on success', () => {
     arrange({ issueNumber: 7, projectId: 'proj-x' })
     const close = findMutationByApiCall(apiMocks.closeIssue)
 
@@ -193,8 +197,9 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     close.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledTimes(1)
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledTimes(2)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
   it('done: calls the manual completion API and invalidates list plus detail', () => {
@@ -205,11 +210,11 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     done.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
-  it('reopen: invalidates ["issues"] only on success', () => {
+  it('reopen: invalidates the scoped list and detail only on success', () => {
     arrange({ issueNumber: 7, projectId: 'proj-x' })
     const reopen = findMutationByApiCall(apiMocks.reopenIssue)
 
@@ -217,8 +222,9 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     reopen.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledTimes(1)
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledTimes(2)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
   })
 
   it('resume / retry / rerun: each invalidate ["issues"] + ["agent-status"] on success', () => {
@@ -230,7 +236,7 @@ describe('useIssueDetailMutations', () => {
       const m = findMutationByApiCall(apiFn)
       expect(apiFn).toHaveBeenCalledWith(7, 'proj-x')
       m.onSuccess?.()
-      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+      expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
       expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     }
   })
@@ -248,7 +254,7 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     forceStop.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(onForceStopSuccess).toHaveBeenCalledTimes(1)
   })
@@ -258,7 +264,7 @@ describe('useIssueDetailMutations', () => {
     const forceStop = findMutationByApiCall(apiMocks.forceStopIssue)
     invalidateQueriesMock.mockClear()
     expect(() => forceStop.onSuccess?.()).not.toThrow()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
   })
 
@@ -275,7 +281,7 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     stop.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(listInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(onStopSuccess).toHaveBeenCalledTimes(1)
   })
@@ -294,7 +300,7 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     addComment.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledTimes(1)
     expect(onAddCommentSuccess).toHaveBeenCalledTimes(1)
   })
@@ -312,7 +318,7 @@ describe('useIssueDetailMutations', () => {
 
     invalidateQueriesMock.mockClear()
     deleteComment.onSuccess?.()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith(detailInvalidation)
     expect(invalidateQueriesMock).toHaveBeenCalledTimes(1)
     expect(onDeleteCommentSuccess).toHaveBeenCalledTimes(1)
   })

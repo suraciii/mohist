@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { ArchiveIcon, AlertTriangleIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
+import { issueListKeys, IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
 import { archiveIssue, rerunIssue } from '../../../entities/issue'
 import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
@@ -323,7 +323,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const rerunMutation = useMutation({
     mutationFn: () => rerunIssue(issue.number, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   })
@@ -331,8 +331,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const archiveMutation = useMutation({
     mutationFn: () => archiveIssue(issue.number, projectId),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.archived(projectId) })
       if (data.warning) {
         toast.warning(data.warning)
       } else {

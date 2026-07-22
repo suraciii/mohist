@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
-import { IssueStatus, IssueHealth, WorkflowStage, startIssue } from '../../../entities/issue'
+import { issueDetailKeys, issueListKeys, IssueStatus, IssueHealth, WorkflowStage, startIssue } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
@@ -168,7 +168,8 @@ export function SpecialStatePanel({
   const startMutation = useMutation({
     mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   })

@@ -10,7 +10,17 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { createIssue, extractAttachmentIds, IssuePrerequisitePicker, LabelEditor, partitionIssueBody, useIssues } from '../../../entities/issue'
+import {
+  createIssue,
+  extractAttachmentIds,
+  IssuePrerequisitePicker,
+  issueCandidateKeys,
+  issueDetailKeys,
+  issueListKeys,
+  LabelEditor,
+  partitionIssueBody,
+  useParentIssueCandidates,
+} from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
@@ -18,7 +28,6 @@ import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-tem
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import {
-  deriveEligibleParentCandidates,
   mapCreateIssueError,
   pickInitialRepositoryName,
 } from '../lib/assignment'
@@ -121,7 +130,12 @@ function TemplateSelector({
   )
 }
 
-export function CreateIssueDialog({ open, onClose }: Props) {
+export function CreateIssueDialog(props: Props) {
+  if (!props.open) return null
+  return <CreateIssueDialogContent {...props} />
+}
+
+function CreateIssueDialogContent({ open, onClose }: Props) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [labels, setLabels] = useState<LabelMap>({})
@@ -170,12 +184,9 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
   }, [projectId, repositories])
 
-  const parentIssuesQuery = useIssues(projectId ? { projectId } : undefined)
-  const parentIssuesLoaded = parentIssuesQuery.data !== undefined
-  const eligibleParentCandidates = useMemo(
-    () => deriveEligibleParentCandidates(parentIssuesQuery.data ?? []),
-    [parentIssuesQuery.data],
-  )
+  const parentCandidatesQuery = useParentIssueCandidates()
+  const parentIssuesLoaded = parentCandidatesQuery.data !== undefined
+  const eligibleParentCandidates = parentCandidatesQuery.data ?? []
   useEffect(() => {
     if (parentIssueNumber === null) return
     if (!parentIssuesLoaded) return
@@ -233,10 +244,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     onSuccess: (data: Issue) => {
       toast.success(`Issue #${data.number} created`)
       if (parentIssueNumber != null) {
-        queryClient.invalidateQueries({ queryKey: ['issues', parentIssueNumber, projectId] })
-        queryClient.invalidateQueries({ queryKey: ['issues', parentIssueNumber, projectId, 'children'] })
+        queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, parentIssueNumber), exact: true })
       }
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueCandidateKeys.project(projectId), exact: true })
       resetAndClose()
     },
     onError: (err: Error) => {
@@ -463,10 +474,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
               value={parentIssueNumber != null ? String(parentIssueNumber) : ''}
               onChange={(e) => setParentIssueNumber(e.target.value === '' ? null : Number(e.target.value))}
               className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
-              disabled={parentIssuesQuery.isLoading}
+              disabled={parentCandidatesQuery.isLoading}
             >
               <option value="">
-                {parentIssuesQuery.isLoading ? 'Loading issues…' : 'No parent (ordinary issue)'}
+                {parentCandidatesQuery.isLoading ? 'Loading issues…' : 'No parent (ordinary issue)'}
               </option>
               {eligibleParentCandidates.map((issue) => (
                 <option key={issue.number} value={issue.number}>

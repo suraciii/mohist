@@ -2,15 +2,6 @@ import type { RebaseConflictState } from '../../../entities/issue'
 import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 import { readIssueNumber } from './timeline-live-event'
 
-/**
- * Invalidation key the caller will hand to `queryClient.invalidateQueries`.
- * Decoupled from TanStack types so this module stays a pure function of
- * `(eventName, parsed)` with no runtime dependency on `@tanstack/react-query`.
- *
- * Shape: tuple of string segments (e.g. `['issues']`, `['issues', 'detail', id]`).
- */
-export type ReverseDnsInvalidationKey = readonly string[]
-
 export type ReverseDnsToastTone = 'success' | 'error'
 
 export interface ReverseDnsToast {
@@ -30,24 +21,14 @@ export type ReverseDnsRebaseEvent =
 /**
  * Declarative outcome of routing a reverse-DNS integration event.
  *
- * - `handled: false` — the event is not a reverse-DNS integration outcome
- *   (no rebase dispatch, no toast, no state change). The caller falls
- *   through to its switch-arm default invalidations.
- * - `handled: true` — the decider matched one of the four outcome arms;
- *   the caller applies exactly the sinks returned.
- *
- * The four sinks are mutually independent — none awaits another, and none
- * reads a value produced by another in the same call — so the caller
- * applies them in one canonical order (invalidate -> setRebaseConflict
- * [null clears] -> dispatchRebaseEvent -> toast). The legacy per-arm order
- * was not uniform across arms (rebase arms invalidated last; merge arms
- * invalidated first) and is not reproduced per-arm.
+ * - `handled: false` means the event carries no reverse-DNS outcome.
+ * - `handled: true` means the decider matched one of the outcome arms and
+ *   the caller applies the returned rebase/toast side effects.
  */
 export type ReverseDnsOutcome =
   | { handled: false }
   | {
     handled: true
-    invalidations: ReverseDnsInvalidationKey[]
     rebaseConflict?: RebaseConflictState | null
     rebaseEvent?: ReverseDnsRebaseEvent
     toast?: ReverseDnsToast
@@ -86,7 +67,6 @@ export function decideReverseDnsOutcome(
       const rebased = typeof parsed.rebased === 'boolean' ? parsed.rebased : true
       return {
         handled: true,
-        invalidations: [['issues']],
         rebaseConflict: null,
         rebaseEvent: { type: 'rebase_completed', issueNumber, rebased },
       }
@@ -94,7 +74,6 @@ export function decideReverseDnsOutcome(
     if (isMergePayload(parsed)) {
       return {
         handled: true,
-        invalidations: [['issues']],
         toast: { tone: 'success', message: `Issue #${issueNumber} merged successfully` },
       }
     }
@@ -110,7 +89,6 @@ export function decideReverseDnsOutcome(
     const state: RebaseConflictState = { issueNumber, conflicts, status: 'failed', error }
     return {
       handled: true,
-      invalidations: [['issues']],
       rebaseConflict: state,
       rebaseEvent: { type: 'rebase_conflict', issueNumber, conflicts, status: 'failed', error },
       toast: { tone: 'error', message: `Rebase conflict on Issue #${issueNumber}` },
@@ -119,10 +97,8 @@ export function decideReverseDnsOutcome(
   if (isMergePayload(parsed)) {
     return {
       handled: true,
-      invalidations: [['issues']],
       toast: { tone: 'error', message: `Merge failed for Issue #${issueNumber}` },
     }
   }
   return { handled: false }
 }
-

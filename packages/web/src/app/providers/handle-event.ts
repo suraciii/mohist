@@ -5,6 +5,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import {
   dispatchRebaseEvent,
   invalidateApprovalWait,
+  invalidateIssueEvent,
   type EventName,
   type RebaseConflictState,
 } from '../../entities/issue'
@@ -73,18 +74,9 @@ export const AGENT_ACTIVITY_EVENT_NAMES: ReadonlySet<string> = new Set<string>([
 ])
 
 /**
- * Apply the declarative result of `decideReverseDnsOutcome` to its four
- * real-world sinks. The four sinks are mutually independent (none awaits
- * another, none reads another's result in-call), so a single canonical
- * order preserves observable behavior across every arm — the legacy
- * per-arm order was not uniform (rebase arms invalidated last, merge
- * arms first) and is intentionally not reproduced per-arm.
- *
- * Canonical order:
- *   1. invalidations   (`queryClient.invalidateQueries` for each key)
- *   2. setRebaseConflict (null clears; undefined leaves the state unchanged)
- *   3. dispatchRebaseEvent
- *   4. toast
+ * Apply the declarative reverse-DNS side effects. Query invalidation is kept
+ * in the event-to-resource mapping so an outcome cannot reintroduce a broad
+ * collection invalidation.
  *
  * Returns `true` when the outcome was handled (caller should skip its
  * default invalidations); `false` when the event is not a reverse-DNS
@@ -92,13 +84,9 @@ export const AGENT_ACTIVITY_EVENT_NAMES: ReadonlySet<string> = new Set<string>([
  */
 function applyReverseDnsOutcome(
   outcome: ReturnType<typeof decideReverseDnsOutcome>,
-  queryClient: QueryClientLike,
   setRebaseConflict: SetRebaseConflict,
 ): boolean {
   if (!outcome.handled) return false
-  for (const queryKey of outcome.invalidations) {
-    queryClient.invalidateQueries({ queryKey: queryKey as unknown[] })
-  }
   if (outcome.rebaseConflict !== undefined) {
     setRebaseConflict(outcome.rebaseConflict)
   }
@@ -123,43 +111,23 @@ function applyReverseDnsOutcome(
  * legacy `switch`).
  */
 function stageHandler(ctx: HandlerContext): void {
-  if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
-    return
-  }
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
+  applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.setRebaseConflict)
 }
 
-function workflowTaskHandler(ctx: HandlerContext): void {
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
-}
+function workflowTaskHandler(_ctx: HandlerContext): void {}
 
 function issueHandler(ctx: HandlerContext): void {
-  if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
-    return
-  }
-  const { issueNumber } = ctx.parsed as { issueNumber?: number }
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
-  if (typeof issueNumber === 'number') {
-    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
-  }
+  applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.setRebaseConflict)
 }
 
 function issueEpicChangedHandler(ctx: HandlerContext): void {
-  const { issueNumber } = ctx.parsed as { issueNumber?: number }
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
-  if (typeof issueNumber === 'number') {
-    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
-  }
-  ctx.queryClient.invalidateQueries({ queryKey: ['epics'] })
+  applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.setRebaseConflict)
 }
 
 function workflowRunHandler(ctx: HandlerContext): void {
-  if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
-    return
-  }
+  if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.setRebaseConflict)) return
   ctx.queryClient.invalidateQueries({ queryKey: ['agent-status'] })
   ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound) {
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-session'] })
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
@@ -187,13 +155,11 @@ function agentSessionHandler(ctx: HandlerContext): void {
 function approvalHandler(ctx: HandlerContext): void {
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.StageApprovalRequested) {
     const evt = ctx.parsed as { issueNumber?: number }
-    ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
     notifyApprovalRequestedToast(ctx.viewedIssue, evt)
     return
   }
   // StageApprovalResolved
-  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
   ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
   invalidateApprovalWait(ctx.queryClient as QueryClient)
 }
@@ -255,8 +221,14 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
   [REVERSE_DNS_EVENT_TYPES.IssueCompleted]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueDraftChanged]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueWorkflowProfileChanged]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueParentChanged]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueRepositoryChanged]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueCompositeStarted]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueCompositeStatusChanged]: issueHandler,
 
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted]: workflowRunHandler,
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed]: workflowRunHandler,
@@ -329,6 +301,7 @@ export function routeEvent(
   parsed: Record<string, unknown>,
   ctx: Omit<HandlerContext, 'eventName' | 'parsed'>,
 ): void {
+  invalidateIssueEvent(ctx.queryClient, eventName, parsed, ctx.projectId)
   if (AGENT_ACTIVITY_EVENT_NAMES.has(eventName)) {
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
   }

@@ -66,6 +66,8 @@ public sealed class InboxItemView
     public bool IsArchived => ArchivedAt.HasValue;
 }
 
+public sealed record InboxUnreadCount(int UnreadCount);
+
 /// <summary>
 /// Project-scoped inbox subscription preference state. Returned by
 /// <see cref="InboxSubscriptionStore.GetAsync"/> — when no row exists,

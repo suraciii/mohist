@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { IssueStatus, type Issue, type IssueHealth } from '../model/types'
 import { deriveCompletionSnapshot, useCompletionSnapshot } from './completion-snapshot'
+import { issueListKeys } from '../api/query-keys'
 
 type StatusLiteral = 'backlog' | 'in_progress' | 'done' | 'cancelled'
 
@@ -25,7 +26,7 @@ function makeIssue(overrides: { status: StatusLiteral; createdAt: string; update
 
 const NOW = new Date('2026-06-19T12:00:00.000Z').getTime()
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const issuesQueryKey = ['issues', undefined] as const
+const issuesQueryKey = issueListKeys.list()
 
 function renderSnapshot(issues?: Issue[]) {
   const queryClient = new QueryClient({

@@ -8,6 +8,7 @@ import type { Project } from '../../../entities/project'
 import type { Issue } from '../../../entities/issue'
 import { IssueDetailPage } from './IssueDetailPage'
 import { getCurrentIssueFixture, mockIssue, mountIssueDetail } from './_issueDetailMsw'
+import { issueDetailKeys } from '../../../entities/issue/api/query-keys'
 
 const updateIssue = vi.fn(async () => makeIssue({ isDraft: false }) as Issue)
 
@@ -52,8 +53,8 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const issue = getCurrentIssueFixture()
   if (issue) {
-    queryClient.setQueryDefaults(['issues', 201, 'proj-1'], { staleTime: Infinity })
-    queryClient.setQueryData(['issues', 201, 'proj-1'], issue)
+    queryClient.setQueryDefaults(issueDetailKeys.detail('proj-1', 201), { staleTime: Infinity })
+    queryClient.setQueryData(issueDetailKeys.detail('proj-1', 201), issue)
   }
   return render(
     <QueryClientProvider client={queryClient}>

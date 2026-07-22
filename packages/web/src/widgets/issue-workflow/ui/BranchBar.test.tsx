@@ -7,6 +7,7 @@ import { useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { LiveTaskContext, WorkflowStage } from '../../../entities/issue'
 import type { RebaseConflictState } from '../../../entities/issue'
+import { issueWorkflowKeys } from '../../../entities/issue/api/query-keys'
 import { BranchBar } from './BranchBar'
 
 let rebaseRequests: string[] = []
@@ -40,7 +41,7 @@ function renderBranch(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  const queryKey = ['issues', issueNumber, project.id, 'workspace-status']
+  const queryKey = issueWorkflowKeys.workspace(project.id, issueNumber)
   queryClient.setQueryDefaults(queryKey, { staleTime: Number.POSITIVE_INFINITY })
   if (workspaceStatus !== 'loading') {
     queryClient.setQueryData(queryKey, workspaceStatus)

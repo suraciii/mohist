@@ -9,6 +9,7 @@ import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { useMswServer } from '../../../../tests/support/msw'
 import { AppSidebar } from './AppSidebar'
 import type { InboxItem } from '../../../entities/inbox'
+import { inboxCountQueryKey } from '../../../entities/inbox'
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -29,6 +30,9 @@ useMswServer(
   ),
   http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () =>
     HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox/unread-count`, () =>
+    HttpResponse.json({ success: true, data: { unreadCount: 0 } }),
   ),
 )
 
@@ -243,7 +247,9 @@ describe('AppSidebar primary navigation', () => {
 describe('AppSidebar unread inbox count badge', () => {
   function renderSidebarWithCache(initialRoute: string, inboxData: InboxItem[]) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    queryClient.setQueryData(['inbox', TEST_PROJECT.id], inboxData)
+    queryClient.setQueryData(inboxCountQueryKey(TEST_PROJECT.id), {
+      unreadCount: inboxData.filter((item) => !item.isRead).length,
+    })
     return render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
@@ -301,7 +307,7 @@ describe('AppSidebar unread inbox count badge', () => {
 
   it('updates the badge count when unread items change (live update)', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    queryClient.setQueryData(['inbox', TEST_PROJECT.id], [readItem, unreadItem])
+    queryClient.setQueryData(inboxCountQueryKey(TEST_PROJECT.id), { unreadCount: 1 })
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
@@ -316,10 +322,7 @@ describe('AppSidebar unread inbox count badge', () => {
 
     expect(screen.getByTestId('nav-inbox-badge')).toHaveTextContent('1')
 
-    queryClient.setQueryData(['inbox', TEST_PROJECT.id], [
-      { ...unreadItem, isRead: true, readAt: '2024-01-03T00:00:00.000Z' },
-      readItem,
-    ])
+    queryClient.setQueryData(inboxCountQueryKey(TEST_PROJECT.id), { unreadCount: 0 })
 
     rerender(
       <QueryClientProvider client={queryClient}>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../../shared/api/client'
-import { cleanupIssueWorkspace, onRebaseEvent, rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
+import { cleanupIssueWorkspace, issueDetailKeys, issueListKeys, issueWorkflowKeys, onRebaseEvent, rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 
@@ -84,9 +84,9 @@ export function WorkspacePanel({
       } else {
         setRebaseResult({ type: 'info', message: 'Already up to date' })
       }
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.workspace(projectId, issueNumber), exact: true })
     },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.code === 'rebase_already_pending') {
@@ -111,9 +111,9 @@ export function WorkspacePanel({
         type: data.removed ? 'success' : 'info',
         message: data.message,
       })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.workspace(projectId, issueNumber), exact: true })
     },
     onError: (error: Error) => {
       setCleanupResult({ type: 'error', message: error.message })
