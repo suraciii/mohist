@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentJobExecutor, projectTurnToWorkItemResult } from "../src/runtime/agent-job-executor.js"
+import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { DispatchWorkItem } from "../src/core/types.js"
 import type {
@@ -73,6 +74,13 @@ function makeFakeRuntime(): FakeRuntimeHandles {
     setTurnEvents(events) {
       nextEvents = events
     },
+  }
+}
+
+function makeAccessors(runtime: OpenCodeRuntime | null = makeFakeRuntime().runtime): AgentJobRuntimeAccessors {
+  return {
+    openCode: runtime,
+    pi: null,
   }
 }
 
@@ -156,7 +164,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
   it("calls OpenCodeRuntime.runTurn with a flat Agent-owned request", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -182,7 +190,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
   it("returns the legacy {kind, status, runtimeSessionId, model, variant, text, error} envelope", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -220,7 +228,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
   it("never resolves a Workflow Action for an AgentJob dispatch", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     // Even if `with.uses` was stamped (it should never be in the
     // new server-side envelope), the executor does not consult an
@@ -240,7 +248,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
   it("rejects a non-agent-job dispatch with a clear failure", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ ownerKind: "workflow", agentJobId: null })
     const result = await executor.execute(work, new AbortController().signal)
@@ -251,7 +259,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
 
   it("requires the OpenCode runtime to be present", async () => {
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, null)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(null))
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
@@ -267,7 +275,7 @@ describe("AgentJobExecutor drives OpenCodeRuntime directly", () => {
         throw new Error("should not be called")
       },
     }
-    const executor = new AgentJobExecutor(connection.connection, runtime as OpenCodeRuntime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime as OpenCodeRuntime))
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("failed")
@@ -280,7 +288,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: null })
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     runtime.setTurnResult({
       ok: true,
@@ -316,7 +324,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
   it("forwards matching runtime events to the canonical AgentSession", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
     runtime.setTurnEvents([{
       type: "message.delta",
       runtimeSessionId: "ses_default",
@@ -346,7 +354,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
   it("does not let transcript event write failures adjudicate the AgentJob", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
     runtime.setTurnEvents([
       { type: "message.delta", runtimeSessionId: "ses_default", workDir: "/tmp/ws", payload: { text: "working" } },
     ])
@@ -369,7 +377,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
   it("writes runtime events in observation order", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
     let releaseFirst!: () => void
     let markFirstStarted!: () => void
     const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve })
@@ -399,7 +407,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
   it("does not report a binding when the dispatch carries no AgentSessionId", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ agentSessionId: null })
     const result = await executor.execute(work, new AbortController().signal)
@@ -412,7 +420,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const connection = {
       async getAgentSession() { throw new Error("session lookup offline") },
     } as unknown as ServerConnection
-    const executor = new AgentJobExecutor(connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
 
@@ -425,7 +433,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: "ses_existing" })
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ agentSessionId: "session-existing" })
     const result = await executor.execute(work, new AbortController().signal)
@@ -447,7 +455,7 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
         return { runtimeSessionId: null } as never
       },
     } as unknown as ServerConnection
-    const executor = new AgentJobExecutor(connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
@@ -469,7 +477,7 @@ describe("AgentJobExecutor materialises the launch-time snapshot", () => {
     // already wrote into the dispatch envelope.
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const launchTimeInstructions = "be brief; cite line numbers"
     const launchTimeModel = "openai/gpt-5.5"
@@ -494,7 +502,7 @@ describe("AgentJobExecutor materialises the launch-time snapshot", () => {
   it("does not mutate state across calls; each invocation reads a fresh dispatch snapshot", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     // First launch pins one snapshot
     await executor.execute(
@@ -517,7 +525,7 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
   it("rejects a dispatch without a prompt", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ with: { instructions: "no prompt" } })
     const result = await executor.execute(work, new AbortController().signal)
@@ -529,7 +537,7 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
   it("rejects a malformed model identifier", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ with: { prompt: "go", model: "not a model id" } })
     const result = await executor.execute(work, new AbortController().signal)
@@ -541,7 +549,7 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
   it("requires a workspace.path variable", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ variables: {} })
     const result = await executor.execute(work, new AbortController().signal)
@@ -549,13 +557,27 @@ describe("AgentJobExecutor parses the dispatch payload", () => {
     expect(result.message).toMatch(/workspace\.path/)
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
+
+  it("does not flag `runtime` as an unknown dispatch option key", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const work = buildAgentJobWork({
+      with: { prompt: "audit", runtime: "opencode" },
+    })
+    await executor.execute(work, new AbortController().signal)
+
+    expect(runtime.runTurnCalls).toHaveLength(1)
+    expect(runtime.runTurnCalls[0].options?.unknownKeys ?? []).toEqual([])
+  })
 })
 
 describe("AgentJobExecutor surfaces a missing-session turn as a Reset hint", () => {
   it("returns the legacy {kind, status, ..., hint: 'reset'} envelope on a missing session", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(connection.connection, runtime.runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     runtime.setTurnResult({
       ok: false,
@@ -579,7 +601,7 @@ describe("AgentJobExecutor surfaces a missing-session turn as a Reset hint", () 
   })
 })
 
-describe("AgentJob work-result projection", () => {
+describe("AgentJobExecutor work-result projection", () => {
   it("maps a successful RuntimeResult to a completed work result", () => {
     const result: RuntimeResult<RuntimeTurnResult> = {
       ok: true,
@@ -593,7 +615,7 @@ describe("AgentJob work-result projection", () => {
       },
       diagnostics: [],
     }
-    const workResult = projectTurnToWorkItemResult(result, "openai/gpt-5.5", "high")
+    const workResult = projectTurnToWorkItemResult(result, "opencode", "openai/gpt-5.5", "high")
     expect(workResult.status).toBe("completed")
     expect(workResult.exitCode).toBe(0)
     expect(workResult.error).toBeUndefined()
@@ -609,7 +631,7 @@ describe("AgentJob work-result projection", () => {
       error: { kind: "turn-failed", message: "boom", diagnostics: [] },
       diagnostics: [],
     }
-    const workResult = projectTurnToWorkItemResult(result, null, null)
+    const workResult = projectTurnToWorkItemResult(result, "opencode", null, null)
     expect(workResult.status).toBe("failed")
     expect(workResult.error).toEqual({ code: "turn-failed", message: "boom" })
     expect(workResult.exitCode).toBe(1)

@@ -392,7 +392,10 @@ export class RunnerHost {
       undefined,
       undefined,
       this.openCodeRuntime,
-      new AgentJobExecutor(this.connection, this.openCodeRuntime),
+      new AgentJobExecutor(this.connection, {
+        openCode: () => this.openCodeRuntime,
+        pi: () => this.piRuntime,
+      }),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,

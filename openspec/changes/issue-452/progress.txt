@@ -110,3 +110,116 @@ Test results:
   authoritative value for everything downstream (open, attach, command
   routing). Do not hardcode "opencode" in any generic agent-session
   route.
+## T-002 Runner AgentJobExecutor selects runtime from dispatch — patterns & gotchas
+
+### Where `runtime` lives at the runner boundary
+
+- The dispatch `with.runtime` is the snapshotted backend (T-001's
+  `BuildDispatch` writes it). `AgentJobExecutor` reads
+  `work.with["runtime"]` and defaults to `"opencode"` when absent
+  (legacy / partial rollout defense).
+- Constructor takes `AgentJobRuntimeAccessors` — both runtimes as
+  late-binding accessors (matching the `command-runtime.ts` shape so
+  the host's `() => this.openCodeRuntime` / `() => this.piRuntime`
+  accessors survive runtime rebuilds without a constructor rewrite).
+- Two parallel paths inside `execute()`: `executeOpenCode` and
+  `executePi`. They share the `AgentSessionEventSink` helper (attach
+  + session.input + runtime-event forwarding) so the Pi path does
+  not duplicate the OpenCode observer glue.
+
+### Pi session creation at AgentJob boundary
+
+- `PiRuntime.runTurn` requires a bound session (`runtimeSessionId`
+  cannot be null — `pi/runtime.ts:97`). When the AgentJob has no
+  existing binding, the executor pre-creates a session via
+  `runtime.createSession(...)` and threads the resulting path into
+  the `PiTurnRequest`. This mirrors the Workflow path in
+  `actions/pi.ts`.
+- For OpenCode the runtime handles session creation internally and
+  signals the new id via `onSessionReady`. For Pi there is no
+  `onSessionReady` hook — the executor's `AgentSessionEventSink`
+  emits `attach + session.input` after the pre-create so both
+  backends publish the same AgentSession events.
+
+### Runtime-unavailable semantics
+
+- Per D4, a non-ready chosen runtime fails with `runtime-unavailable`
+  and NEVER falls back to OpenCode (or Pi). Tests assert both
+  directions explicitly.
+- An accessor returning `null` (runtime not constructed yet) is
+  treated the same as `runtime.ready() === false` — same failure
+  code, no fallback.
+- The terminal output's `kind` is the runtime that the executor
+  tried to use, so a Pi `runtime-unavailable` failure is labeled
+  `kind: "pi"` (not "opencode") for caller diagnostics.
+
+### `runtime` in the dispatch payload — known-keys set
+
+- `collectUnknownKeys` now treats `runtime` as known (alongside
+  `prompt`, `instructions`, `model`, `variant`). Pi's
+  `runtime.runTurn` records `options-unknown-keys` info diagnostics
+  for unknown keys — keeping `runtime` out of unknown-keys prevents
+  the Pi path from emitting a confusing diagnostic about its own
+  routing key.
+
+### Error kind mapping
+
+- Pi's `PiErrorKind` is mapped to the same legacy codes the existing
+  OpenCode path uses:
+  - `deadline-exceeded` → `timeout`
+  - `missing-session` → `runtime-session-missing` (+ `hint: "reset"`)
+  - everything else passes through.
+- The runtime is the final validator of model legality (D4 / spec
+  `actionable failure for an uncredentialed model`): Pi's
+  `setModel` failure surfaces as `turn-failed` with a
+  `model-rejected` diagnostic, the executor does NOT swallow it.
+
+### Test infra
+
+- The two opencode-path tests in `agent-job-executor.spec.ts`
+  (OpenCode-only behavior) and the new
+  `agent-job-executor-pi-runtime.spec.ts` (runtime selection +
+  Pi-path tests) are split into separate files to keep both under
+  the 800-line test-budget.
+- `makeFakePiRuntime` mirrors `makeFakeOpenCodeRuntime`: records
+  `runTurn` and `createSession` calls, exposes setters for
+  `ready`, the next `runTurn` result, and the next created
+  session id. The fake forwards a small sample of Pi events
+  (`message`) through the `onEvent` observer so the
+  AgentSession-projection test can assert the channel carries
+  Pi-runtime facts.
+- Test using accessor `() => null` (late-binding semantics) —
+  `resolveAccessor` (reused from `command-runtime.ts`) handles
+  null/undefined/function.
+
+### Build / test commands that worked
+
+```
+npm run typecheck -w packages/runner
+npm run typecheck:tests -w packages/runner
+npm run check:test-boundaries -w packages/runner
+npm test -w packages/runner
+```
+
+Test results:
+- Runner unit + spec tests: 1353 / 1353 pass (including new
+  `agent-job-executor-pi-runtime.spec.ts` (14 tests) and the new
+  `runtime is not flagged as unknown` test in
+  `agent-job-executor.spec.ts`).
+- Server unit tests unchanged from T-001 baseline (1299 / 1299).
+
+### Codebase patterns to carry forward (T-003)
+
+- Late-binding accessor shape (`T | (() => T | null) | null`) is the
+  single source of truth for "runtime may not exist yet / may be
+  rebuilt". Reuse `resolveAccessor` from `command-runtime.ts`.
+- The same `AgentSessionEventSink` is reusable for any future
+  Agent-bound runtime — it owns the attach + session.input +
+  runtime-event-forwarding wiring in one place. New runtimes need
+  to: (a) implement `runTurn`, (b) optionally implement
+  `createSession` for fresh sessions, (c) call the sink from the
+  runtime observer.
+- The terminal output `kind` is the runtime label, not the
+  dispatch label. This is essential for caller diagnostics — a Pi
+  failure must not be mislabeled as OpenCode.
+

@@ -457,7 +457,7 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       "/tmp/agent-job",
       undefined,
       fakeRuntime,
-      new AgentJobExecutor({} as never, fakeRuntime),
+      new AgentJobExecutor({} as never, { openCode: fakeRuntime, pi: null }),
     )
     const result = await executor.execute(
       {
