@@ -288,7 +288,16 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         using var scope = _services.CreateScope();
         var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
-        var snapshot = await query.GetEffectiveVariablesAsync(workflowRunId);
-        return JsonDocument.Parse(snapshot.GetRawText());
+        var repository = await query.GetRepositoryContextAsync(workflowRunId);
+        Assert.NotNull(repository);
+        return JsonSerializer.SerializeToDocument(new
+        {
+            repository = new
+            {
+                name = repository!.Name,
+                gitUrl = repository.GitUrl,
+                baseBranch = repository.BaseBranch,
+            },
+        });
     }
 }

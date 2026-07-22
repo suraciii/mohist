@@ -278,7 +278,7 @@ public class ProjectTemplateRoutesSpecs
             description = "Preview test",
             tags = Array.Empty<string>(),
             stage = "plan",
-            body = "Hello ${{ issue.number }} from ${{ project.name }}",
+            body = "Hello ${{ issue.number }} from ${{ vars.projectName }}",
         });
 
         using var response = await _client.PostAsJsonAsync(
@@ -288,7 +288,7 @@ public class ProjectTemplateRoutesSpecs
                 variables = new
                 {
                     issue = new { number = 42 },
-                    project = new { name = "Mohist" },
+                    vars = new { projectName = "Mohist" },
                 },
             });
 

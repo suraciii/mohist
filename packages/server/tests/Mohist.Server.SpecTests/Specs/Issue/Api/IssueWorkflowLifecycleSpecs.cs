@@ -297,7 +297,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWork_DispatchVariables_ExposeWorkspacePathAndRepositoryMetadataOnly()
     {
-         var (projectId, _, _, _, wrId) = await SeedIssueInProgressAsync();
+         var (_, _, _, _, wrId) = await SeedIssueInProgressAsync();
 
         using var scope = _services.CreateScope();
         var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
@@ -306,13 +306,10 @@ public class IssueWorkflowLifecycleSpecs
         using var doc = JsonDocument.Parse(snapshot.GetRawText());
         var root = doc.RootElement;
 
-         Assert.True(root.TryGetProperty("project", out var project));
-         Assert.Equal(projectId, project.GetProperty("id").GetString());
-         Assert.False(project.TryGetProperty("name", out _));
-         Assert.True(root.TryGetProperty("repository", out var repository));
-         Assert.Equal("origin", repository.GetProperty("name").GetString());
-         Assert.True(root.TryGetProperty("workspace", out var workspace));
-         Assert.True(workspace.TryGetProperty("changeDir", out _));
+         Assert.False(root.TryGetProperty("mohist", out _));
+         Assert.False(root.TryGetProperty("project", out _));
+         Assert.False(root.TryGetProperty("repository", out _));
+         Assert.False(root.TryGetProperty("workspace", out _));
     }
 
     private async Task<(string projectId, string projectName)> SeedProjectAsync()

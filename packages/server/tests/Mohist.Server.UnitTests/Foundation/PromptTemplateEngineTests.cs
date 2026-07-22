@@ -106,4 +106,16 @@ public class PromptTemplateEngineTests
         Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "vars.missing");
         Assert.Contains(result.Errors, error => error.Code == "invalid_type" && error.Path == "vars.object");
     }
+
+    [Fact]
+    public void Render_RejectsBareVariablesAndOffTableRoots()
+    {
+        var result = new PromptTemplateEngine().Render(
+            "${{ foo }} ${{ project.id }} ${{ vars.foo }}",
+            Variables("{ \"foo\": \"bare\", \"project\": { \"id\": \"project-1\" }, \"vars\": { \"foo\": \"namespaced\" } }"));
+
+        Assert.Equal("  namespaced", result.Rendered);
+        Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "foo");
+        Assert.Contains(result.Errors, error => error.Code == "missing_reference" && error.Path == "project.id");
+    }
 }

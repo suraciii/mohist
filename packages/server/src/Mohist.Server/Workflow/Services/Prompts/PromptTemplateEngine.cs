@@ -8,6 +8,19 @@ public sealed class PromptTemplateEngine : ISingletonService
 {
     public const int MaxPasses = 5;
     private const string EscapeSentinel = "\u0000LITERAL_DOLLAR_BRACE\u0000";
+    private static readonly HashSet<string> AllowedRoots = new(StringComparer.Ordinal)
+    {
+        "workflow",
+        "stage",
+        "work",
+        "issue",
+        "repository",
+        "workspace",
+        "vars",
+        "tasks",
+        "prompts",
+        "failure",
+    };
 
     private static readonly Regex TokenRegex = new(
         @"\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}",
@@ -98,6 +111,10 @@ public sealed class PromptTemplateEngine : ISingletonService
     private static bool TryResolve(JsonElement variables, string path, out JsonElement? value)
     {
         value = null;
+
+        var root = path.Split('.', 2)[0];
+        if (!AllowedRoots.Contains(root))
+            return false;
 
         var current = variables;
         foreach (var part in path.Split('.'))
