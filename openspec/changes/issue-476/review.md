@@ -1,11 +1,7 @@
 # Review Findings
 
-## P1: Non-interactive `stop --issue` performs HTTP before rejecting confirmation
+## P1: Packaged Skill and remaining docs still teach removed control paths
 
-`packages/cli/Mohist.Cli/MohistCliCommands.Run.cs:525-535` resolves the target with `ResolveRunTargetAsync` before checking `PromptsEnabled` and requiring `--yes`. Therefore `mo run stop --issue 42` in a non-interactive context first sends a GET for issue 42, then exits with the missing-`--yes` error. The run-control acceptance criteria require this invocation to fail without any HTTP request, and the confirmation must be checked before any remote work. Move the non-interactive confirmation validation ahead of target resolution, while preserving the resolved Run ID for the interactive prompt.
-
-## P1: `run view` rejects the required JSON field-selection shape
-
-`packages/cli/Mohist.Cli/MohistCliCommands.Run.Reads.cs:50-52` defines `RunViewDescriptor` with only `status` and `issueRef`, but the run-reads spec scenario and T-002 acceptance criteria exercise `mo run view wr_abc --json id,status,currentStage`. `JsonSelection.Parse` consequently treats `id` and `currentStage` as invalid and the command exits locally without fetching the run. The implementation needs a view output descriptor/projection that supports the accepted run fields and maps them to the actual nested `WorkflowRunDetailDto` payload, while retaining the full default view output.
+`packages/cli/Mohist.Cli/skill-data/mohist/SKILL.md:65-72,80,143` still tells agents and users to run `mo issue approve/reject/retry/rerun/rerun-from-stage/stop/force-stop/resume`, including the obsolete `force-stop` distinction. Those commands no longer resolve after this change, and issue 476 explicitly requires that the old aliases be removed and that Skill not explain two syntaxes. The same stale commands remain in user-facing guidance under `docs/the-workflow.md:60-61,98-99`, `docs/getting-started.md:135-136`, `docs/troubleshooting.md:35-39,123,154-157`, and `docs/hermes-notifications.md:51`. Update the source guidance to the canonical `mo run` forms, using `--issue` and `--yes` where required, and remove the obsolete `force-stop` workflow.
 
 <promise>FAIL</promise>
