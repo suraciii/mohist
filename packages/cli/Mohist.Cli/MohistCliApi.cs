@@ -181,7 +181,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -413,7 +413,7 @@ internal sealed class MohistCliApi
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             _err.WriteLine($"Runner '{runnerIdEncoded}' not found");
-            return 4;
+            return 1;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync();
@@ -422,7 +422,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -637,7 +637,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -1167,7 +1167,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -1190,7 +1190,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return FailureExitCode(response);
         }
 
@@ -1215,7 +1215,7 @@ internal sealed class MohistCliApi
         var envelope = ExtractEnvelope(node, response);
         if (!envelope.Success)
         {
-            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            WriteEnvelopeFailure(envelope);
             return new PostResult(FailureExitCode(response), null, envelope.Error, envelope.Code);
         }
 
@@ -1241,7 +1241,8 @@ internal sealed class MohistCliApi
         bool Success,
         JsonNode? Data,
         string Error,
-        string? Code);
+        string? Code,
+        JsonNode? Details);
 
     internal static Envelope ExtractEnvelope(JsonNode? node, HttpResponseMessage response)
     {
@@ -1252,7 +1253,8 @@ internal sealed class MohistCliApi
                 Success: response.IsSuccessStatusCode,
                 Data: null,
                 Error: response.ReasonPhrase ?? "Request failed",
-                Code: null);
+                Code: $"http-{(int)response.StatusCode}",
+                Details: null);
         }
 
         var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
@@ -1262,14 +1264,19 @@ internal sealed class MohistCliApi
         var code = success || !string.IsNullOrWhiteSpace(rawCode)
             ? rawCode
             : $"http-{(int)response.StatusCode}";
-        return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code);
+        return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code, Details: node["details"]);
     }
 
     internal static int FailureExitCode(HttpResponseMessage response) =>
         FailureExitCode(response.StatusCode);
 
-    internal static int FailureExitCode(HttpStatusCode statusCode) =>
-        statusCode == HttpStatusCode.NotFound ? 4 : 1;
+    internal static int FailureExitCode(HttpStatusCode statusCode) => 1;
+
+    private void WriteEnvelopeFailure(Envelope envelope)
+    {
+        var details = envelope.Details is null ? string.Empty : $" details={envelope.Details.ToJsonString()}";
+        _err.WriteLine($"{envelope.Error} (code={envelope.Code}){details}");
+    }
 
     internal async Task<HttpResponseMessage?> SendAsync(
         HttpMethod method,

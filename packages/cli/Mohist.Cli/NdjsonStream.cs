@@ -23,7 +23,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         catch (HttpRequestException)
         {
@@ -69,7 +69,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         finally
         {
@@ -155,7 +155,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         catch (HttpRequestException ex)
         {
@@ -189,7 +189,7 @@ internal static class NdjsonStream
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CliExitCode.For(CliExitOutcome.Cancelled);
         }
         catch (JsonException ex)
         {
