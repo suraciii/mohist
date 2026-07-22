@@ -89,7 +89,7 @@ Builtin `.prompt` 是产品化内容，随产品分发、面向任意项目：
 - 修改文件的 prompt（build、fix 类）常驻一行中断契约：agent 可能随时被中断——边做
   边提交、进度记录保持最新。review 类 prompt 不加：其唯一产物是报告，收到收尾警告
   时用当前发现立即写完即可。期限警告的注入与文案由 runtime 统一负责（见
-  [`runtimes/opencode.md`](runtimes/opencode.md)「回合期限与两段式收尾」），prompt
+  [`runtimes/opencode.md`](runtimes/opencode.md)「Prompt 期限与两段式收尾」），prompt
   不复述警告内容。
 
 CLI skill-data 中随 nupkg 分发的 SKILL.md 适用同一约定。

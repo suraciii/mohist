@@ -10,17 +10,14 @@ Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
 |---|---|---|---|
 | 定义 | Mohist Agent | Agent context | 身份、instructions、config、skills、状态 |
 | 工作 | TaskRun | Workflow context | Workflow task 生命周期、结果、输出、恢复 |
-| 工作 | AgentJob | Agent context | 一次 Mohist Agent 执行的生命周期与结果 |
+| 工作 | AgentJob | Agent context | 一次 Mohist Agent 工作的生命周期与结果 |
 | 执行契约 | Action | Workflow context | 一次工作 dispatch 的 `uses` / `with` 输入输出契约 |
-| 对话 | AgentSession | Session context | transcript、context、usage、Runtime binding、lineage |
-| 对话 | Turn | Session context | 一次对话执行的输入、活动状态与结束结果 |
-| Runtime | Runtime Session | 外部 Runtime | 物理对话与 provider 执行状态 |
+| 会话 | AgentSession | Session context | transcript、context、usage、activity、当前 Runtime binding |
+| Runtime | Runtime Session | 外部 Runtime | 物理会话与 provider 执行状态 |
 | Adapter | OpenCodeRuntime、PiRuntime | Runner 进程 | protocol、进程、事件、状态核对、错误 |
 
 `Inline Agent` 是产品使用方式，不是另一个实体或 bounded context。它表示 Workflow
 TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist Agent。
-
-## 规范术语
 
 跨上下文统一定义见 [`../CONTEXT.md`](../CONTEXT.md)。本文只定义这些概念的生命周期、
 所有权、事件契约和模块边界，不建立第二套术语。
@@ -29,37 +26,35 @@ TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist
 
 | 路径 | 工作所有者 | Runner 入口 | AgentSession 来源 |
 |---|---|---|---|
-| Workflow 直接调用 | TaskRun | `mohist/opencode` Action adapter | Workflow |
+| Workflow 直接调用 | TaskRun | Runtime Action adapter | Workflow |
 | 启动 Mohist Agent | AgentJob | AgentJob executor | Agent launch |
 
 ```text
-Workflow: TaskRun -> mohist/opencode Action adapter --+
-                                                       +-> OpenCodeRuntime -> Runtime Session
-Agent: Mohist Agent -> AgentJob -> AgentJob executor --+
+Workflow: TaskRun -> Runtime Action adapter --+
+                                             +-> Runtime adapter -> Runtime Session
+Agent: Mohist Agent -> AgentJob executor -----+
 ```
 
 两条路径共享 Runner 执行能力和 Session 基础设施，但不共享工作所有者：TaskRun 对
 Workflow 工作负责，AgentJob 对 Mohist Agent 工作负责。每个入口把已经解析好的
-AgentSession 目标交给 `OpenCodeRuntime`，Runtime 事实写回该 Session。共享 Runtime
+AgentSession 目标交给 Runtime adapter，Runtime 事实写回该 Session。共享 Runtime
 代码不能制造 Workflow -> Agent 的领域依赖。
 
 ## Action 语义
 
-`mohist/opencode` 是 Runtime 特有的 Action，回答“用 OpenCode 执行这个回合”。它不接收
-Agent ID，不解析 Agent 名称，不读取 Agent 定义，也不创建 AgentJob。因此 Workflow
-直接使用它时形成 Inline Agent。
+`mohist/opencode` 和 `mohist/pi` 是 Runtime 特有的 Action，回答“用这个 Runtime 执行
+本次输入”。它们不接收 Agent ID，不解析 Agent 名称，不读取 Agent 定义，也不创建
+AgentJob。因此 Workflow 直接使用它们时形成 Inline Agent。
 
-`mohist/pi` 等 Runtime Action 与它处于同一层（见 [`runtimes/pi.md`](runtimes/pi.md)）。
-本设计有意不定义
-`mohist/agent` 契约；该名称留给后续 Mohist Agent 专项设计，不能在这里充当 Runtime
-别名或 `mohist/opencode` 的通用包装。
+本设计不定义 `mohist/agent` 契约；该名称留给后续 Mohist Agent 专项设计，不能充当
+Runtime 别名或 Runtime Action 的通用包装。
 
-AgentJob 路径不能通过公开的 `mohist/opencode` Action 契约 dispatch。Agent 定义完成
-解析和 snapshot 后，其 executor 接收由 Agent 拥有的 execution request。Workflow Action
-adapter 与 AgentJob executor 都可以调用同一个 `OpenCodeRuntime` 深模块。复用点是
-Runtime 实现，不是 Action。
+AgentJob 路径不能通过公开的 Workflow Action 契约 dispatch。Agent 定义完成解析和
+snapshot 后，其 executor 接收由 Agent 拥有的 execution request。Workflow Action
+adapter 与 AgentJob executor 可以调用同一个 Runtime 深模块。复用点是 Runtime 实现，
+不是 Action。
 
-## 工作生命周期与对话
+## 工作生命周期与会话
 
 TaskRun 与 AgentJob 拥有以下决策：
 
@@ -69,181 +64,167 @@ TaskRun 与 AgentJob 拥有以下决策：
 
 AgentSession 拥有以下事实：
 
-- Turn、用户 / agent 消息和 tool calls；
+- 按顺序记录的输入、回复、tool calls 与 Runtime 状态；
 - context 与 usage；
 - model / Runtime observations；
-- 当前 Runtime Session 绑定与会话沿革（lineage）。
+- 当前 activity 与 Runtime binding。
 
 Workflow Action adapter 向 TaskRun 报告工作结果，AgentJob executor 向 AgentJob 报告
-工作结果；两者都向 AgentSession 报告 Runtime 事实。AgentSession 事件不会推进 Workflow，
-也不会让 AgentJob 进入终态。失败的 AgentSession 操作可以成为工作所有者判断的证据，
-但 Session 不是裁判。
+工作结果；两者都向 AgentSession 报告会话事实。AgentSession 事件不会推进 Workflow，
+也不会让 AgentJob 进入终态。工作失败可以成为 transcript 中的诊断，但 Session 不是
+工作结果的裁判。
 
-Session 命令不是工作 dispatch。执行中提交的 Follow-up 成为当前回合输入；空闲时提交
-Follow-up 会启动一个用户发起的对话回合，只记录命令和 Runtime 事实，不创建 TaskRun
-或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则，且都只在逻辑
-Session 空闲时执行；两者都不轮换 AgentSession ID，命令响应返回同一稳定
-`sessionId`。在用户显式 Session 命令中只有 Reset 替换 Runtime 绑定；新 Turn 提交前的
-缺失恢复属于下文独立的 binding 准备，不是另一个 Session 命令。
+Session 命令不是工作 dispatch。Follow-up 只向现有 AgentSession 追加输入，不创建
+TaskRun 或 AgentJob。Compact 与 Reset 同样只改变 Session；它们不轮换 AgentSession ID。
 
-## Turn 生命周期与 transcript DSL
+## AgentSession 模型
 
-Turn 是 AgentSession 内唯一拥有对话执行终态的实体。AgentSession 可以先后包含多个
-Turn；一个 Turn 的完成、失败或停止只结束本次对话执行，不关闭逻辑 Session，也不改变
-TaskRun 或 AgentJob 的工作裁决。
+AgentSession 的结构靠近 Runtime 的物理会话，但拥有 Mohist 的稳定身份：
 
-### 状态投影
+```text
+AgentSession
+  Id
+  Source
+  WorkDir
+  Activity
+  CurrentBinding?
+  Transcript
+  Context
+  Usage
 
-AgentSession 的查询模型把互不替代的状态轴分开呈现：
+RuntimeBinding
+  RunnerId
+  Runtime
+  RuntimeSessionId
+```
 
-| 轴 | 值 | 含义 |
-|---|---|---|
-| `activity` | `idle` / `active` / `unknown` | 当前是否有可确认的执行中 Turn |
-| `binding` | `unbound` / `bound` / `missing` | 当前 Runtime Session 绑定是否存在且可解析 |
-| `currentTurn` | 无，或当前 Turn 摘要 | `active` / `unknown` 时命令和状态核对的稳定目标 |
-| `latestTurn` | 无，或最近 Turn 摘要 | 最近 Turn 的身份、时间与结果，不是 Session 终态 |
+以下是不变量：
 
-Turn 在输入被受理时直接进入 `active`，结束后进入 `finished`。`finished` 必须且只能带一个
-`outcome`：`completed`、`failed` 或 `stopped`。AgentSession 没有与普通 Turn 对应的
-`completed`、`failed` 或 `closed` 状态，也没有 `closedAt`；需要展示最近结束时间时读取
-`latestTurn.finishedAt`。未来若产品引入显式归档，应使用独立的 `archivedAt` 语义。
+- `Id`、`Source` 与 `WorkDir` 在 AgentSession 生命周期内不变。
+- `CurrentBinding` 是当前路由事实，可以整体替换；AgentSession 不保存物理 Session 历史。
+- `Transcript` 是一个按 AgentSession 顺序追加的会话记录，不按物理 Session 或其它
+  子实体拆分。
+- `Context` 描述当前 Runtime Session 的上下文；binding 替换后从空开始。`Transcript`
+  与累计 `Usage` 不随 binding 替换清空。
+- 同一 AgentSession 同时最多有一次 Runtime 执行；该串行约束使 transcript 的 Session
+  内顺序足以表达会话。
+- AgentSession 没有 `completed`、`failed`、`stopped` 或 `closed` 生命周期。
 
-`activity: unknown` 表示 Mohist 知道当前 Turn 可能仍在 Runtime 执行，但无法确认是否已经
-停止，或空闲 Follow-up 可能已经启动新 Turn，但受理结果未知。此时 Follow-up、Compact 与
-Reset 都不能假装 Session 已空闲；Cancel 可以继续针对 `currentTurn` 尝试停止或触发状态
-核对。只有新的 Runtime 证据完成核对后，activity 才能转为 `active`，或由
-`turn.finished` 转为 `idle`。如果最终确认输入从未被受理，则清除候选 `currentTurn` 并
-恢复 `idle`。
+`CurrentBinding` 允许初始为空。首次执行先创建物理 Session，再把 binding 持久化；只有
+binding 持久化成功后才能提交输入。
 
-### 事件契约
+## Activity 与 transcript
 
-以下名称是 transcript DSL 的唯一规范名称。所有 `turn.*` 事实和属于某个 Turn 的
-message、tool、usage、model、status、compaction 事实都必须携带稳定的 `turnId`；
-`turnId` 在所属 AgentSession 内唯一且在重投时不变。
+### Activity
 
-`turn.started` 记录一次 Turn 以及它的首个输入：
+AgentSession 的活动状态只有：
+
+| 值 | 含义 |
+|---|---|
+| `idle` | 没有确认仍在执行的输入，可以开始新的执行、Compact 或 Reset |
+| `active` | Runtime 正在处理输入；Follow-up 可以进入当前执行，Cancel 可以尝试停止 |
+| `unknown` | 无法确认输入是否已被接受或执行是否已停止；不得当作安全空闲 |
+
+新 AgentSession 的初始 activity 是 `idle`，此时允许 `CurrentBinding` 为空。
+
+状态转换为：
+
+```text
+idle + input accepted                 -> active
+active + follow-up accepted           -> active
+active + execution confirmed stopped  -> idle
+active + stop result uncertain        -> unknown
+idle + input acceptance uncertain     -> unknown
+unknown + runtime evidence             -> active | idle
+```
+
+一次执行完成、失败或取消只让 activity 回到 `idle`。具体结果由 TaskRun、AgentJob 或
+transcript 中的 Runtime 诊断表达，不能成为 AgentSession 终态。Runtime 进程退出、缓存
+回收或持久化文件保留同样不能推导 Session 已关闭。
+
+### Transcript 契约
+
+Transcript 是扁平、按 Session 排序的会话事实。它不为单次输入建立子实体、额外身份、
+分组存储或物理 Session 历史。
+
+`session.input` 是输入已被 Mohist 接受的规范事实：
 
 ```json
 {
-  "turnId": "turn_...",
-  "startedAt": "2026-07-22T10:00:00Z",
-  "originKind": "task-run | agent-job | followup",
-  "originId": "...",
-  "input": {
-    "inputId": "input_...",
-    "text": "..."
+  "type": "session.input",
+  "payload": {
+    "text": "...",
+    "source": "task-run | agent-job | followup | system",
+    "acceptedAt": "2026-07-22T10:00:00Z"
   }
 }
 ```
 
-`turn.input.added` 记录执行中 Turn 受理的追加输入：
+每条被接受的输入各有一个 `session.input`。它是 transcript 中的输入边界，不创建另一个
+领域资源。消息、reasoning、tool、usage、model、provider retry、compaction 和 status
+事实按发生顺序追加在同一 transcript 中。
+
+`session.activity` 是 activity 变化的规范事实：
 
 ```json
 {
-  "turnId": "turn_...",
-  "inputId": "input_...",
-  "addedAt": "2026-07-22T10:01:00Z",
-  "source": "followup | system",
-  "text": "..."
-}
-```
-
-`turn.finished` 是 Turn 唯一的结束事实：
-
-```json
-{
-  "turnId": "turn_...",
-  "finishedAt": "2026-07-22T10:02:00Z",
-  "outcome": "completed | failed | stopped",
-  "failure": {
-    "code": "...",
-    "message": "...",
-    "category": "..."
+  "type": "session.activity",
+  "payload": {
+    "activity": "idle | active | unknown",
+    "observedAt": "2026-07-22T10:02:00Z"
   }
 }
 ```
 
-`failure` 只允许在 `outcome: failed` 时出现，`category` 可省略。进程退出码、Action
-结果和工作裁决属于 TaskRun 或 AgentJob，不进入 Turn 结束事实。
+`session.input` 与所需的 `idle -> active` 转换由 Session 原子接受；执行中的 Follow-up
+只追加输入，activity 保持 `active`。执行结束或状态核对只报告新的 activity，不重复表达
+TaskRun 或 AgentJob 结果。所有时间使用 UTC ISO 8601。
 
-Follow-up 的命令结果与 Turn 事实分开记录：
-
-| 事件 | 必需字段 | 语义 |
-|---|---|---|
-| `followup.admitted` | `operationId`、`turnId`、`placement`、`admittedAt` | Runtime 已确认受理；`placement` 是 `current-turn` 或 `new-turn` |
-| `followup.rejected` | `operationId`、`rejectedAt`、`error.code`、`error.message` | 已确认输入没有被受理，可以向用户确定失败 |
-| `followup.delivery.unconfirmed` | `operationId`、`turnId`、`observedAt`、`attemptedPlacement`、`error.code`、`error.message` | 无法确认输入是否已被受理，不能自动重试 |
-
-三个事件的 payload 形状分别为：
+已有 binding 被替换时，`session.context_reset` 是 transcript 中的用户可见边界：
 
 ```json
 {
-  "operationId": "followup_...",
-  "turnId": "turn_...",
-  "placement": "current-turn | new-turn",
-  "admittedAt": "2026-07-22T10:03:00Z"
-}
-```
-
-```json
-{
-  "operationId": "followup_...",
-  "rejectedAt": "2026-07-22T10:03:00Z",
-  "error": {
-    "code": "...",
-    "message": "..."
+  "type": "session.context_reset",
+  "payload": {
+    "reason": "reset | runtime-change | missing-recovery",
+    "observedAt": "2026-07-22T10:03:00Z"
   }
 }
 ```
 
-```json
-{
-  "operationId": "followup_...",
-  "turnId": "turn_...",
-  "attemptedPlacement": "current-turn | new-turn",
-  "observedAt": "2026-07-22T10:03:00Z",
-  "error": {
-    "code": "...",
-    "message": "..."
-  }
-}
-```
+该事实只表达“后续 Runtime 上下文从空开始”，不携带旧或新物理 Session ID，也不建立
+binding 历史。首次从无 binding 建立物理 Session 时不写该事实。替换 binding 与写入
+`session.context_reset` 必须原子完成；该事实在替换后的下一条 `session.input` 之前。
 
-所有 `*At` 字段都是 UTC ISO 8601 时间。`error.code` 是稳定机器码，`error.message` 是
-保留原始原因的用户可读诊断。
+`session.closed` 不属于目标 DSL：一次执行结束不关闭 Session。
+`session.followup_completed` / `session.followup_failed` 同样不属于目标 DSL：Follow-up
+的受理结果不等于 agent 执行结果。
 
-Mohist 在投递前为 Follow-up 分配 `operationId`，并为 `new-turn` placement 预分配
-`turnId`；同一 operation 的状态核对和重投查询复用这些身份。Runtime 确认空闲 Follow-up
-后，按 `followup.admitted`、`turn.started` 的顺序在同一次持久化提交中记录；确认执行中
-Follow-up 后，按 `followup.admitted`、`turn.input.added` 的顺序同次记录。Rejected 或
-delivery-unconfirmed 不生成 Turn 输入事实。
+消费者不能从历史错误、完成或停止事实推导当前 activity。当前 activity 由 Session
+状态和最新 Runtime 证据决定。
 
-`followup.admitted` 与 `followup.rejected` 是互斥的最终受理结果；同一 operation 的最终
-结果只能出现其中一个。`followup.delivery.unconfirmed` 是可被后续核对收敛的中间事实，
-不授权重新发送输入；调用方用原 `operationId` 查询结果，不能创建一次新的副作用。对
-`new-turn` 投递，未确认事实中的预分配 `turnId` 成为候选 `currentTurn`，并把 activity
-投影为 `unknown`；后续证据确认受理后才补记 admitted 与 started，确认未受理后则记
-rejected 并恢复 `idle`。对
-`current-turn` 投递，原 Turn 保持 `active`，直到其执行事实另有变化。
+## Follow-up 与 Cancel
 
-`followup.admitted` 表示输入已进入 Runtime，不表示 agent 已经完成，因此不得使用
-`followup_completed` 命名。
+Follow-up 的目标由 AgentSession 当前 activity 决定：
 
-### 顺序与结束规则
+| Activity | 行为 |
+|---|---|
+| `idle` | 向当前 Runtime Session 提交输入并开始执行 |
+| `active` | 通过 Runtime 原生 steer / async prompt 能力加入当前执行 |
+| `unknown` | 拒绝新输入，先核对当前执行状态 |
 
-- 每个 `turnId` 恰好有一个 `turn.started`，最多有一个 `turn.finished`；重复投递只能重放
-  同一事实，冲突的终态必须拒绝。
-- 同一 Turn 内，输入先于由其产生的输出，`turn.finished` 最后；结束后不能再追加输入或
-  Runtime 事实。Transcript part 的 `sequence` 只在同一 Turn 内比较，不得跨 Turn 排序。
-- Runtime 正常完成、确认失败或确认停止后才能记录 `turn.finished`。停止请求或超时若未
-  确认，必须把 activity 投影为 `unknown`，不得伪造 `stopped` 或 `failed` 结束事实。
-- `turn.finished` 把 AgentSession activity 投影回 `idle`，但不清除 Runtime binding，
-  不妨碍后续 Follow-up 开始新 Turn。
-- `canFollowup` 由 activity、binding 与 Runner 可用性推导；`canCancel` 只由当前 Turn
-  推导。历史 Turn 的结果不能禁用未来命令。
+Follow-up 命令只需要三种结果：
 
-Runtime Session 的内存缓存、进程资源释放、持久化文件保留与淘汰策略属于 Runtime
-adapter。它们不能通过 transcript 事件表达，也不能用来推导 AgentSession 已关闭。
+- `accepted`：Runtime 已确认接受输入；
+- `rejected`：Runtime 已确认没有接受输入；
+- `unknown`：无法确认是否接受，不能自动重新发送。
+
+`operationId` 可以作为命令幂等和状态核对键，但不是 AgentSession 内的新实体，也不用于
+把 transcript 分组。`unknown` 后只能使用同一 operation 核对结果；创建新 operation
+重新发送可能产生重复副作用。
+
+Cancel 只针对当前 binding 上唯一可能执行中的操作，不需要额外的执行身份。Runtime 无法确认
+已经停止时，Session 进入 `unknown`；停止请求本身不能伪造 idle。
 
 ## AgentSession 来源
 
@@ -252,7 +233,7 @@ adapter。它们不能通过 transcript 事件表达，也不能用来推导 Age
 ### Workflow 来源
 
 使用 `(projectId, workflowRunId, sessionName)` 寻址。同一 WorkflowRun 内复用相同名称
-会继续逻辑对话。省略显式名称时使用 Work ID，避免无关 task 意外共享 context。
+会继续逻辑会话。省略显式名称时使用 Work ID，避免无关 task 意外共享 context。
 
 ### Agent launch 来源
 
@@ -264,72 +245,74 @@ adapter。它们不能通过 transcript 事件表达，也不能用来推导 Age
 Workflow 来源迁移为 Agent 来源，反之亦然。
 
 来源特有的 route 只是查询和便利入口，最终都解析为以 `sessionId` 标识的规范
-AgentSession 资源；`(workflowRunId, sessionName)` 和 `agentId` 都不能替代 Session 身份。
+AgentSession 资源。Follow-up、Compact、Reset、transcript 与查询都作用于该资源，
+不能实现第二套 Session 生命周期。
 
-Follow-up、Compact、Reset、transcript 与查询都作用于该规范资源。来源特有的 CLI 或
-API 可以先解析它，但不能实现第二套 Session 生命周期。
+## 当前 Runtime binding
 
-## 逻辑与物理 Session 身份
-
-AgentSession ID 是逻辑对话的稳定身份。Runtime Session 身份是外部物理维度：
+AgentSession ID 是逻辑会话的稳定身份。Runtime Session 身份是外部物理维度：
 
 ```json
 {
+  "runnerId": "runner-...",
   "runtime": "opencode",
   "runtimeSessionId": "ses_..."
 }
 ```
 
-Runtime 变化、Reset 和已确认的 Runtime Session 缺失恢复可以替换物理绑定并追加
-lineage，但不能改变 AgentSession 身份或来源。工作目录是逻辑 AgentSession 的不可变
-属性；变化时必须使用新的逻辑 Session 身份，不能替换原 Session 的物理绑定。Compact
-和 model / variant 选择变化不会替换物理绑定。
+正常执行、retry、Follow-up、Compact、model / variant 变化和 Runner 重启都复用当前
+binding。Reset、Runtime 变化和已确认的 Runtime Session 缺失恢复可以整体替换 binding，
+但不能改变 AgentSession 身份、来源或工作目录。
 
-持久化的当前绑定只保留 Runner 重启后继续控制所需的最小数据：`runtime`、
-`runtimeSessionId`、`runnerId` 与 `workDir`。Lineage 记录 `runtime`、
-`runtimeSessionId`、`boundAt` 与 `reason`。`reason` 只有 `initial`、`reset`、
-`runtime-change` 和 `missing-recovery`；它让查询与 UI 明确区分主动清空上下文、后端切换
-和物理资源丢失，不能用自由文本代替。
+AgentSession 只保存 `CurrentBinding`。旧 binding 不进入 aggregate、DTO 或独立查询模型；
+已有 transcript 也不会按 binding 拆分。Reset、缺失恢复或 Runtime 变化只在 transcript
+记录一次 `session.context_reset`，说明后续 Runtime 上下文从空开始，不记录物理 Session
+沿革。
+
+替换使用完整 expected binding 做 compare-and-swap：
+
+```text
+replaceBinding(expected, candidate):
+  require activity == idle
+  require currentBinding == expected
+  require candidate was created for AgentSession.workDir
+  currentBinding = candidate
+```
+
+Runtime event 必须携带产生它的 `runtimeSessionId`。它不等于 current binding 时，Server
+拒绝该事件；旧物理 Session 的迟到事件不能改变当前 activity 或 transcript。
+
+物理 Session 的缓存、文件、进程资源与保留策略属于 Runtime adapter。binding 被替换
+不要求 Mohist 删除、关闭或继续查询旧物理 Session。
 
 ## Runtime Session 缺失恢复
 
-缺失恢复是 Session 对 Runtime binding 的修复，不是 Prompt retry，也不是 Workflow
-recovery。它只在一个新 Turn 的输入尚未被 Runtime 接受时发生。成功修复后，同一个工作
+缺失恢复是 Session 对当前 binding 的修复，不是 Prompt retry，也不是 Workflow
+recovery。它只在一条新的独立输入尚未被 Runtime 接受时发生。成功后，同一个工作
 attempt 继续执行，不消耗 Workflow recovery budget。
 
 ### 触发条件
 
 以下条件必须同时成立：
 
-1. AgentSession 可以受理新 Turn，`activity` 为 `idle`；
-2. 本次执行位于当前绑定的 `runnerId`，绑定的 Runtime 与本次执行要求一致，`workDir` 与
-   AgentSession 的不可变工作目录一致；
-3. 绑定所属 Runner 上的 Runtime adapter 用确定性证据确认当前 `runtimeSessionId` 已不存在；
+1. AgentSession 的 `activity` 为 `idle`；
+2. 执行位于当前 binding 的 `runnerId`，Runtime 与工作目录仍匹配；
+3. 该 Runner 上的 Runtime adapter 用确定性证据确认 `runtimeSessionId` 已不存在；
 4. 本次输入尚未写入 transcript，也尚未向 Runtime 提交；
-5. binding 替换与输入记录各自提交时，Server 看到的 expected binding 仍是 current。
+5. 替换 binding 和随后记录输入时，Server 看到的 expected binding 都仍是 current。
 
-Runtime 不可用、超时、权限失败、响应形状不兼容、数据损坏或任何无法区分“暂时无法
-读取”和“确定不存在”的结果都不满足条件。执行请求落在另一个 Runner 也不是 missing：
-它必须路由回绑定所属 Runner 或明确失败，不能借缺失恢复迁移物理 Session。上述情况都
-保留原 binding 并形成可行动失败。
-
-`ready`、`definitely-missing` 与失败是 Mohist 共享的语义结果，不是一个泄漏 SDK 类型的
-通用 Runtime 接口。OpenCodeRuntime 与 PiRuntime 各自在自己的深模块中产生这些结果；
-Runner 的 binding 准备只编排共同顺序，不能把 provider 判定上移到 Session 或 Workflow。
+Runtime 不可用、超时、权限失败、响应不兼容、数据损坏或任何无法区分“暂时无法读取”
+和“确定不存在”的结果都不满足条件。请求落在另一个 Runner 也不是 missing；它必须
+路由回 binding 所属 Runner 或明确失败，不能借缺失恢复迁移 Runner。
 
 ### 解析与替换顺序
 
-新 Turn 的 binding 准备只有一条权威流程：
-
 ```text
-expected = AgentSession.currentRuntimeBinding
+expected = AgentSession.currentBinding
 
 if expected is absent:
-    candidate = Runtime.create(requiredRuntime, immutableWorkDir, current turn options)
-    selected = Session.replaceRuntimeBinding(
-        expected = absent,
-        candidate = candidate on currentRunnerId,
-        reason = initial)
+    candidate = Runtime.create(requiredRuntime, AgentSession.workDir, inputOptions)
+    selected = Session.replaceBinding(expected = absent, candidate)
 else:
     require currentRunnerId == expected.runnerId
     resolved = Runtime.resolve(expected)
@@ -337,123 +320,83 @@ else:
     if resolved is ready:
         selected = expected
     else if resolved is definitely-missing:
-        candidate = Runtime.create(expected.runtime, expected.workDir, current turn options)
-        selected = Session.replaceRuntimeBinding(
-            expected,
-            candidate,
-            reason = missing-recovery)
+        candidate = Runtime.create(expected.runtime, AgentSession.workDir, inputOptions)
+        selected = Session.replaceBinding(expected, candidate)
     else:
         fail without changing the binding
 
 Session.recordInput(expectedBinding = selected, input)
-submit the input exactly once
+Runtime.submitInputExactlyOnce(selected, input)
 ```
 
-自动恢复最多创建一个 candidate；新 candidate 创建或 binding 持久化失败时，不提交输入。
-已经创建但未能绑定的 candidate 不得用于执行；它只形成诊断，不要求在本流程内同步删除，
-也不引入影响 binding 裁决的补偿协议。
+自动恢复最多创建一个 candidate。新 candidate 创建或 binding 持久化失败时，不提交输入。
+已经创建但未能绑定的 candidate 只形成诊断，不引入补偿协议，也不复制物理会话数据。
 
-`Session.replaceRuntimeBinding` 是 Server 中的状态裁决。命令必须携带 expected
-binding 的 `runnerId`、`runtime`、`runtimeSessionId` 与 `workDir`；Session 只在 expected
-仍完整等于 current、activity 仍允许新 Turn 时原子替换 binding 并追加 lineage。
-`missing-recovery` 建立的 replacement 保持同一 `runnerId`、Runtime 与工作目录，只替换
-`runtimeSessionId`。过期结果必须拒绝，不能覆盖 Reset、Runtime 切换或另一轮恢复已经建立
-的 binding。Runner 只报告 Runtime 的 missing/create 事实，不能自行宣称 Server binding
-已经改变。
-
-`Session.recordInput` 再次携带 selected 完整 binding。Server 只在它仍是 current 且
-AgentSession 仍可受理新 Turn 时，原子记录输入并建立 Turn；Reset、Runtime change 或另一
-轮恢复若已先改变 binding，本次记录必须失败。Runner 只有收到输入持久化确认后才能提交
-Prompt，因此换绑与输入之间不需要跨网络锁或新的持久化恢复 Job。
+Runner 只报告 Runtime 的 resolve / create 事实；`replaceBinding` 与 `recordInput` 都由
+Server 裁决。两次写入都比较 expected binding，避免过期恢复覆盖 Reset、Runtime 变化
+或另一轮恢复。只有输入持久化成功后 Runner 才能提交给 Runtime。
 
 ### 操作边界
 
 | 操作 | 确认缺失时自动替换 | 原因 |
 |---|---:|---|
-| TaskRun 或 AgentJob 开始新 Turn | 是 | 输入尚未提交，工作可以在空上下文继续 |
-| AgentSession 空闲时的 Follow-up | 是 | 它将开始新 Turn，使用同一 admission 与提交顺序 |
-| 执行中 Turn 的 Follow-up | 否 | 输入目标是当前 Turn，替换后语义不再相同 |
+| TaskRun 或 AgentJob 提交新输入 | 是 | 输入尚未提交，可以在空上下文继续 |
+| AgentSession 空闲时的 Follow-up | 是 | 它将开始新的执行，使用相同提交顺序 |
+| 执行中的 Follow-up | 否 | 输入目标是当前物理执行，替换后语义不同 |
 | Compact | 否 | 缺失的上下文无法压缩 |
-| Cancel | 否 | 新 Session 不是原执行中的 Turn |
-| Reset | 不属于自动恢复 | 用户主动创建空 Session；旧 Session 缺失也不能阻止 Reset |
+| Cancel | 否 | 新物理 Session 不是原执行目标 |
+| Reset | 不属于自动恢复 | 用户主动建立空上下文，旧 Session 缺失也不阻止 Reset |
 
-自动恢复建立空上下文，不从 Mohist transcript 重放消息、Prompt 或 tool call。重放会把只读
-审计记录变成新的执行输入，并可能重复外部副作用。Lineage 的 `missing-recovery` 是上下文
-中断的持久事实；产品查询和 UI 必须展示它，不能把替换后的物理对话表示为无缝连续。
+自动恢复不从 Mohist transcript 重放消息、Prompt 或 tool call。Transcript 是审计与展示
+记录，不是重建 Runtime 上下文的命令来源。
 
-一旦 Prompt 提交已经开始，任何 missing、transport failure 或响应不确定都不得进入上述
-流程。当前 Turn 按原错误结束或进入 `unknown`，工作所有者决定后续 retry；Runner 不能
-创建新 physical Session 后自动重放 Prompt。
+## Runtime 变化与 Reset
 
-本能力不增加 Workflow DSL、Action Input、Agent 配置开关、恢复 Stage 或持久化恢复 Job。
-一次 binding 准备内的单次 candidate 创建与 expected-binding 裁决已经完整表达恢复过程。
+Runtime 变化或 Reset 只在 `idle` 时执行。Runner 先创建新的空物理 Session；Server
+只在 expected binding 仍是 current 时整体替换。新 Session 建立失败时保留原 binding。
 
-### 验证责任
+Reset 不改变 Runtime；Runtime 变化可以改变 `runtime` 和 `runnerId`，但不能改变
+AgentSession 工作目录。两者都保留已有 transcript，不迁移或重放 Runtime 上下文，
+也不建立物理 Session 历史。
 
-- Session domain spec 覆盖 initial、missing-recovery、Reset 与 Runtime change 四种
-  lineage reason，以及 expected binding 不匹配、activity 非 idle、Runner / Runtime /
-  workDir 不匹配时的拒绝。
-- Runner spec 从 Workflow、AgentJob 与 idle Follow-up 三个产品入口证明：binding 先于
-  input、input 先于 Prompt；恢复成功只提交一次，重新绑定或 input CAS 失败不提交。
-- 路由 spec 证明新 Turn 只交给 binding 的 `runnerId`；其它 Runner 不能把本地 404 或文件
-  不存在报告成该 binding 的 `definitely-missing`。
-- Runtime unit test 只验证本后端的 `ready` / `definitely-missing` / ambiguous 分类和
-  candidate 创建；Server 状态矩阵不通过 Runtime test 重复。
-- 所有测试使用 fake Runtime、fake Server connection 与可控信号，不访问真实进程、网络、
-  文件系统或墙钟。
+## 模块所有权
 
-## Mohist Agent 启动
+- Workflow 拥有 TaskRun 和 Workflow Action 契约，不解释 Session transcript。
+- Agent 拥有 Mohist Agent 与 AgentJob，不解释 Session activity。
+- Session 拥有 AgentSession 身份、source、workDir、activity、current binding、transcript、
+  context 与 usage。
+- Runner 执行已经解析的工作，创建或恢复 Runtime Session，并报告物理事实。
+- Runtime adapter 隐藏 SDK / protocol、缓存、进程、文件、事件核对和错误分类。
+- Web 和 CLI 只消费 Server 给出的 activity、current binding 与 transcript，不自行从
+  历史结果推导 Session 状态。
 
-Agent context 负责组装启动请求：
+Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决定 current binding
+已经改变，也不能因为 Runtime 进程退出就关闭 AgentSession。
 
-1. 按 ID 或名称解析 active Mohist Agent；
-2. 把 Agent ID、instructions、config 与 launch prompt 固定到 AgentJob input；
-3. 创建并打开 Agent launch 来源的 AgentSession；
-4. 把 AgentJob dispatch 给合适的 Runner；
-5. Runtime executor 只处理已经组装好的回合输入与 Session 绑定。
+## 测试边界
 
-Runtime adapter 不再查询 Agent 定义。这样并发修改 Agent 不会改变执行中的输入字节，
-Runtime 模块也不依赖 Agent context。
+默认测试不访问真实 Runtime、网络、进程、文件系统 Session 或墙钟。至少覆盖：
 
-## 模块边界
+- 同一 AgentSession 跨 task、retry、Follow-up 与 Runner 重启复用 current binding；
+- `session.input` 和 Runtime 事实按 AgentSession 顺序持久化，不要求额外的执行身份；
+- binding 替换与 `session.context_reset` 原子持久化，且事件不包含物理 Session 沿革；
+- 一次执行完成、失败或取消后 activity 回到 `idle`，没有 Session 终态；
+- 停止或输入受理不确定时进入 `unknown`，不会自动重放；
+- Reset、Runtime 变化和 confirmed missing 在 `idle` 时原子替换 current binding；
+- stale expected binding 与旧 Runtime Session 事件被拒绝；
+- binding 替换不创建新 AgentSession、不保存物理 Session history，也不复制物理会话数据；
+- TaskRun / AgentJob 结果与 AgentSession activity 互不覆盖。
 
-- Workflow 拥有 TaskRun 与 `uses` / `with` Action 契约。
-- Agent 拥有 Mohist Agent、AgentJob、启动组装、AgentJob execution request 与报告校验。
-- Session 拥有 AgentSession 身份、metadata、transcript、usage 与 lineage。
-- Runner context 只记录执行资源是否在线及其容量，不拥有 Agent 或 Session 语义。
-- Runner 进程执行 dispatch 并适配外部 Runtime，不拥有业务实体。
+## 实装差距
 
-Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范化事实。它不能
-暴露 SDK 类型、解析 Agent 定义、决定 Workflow transition 或拥有 job status。
+本文以上内容是目标设计。当前实现仍写入或消费 `session.closed`、
+`session.followup_completed` 与 `session.followup_failed`，并有消费者从历史结束事实推导
+整个 AgentSession 的状态和命令能力。当前实现还持久化并展示物理 Session 历史。
 
-## 不变量
+#484 负责删除这些 Session 终态语义，改为扁平 transcript 与独立 activity，并移除
+单次执行子资源、物理 Session 历史复制和 Runner 协议版本门。数据库结构可以迁移，
+但不迁移物理会话内容。实施不保留
+`session.closed` 别名，也不把旧事件转换成另一套有身份的会话子资源。
 
-- Action 不是 Agent。
-- AgentSession 不是 Agent，也不是工作所有者。
-- Turn 结果不终结 AgentSession；工作结果、Turn 结果、Session activity 与 Runtime
-  资源生命周期是四个独立维度。
-- 所有 Turn 范围内的 transcript 事实都携带稳定 `turnId`，不得跨 Turn 解释局部顺序。
-- Inline Agent 没有 Agent ID 或可复用定义。
-- Mohist Agent 有稳定身份，可以拥有多次执行和多个 Session。
-- 一次 dispatch 的工作所有者只能是 TaskRun 或 AgentJob 之一。
-- 每个 AgentSession 只有一个不可变来源。
-- 替换 Runtime Session 不改变 AgentSession 来源或逻辑身份。
-- 明确缺失的 Runtime Session 只可在新 Turn 输入提交前，以 expected binding 原子替换。
-- Runtime Session 缺失恢复不重放 Prompt，不消耗 Workflow recovery budget。
-- `mohist/opencode` 不暴露 OpenCode 原生 agent 选择。
-- AgentJob 执行不依赖 Workflow Action 名称或 Action Input 契约。
-- 共享 `OpenCodeRuntime` 不制造 Workflow -> Agent context 依赖。
-
-## Status
-
-本文以上内容是目标设计。当前实现仍写入或消费 `session.input`、`session.closed`、
-`session.followup_completed` 与 `session.followup_failed`，并有消费者从历史 close 事实
-推导整个 AgentSession 的状态和命令能力；部分 transcript part 的局部序列也尚未以
-`turnId` 分区。对应实施 issue 待从本 spec 创建。
-
-Runtime Session 缺失恢复也尚未完整实现。当前部分 Runtime 路径仍把确定 missing 直接
-返回给工作所有者，并要求用户 Reset；lineage 尚未记录 replacement reason。对应实施
-issue 待从本 spec 创建。
-
-迁移不保留 `session.closed` 别名或新旧事件双写。实施必须一次处理当前读写路径、已持久化
-transcript 与待投递 outbox，使同一 AgentSession 不会同时存在两套相互冲突的终态语义。
+Runtime Session 确认缺失后的自动创建与 expected-binding replacement 尚未覆盖全部入口；
+当前部分路径仍要求用户 Reset。该差距按本文的最小 current-binding 模型实施。

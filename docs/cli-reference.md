@@ -200,7 +200,7 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - 后续读取、follow-up、compact、reset 和 cancel 都使用稳定的 Session ID。
 
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
-`session cancel` 请求中断当前 Runtime 回合；它不表示取消或重写 AgentJob 生命周期。
+`session cancel` 请求中断当前 Runtime 执行；它不表示取消或重写 AgentJob 生命周期。
 
 ## Activity、Event 与本机 Service
 

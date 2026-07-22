@@ -70,7 +70,7 @@ expect:
   files:                    # 这些文件必须存在
     - path: <path>
   markers:                  # 内容必须命中 oneOf 之一，否则任务失败
-    - path: <path>          # 或特殊值 _output：检查 Agent 本回合的最终答复文本
+    - path: <path>          # 或特殊值 _output：检查 Agent 本次执行的最终答复文本
       oneOf:
         - <promise>PASS</promise>
         - <promise>FAIL</promise>

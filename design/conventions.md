@@ -13,7 +13,6 @@
 | WorkflowRun | `WorkflowRunId` | `wr_123` |
 | Runner | `RunnerId` | `runner_123` |
 | AgentSession | `SessionId` | `session_123` |
-| Turn | (`SessionId`, `TurnId`) | (`session_123`, `turn_123`) |
 | Event | `EventId` | `evt_123` |
 
 - Issue 与 Epic 的 number 是 Project 内永久身份的一部分，不是展示别名；不再为它们
@@ -61,7 +60,6 @@ Leading slash. Plural nouns. URL path segments. No trailing slash.
 | WorkflowBacklog | — | projectId | /projects/{projectId}/workflow-backlog |
 | StageLock | — | internal id | /projects/{projectId}/workflow-stage-locks/{resource} |
 | AgentSession | sessionId | sessionId | /projects/{projectId}/agent-sessions/{sessionId} |
-| Turn | sessionId + turnId | — | — |
 | Event | eventId | — | /events/{eventId} |
 
 ## AgentSession runtime identity
@@ -83,20 +81,20 @@ Concept ownership and origin rules are defined in
   `coderSessionId` as aliases.
 - `workflowRunId + sessionName` and `agentId` are origin/lookup references, not AgentSession
   identity. Workflow- and Agent-scoped routes resolve to the canonical `sessionId` resource.
-- `turnId` is stable and unique within its `sessionId`. Turn is a nested transcript entity, not an
-  independently routed aggregate or HTTP resource.
 - `runtime` names the execution backend. Do not add a second `kind` field.
-- Current runtime binding also retains `runnerId` and immutable `workDir` so Session commands
-  survive Runner process restart. A Workflow adapter rejects a request whose authoritative
-  workspace differs from that immutable binding; it never silently reuses the old directory.
+- Current runtime binding retains `runnerId`; immutable `workDir` belongs to AgentSession. Together
+  they let Session commands survive Runner process restart. A Workflow adapter rejects a request
+  whose authoritative workspace differs from the AgentSession workDir; it never silently reuses
+  another directory.
 - Binding replacement compares the complete expected binding: `runnerId`, `runtime`,
-  `runtimeSessionId`, and `workDir`. Confirmed-missing recovery stays on the bound Runner and only
-  replaces `runtimeSessionId`; Runner handoff is not missing recovery.
-- Runtime Session lineage records `runtime`, `runtimeSessionId`, `boundAt`, and `reason`. `reason`
-  is one of `initial`, `reset`, `runtime-change`, or `missing-recovery`; it is not free text.
+  and `runtimeSessionId`, while separately requiring the AgentSession workDir. Confirmed-missing
+  recovery stays on the bound Runner and only replaces `runtimeSessionId`; Runner handoff is not
+  missing recovery.
+- AgentSession stores only the current binding. It does not expose or persist a physical Session
+  history model.
 - Compact does not change `runtimeSessionId`. Reset, runtime change, or confirmed missing recovery
-  appends a new lineage entry while preserving `sessionId`. A work directory change requires a new
-  logical Session identity.
+  replaces the current binding while preserving `sessionId`. A work directory change requires a
+  new logical Session identity.
 
 ## WorkflowRun metadata
 

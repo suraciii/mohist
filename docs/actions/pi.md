@@ -41,7 +41,7 @@ stages:
 `agent` 变量的合并规则（Issue 覆盖 Project，Run 覆盖 Issue）与其他 Workflow 变量
 一致，见 [`mohist/opencode`](opencode.md) 的基本用法。同一个 `agent` 对象可以绑定给
 任何一个后端 Action：对 `mohist/pi` 有效的键是 `model` 和 `variant`；对象中其余的键
-（例如为 Mohist Agent 准备的 `runtime`）会被忽略并记入诊断，不会导致回合失败。
+（例如为 Mohist Agent 准备的 `runtime`）会被忽略并记入诊断，不会导致执行失败。
 
 `${{ vars.agent }}` 占据整个 `options` 值时，展开结果仍是一个对象。没有显式绑定
 `options` 时，使用当前 Pi Session 的模型选择，首次执行则使用 Pi 默认值。
@@ -55,7 +55,7 @@ stages:
 | `options` | 否 | — | 本次选择 Pi 模型的对象 |
 | `options.model` | 否 | — | Pi 模型，使用 `provider/model` 标识 |
 | `options.variant` | 否 | — | 该模型的推理档位（Pi thinking level），如 `low`、`medium`、`high` |
-| `timeout` | 否 | `3600000` | 回合期限，以毫秒为单位；到达后中断当前回合 |
+| `timeout` | 否 | `3600000` | 本次执行的期限，以毫秒为单位；到达后中断当前执行 |
 
 工具、技能、系统提示词和自动压缩继续使用 Pi 自己的配置，不复制成 Mohist 字段。
 Action Input 不需要 `agent`、`kind` 或 `type`；使用哪个执行后端已经由 `uses` 决定。
@@ -67,39 +67,41 @@ Action Input 展开后的值是本次执行的唯一配置事实。`mohist/pi` �
 
 `session` 标识 Workflow 来源的逻辑 AgentSession，语义与 `mohist/opencode` 一致：
 同一 WorkflowRun 中使用相同名称的 task 解析到同一个逻辑 AgentSession；只要当前物理
-绑定不变，它们共享对话上下文。Runtime 切换仍保留逻辑身份和 lineage，但新物理 Session
-从空上下文开始，不迁移旧 Runtime 对话。不同名称相互隔离；省略时使用 Work ID。
+绑定不变，它们共享对话上下文。Runtime 切换仍保留逻辑身份，但新物理 Session 从空上下文
+开始，不迁移旧 Runtime 对话，也不建立物理 Session 历史。不同名称相互隔离；省略时
+使用 Work ID。
 
 ### 物理 Session 复用不变量
 
 同一 WorkflowRun 中，只要 task 指定同一个 `session` 名称，Mohist 就必须继续使用该
 AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重试，以及
 `options.model` 或 `options.variant` 变化都不能替换这个物理 Session；模型选择只影响
-本次回合，并在原 Session 上生效。
+本次执行，并在原 Session 上生效。
 
 | 变化 | 物理 Pi Session |
 |---|---|
 | 后续 task 或重试继续使用同名 `session` | 保持不变 |
 | `options.model` 或 `options.variant` 变化 | 保持不变 |
 | Compact | 保持不变 |
-| Reset | 建立新的空 Session，并记录会话沿革 |
-| 开始新 Turn 前明确确认当前 Session 文件已不存在 | 自动建立新的空 Session，并把缺失恢复记录到会话沿革 |
+| Reset | 建立新的空 Session；AgentSession 保留已有会话内容 |
+| 提交新的独立输入前明确确认当前 Session 文件已不存在 | 自动建立新的空 Session |
 | 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
-| 执行后端变化 | 建立新物理 Session，并记录会话沿革 |
+| 执行后端变化 | 建立新的空物理 Session |
 
 自动恢复只处理负责当前绑定的 Runner 上，Pi 明确确认旧 Session 文件已不存在、且本次
 输入尚未被接受的情况。请求落到其它 Runner、Session 文件损坏、执行后端暂时不可用、
 响应无法判断，或 Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。
-新 Session 没有旧上下文，替换原因会显示在同一 AgentSession 的会话沿革中。不同
-`session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而合并。
+新 Session 没有旧上下文；同一 AgentSession 继续显示已有消息，并以“上下文已重置”说明
+后续从空上下文开始，不维护物理 Session 历史。不同 `session` 名称仍相互隔离，不能
+因为 prompt、模型或配置相同而合并。
 
 如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
-物理 Pi Session 中继续这个收尾回合。这个收尾不会替换会话，也不要求用户先 Reset；
+物理 Pi Session 中继续这次收尾执行。这个收尾不会替换会话，也不要求用户先 Reset；
 完成后，后续使用同名 `session` 的 task 继续沿用原对话上下文。
 
-同一 AgentSession 同时只执行一个由 Workflow 发起的回合。不同 AgentSession 可以并行。
-用户在 Session 页面提交的 follow-up 是例外：当前回合仍在执行时，它会进入当前回合；
-Session 空闲时，它会开始下一回合。
+同一 AgentSession 同时只执行一个由 Workflow 发起的输入。不同 AgentSession 可以并行。
+用户在 Session 页面提交的 follow-up 是例外：Session 正在执行时，它会加入当前执行；
+Session 空闲时，它会开始新的执行。
 
 Session 用量分别记录 input、output、cache read、cache write 与 thought tokens（Pi 提供时）；
 cache write 不会并入 cache read，也不会因事件重投而重复累加。
@@ -112,39 +114,39 @@ cache write 不会并入 cache read，也不会因事件重投而重复累加。
 |---|---|
 | Follow-up | 把用户文本交给当前 Pi Session；确认 Pi 已接收后返回 |
 | Compact | 使用 Pi 原生压缩当前 Session；Runtime Session 身份不变 |
-| Reset | 在 Session 空闲时建立一个没有旧上下文的新 Pi Session；旧 Session 保留在会话沿革中 |
+| Reset | 在 Session 空闲时建立一个没有旧上下文的新 Pi Session；AgentSession 保留已有会话内容 |
 
 Compact 是用户在 Session 中发起的操作，不是 Workflow Action。Mohist 不生成一段假的
 摘要来模拟压缩，也不会在 Pi 压缩失败时静默降级。
 
 Runner 重启后，Mohist 仍使用 AgentSession 保存的 Pi Session 绑定继续这些操作。如果
-开始新 Turn 前确认对应的 Session 文件已不存在，Workflow task、AgentJob 或空闲
-Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中回合的操作不会这样
+提交新的独立输入前确认对应的 Session 文件已不存在，Workflow task、AgentJob 或空闲
+Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中操作的命令不会这样
 恢复；Reset 即使在旧 Session 已不存在时仍可建立新的空 Session。
 
 ## 完成与失败
 
-Pi 回合成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和 recovery
-规则判断后续流程。回合失败、取消或超时时，原始错误就是 task 结果，不再检查文件或
+Pi 执行成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和 recovery
+规则判断后续流程。执行失败、取消或超时时，原始错误就是 task 结果，不再检查文件或
 marker。这些是 Workflow 的 task 完成要求，不是 `mohist/pi` 的 Action Input。
 Action Output 与 `mohist/opencode` 相同：只在命中 promise marker 时返回
 `{ "promise": "..." }`，否则为 `null`。
 
 Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许
-的操作直接执行。每次 Workflow Prompt 回合的期限默认固定为 60 分钟，可通过
+的操作直接执行。每次 Workflow Prompt 执行的期限默认固定为 60 分钟，可通过
 Action Input 的 `timeout` 字段覆盖，从向 Pi 提交 Prompt 前开始计时；绑定和审计
-输入准备不占用该预算，收尾 Prompt 是新的回合并获得新的 60 分钟。期限到达会中断
-当前回合。提交结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。Runner
+输入准备不占用该预算，收尾 Prompt 是新的执行并获得新的 60 分钟。期限到达会中断
+当前执行。提交结果不确定时不会自动重放 Prompt，避免同一任务被执行两次。Runner
 主动触发的执行期限会明确报告 timeout；中断 Pi 只是收尾，不能用缺少 marker 覆盖
 timeout，也不会替换当前 Session 绑定或自动 Reset。
 
-provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 Pi 回合并让
+provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 Pi 执行并让
 本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理 Pi Session 的绑定
 保持不变；Session 回到空闲后，可以选择其他模型继续，无需 Reset。Reset 只表达用户
-明确要求清空上下文；物理 Session 缺失由下一个安全的新 Turn 自动恢复。
+明确要求清空上下文；物理 Session 缺失由下一条安全的独立输入自动恢复。
 
-如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的回合
-显示为已经安全停止。
+如果 Mohist 无法确认当前执行已经停止，则明确报告中断未确认；不会把仍可能执行的
+Session 显示为已经安全空闲。
 
 ## Pi 责任边界
 
@@ -161,7 +163,7 @@ Pi 执行工具时不逐项征求批准，也不提供沙箱；工具以 Runner 
 AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型（与 OpenCode 的行为
 一致）。需要自定义 Pi 行为时，在 Runner 用户的全局 Pi 配置中进行。
 
-工具的超时和重试由 Pi 判断。Mohist 只负责整个回合的期限和中断确认，不为单个工具
+工具的超时和重试由 Pi 判断。Mohist 只负责整个执行的期限和中断确认，不为单个工具
 建立另一套超时策略。
 
 ## 错误码
@@ -179,14 +181,14 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
 | `runtime-session-missing` | Pi Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
 | `unavailable-runtime` | Pi 报告不可用 |
-| `turn-failed` | 回合执行失败（含 provider 额度、余额或计费耗尽） |
+| `execution-failed` | 执行失败（含 provider 额度、余额或计费耗尽） |
 
 ## 实装差距
 
 Workflow 与 AgentJob 两条路径都已实装：Workflow 的 `uses: mohist/pi` 和选择 Pi 的 Mohist
-Agent 都可执行回合，复用 AgentSession，并在现有 Session 页面展示 transcript、工具、
-状态、压缩、模型、用量、成本与 lineage。Agent 和 issue 的执行后端选择、按 Runtime 提供
+Agent 都可执行输入，复用 AgentSession，并在现有 Session 页面展示 transcript、工具、
+状态、压缩、模型、用量和成本。Agent 和 issue 的执行后端选择、按 Runtime 提供
 模型目录与 Web 选择器也已落地。
 
-缺失的 Pi Session 文件目前仍会让部分新 Turn 失败，自动重建与重新绑定尚未落地；对应
+缺失的 Pi Session 文件目前仍会让部分新输入失败，自动重建与重新绑定尚未落地；对应
 实施 issue 待从本 spec 创建。

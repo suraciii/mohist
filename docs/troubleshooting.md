@@ -35,7 +35,7 @@ mo issue show <number>
 | AI 自检失败（check 没过） | `mo issue retry <n>` | 重新跑当前阶段 |
 | Runner 崩了且自动恢复失败 | `mo issue retry <n>` | Runner 恢复后重试失败阶段 |
 | 想完全重做当前阶段 | `mo issue rerun <n>` | 丢弃当前产物重跑 |
-| 当前阶段彻底卡死 | `mo issue force-stop <n>` | 终止当前 Inline Agent 回合，再 retry/resume |
+| 当前阶段彻底卡死 | `mo issue force-stop <n>` | 终止当前 Inline Agent 执行，再 retry/resume |
 | 不想继续了 | `mo issue stop <n>` | 终止运行（保留状态） |
 | Workflow 已停止，工作已通过其它方式交付 | `mo issue done <n>` | 进入 Done，保留原 workflow 历史 |
 | 完全放弃 | `mo issue close <n>` | 进 cancelled 终态 |

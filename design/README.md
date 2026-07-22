@@ -104,7 +104,7 @@
 
 ## Agent 与执行
 
-- [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession、Turn 与 Runtime Session 的分层、生命周期所有权和 transcript DSL；Turn DSL 为 **WIP**。
+- [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层、生命周期所有权、activity 和 transcript DSL。
 - [event-routing.md](event-routing.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 
 ## Runtime 集成
