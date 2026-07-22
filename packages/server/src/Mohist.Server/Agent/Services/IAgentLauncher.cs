@@ -86,6 +86,7 @@ public interface IAgentLauncher
         RoutedExecutionContext executionContext,
         CloudEvent triggeringEvent,
         string ruleId,
+        string? runtimeOverride = null,
         CancellationToken ct = default);
 }
 

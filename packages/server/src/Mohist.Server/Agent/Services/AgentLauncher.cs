@@ -155,6 +155,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         RoutedExecutionContext executionContext,
         CloudEvent triggeringEvent,
         string ruleId,
+        string? runtimeOverride = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -176,7 +177,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
 
         var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, launchOverride: null);
+        var resolvedRuntime = ResolveRuntime(agent.AgentConfig, runtimeOverride);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;

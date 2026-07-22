@@ -242,3 +242,10 @@ Test results:
 - Issue workflow variables already provide the durable surface for issue and stage backend selection: `vars.agent.runtime` and `stages.<stage>.vars.agent.runtime`. The issue selector queries the default catalog and each fixed stage catalog with its selected runtime; Pi does not use the OpenCode default model fallback.
 - Create Issue sends the selected backend in `agentConfig.runtime` while retaining the existing top-level `model`/`modelVariant` request fields.
 - Verification: focused Web coverage 85 tests; full `npm run typecheck -w packages/web`; full `npm run test:run -w packages/web` passed with 381 files / 5109 tests.
+
+## Review fixes
+
+- Routed Mohist Agent launches now read the issue's effective root `AgentConfig.runtime` as a launch override after lineage resolution, and snapshot the resolved value into the routed plan for both executable and preflight paths.
+- Blank JSON runtime strings are rejected by `AgentConfigSchema` instead of defaulting to OpenCode.
+- Pi AgentJob diagnostic failures preserve `kind: "pi"` in terminal output.
+- Verification: runner typecheck and focused Pi AgentJob tests passed; server solution build, focused schema tests, and the focused routed-override spec passed. The full server spec command was attempted but exceeded its command timeout before reporting.
