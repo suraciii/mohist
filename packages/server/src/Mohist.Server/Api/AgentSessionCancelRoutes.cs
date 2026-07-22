@@ -147,15 +147,17 @@ public static class AgentSessionCancelRoutes
                 "runner_no_response",
                 new { sessionId });
 
-        return ApiResults.Ok(new { state = reply.State });
+        return reply.InterruptUnconfirmed == true
+            ? ApiResults.Ok(new { state = reply.State, interruptUnconfirmed = true })
+            : ApiResults.Ok(new { state = reply.State });
     }
 }
 
 /// <summary>
 /// Reply shape for the server→runner <c>CancelAgentSession</c> SignalR
-/// invocation (issue-129 T-005 / design D6). The runner reports the
-/// session state it actually observed so the API can never pretend
-/// success. Recognised values:
+/// invocation (issue-129 T-005 / design D6 + issue-451 T-004 / design D6).
+/// The runner reports the session state it actually observed so the API
+/// can never pretend success. Recognised values:
 /// <list type="bullet">
 ///   <item><c>cancelled</c> — the runner sent a cancel request to the
 ///     current runtime session.</item>
@@ -166,5 +168,13 @@ public static class AgentSessionCancelRoutes
 ///     request; the API surfaces the same value so the caller can react
 ///     without polling.</item>
 /// </list>
+/// <para>
+/// <c>interruptUnconfirmed</c> is the additive honesty flag the API
+/// needs to surface a stop the runner could not confirm (issue-451
+/// T-004 / design D6). OpenCode replies never set the flag because the
+/// OpenCode abort is authoritative; Pi replies set it exactly when the
+/// session's stop state could not be observed. Absent on a confirmed
+/// cancel so existing callers see byte-identical responses.
+/// </para>
 /// </summary>
-public sealed record AgentSessionCancelReply(string? State);
+public sealed record AgentSessionCancelReply(string? State, bool? InterruptUnconfirmed = null);

@@ -60,6 +60,32 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         }
     }
 
+    [Fact]
+    public async Task Cancel_StopUnconfirmed_MirrorsInterruptUnconfirmedToHttpResponse()
+    {
+        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-unconfirmed");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("CancelAgentSession", new AgentSessionCancelReply("cancelled", true));
+        tracker.Register(_runnerId, "conn-gen-cancel-unconfirmed");
+        try
+        {
+            using var response = await PostGenericCancelAsync(project.Id, sessionId);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal("cancelled", data.GetProperty("state").GetString());
+            Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
     [Theory]
     [InlineData("workflow")]
     [InlineData("agent-launch")]

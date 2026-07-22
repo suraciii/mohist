@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-22T02:19:52.734Z",
+  "scenario": "Pi SDK surface for Follow-up/Compact/Reset/Cancel channels",
+  "sdk": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "0.80.10"
+  },
+  "environment": {
+    "node": "v22.23.1",
+    "cwd": "/tmp/pi-sdk-smoke-PzBou3/work",
+    "agentDir": "/tmp/pi-sdk-smoke-PzBou3/agent",
+    "catalogSize": 78
+  },
+  "surface": {
+    "compact": {
+      "present": true,
+      "arity": 1,
+      "signatureFromDts": "compact(customInstructions?: string): Promise<CompactionResult>;"
+    },
+    "prompt": {
+      "present": true,
+      "arity": 2,
+      "signatureFromDts": "prompt(text: string, options?: PromptOptions): Promise<void>;",
+      "acceptsPreflightResult": true,
+      "preflightResultSignatureFromDts": "preflightResult?: (success: boolean) => void;"
+    },
+    "abort": {
+      "present": true,
+      "arity": 0,
+      "signatureFromDts": "abort(): Promise<void>;"
+    },
+    "isStreaming": {
+      "hasGetter": true,
+      "currentValue": false,
+      "signatureFromDts": "get isStreaming(): boolean;"
+    },
+    "sessionFile": "absolute-path",
+    "sessionId": "019f879f-4a3c-7cf6-a73b-65a2764d7643",
+    "followUp": {
+      "present": true,
+      "arity": 2
+    },
+    "steer": {
+      "present": true,
+      "arity": 2
+    },
+    "setModel": {
+      "present": true
+    },
+    "setThinkingLevel": {
+      "present": true
+    },
+    "subscribe": {
+      "present": true
+    },
+    "dispose": {
+      "present": true
+    }
+  },
+  "preflightProbe": {
+    "hookInvoked": true,
+    "hookArgShape": {
+      "success": true
+    },
+    "threw": null,
+    "turnStarted": true,
+    "verdict": "PASS — preflight hook invoked with a boolean (acceptance path; run observed and aborted within the 1500 ms bound)"
+  },
+  "promptOptionsShape": {
+    "expandPromptTemplates": "?: boolean",
+    "images": "?: ImageContent[]",
+    "streamingBehavior": "?: 'steer' | 'followUp'",
+    "source": "?: InputSource",
+    "preflightResult": "?: (success: boolean) => void"
+  },
+  "assumptions": [
+    "No provider auth, no model call, no network I/O performed — the probe runs against a session constructed with ModelRuntime.create() in an isolated agentDir.",
+    "Stop confirmation is observed via session.isStreaming (no separate stop operation); the verifier corroborates from the AgentSession declaration (agent-session.d.ts: `get isStreaming(): boolean`).",
+    "compact() signature with optional customInstructions is taken from the published agent-session.d.ts (lib types)."
+  ],
+  "notes": [
+    "SDK version pinned via packages/runner/package.json dependency string; consumed transitively through the workspace root lockfile.",
+    "Probe completes in isolated temp dir /tmp/pi-sdk-smoke-PzBou3; no settings, credentials, or session files outside it."
+  ],
+  "durationMs": 1887
+}

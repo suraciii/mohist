@@ -198,6 +198,7 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
         projectId: "proj-1",
         workflowRunId: "wr-1",
         sessionName: "work-1",
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
       },
       text: "tag me",
     })
@@ -218,7 +219,16 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
     buildClient({ resolver: resolver as never, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
-    emitFollowup(lastBuilder(), { workflowRunId: "wr-legacy", sessionName: "work-legacy", text: "legacy ok" })
+    emitFollowup(lastBuilder(), {
+      target: {
+        kind: "workflow",
+        projectId: "proj-legacy",
+        workflowRunId: "wr-legacy",
+        sessionName: "work-legacy",
+        binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" },
+      },
+      text: "legacy ok",
+    })
     await flush()
 
     expect(recording.beforeExecutionCalls).toHaveLength(1)
