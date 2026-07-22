@@ -153,9 +153,9 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。具体执行方式由当�
 - `mohist/opencode`：直接通过 OpenCode 执行一个回合；Workflow 直接使用时形成 Inline Agent。
 - `mohist/pi`：直接通过 Pi 执行一个回合，和 `mohist/opencode` 处于同一层。
 
-`mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装。Mohist Agent 当前固定使用
-OpenCode，按 Agent 配置选择 Pi 的 AgentJob 路径仍由对应 issue 推进。`mohist/agent` 不在
-本次范围内；它保留给后续 Mohist Agent 专项设计，本篇不定义它的输入、复用或等待语义。
+`mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装；Mohist Agent 也可以按配置
+选择 OpenCode 或 Pi。`mohist/agent` 不在本次范围内；它保留给后续 Mohist Agent 专项
+设计，本篇不定义它的输入、复用或等待语义。
 
 Mohist Agent 的配置中包含执行后端选择（OpenCode 或 Pi）；启动时后端随 Agent snapshot
 固定到 AgentJob，执行中编辑 Agent 不改变已经开始的执行。

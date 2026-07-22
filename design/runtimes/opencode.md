@@ -10,9 +10,9 @@ ACP adapter 直接移除，不保留 fallback。现有 AgentJob 执行也必须�
 由 Agent 拥有的 executor 使用同一个 `OpenCodeRuntime` 能力，而不是依赖 Workflow Action
 契约。本设计不定义 `mohist/agent` Action，也不重新设计 Mohist Agent 产品。
 
-当前只实现 OpenCode Runtime。未来可以增加 Pi Action，但本次不会为它预先引入通用
-`AgentRuntime` 接口。稳定边界是 Workflow Action 契约、AgentJob 执行契约
-和 Session 命令，不是假想的跨 Runtime SDK wrapper。
+OpenCode 与 Pi 各自实现独立的 Runtime 深模块，不引入通用 `AgentRuntime` 接口。稳定
+边界是 Workflow Action 契约、AgentJob 执行契约和 Session 命令，不是假想的跨 Runtime
+SDK wrapper。
 
 ## Action 输入输出契约
 

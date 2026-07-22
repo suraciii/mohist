@@ -415,12 +415,10 @@ Pi 是 0.x 快速演进的依赖（约每周一个 minor），SDK 的 breaking c
 
 ## 实装差距
 
-直接 Workflow 路径已经实装：`PiRuntime`、`mohist/pi` Action、runtime-aware Workflow
-Session binding，以及现有 Session transcript/tool/status/compaction/model/usage/cost/
-lineage 展示均已落地。以下设计触及面仍是实现差距：
+Workflow 与 AgentJob 两条路径均已实装：`PiRuntime`、`mohist/pi` Action、AgentJob runtime
+选择、runtime-aware Session binding、模型目录 API 与 Web 选择器，以及现有 Session
+transcript/tool/status/compaction/model/usage/cost/lineage 展示均已落地。
 
-- AgentJob executor 与 Agent 配置中的 runtime 选择仍未接入，Mohist Agent 固定使用 OpenCode。
-- runtime-aware model catalog API 与 Web 模型选择 UI 仍未接入。
-- 缺失的 Pi session 文件目前仍直接形成 `missing-session`；新 Turn 尚未执行
-  `definitely-missing → create → expected binding replacement`。对应实施 issue 待从本
-  spec 创建。
+缺失的 Pi session 文件目前仍直接形成 `missing-session`；新 Turn 尚未执行
+`definitely-missing → create → expected binding replacement`。对应实施 issue 待从本
+spec 创建。
