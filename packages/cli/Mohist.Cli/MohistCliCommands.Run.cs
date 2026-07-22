@@ -55,6 +55,7 @@ internal static partial class RunCommands
         // partial focused on one concern (control verbs vs. reads vs.
         // feedback — see design D1).
         RegisterReads(run, api);
+        RegisterFeedback(run, api);
 
         return run;
     }
