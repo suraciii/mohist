@@ -43,7 +43,7 @@ Each status snapshot SHALL expose the observability storage budget, current usag
 
 ### Requirement: Status exposes a bounded anomalous-route summary
 
-Status SHALL expose at most 10 stable-route summaries from the most recent five minutes. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. Entries SHALL be ordered so routes with greater work amplification and latency are presented first, and neither route identity nor response size SHALL grow with raw URL or request cardinality.
+Status SHALL expose at most 10 stable-route summaries from the five-minute local window at one-second resolution. The single boundary bucket MAY contribute for less than one additional second so a request is not discarded early. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. Entries SHALL be ordered so routes with greater work amplification and latency are presented first, and neither route identity nor response size SHALL grow with raw URL or request cardinality.
 
 #### Scenario: Recent routes have different amplification
 
@@ -51,9 +51,9 @@ Status SHALL expose at most 10 stable-route summaries from the most recent five 
 - **THEN** status SHALL return no more than 10 stable-route entries ordered by amplification and latency
 - **AND** every entry SHALL expose request count, latency, database calls per request and downstream calls per request
 
-#### Scenario: No recent route observations exist
+#### Scenario: No route observations exist in the retained window
 
-- **WHEN** no route observation falls within the current five-minute window
+- **WHEN** no route observation falls within the current five-minute window or its permitted one-second boundary bucket
 - **THEN** status SHALL return an empty route summary rather than historical database-derived entries
 
 ### Requirement: Status cost is independent of telemetry history

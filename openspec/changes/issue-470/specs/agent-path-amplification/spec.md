@@ -4,7 +4,7 @@
 
 #### Scenario: Agent status considers more candidates than it returns
 
-- **WHEN** an agent status request considers multiple candidate runner or active-agent records but only some contribute to the returned status
+- **WHEN** an agent status request considers multiple candidate Session records for active-agent classification but only some contribute to the returned active-agent list
 - **THEN** its amplification summary SHALL report the candidate and actually processed counts for that request
 - **AND** SHALL report transcript records read and the database and downstream calls made while producing the response
 
@@ -24,21 +24,21 @@
 - **THEN** its amplification summary SHALL report candidate sessions, processed sessions, transcript records, database calls and downstream calls for that request
 - **AND** the counts SHALL use one common request scope so their ratios are directly comparable
 
-#### Scenario: The activity limit narrows processing
+#### Scenario: Activity reconciliation narrows processing
 
-- **WHEN** an activity request applies its response limit to a larger candidate set
+- **WHEN** an activity request loads a bounded candidate set and reconciliation removes candidates that must not become cards
 - **THEN** the amplification summary SHALL distinguish the candidate count from the actually processed count
 - **AND** the existing response limit SHALL continue to bound returned activity cards
 
-### Requirement: Agent amplification cost follows current relevant work
+### Requirement: Agent amplification reporting remains bounded
 
-The agent status and activity paths SHALL keep their response and diagnostic memory bounded. Their database, transcript and downstream work SHALL depend on current relevant candidates and the existing response bound, not on unrelated historical projects, sessions, transcripts or workflows. Cost verification SHALL compare operation counts with and without unrelated history; it MUST NOT use elapsed wall-clock time as the assertion.
+The amplification summary added to agent status and activity SHALL have a fixed shape and SHALL use only fixed-size counters, regardless of the amount of database, transcript or downstream work observed. Cost verification SHALL assert operation counts rather than elapsed wall-clock time so later changes can prove whether historical projects, sessions, transcripts or workflows amplify these paths.
 
-#### Scenario: Unrelated history increases
+#### Scenario: Unrelated history amplifies current work
 
 - **WHEN** the same current agent status or activity request is executed against datasets with small and large amounts of unrelated historical data
-- **THEN** the number of records inspected and downstream calls SHALL remain within the same explicit bound
-- **AND** the amplification summary and response size SHALL remain bounded
+- **THEN** each response SHALL report the operation counts actually observed for its own request
+- **AND** the amplification summary itself SHALL remain fixed-size even when those counts increase
 
 #### Scenario: Activity reaches its maximum result bound
 

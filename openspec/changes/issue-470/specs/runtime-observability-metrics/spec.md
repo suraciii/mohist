@@ -37,7 +37,7 @@ Metric instrument names and the exact label-key set accepted by each instrument 
 
 ### Requirement: Local route diagnostics are bounded and ephemeral
 
-The local runtime summary SHALL retain only observations from the most recent five minutes and SHALL be bounded independently of request volume, route count and telemetry history. It SHALL produce at most 10 anomalous route entries, each containing the stable route name, request count, latency information, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
+The local runtime summary SHALL retain observations from a five-minute window at one-second resolution and SHALL be bounded independently of request volume, route count and telemetry history. The single boundary bucket MAY retain observations for less than one additional second so an observation is never discarded before it is five minutes old. The summary SHALL produce at most 10 anomalous route entries, each containing the stable route name, request count, latency information, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
 
 #### Scenario: More than ten routes are active
 
@@ -47,8 +47,8 @@ The local runtime summary SHALL retain only observations from the most recent fi
 
 #### Scenario: Observations age out
 
-- **WHEN** injected time advances beyond five minutes without another observation for a route
-- **THEN** observations older than the five-minute window SHALL no longer contribute to that route's diagnostic values
+- **WHEN** injected time advances beyond five minutes plus the one-second boundary resolution without another observation for a route
+- **THEN** the expired observations SHALL no longer contribute to that route's diagnostic values
 - **AND** verification SHALL NOT require waiting for wall-clock time
 
 #### Scenario: The Server restarts

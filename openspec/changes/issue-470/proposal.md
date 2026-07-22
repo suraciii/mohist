@@ -5,7 +5,7 @@ Mohist can currently report that its collector is online and count stored traces
 ## What Changes
 
 - Add low-cardinality runtime metrics for stable HTTP routes, database and downstream calls, process resource pressure, telemetry receipt and persistence outcomes, and observability storage usage and growth; project, issue, workflow, session, and raw-URL identities are excluded from metric labels.
-- Maintain a fixed five-minute in-memory diagnostic window with at most 10 anomalous stable-route summaries, ranked by workload amplification and latency; the summary resets on Server restart and does not become business data.
+- Maintain a bounded five-minute in-memory diagnostic window at one-second resolution, with at most 10 anomalous stable-route summaries ranked by workload amplification and latency; the summary resets on Server restart and does not become business data.
 - Expand the OTel status API and `mo otel status` to report exactly one of `off`, `healthy`, or `degraded`, together with storage usage and budget, growth, received, saved, rejected and dropped telemetry, the latest degradation reason, process pressure, and bounded route diagnostics.
 - Report an unreadable OTel database, failed writes, active rejection, or data loss as `degraded` instead of presenting zero counts as healthy; emit one structured log on each transition into degradation and recovery, without repeating logs while the state is unchanged.
 - Expose candidate, actually processed, transcript/database, and downstream-call counts on the agent status and activity read paths so polling and feed amplification can be diagnosed directly.

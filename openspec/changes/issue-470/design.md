@@ -1,0 +1,254 @@
+## Context
+
+The proposal and the three capability specs define a low-cost operational surface for runtime amplification and OTel degradation. Today the Server has a trace-only outbound OpenTelemetry pipeline in `Infrastructure/Hosting/MohistOpenTelemetryRegistration.cs`, a built-in OTLP receiver and SQLite store in `Otel/`, and `GET /otel/api/status` implemented by `TraceQuerier.GetStatusAsync`. That status performs exact `COUNT(*)` queries over both Trace and Span tables, catches every database error, and substitutes zero counts. `mo otel status` renders only collector online/offline, file size, Trace count and Span count.
+
+The existing agent reads are project-scoped. `GET /api/projects/{projectRef}/agent/status` calls `RunnerStatusService` and `WorkflowActivityQuerier`; the latter currently loads every project Session before filtering active work. `GET /api/projects/{projectRef}/agent/activity` loads bounded Session candidates but also reads transcript parts and calls workflow status once per distinct workflow. Issues #467 and #468 deliberately depend on this change: they will reduce those costs while preserving the counters established here. The removed unscoped `/api/agent/status` route remains removed.
+
+Issue #470 is also the instrumentation prerequisite for #471 (bounded OTLP admission and writes) and #437 (72-hour / 1-GiB retention). This change owns the counters, status model and reporting seams. Those follow-ups own admission, batching, deletion and storage protection policy and will publish their outcomes through the seams defined here.
+
+Constraints:
+
+- Metrics are operational signals, not Workflow, Session or issue facts. They cannot influence scheduling or business outcomes.
+- The local status path must work without an external metrics service and cannot query history-sized data.
+- `Mohist:Otel:Enabled` remains disabled by default until #472 completes the full resource-budget gate.
+- Tests use `TimeProvider`, in-memory stores and operation counts; they do not wait five real minutes or access the host filesystem.
+- OTel ingestion, query, status and maintenance must not observe and export themselves back into the same built-in collector.
+
+Stakeholders are operators using `mo otel status`, API clients reading runtime status and agent activity, and follow-up implementations that need one stable place to report accepted, saved, rejected, dropped and storage-protection outcomes.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- Emit a fixed, low-cardinality `System.Diagnostics.Metrics.Meter` catalog and maintain a bounded in-process snapshot from the same observations.
+- Attribute stable HTTP routes with request count, latency, database calls and downstream calls without requiring full Trace reconstruction.
+- Report `off`, `healthy` or `degraded` with explicit storage, ingestion, process and route diagnostics at fixed read cost.
+- Make ingestion and storage failures visible and log only actual healthy/degraded transitions.
+- Add per-response amplification counts to the two project-scoped agent reads without changing their existing product payload semantics.
+- Provide narrow publication seams that #437, #467, #468 and #471 can reuse without depending on the status DTO or CLI renderer.
+
+**Non-Goals:**
+
+- Implement #437 retention, #471 OTLP request/write limits, #467 status-query optimization or #468 persisted activity summaries in this change.
+- Enable OTel by default, add Prometheus/Grafana, add a metrics Web page or persist route history.
+- Export Mohist's local metrics to the built-in OTLP receiver. The current outbound endpoint is trace-oriented and defaults to that same process.
+- Replace Trace or structured logs with metrics, instrument arbitrary user code or guarantee that observability data is never lost.
+- Restore legacy unscoped agent routes or change the five-second Activity-page polling policy.
+
+## Decisions
+
+### D1. One singleton owns observations and status state
+
+Add a singleton `RuntimeObservability` in `Mohist.Server.Otel`. It owns the `Meter`, cumulative process-lifetime ingestion counters, the bounded route aggregator, the latest sampled process/storage values and degradation-source state. Its public methods are narrow operational facts rather than status DTO setters:
+
+- `CompleteRequest(route, method, statusCode, duration, databaseCalls, downstreamCalls)`
+- `RecordAgentPath(path, candidates, processed, transcriptRecords)`
+- `RecordIngest(IngestOutcome outcome)`
+- `PublishStorage(sample)` and `SetDegradation(source, reason?)`
+- `GetSnapshot()`
+
+All mutation is thread-safe. `GetSnapshot` copies immutable values under the state lock and performs no database, filesystem, HTTP or grain call. The status route maps this internal snapshot to its wire DTO; the CLI knows only the wire DTO. Follow-up issues call the fact-oriented methods and do not mutate counters or DTO fields directly.
+
+`IngestOutcome` contains non-negative `Received`, `Saved`, `Rejected` and `Dropped` Span-attempt counts plus an optional bounded reason code. It is produced once at the ingest boundary, including on a typed write failure, so callers cannot independently publish contradictory increments. `Received` counts parsed Span attempts; duplicate upserts count as saved; rejected means an admitted Span intentionally refused with a non-retryable OTLP partial-success response; dropped means malformed data or another loss for which the response will not request a retry. A rolled-back write that returns a retryable failure increments received and activates `storage_write`, but does not increment dropped, so the four counters intentionally need not satisfy a conservation equation.
+
+`RuntimeObservability` is registered even when OTel is disabled so `/otel/api/status` can return `off`; recording middleware and sampling work are activated only when `Mohist:Otel:Enabled` is true. The state is process-local and is never added to `MohistDbContext` or Orleans storage.
+
+Alternative considered: let `TraceQuerier` assemble status by querying each subsystem on every request. Rejected because it repeats the current history-dependent design, makes partial failures look like missing data and couples a cheap read to storage availability.
+
+Alternative considered: separate singleton counters, route summary, degradation tracker and status assembler behind several interfaces. Rejected because they share one consistency boundary and no independent consumer needs those mutation models; splitting them would scatter the definition of a status snapshot.
+
+### D2. Lock one explicit Meter catalog and do not add a local metrics exporter
+
+Create a single `Meter` named `Mohist.Server.Runtime`. Synchronous request and ingestion instruments are updated by the same methods that update local state. Observable gauges read only the latest cached sampler values; callbacks never touch `Process`, SQLite or the filesystem. This follows the OpenTelemetry .NET observable-instrument model, where each collection callback publishes the current attribute sets and stale sets disappear when no longer returned.
+
+The initial catalog is:
+
+| Instrument | Kind / unit | Attributes |
+|---|---|---|
+| `mohist.server.http.request.count` | Counter / `{request}` | `http.route`, `http.request.method`, `http.response.status_code` |
+| `mohist.server.http.request.duration` | Histogram / `ms` | same HTTP attributes |
+| `mohist.server.http.request.database_calls` | Histogram / `{call}` | same HTTP attributes |
+| `mohist.server.http.request.downstream_calls` | Histogram / `{call}` | same HTTP attributes |
+| `mohist.server.path.candidates` | Histogram / `{item}` | `mohist.path` |
+| `mohist.server.path.processed` | Histogram / `{item}` | `mohist.path` |
+| `mohist.server.path.transcript_records` | Histogram / `{record}` | `mohist.path` |
+| `mohist.otel.spans.received` | Counter / `{span}` | none |
+| `mohist.otel.spans.saved` | Counter / `{span}` | none |
+| `mohist.otel.spans.rejected` | Counter / `{span}` | none |
+| `mohist.otel.spans.dropped` | Counter / `{span}` | none |
+| `mohist.otel.storage.usage` | ObservableGauge / `By` | none |
+| `mohist.otel.storage.budget` | ObservableGauge / `By` | none |
+| `mohist.otel.storage.growth` | ObservableGauge / `By/s` | none |
+| `mohist.process.cpu.utilization` | ObservableGauge / `1` | none |
+| `mohist.process.memory.working_set` | ObservableGauge / `By` | none |
+| `mohist.process.runtime.dotnet.gc.heap` | ObservableGauge / `By` | none |
+
+`http.route` is the matched route template, never a concrete URL. Request methods normalize to `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` or `OTHER`; response codes outside `100..599` normalize to `0`. Unmatched requests use `unmatched`; path-level metrics use only `agent.status` or `agent.activity`. Project, issue, workflow, session, Trace, Span and raw URL values are forbidden. A `MeterListener` unit test locks the exact instrument names, kinds, units, attribute keys and allowed bounded values.
+
+No `WithMetrics(...AddOtlpExporter...)` registration is added. A standard in-process `MeterListener` can consume the catalog, while status uses the local state. Exporting to an external metrics backend needs a future endpoint/configuration contract distinct from the current trace endpoint. This prevents the default `http://localhost:4318/otel` endpoint from sending local metrics into its own receiver.
+
+Alternative considered: rely only on ASP.NET Core, EF Core and HttpClient OTel metrics. Rejected because they do not provide the shared local snapshot or agent candidate/transcript counts, and their evolving labels are not Mohist's locked contract.
+
+Alternative considered: configure the existing OTLP exporter for metrics. Rejected because the configured endpoint defaults to the built-in receiver, which does not accept metrics and must not receive self-observation; endpoint-role detection based on loopback URLs would be brittle.
+
+### D3. Count request work through one ambient operational scope
+
+Add `RuntimeRequestMetricsMiddleware` after routing and before endpoint execution. When OTel is enabled and the matched endpoint is not under `/otel/v1` or `/otel/api`, it creates an internal `RequestWorkScope` in `AsyncLocal`, records a monotonic start timestamp through `TimeProvider`, and always completes the observation in `finally`. Completion resolves `RouteEndpoint.RoutePattern.RawText`, method and response status, then calls `RuntimeObservability.CompleteRequest` once.
+
+Three narrow adapters increment the active scope and otherwise no-op:
+
+- an EF Core `DbCommandInterceptor` increments `databaseCalls` once for each command execution against the business `MohistDbContext`;
+- an Orleans outgoing grain-call filter increments `downstreamCalls` once per caller-side grain invocation begun while the HTTP execution context is active;
+- an `IHttpMessageHandlerBuilderFilter` inserts the counting handler immediately inside the primary handler and increments `downstreamCalls` once per physical factory-created HTTP send, including each retry attempt.
+
+The scope uses atomic integer increments so parallel fan-out inside one request is safe. It carries no project or domain identity and cannot affect call results. "Downstream" is intentionally caller-side, not transitive: grain-to-grain calls after an Orleans message boundary are not attributed back to the originating HTTP request. Direct `otel.db` SQLite operations do not pass through the EF interceptor. OTel routes do not create a scope, so their query, ingest and status work is excluded. Storage sampling/maintenance runs outside HTTP scope and therefore cannot recursively contribute route work.
+
+Alternative considered: derive database and downstream counts by reading completed child Spans. Rejected because Activity creation depends on tracing configuration and sampling, status would lag request completion, and attaching a second Activity listener risks double-counting existing instrumentation.
+
+Alternative considered: manually increment every route and service call. Rejected for general request metrics because new database/HTTP/grain calls would silently escape accounting. Explicit candidate/transcript counts remain at the agent services because no infrastructure observer can infer their domain-neutral work units.
+
+### D4. Keep a one-second-resolution five-minute ring over a capped route set
+
+The route aggregator uses 301 rotating one-second buckets driven by injected `TimeProvider`. Each bucket stores its epoch second plus request count, total and maximum duration, total database calls and total downstream calls per stable route. A bucket accepts at most 256 route templates; additional templates fold into one `other` entry. `unmatched` is already one bounded route identity. Snapshot includes buckets whose timestamp intersects `[now - 5 minutes, now]`; the boundary bucket gives the window at most one second of over-retention and never drops a request before it is five minutes old. Rotation clears expired buckets rather than retaining individual requests.
+
+`GetSnapshot` merges the 301 buckets, computes average duration and per-request call ratios, then orders entries lexicographically by `(databaseCallsPerRequest + downstreamCallsPerRequest)` descending and average duration descending. It returns the first 10 entries with:
+
+- `route`
+- `request_count`
+- `average_duration_ms`
+- `max_duration_ms`
+- `database_calls_per_request`
+- `downstream_calls_per_request`
+
+The maximum retained aggregate count is fixed (`301 * 257`), response count is fixed at 10 and Server restart starts with empty buckets. Tests advance `FakeTimeProvider` across second and five-minute boundaries and assert expiration, the one-second boundary tolerance and memory bounds.
+
+Alternative considered: retain every request for an exact sliding five-minute window. Rejected because memory would grow with traffic.
+
+Alternative considered: persist minute aggregates in SQLite. Rejected because the issue explicitly defines restart-local diagnostics and persistence would make observation a new storage workload and feedback source.
+
+### D5. Sample process and storage values outside the status request
+
+An enabled-only `OtelDiagnosticsSampler` hosted service samples every 10 seconds using `TimeProvider.CreateTimer`. It allows only one sample in flight: ticks that arrive while a probe is running are coalesced into one pending sample, and each storage probe has a fixed cancellation budget. Shutdown cancels and awaits the active sample before disposal. It depends on two replaceable readers:
+
+- `IProcessResourceReader` returns process total CPU time, working set and `GC.GetGCMemoryInfo().HeapSizeBytes`;
+- `IOtelStorageProbe` performs a bounded readiness probe and returns the combined size of `otel.db`, `otel.db-wal` and `otel.db-shm` plus the fixed 1-GiB budget.
+
+CPU utilization is the delta in process CPU time divided by elapsed injected time and processor count, clamped to `[0,1]`. Storage growth is the byte delta between the oldest and newest samples in a fixed 60-second, seven-slot ring divided by sample time. Until two valid samples exist, CPU utilization and growth are `null`, not false zero. Observable gauges omit unavailable values and the status DTO renders them as unavailable.
+
+The storage probe may initialize a missing new database and execute a constant schema/readiness check, but it never counts or enumerates Trace/Span rows. Read/probe failure activates a sticky `storage_read` degradation; a later successful probe clears that source. Write paths report `storage_write` failure and clear it only after a later successful write. #437 will replace/extend the same probe with its persisted watermarks and publish protection state through `SetDegradation`; it does not replace status assembly. A blocked-probe test advances fake time through multiple ticks and proves that no second probe starts.
+
+Alternative considered: sample process and file metadata inside `GET /otel/api/status`. Rejected because each status poll would become observation work, CPU needs a prior sample, and failures would couple response latency to the host filesystem.
+
+Alternative considered: use OpenTelemetry runtime instrumentation as the sole process source. Rejected because status must work without an SDK reader/exporter and tests need deterministic process values.
+
+### D6. Model degradation as independent sources, not one mutable flag
+
+`RuntimeObservability` keeps a bounded map keyed by a fixed enum: `collector`, `storage_read`, `storage_write` and `ingest_protection`. An enabled instance starts with `collector_unverified` and `storage_unverified` active; successful Kestrel start clears the collector source, and the first successful storage probe clears the storage source. `collector_online` is projected from that same collector source, not maintained as a second flag. Status is derived as follows:
+
+- configured disabled: `off`;
+- configured enabled with no active source: `healthy`;
+- configured enabled with any active source: `degraded`.
+
+Collector bind failure remains active until restart with a successful bind. Storage failures remain active until the corresponding successful probe/write. Rejection or drop observations activate `ingest_protection` for five minutes since the latest event; the injected clock expires it when the next observation, sample or status snapshot evaluates state. This makes "currently rejecting or dropping" finite without a wall-clock timer per event. The latest degradation record retains a stable code, a bounded 256-character message and timestamp for the process lifetime, including after recovery.
+
+The state machine compares the derived previous and next states after every update. It emits one structured log only for `healthy -> degraded` and `degraded -> healthy`, with `PreviousState`, `NewState`, `ReasonCode` and `Reason`. Repeated updates within the same state update counters/reason but do not log another transition. `off` startup and shutdown are not degradation transitions.
+
+The OTLP-port fallback in `Program.cs` must stop rewriting `Mohist:Otel:Enabled=false`. After failed `StartAsync`, it first disposes the failed app and its partially started hosted services, then builds one alternate host without the OTLP Kestrel listener. That host keeps the user's configured enabled intent, initializes the diagnostics source as `collector_bind_failed`, and still maps the main-port status route. A fallback integration test proves there is one silo and sampler, no OTLP listener, and a `degraded` status with `collector_online=false`. Otherwise a requested but failed collector is incorrectly reported as `off` and duplicate hosted work can survive the failed host.
+
+Alternative considered: a single boolean set by the latest subsystem. Rejected because a successful storage read could incorrectly clear an unrelated write or bind failure.
+
+Alternative considered: keep any rejection/drop degraded until restart. Rejected because transient protection would never recover without a separate manual reset, contradicting transition recovery.
+
+### D7. Replace the status contract as one release with an explicit skew rule
+
+Move status assembly out of `TraceQuerier`; it remains responsible only for trace listing and bounded SQL query execution. `GET /otel/api/status` maps `RuntimeObservability.GetSnapshot()` to this snake-case payload inside the existing `ApiResponse` envelope:
+
+```json
+{
+  "status": "healthy",
+  "collector_online": true,
+  "since": "2026-01-01T00:00:00Z",
+  "storage": {
+    "usage_bytes": 4096,
+    "budget_bytes": 1073741824,
+    "growth_bytes_per_second": 12.5,
+    "growth_window_seconds": 60
+  },
+  "telemetry": {
+    "received_spans": 42,
+    "saved_spans": 40,
+    "rejected_spans": 1,
+    "dropped_spans": 1
+  },
+  "process": {
+    "cpu_utilization": 0.12,
+    "working_set_bytes": 134217728,
+    "gc_heap_bytes": 33554432
+  },
+  "latest_degradation": {
+    "code": "storage_write_failed",
+    "message": "OTel storage write failed",
+    "at": "2026-01-01T00:01:00Z"
+  },
+  "routes": []
+}
+```
+
+Unavailable sampled numbers are JSON `null`; failures are never represented by fabricated zeros. `trace_count` and `span_count` are removed. The status route stays mapped when OTel is disabled and returns the same fixed shape with `status=off`, zero process-lifetime telemetry counters, empty routes and unavailable sampler fields.
+
+`mo otel status` continues calling `/otel/api/status`, exits successfully for all three reported states, and renders State, Collector, Storage, Telemetry, Process, Latest degradation and Routes sections. Server unreachable and invalid envelope behavior stay unchanged. The new CLI validates the required `status` field and fails clearly against an old Server payload. Deployment updates the CLI before the Server; after the Server changes, an old CLI may display only zero legacy counts and is explicitly unsupported under the repository's no-compatibility policy. `mo update` installs both from the same release, minimizing that skew window without claiming an atomic process replacement.
+
+`/api/health` is untouched. No OTel state is injected into `HealthRoutes`, so an OTel failure cannot change its status code or `status=ok` payload.
+
+Alternative considered: preserve old counts and add the new fields. Rejected because exact historical counts require the forbidden table scans; retaining fields with process-local meanings would silently change their semantics.
+
+Alternative considered: return HTTP 503 when OTel is degraded. Rejected because observability degradation is not core-service unavailability and callers need a successful bounded diagnostic response.
+
+### D8. Add an amplification object to each active agent response
+
+Add one shared `AgentPathAmplificationDto` with camelCase wire fields `candidates`, `processed`, `transcriptRecords`, `databaseCalls` and `downstreamCalls`. `AgentStatusResponse` and `ActivityDto` each gain an `amplification` property; all existing fields, ordering and response limits remain unchanged.
+
+The agent route begins a named path measurement within the active request scope and finalizes it after all assemblers complete:
+
+- status candidates are Session records selected for active-agent classification; processed is the active-agent records returned; transcript records are zero in the current status path;
+- activity candidates are Session records returned by the bounded Session query before reconciliation; processed is the cards returned after reconciliation; transcript records are the transcript parts loaded by `LoadLatestEventsAsync` and `TranscriptReductions` for this request;
+- database and downstream calls come from the same `RequestWorkScope`, so every count has one request boundary.
+
+The explicit candidate/processed/transcript increments live at `WorkflowActivityQuerier` and `AgentActivityFeedAssembler`, beside the operations that define them. The route reads an immutable scope snapshot and adds the DTO only after downstream work is complete. It also calls `RecordAgentPath` with `mohist.path=agent.status` or `agent.activity`; the general HTTP histograms receive database/downstream totals once when middleware completes.
+
+#467 can move status candidate selection into SQL while keeping the meanings above; #468 can replace transcript-part loads with persisted summaries and correctly drive `transcriptRecords` to zero. This issue's tests use short and history-heavy datasets to prove that the response-local counters expose any amplification and remain fixed-size; #467/#468 then use those same operation counts, not elapsed time, to prove the amplification is removed.
+
+Alternative considered: expose global process counters on each agent response. Rejected because callers could not derive one response's amplification and concurrent requests would contaminate the values.
+
+Alternative considered: put only computed ratios on the wire. Rejected because zero denominators become ambiguous and raw bounded counts are easier to test, compare and evolve.
+
+## Risks / Trade-offs
+
+- `[AsyncLocal context is lost by detached work] ->` Count only work awaited as part of producing the HTTP response; detached work is not response amplification. Adapter tests cover parallel awaited calls and no-scope behavior.
+- `[Infrastructure adapters miss direct database or network calls] ->` The catalog explicitly defines database calls as `MohistDbContext` commands and downstream calls as Orleans plus factory-created HTTP calls. Direct `otel.db` work is intentionally excluded; new direct adapters require a contract-test update.
+- `[Automatic EF/HTTP/Orleans tracing and operational counters can appear to duplicate signals] ->` Existing instrumentation continues producing Spans; the new adapters produce only integer request counters and never start Activities, so each signal has one role and one write point.
+- `[Time aggregation has a boundary approximation] ->` Use one-second buckets and retain the intersecting boundary bucket, so an observation is never dropped before five minutes and over-retention is less than one second; lock that tolerance with fake time.
+- `[A 256-route cap can fold legitimate routes into other] ->` Mohist's registered route templates are compile-time bounded and expected below the cap; a contract test enumerates endpoint templates, and overflow remains explicit as `other` rather than increasing memory.
+- `[Transient rejection keeps status degraded for up to five minutes after pressure ends] ->` This is deliberate hysteresis aligned with the diagnostic window; explicit storage/collector recovery remains immediate.
+- `[Sampler failures can leave stale resource values] ->` Mark the sample unavailable and activate a degradation source; never present the prior value as current or substitute zero.
+- `[Metric names become a compatibility surface] ->` Lock names, kinds, units and label keys in one test and route all creation through `RuntimeObservability`; changing the catalog requires an explicit spec change.
+- `[The status API is breaking] ->` Ship one release, update CLI before Server, make the new CLI reject old payloads, remove old count assertions and state that old-CLI/new-Server skew is unsupported. No persisted client state requires migration.
+- `[Follow-up issues need more detailed rejection/storage reasons] ->` Keep reason codes as a bounded enum and counters as fact-oriented methods; #437/#471 can add enum members without changing status structure or introducing identity labels.
+
+## Migration Plan
+
+1. Add `RuntimeObservability`, request scope/adapters, fakeable resource readers and bounded aggregation with unit tests. Keep all recorders gated by the existing disabled-by-default option.
+2. Add the enabled-only sampler and alter OTLP bind fallback to preserve configured enabled intent while publishing `collector_bind_failed`.
+3. Instrument the current ingester to produce one `IngestOutcome` and report write success/failure. Duplicate upserts count as saved; admission rejection before Span parsing does not increment received; malformed parsed Spans count as dropped; retryable transaction rollback increments received and `storage_write` degradation but not dropped; and #437/#471 use rejected only for admitted Spans deliberately refused through non-retryable partial success.
+4. Add agent candidate/processed/transcript accounting and the additive `amplification` response objects. Preserve current query behavior and make its amplification visible for #467/#468 to optimize later.
+5. Replace `/otel/api/status` and CLI rendering in the same release; install CLI first, then Server, and delete the old `TraceQuerier.GetStatusAsync` count path and old DTO/tests.
+6. Run focused Server unit/spec tests and CLI specs, then the repository `npm test`. Verify metric contract, fake-time bucket rotation, transition logs, status no-scan behavior, self-feedback exclusion and `/api/health` independence.
+
+There is no database migration and no persisted diagnostic state. Rollback reverses deployment order: roll back the Server first while the new CLI clearly rejects the legacy payload, then roll back the CLI. This avoids the misleading old-CLI/new-Server combination. Process-local counters and route windows disappear on restart by design. Because OTel remains default-off until #472, rollout can also disable `Mohist:Otel:Enabled` to stop recording/sampling while retaining an `off` status response. Later #437/#471 deployments must retain the publication method semantics, but rolling back this issue before those dependents requires rolling back the dependents as well.
+
+## Open Questions
+
+No blocking questions remain for this change.
+
+- External metric export is intentionally undecided. A future change must define a separate exporter endpoint/configuration and prove it cannot target the same built-in receiver before wiring `Mohist.Server.Runtime` into an OTel `MeterProvider`.
+- #437 may add storage watermark and maintenance fields internally, but this status contract remains budget/usage/growth plus degradation reason unless that issue proposes a user-visible extension.
