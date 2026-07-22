@@ -53,7 +53,7 @@ public static partial class IssueRoutes
                 taskId,
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
-                BuildRebaseTaskWith(baseBranch, runSnapshot),
+                BuildRebaseTaskWith(baseBranch),
                 InvalidateChecks: true,
                 Recovery: BuildRebaseRecovery());
 

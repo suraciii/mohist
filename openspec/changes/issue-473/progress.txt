@@ -1,0 +1,32 @@
+## Codebase Patterns
+
+- Route handlers live in `packages/server/src/Mohist.Server/Api/IssueRoutes.*.cs` as `internal static` partial-class methods. `BuildRebaseTaskWith` lives in `IssueRoutes.Helpers.cs`; the rebase route in `IssueRoutes.Rebase.cs`.
+- Helpers that take a `WorkflowRepositoryContext` fixture normally use the fully-qualified namespace (`Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext`) inside the signature to avoid a `using` at the top of the file.
+- `JsonSerializer.SerializeToElement(with, JSON.Options)` is the standard way to convert a `Dictionary<string, object?>` into the `JsonElement?` shape consumed by `RuntimeTaskInput.With`. The result is a JSON object that the dispatcher hands verbatim to Action input validation.
+- `mohist/rebase` Action declares only `baseBranch`, `remote`, `squash`, `message`, `messageFrom` (`packages/runner/src/actions/built-ins.ts:236-242`). Anything else in `with` triggers `Action 'mohist/rebase' received unknown input '<key>'` from `validateActionInput`.
+- The rebase route handler reads `runSnapshot` for two responsibilities that must be preserved:
+  - line 37-39: returns Conflict `missing_repository_context` if absent (no task queued).
+  - line 48-50: defaults `baseBranch` from the snapshot when the operator omits one.
+  These are spec requirements 2 and 3 and are intentionally left as-is by T-001; only the mirroring of the snapshot into the Action `with` is removed.
+
+## T-001 Notes
+
+- Signature collapsed to `BuildRebaseTaskWith(string baseBranch)`; the dead `repository` parameter was removed because after dropping the `repository` object from `with` the helper reads nothing from the snapshot. Per Decision 2 in `design.md`, keeping a dead parameter would re-seed the confusion that caused the bug.
+- Single caller updated: `IssueRoutes.Rebase.cs:56` now passes only `baseBranch`. Verified with `grep -rn BuildRebaseTaskWith packages --include='*.cs'` — only one call site.
+- Test rewritten and renamed `BuildRebaseTaskWith_CarriesOnlyDeclaredRebaseInputs`. New assertions:
+  - `baseBranch` equals the argument.
+  - `remote` equals `"origin"`.
+  - Set of top-level keys is exactly `{"baseBranch", "remote"}` (sorted).
+  - Negative: `TryGetProperty("repository", out _)` returns false.
+  - No `WorkflowRepositoryContext` fixture.
+- Sibling `ManualRebaseRecovery_ReferencesNamedPromptAndAgent_NeverInlines` test is byte-identical (still passes).
+- Existing rebase spec coverage passes unchanged: ran `IssueRebaseApi_QueuesWorkflowTask` + `IssueWorkspaceRepositoryResolution*` + spec-level `ApiContract*` filters — 32/32 pass.
+- One transient flake observed in the full `npm test` run: `AgentJobGrainSpecs.SubmitAsync_DoesNotUseWorkflowAssignment` (Agent job runner polling timeout, unrelated to rebase). Confirmed pre-existing flake — re-running it in isolation passes, and it does not touch any rebase code paths (verified via grep).
+- Final `git status`: three files modified, no generated-file drift. `npm test` left no Git-visible generated changes.
+
+## Verification Commands
+
+- `dotnet build packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj` — 0 warnings, 0 errors.
+- `dotnet test ... --filter FullyQualifiedName~IssueRebaseRecoveryTests` — 2/2 pass.
+- `dotnet test ... --filter "IssueRebaseApi_QueuesWorkflowTask|IssueWorkspaceRepositoryResolution|ApiContractSpecs"` (SpecTests) — 32/32 pass.
+- `npm test` — full suite (Cli + Unit + Spec + Arch + web 5050 + runner 1263) passes; the one Agent-spec flake passes in isolation.

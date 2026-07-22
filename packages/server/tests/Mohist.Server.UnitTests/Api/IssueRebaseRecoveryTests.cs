@@ -1,5 +1,5 @@
+using System.Text.Json;
 using Mohist.Server.Api;
-using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Api;
@@ -7,22 +7,22 @@ namespace Mohist.Server.UnitTests.Api;
 public class IssueRebaseRecoveryTests
 {
     [Fact]
-    public void BuildRebaseTaskWith_UsesResolvedRepositoryContext()
+    public void BuildRebaseTaskWith_CarriesOnlyDeclaredRebaseInputs()
     {
-        var repository = new WorkflowRepositoryContext(
-            Name: "secondary",
-            GitUrl: "git@secondary.example:repo.git",
-            BaseBranch: "release");
-
-        var input = IssueRoutes.BuildRebaseTaskWith("release", repository);
+        var input = IssueRoutes.BuildRebaseTaskWith("release");
 
         Assert.NotNull(input);
-        Assert.Equal("release", input!.Value.GetProperty("baseBranch").GetString());
-        Assert.Equal("origin", input.Value.GetProperty("remote").GetString());
-        var taskRepository = input.Value.GetProperty("repository");
-        Assert.Equal("secondary", taskRepository.GetProperty("name").GetString());
-        Assert.Equal("git@secondary.example:repo.git", taskRepository.GetProperty("gitUrl").GetString());
-        Assert.Equal("release", taskRepository.GetProperty("baseBranch").GetString());
+        var with = input!.Value;
+        Assert.Equal("release", with.GetProperty("baseBranch").GetString());
+        Assert.Equal("origin", with.GetProperty("remote").GetString());
+
+        var declaredKeys = new HashSet<string>(
+            with.EnumerateObject().Select(p => p.Name),
+            StringComparer.Ordinal);
+        Assert.Equal(new[] { "baseBranch", "remote" }, declaredKeys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+        Assert.False(
+            with.TryGetProperty("repository", out _),
+            "The rebase task's with must not carry a 'repository' key — the mohist/rebase Action does not declare it as an input.");
     }
 
     [Fact]
