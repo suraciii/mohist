@@ -54,7 +54,7 @@ describe("WorkExecutor result variable effects", () => {
 
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+       verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       connection as ServerConnection,
       workDir,
     )
@@ -77,6 +77,6 @@ function buildWork(): DispatchWorkItem {
     uses: "test/write-vars",
     with: {},
     setVars: { checkpoint: "output.checkpoint" },
-    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+     variables: { workspace: { path: workDir, branch: null } },
   }
 }

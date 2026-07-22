@@ -55,17 +55,19 @@ interface PreviewVariable {
 }
 
 const DEFAULT_PREVIEW_VARIABLES_JSON = `{
-  "openspecChangeDir": "openspec/changes/issue-1",
   "issue": {
     "number": 1,
+    "projectId": "demo-project",
     "title": "Example issue title"
   },
-  "project": {
-    "id": "demo-project",
-    "name": "Demo Project"
+  "repository": {
+    "baseBranch": "main"
   },
-  "mohist": {
-    "system": "mohist"
+  "workspace": {
+    "branch": "feature/issue-1"
+  },
+  "vars": {
+    "agent": {}
   }
 }`
 

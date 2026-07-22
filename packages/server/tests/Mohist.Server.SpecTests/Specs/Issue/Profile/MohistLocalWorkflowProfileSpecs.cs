@@ -28,7 +28,7 @@ public class MohistLocalWorkflowProfileSpecs
         var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
 
         using var document = JsonDocument.Parse(variables);
-        Assert.Equal("openspec/changes/issue-154", document.RootElement.GetProperty("openspecChangeDir").GetString());
+         Assert.False(document.RootElement.TryGetProperty("openspecChangeDir", out _));
         Assert.False(document.RootElement.TryGetProperty("artifacts", out _));
     }
 
@@ -152,7 +152,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("\"uses\":\"mohist/opencode\"", withJson);
         Assert.Contains("\"prompt\":", withJson);
         Assert.Contains("\"uses\":\"mohist/openspec-task-prompt\"", withJson);
-        Assert.Contains("${{ openspecChangeDir }}/tasks.json", withJson);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}/tasks.json", withJson);
         Assert.Contains("\"items\":\"tasks\"", withJson);
         Assert.Contains("\"base\":\"${{ prompts.build }}\"", withJson);
     }
@@ -182,7 +182,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Equal("load-tasks", loadTask.Id);
-        Assert.Equal("${{ openspecChangeDir }}/tasks.json", pathElement.GetString());
+         Assert.Equal("openspec/changes/issue-${{ issue.number }}/tasks.json", pathElement.GetString());
     }
 
     [Fact]
@@ -381,12 +381,12 @@ public class MohistLocalWorkflowProfileSpecs
     {
         var files = new FakePromptFileStore("/prompts");
         files.Add("review.prompt", """
-            Mohist workflow artifacts under `${{ openspecChangeDir }}/` are review context and evidence, not product deliverables by themselves.
-            Do not fail solely because `${{ openspecChangeDir }}/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, or delta specs exist.
+             Mohist workflow artifacts under `openspec/changes/issue-${{ issue.number }}/` are review context and evidence, not product deliverables by themselves.
+             Do not fail solely because `openspec/changes/issue-${{ issue.number }}/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, or delta specs exist.
             """);
         files.Add("auto-fix.prompt", """
-            Do NOT remove Mohist workflow artifacts under `${{ openspecChangeDir }}/`.
-            Workflow artifacts under `${{ openspecChangeDir }}/` are planning/review context, not product deliverables to delete during auto-fix.
+             Do NOT remove Mohist workflow artifacts under `openspec/changes/issue-${{ issue.number }}/`.
+             Workflow artifacts under `openspec/changes/issue-${{ issue.number }}/` are planning/review context, not product deliverables to delete during auto-fix.
             """);
 
         var loader = new FilePromptLoader("/prompts", files);
@@ -394,9 +394,9 @@ public class MohistLocalWorkflowProfileSpecs
 
         Assert.Contains("workflow artifacts", prompts["review"], StringComparison.OrdinalIgnoreCase);
         Assert.Contains("not product deliverables", prompts["review"], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("${{ openspecChangeDir }}/proposal.md", prompts["review"], StringComparison.Ordinal);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}/proposal.md", prompts["review"], StringComparison.Ordinal);
         Assert.Contains("do not remove mohist workflow artifacts", prompts["auto-fix"].ToLowerInvariant());
-        Assert.Contains("${{ openspecChangeDir }}/", prompts["auto-fix"], StringComparison.Ordinal);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}/", prompts["auto-fix"], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public class MohistLocalWorkflowProfileSpecs
         var loader = new FilePromptLoader();
         var prompts = loader.LoadAll();
 
-        const string command = "mo issue show ${{ issue.number }} --project-id ${{ project.id }}";
+         const string command = "mo issue show ${{ issue.number }} --project ${{ issue.projectId }}";
         var executionPrompts = new[] { "proposal", "specs", "design", "tasks", "self-review", "review", "build" };
         foreach (var key in executionPrompts)
         {
@@ -416,15 +416,13 @@ public class MohistLocalWorkflowProfileSpecs
 
         var variablesJson = JsonSerializer.Serialize(new
         {
-            issue = new { number = 42 },
-            project = new { id = "project-1" },
-            openspecChangeDir = "openspec/changes/issue-42",
+             issue = new { number = 42, projectId = "project-1" },
         });
         using var variables = JsonDocument.Parse(variablesJson);
         var result = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
 
         Assert.Empty(result.Errors);
-        Assert.Contains("mo issue show 42 --project-id project-1", result.Rendered, StringComparison.Ordinal);
+         Assert.Contains("mo issue show 42 --project project-1", result.Rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("prompts.issue-context", result.Rendered, StringComparison.Ordinal);
     }
 
@@ -688,11 +686,11 @@ public class MohistLocalWorkflowProfileSpecs
                   prompt: ${{ prompts.proposal }}
                 expect:
                   files:
-                    - path: ${{ openspecChangeDir }}/proposal.md
+                    - path: openspec/changes/issue-${{ issue.number }}/proposal.md
                 artifacts:
                   files:
-                    - path: ${{ openspecChangeDir }}/proposal.md
-                    - path: ${{ openspecChangeDir }}/specs
+                    - path: openspec/changes/issue-${{ issue.number }}/proposal.md
+                    - path: openspec/changes/issue-${{ issue.number }}/specs
               - id: design
                 title: Design
                 uses: mohist/opencode
@@ -700,7 +698,7 @@ public class MohistLocalWorkflowProfileSpecs
                   prompt: ${{ prompts.design }}
                 artifacts:
                   files:
-                    - path: ${{ openspecChangeDir }}/design.md
+                    - path: openspec/changes/issue-${{ issue.number }}/design.md
             checks: []
         """);
 
@@ -709,15 +707,15 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal(
             new[]
             {
-                "${{ openspecChangeDir }}/proposal.md",
-                "${{ openspecChangeDir }}/specs",
+                "openspec/changes/issue-${{ issue.number }}/proposal.md",
+                "openspec/changes/issue-${{ issue.number }}/specs",
             },
             proposal.Artifacts!.Files.Select(f => f.Path).ToArray());
 
         var design = definition.Stages.Single().Tasks.Single(t => t.Id == "design");
         Assert.NotNull(design.Artifacts);
         Assert.Equal(
-            new[] { "${{ openspecChangeDir }}/design.md" },
+            new[] { "openspec/changes/issue-${{ issue.number }}/design.md" },
             design.Artifacts!.Files.Select(f => f.Path).ToArray());
     }
 
@@ -788,19 +786,19 @@ public class MohistLocalWorkflowProfileSpecs
                   prompt: Review
                 expect:
                   markers:
-                    - path: ${{ openspecChangeDir }}/review.md
+                    - path: openspec/changes/issue-${{ issue.number }}/review.md
                       oneOf:
                         - <promise>PASS</promise>
                         - <promise>FAIL</promise>
                 artifacts:
                   files:
-                    - path: ${{ openspecChangeDir }}/review.md
+                    - path: openspec/changes/issue-${{ issue.number }}/review.md
             checks: []
         """);
 
         var task = definition.Stages.Single().Tasks.Single();
         Assert.NotNull(task.Artifacts);
-        Assert.Equal(new[] { "${{ openspecChangeDir }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+        Assert.Equal(new[] { "openspec/changes/issue-${{ issue.number }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
         var expectJson = JsonSerializer.Serialize(task.Expect);
         Assert.Contains("markers", expectJson);
         Assert.DoesNotContain("expect", JsonSerializer.Serialize(task.With));
@@ -1362,9 +1360,9 @@ public class MohistLocalWorkflowProfileSpecs
         var body = prompts["apply-feedback"];
         Assert.Contains("mo issue feedback show", body, StringComparison.Ordinal);
         Assert.Contains("${{ issue.number }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ project.id }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ approvalFeedback.id }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ approvalFeedback.command }}", body, StringComparison.Ordinal);
+         Assert.Contains("${{ issue.projectId }}", body, StringComparison.Ordinal);
+         Assert.Contains("${{ work.approvalFeedback.id }}", body, StringComparison.Ordinal);
+         Assert.DoesNotContain("approvalFeedback.command", body, StringComparison.Ordinal);
         Assert.Contains("${{ stage.name }}", body, StringComparison.Ordinal);
         Assert.Contains("Do not approve the stage", body, StringComparison.Ordinal);
         Assert.Contains("required input", body, StringComparison.OrdinalIgnoreCase);

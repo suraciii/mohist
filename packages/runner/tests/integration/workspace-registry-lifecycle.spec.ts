@@ -126,15 +126,13 @@ function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
     workType: "task",
     uses: "mohist/opencode",
     variables: {
-      mohist: { runId: workflowRunId },
-      issue: { number: issueNumber },
-      project: { id: "project-1", name: "Mohist Local" },
+      workflow: { runId: workflowRunId },
+      issue: { number: issueNumber, projectId: "project-1" },
       repository: {
         name: "main",
         gitUrl,
         baseBranch: "main",
       },
-      openspecChangeDir: "openspec/changes/sample-change",
     },
   }
 }

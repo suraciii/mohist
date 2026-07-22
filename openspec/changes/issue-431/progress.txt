@@ -25,3 +25,10 @@
 - Replaced the old lenient server tests with behavior vectors for scalar/embedded values, missing task outputs, object/array rejection, escape, nesting, cycles, and depth; route tests cover actionable missing/type errors.
 - Focused verification passed: 8 `PromptTemplateEngineTests` and 22 template/project preview route specs.
 - Full Server unit tests pass (1,268). Full Server spec tests currently report four T-001 baseline failures that still assert removed runtime roots or vars hoisting; no T-003 preview failures were observed.
+
+## T-004
+
+- Migrated both builtin profiles and all builtin prompts to literal `openspec/changes/issue-${{ issue.number }}` paths, `issue.projectId` with `--project`, and `work.approvalFeedback.id`; removed the pre-rendered feedback command example.
+- Updated runner/server workflow fixtures and profile assertions, web preview/editor defaults, and the affected end-to-end workflow coverage. Existing recovery, retry, artifact, feedback, and GitHub PR tests now assert the closed namespace without changing resolved paths.
+- Removed resolved namespace and old Server pre-expansion gap notes from product/design docs. Focused runner, web, Server unit, and Server spec verification passed; `git diff --check` passed.
+- Full `npm test` passes: CLI 1,374, Server unit 1,268, architecture 30, Server spec 2,987, Web 5,151, and Runner 1,353 tests, with all boundary/typecheck gates passing.

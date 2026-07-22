@@ -69,8 +69,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Equal("build", document.RootElement.GetProperty("stage").GetProperty("name").GetString());
         Assert.Equal(work.WorkId, document.RootElement.GetProperty("work").GetProperty("id").GetString());
         Assert.Equal("task", document.RootElement.GetProperty("work").GetProperty("type").GetString());
-        Assert.Equal(42, document.RootElement.GetProperty("custom").GetProperty("answer").GetInt32());
-        Assert.False(document.RootElement.TryGetProperty("issue", out _));
+         Assert.Equal(42, document.RootElement.GetProperty("vars").GetProperty("custom").GetProperty("answer").GetInt32());
+         Assert.True(document.RootElement.TryGetProperty("issue", out _));
         Assert.False(document.RootElement.TryGetProperty("project", out _));
         Assert.False(document.RootElement.TryGetProperty("artifacts", out _));
         Assert.True(document.RootElement.TryGetProperty("vars", out _));
@@ -124,7 +124,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.NotNull(proposal.Expect);
         using (var proposalExpect = JsonDocument.Parse(proposal.Expect!))
         {
-            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalExpect.RootElement.GetProperty("files")[0].GetProperty("path").GetString());
+             Assert.Equal("openspec/changes/issue-${{ issue.number }}/proposal.md", proposalExpect.RootElement.GetProperty("files")[0].GetProperty("path").GetString());
             Assert.False(proposalExpect.RootElement.TryGetProperty("markers", out _));
         }
         await ReportAsync(r1, proposal.WorkId, "completed");
@@ -144,7 +144,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var (check, _) = await PollWorkAnyAsync();
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
-        Assert.Contains("${{ openspecChangeDir }}", check.With);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}", check.With);
         Assert.DoesNotContain("${{ artifacts.changeDir }}", check.With);
     }
 
@@ -191,7 +191,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("\"task\":", proposal.With);
         Assert.DoesNotContain("changeDir", proposal.With);
         Assert.DoesNotContain("\"expect\"", proposal.With);
-        Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.Expect!);
+         Assert.Contains("openspec/changes/issue-${{ issue.number }}/proposal.md", proposal.Expect!);
     }
 
     private static WorkflowDefinition MohistPlanDefinitionWithoutArtifacts() =>
@@ -204,40 +204,40 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                         { "session": "plan", "prompt": "${{ prompts.proposal }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                        { "files": [ { "path": "${{ openspecChangeDir }}/proposal.md" } ] }
+                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/proposal.md" } ] }
                         """)),
                     new("specs", "Write specs", "mohist/opencode",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.specs }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                        { "files": [ { "path": "${{ openspecChangeDir }}/specs" } ] }
+                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/specs" } ] }
                         """)),
                     new("design", "Create design", "mohist/opencode",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.design }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                        { "files": [ { "path": "${{ openspecChangeDir }}/design.md" } ] }
+                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/design.md" } ] }
                         """)),
                     new("tasks", "Generate tasks", "mohist/opencode",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.tasks }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                        { "files": [ { "path": "${{ openspecChangeDir }}/tasks.json" } ] }
+                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/tasks.json" } ] }
                         """)),
                     new("self-review", "Self review", "mohist/opencode",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.self-review }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                        { "files": [ { "path": "${{ openspecChangeDir }}/self-review.md" } ] }
+                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/self-review.md" } ] }
                         """)),
                 ],
                 [
-                    new("plan-artifacts", "Plan artifacts complete", "mohist/openspec-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"${{ openspecChangeDir }}\"").RootElement.Clone() }),
-                    new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
+                     new("plan-artifacts", "Plan artifacts complete", "mohist/openspec-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"openspec/changes/issue-${{ issue.number }}\"").RootElement.Clone() }),
+                     new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"openspec/changes/issue-${{ issue.number }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
                     new("health", "Health", "core/script", new Dictionary<string, JsonElement?> { ["run"] = JsonDocument.Parse("\"git diff --check\"").RootElement.Clone() }),
                 ])
         ]);

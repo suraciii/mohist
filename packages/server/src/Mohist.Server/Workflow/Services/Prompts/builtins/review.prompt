@@ -7,19 +7,19 @@ stage: check
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
 Review the current change and write your findings to
-`${{ openspecChangeDir }}/review.md`.
+`openspec/changes/issue-${{ issue.number }}/review.md`.
 
 You are a reviewer, not a fixer: do not modify any file other than `review.md`.
 A separate task fixes every problem you report, so describe each finding with
 enough context (what is wrong, where) for that task to act on.
 
 Review the changed files as they are now, against the issue's acceptance criteria
-and the plan artifacts under `${{ openspecChangeDir }}/`. Judge only this change —
-files under `${{ openspecChangeDir }}/` are this workflow's own artifacts, not
+and the plan artifacts under `openspec/changes/issue-${{ issue.number }}/`. Judge only this change —
+files under `openspec/changes/issue-${{ issue.number }}/` are this workflow's own artifacts, not
 product deliverables.
 
 The final line of `review.md` MUST be exactly one of:

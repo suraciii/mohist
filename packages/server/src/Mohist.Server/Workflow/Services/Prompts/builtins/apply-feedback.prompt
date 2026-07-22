@@ -7,7 +7,7 @@ stage: approval
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
 This task exists because the user requested changes at the `${{ stage.name }}` approval gate.
@@ -17,23 +17,17 @@ This task exists because the user requested changes at the `${{ stage.name }}` a
 The feedback is the authoritative source. Read it through the CLI before making any other changes:
 
 ```bash
-mo issue feedback show ${{ issue.number }} --feedback ${{ approvalFeedback.id }} --project-id ${{ project.id }} --output json
-```
-
-The pre-rendered `approvalFeedback.command` gives you the same invocation:
-
-```bash
-${{ approvalFeedback.command }}
+mo issue feedback show ${{ issue.number }} --feedback ${{ work.approvalFeedback.id }} --project ${{ issue.projectId }} --output json
 ```
 
 ## Your Job
 
 1. Read the feedback body through the CLI above. Do not skip this step.
 2. Read the relevant issue, workflow artifacts, and changed files:
-   - `${{ openspecChangeDir }}/proposal.md`
-   - `${{ openspecChangeDir }}/design.md`
-   - `${{ openspecChangeDir }}/tasks.json`
-   - `${{ openspecChangeDir }}/specs/`
+   - `openspec/changes/issue-${{ issue.number }}/proposal.md`
+   - `openspec/changes/issue-${{ issue.number }}/design.md`
+   - `openspec/changes/issue-${{ issue.number }}/tasks.json`
+   - `openspec/changes/issue-${{ issue.number }}/specs/`
    - any files the feedback points to
 3. Treat the feedback as required input, not optional commentary. Every requested change must be addressed.
 4. Apply only the changes needed to satisfy the feedback. Do not make unrelated edits.
@@ -43,8 +37,8 @@ ${{ approvalFeedback.command }}
 
 ## Rules
 
-- Do not edit `${{ openspecChangeDir }}/review.md` or other review-marker artifacts; the next review task regenerates them.
-- Do not modify workflow artifacts under `${{ openspecChangeDir }}/` unless the feedback explicitly requires it.
+- Do not edit `openspec/changes/issue-${{ issue.number }}/review.md` or other review-marker artifacts; the next review task regenerates them.
+- Do not modify workflow artifacts under `openspec/changes/issue-${{ issue.number }}/` unless the feedback explicitly requires it.
 - Do not approve the stage yourself. Approval is a user decision through the Mohist approval gate.
 - Do not create or remove feedback records. The user owns the feedback loop.
 - You may be interrupted at any time: commit incrementally and keep your progress

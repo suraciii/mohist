@@ -7,10 +7,10 @@ describe("renderTemplate", () => {
       prompt: "${{ prompts.proposal }}",
     }, {
       prompts: {
-        proposal: "Write to ${{ openspecChangeDir }}/proposal.md for ${{ issue.title }}",
+         proposal: "Write to openspec/changes/issue-${{ issue.number }}/proposal.md for ${{ issue.title }}",
       },
-      openspecChangeDir: "openspec/changes/issue-2",
-      issue: {
+       issue: {
+         number: 2,
         title: "Document update smoke validation note after update",
       },
     })
@@ -100,13 +100,13 @@ describe("renderTemplate", () => {
     const rendered = renderTemplate({
       markers: [
         {
-          path: "${{ openspecChangeDir }}/review.md",
+           path: "openspec/changes/issue-${{ issue.number }}/review.md",
           contains: "see ${{ docs }} for details",
           oneOf: ["<promise>${{ verdict }}</promise>", "<promise>FAIL</promise>"],
         },
       ],
     }, {
-      openspecChangeDir: "openspec/changes/issue-408",
+       issue: { number: 408 },
       docs: "should-not-be-rendered-here",
       verdict: "PASS",
     }) as { markers: Array<{ path: string; contains: string; oneOf: string[] }> }
@@ -136,10 +136,10 @@ describe("renderWithSkippedFields", () => {
     // which iterates Object.entries — a string "abc" became {"0":"a","1":"b","2":"c"}.
     const rendered = renderWithSkippedFields(
       {
-        path: "${{ openspecChangeDir }}/tasks.json",
+         path: "openspec/changes/issue-${{ issue.number }}/tasks.json",
         buildPrompt: "issue=${{ issue.number }}",
       },
-      { openspecChangeDir: "openspec/changes/issue-7", issue: { number: 7 } },
+       { issue: { number: 7 } },
       new Set(),
     )
 
@@ -152,8 +152,8 @@ describe("renderWithSkippedFields", () => {
   it("passes through skipped fields without rendering", () => {
     const task = { uses: "mohist/opencode", with: { base: "${{ prompts.build }}" } }
     const rendered = renderWithSkippedFields(
-      { path: "${{ openspecChangeDir }}/tasks.json", task },
-      { openspecChangeDir: "openspec/changes/issue-7" },
+       { path: "openspec/changes/issue-${{ issue.number }}/tasks.json", task },
+       { issue: { number: 7 } },
       new Set(["task"]),
     )
 
@@ -282,9 +282,9 @@ describe("wholeStringUnresolvedReferences", () => {
       {
         description:
           "The runner's ${{ prompts.xxx }} resolution should be unaffected. " +
-          "Write to ${{ openspecChangeDir }}.",
+           "Write to openspec/changes/issue-${{ issue.number }}.",
       },
-      { openspecChangeDir: "openspec/changes/issue-49" },
+       { issue: { number: 49 } },
     )
     expect(unresolved).toEqual([])
   })
@@ -343,10 +343,9 @@ describe("task output variables", () => {
 
   it("ExistingTemplateBehaviorWithTaskOutputsUnchanged", () => {
     const rendered = renderTemplate(
-      { prompt: "Write to ${{ openspecChangeDir }}/proposal.md for ${{ issue.title }}" },
+       { prompt: "Write to openspec/changes/issue-${{ issue.number }}/proposal.md for ${{ issue.title }}" },
       {
-        openspecChangeDir: "openspec/changes/issue-97",
-        issue: { title: "Document update" },
+         issue: { number: 97, title: "Document update" },
         tasks: { proposal: { outputs: { openspecName: "issue-97" } } },
       },
     ) as { prompt: string }

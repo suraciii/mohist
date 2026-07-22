@@ -97,7 +97,7 @@ function buildRegistry(handlers: Record<string, TestActionDefinition | ((inputs:
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch, changeDir: null }),
+     verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
     connection as never,
     worktree.workDir,
   )

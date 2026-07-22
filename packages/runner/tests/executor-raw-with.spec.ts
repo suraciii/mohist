@@ -48,7 +48,7 @@ describe("WorkExecutor action input boundary", () => {
 
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -65,7 +65,7 @@ describe("WorkExecutor action input boundary", () => {
       uses: "test/capture-inputs",
       with: { task: { with: { options: placeholder } } },
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { path: workDir, branch: null },
         vars: { agent: agentObject },
       },
     }
@@ -100,7 +100,7 @@ describe("WorkExecutor action input boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -111,7 +111,7 @@ describe("WorkExecutor action input boundary", () => {
       stage: "plan",
       uses: "test/capture-inputs-boundary",
       with: { prompt: "child prompt" },
-      variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+      variables: { workspace: { path: workDir, branch: null } },
       parentIssueContext: { title: "Parent", body: "Parent body" },
     }
 
@@ -136,7 +136,7 @@ describe("WorkExecutor action input boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: "main", changeDir: "should-not-be-exposed" }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: "main" }),
       {} as never,
       workDir,
     )
@@ -151,7 +151,7 @@ describe("WorkExecutor action input boundary", () => {
         foo: "bare",
         runner: { os: "fake" },
         failure: { output: "not available" },
-        workspace: { path: "/dispatch/path", branch: "dispatch-branch", changeDir: "not available" },
+        workspace: { path: "/dispatch/path", branch: "dispatch-branch" },
         vars: { foo: "namespaced" },
       },
     }, new AbortController().signal)
@@ -186,7 +186,7 @@ describe("WorkExecutor action input boundary", () => {
 
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -199,7 +199,7 @@ describe("WorkExecutor action input boundary", () => {
       uses: "test/engine-input",
       with: {},
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { path: workDir, branch: null },
         prompts: { build: "build instructions" },
       },
     }, new AbortController().signal)
@@ -226,7 +226,7 @@ describe("Dispatch rendering boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -278,7 +278,7 @@ describe("Dispatch rendering boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -311,7 +311,7 @@ describe("Dispatch rendering boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -347,7 +347,7 @@ describe("Dispatch rendering boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -397,7 +397,7 @@ describe("Dispatch rendering boundary", () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )

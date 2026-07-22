@@ -36,7 +36,7 @@ afterEach(async () => {
   setProcessSpawnerForTest(null)
 })
 
-function buildExecutor(workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null })): WorkExecutor {
+ function buildExecutor(workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null })): WorkExecutor {
   return new WorkExecutor(
     createDefaultRegistry(),
     workspaceManager,
@@ -54,7 +54,7 @@ function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem 
     title: "Task-log process output",
     uses: "core/process",
     with: {},
-    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+   variables: { workspace: { path: workDir, branch: null } },
     ...overrides,
   }
 }

@@ -129,11 +129,9 @@ function buildWork(repo: string, workflowRunId: string, stage: string, workId: s
     uses: "core/script",
     with: { run: "echo ok" },
     variables: {
-      mohist: { runId: workflowRunId },
-      issue: { number: 9 },
-      project: { id: "project-1", name: "Mohist Local" },
+      workflow: { runId: workflowRunId },
+      issue: { number: 9, projectId: "project-1" },
       repository: { name: "master", gitUrl: repo, baseBranch: "master" },
-      openspecChangeDir: "openspec/changes/issue-9",
     },
   }
 }

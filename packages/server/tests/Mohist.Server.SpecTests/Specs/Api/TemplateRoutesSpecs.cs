@@ -86,7 +86,7 @@ public class TemplateRoutesSpecs
     {
         var response = await _fixture.Client.PostAsJsonAsync(
             "/api/templates/extract-variables",
-            new { body = "Use ${{ openspecChangeDir }} and ${{ issue.number }} and ${{ openspecChangeDir }}" });
+             new { body = "Use openspec/changes/issue-${{ issue.number }} and ${{ issue.number }} and openspec/changes/issue-${{ issue.number }}" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -98,7 +98,7 @@ public class TemplateRoutesSpecs
             .Select(item => item.GetString())
             .ToArray();
 
-        Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables);
+         Assert.Equal(new[] { "issue.number" }, variables);
     }
 
     [Fact]
