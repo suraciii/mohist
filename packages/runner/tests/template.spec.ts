@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findTemplateReferences, renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../src/core/template.js"
+import { findTemplateReferences, renderTemplate, renderWithSkippedFields, unresolvedReferences, wholeStringUnresolvedReferences } from "../src/core/template.js"
 
 describe("renderTemplate", () => {
   it("VariableValueContainsTemplate_RendersNestedVariables", () => {
@@ -151,6 +151,63 @@ describe("renderTemplate", () => {
       "<promise>${{ verdict }}</promise>",
       "<promise>FAIL</promise>",
     ])
+  })
+})
+
+describe("renderWithSkippedFields", () => {
+  it("renders string values as strings (not character-indexed objects)", () => {
+    // Regression: previously each value was passed through renderTemplate,
+    // which iterates Object.entries — a string "abc" became {"0":"a","1":"b","2":"c"}.
+    const rendered = renderWithSkippedFields(
+      {
+        path: "${{ openspecChangeDir }}/tasks.json",
+        buildPrompt: "issue=${{ issue.number }}",
+      },
+      { openspecChangeDir: "openspec/changes/issue-7", issue: { number: 7 } },
+      new Set(),
+    )
+
+    expect(rendered?.path).toBe("openspec/changes/issue-7/tasks.json")
+    expect(rendered?.buildPrompt).toBe("issue=7")
+    expect(typeof rendered?.path).toBe("string")
+    expect(typeof rendered?.buildPrompt).toBe("string")
+  })
+
+  it("passes through skipped fields without rendering", () => {
+    const task = { uses: "mohist/opencode", with: { base: "${{ prompts.build }}" } }
+    const rendered = renderWithSkippedFields(
+      { path: "${{ openspecChangeDir }}/tasks.json", task },
+      { openspecChangeDir: "openspec/changes/issue-7" },
+      new Set(["task"]),
+    )
+
+    expect(rendered?.path).toBe("openspec/changes/issue-7/tasks.json")
+    // Skipped field is byte-identical (still contains the unrendered reference)
+    expect(rendered?.task).toEqual(task)
+  })
+
+  it("whole-string reference resolving to an object returns the object, not a stringified form", () => {
+    const rendered = renderWithSkippedFields(
+      { options: "${{ vars.agent }}" },
+      { vars: { agent: { model: "opencode" } } },
+      new Set(),
+    )
+
+    expect(rendered?.options).toEqual({ model: "opencode" })
+  })
+
+  it("returns null for null/undefined input", () => {
+    expect(renderWithSkippedFields(null, {}, new Set())).toBeNull()
+    expect(renderWithSkippedFields(undefined, {}, new Set())).toBeNull()
+  })
+})
+
+describe("renderTemplate input guards", () => {
+  it("rejects a non-object input instead of silently iterating its entries", () => {
+    // Passing a string to renderTemplate would previously walk its character
+    // indices and return {"0":"a","1":"b",…}. Guard so future misuse throws.
+    expect(() => renderTemplate("literal string" as unknown as Record<string, never>, {})).toThrow(/JSON object/)
+    expect(() => renderTemplate(["a", "b"] as unknown as Record<string, never>, {})).toThrow(/array/)
   })
 })
 

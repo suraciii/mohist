@@ -3,7 +3,7 @@ import type { ActionError, ActionResult, JsonObject, JsonValue, RenderedWorkItem
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
-import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderTemplate, renderWithSkippedFields, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
@@ -229,17 +229,7 @@ export class WorkExecutor {
     variables: JsonObject,
     deferred: Set<string>,
   ): JsonObject | null {
-    if (!withInput) return null
-    if (deferred.size === 0) return renderTemplate(withInput, variables)
-    const rendered: JsonObject = {}
-    for (const [key, value] of Object.entries(withInput)) {
-      if (!deferred.has(key)) {
-        rendered[key] = renderTemplate(value as JsonObject | null, variables)
-      } else {
-        rendered[key] = value
-      }
-    }
-    return rendered
+    return renderWithSkippedFields(withInput, variables, deferred)
   }
 
   private buildActionHost(
