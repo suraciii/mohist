@@ -53,9 +53,9 @@ Add a shared `VariableBundleShapeValidator` invoked at the top of each manager's
 
 ### D5 — In-place route rename, no aliases
 
-Rename Project/Issue/Run variable routes from `workflow-profile/variables` to `variables` in `ProjectRoutes`, `IssueRoutes.WorkflowProfile`, and `WorkflowRoutes`. Update the single Runner caller (`server/connection.ts:282`) and drop the now-redundant `workflow-profile` GET/PUT/PATCH variable routes. Effective read routes are already clean and unchanged.
+Rename Project/Issue/Run variable routes from `workflow-profile/variables` to `variables` in `ProjectRoutes`, `IssueRoutes.WorkflowProfile`, and `WorkflowRoutes`. Update every caller of the removed paths in the same change: the Runner caller (`server/connection.ts:282`) and the **Web production API clients** — `entities/settings/api/client.ts:64,68` (Settings AI variables GET/PATCH) and `entities/issue/api/client.ts:266,274,281` (Issue workflow variables GET/PUT/PATCH) — which currently call `workflow-profile/variables`. Drop the now-redundant `workflow-profile` GET/PUT/PATCH variable routes. Effective read routes are already clean and unchanged.
 
-- *Alternative:* keep both paths as aliases. *Rejected:* the reliability check forbids synonymous command/resource paths, and no compat obligation exists.
+- *Alternative:* keep both paths as aliases during transition. *Rejected:* the reliability check forbids synonymous command/resource paths, and no compat obligation exists. The correct response to the Web dependency is to migrate the clients, not to retain dual routes.
 
 ### D6 — Effective reads reuse existing read-only routes
 
@@ -69,7 +69,7 @@ Rename Project/Issue/Run variable routes from `workflow-profile/variables` to `v
 
 ## Risks / Trade-offs
 
-- `[Route rename breaks Runner/internal callers]` → Mitigation: rename server routes, update `server/connection.ts:282`, and update any internal callers in one change; the CLI variable tests and Runner `setVars` specs assert the clean path.
+- `[Route rename breaks Runner/Web/test callers]` → Mitigation: the rename touches every caller of `workflow-profile/variables` — Runner (`server/connection.ts:282`), Web production clients (`entities/settings/api/client.ts`, `entities/issue/api/client.ts`), Web MSW/test handlers, and the server path-contract regression specs (`PathContractRegressionSpecs.cs` and the other server specs asserting the old path). All are updated in one change; CLI variable tests, Runner `setVars` specs, and Web specs assert the clean `/variables` path.
 - `[Dotted key path through a non-object is ambiguous]` → Mitigation: `VariableKeyPath` rejects segments that cannot traverse an object at write and read boundaries with an actionable domain error; original value unchanged.
 - `[Project/Issue `vars.agent` convergence silently drops non-{model,variant} keys]` → Mitigation: `ProjectVariablesFilter` remains the agent write authority; document that `project variable set agent.<other>` is not persisted. This is pre-existing behavior, surfaced — not introduced — by the new command.
 - `[Concurrent `run variable set` and `setVars` race]` → Mitigation: Run already uses ETag read-modify-write (`MutateVariablesAsync`); a lost write raises `DbUpdateConcurrencyException` rather than silently clobbering. CLI surfaces transport-vs-domain outcomes per #475.
@@ -82,9 +82,10 @@ No schema or data change, so migration is code-only and atomic within this chang
 1. **Server**: add `VariableBundleShapeValidator`; wire it into the three managers' Set/Patch.
 2. **Server routes**: rename variable routes to `/variables` in `ProjectRoutes`, `IssueRoutes.WorkflowProfile`, `WorkflowRoutes`; remove the redundant `workflow-profile/variables` PUT/PATCH/GET for variables.
 3. **Runner**: update `server/connection.ts:282` URL to `/variables`.
-4. **CLI**: add `VariableCommands`; register under `project`/`issue`/`run`; remove `--var`/`--stage-var`/`--vars-file` from `MohistCliCommands.ProjectWorkflow.cs` and the Issue workflow-config commands.
-5. **Tests**: CLI specs (shared rules across scopes, Run `--effective`, target resolution, local usage failures, no-remote paths); server specs (write-boundary rejection, clean routes, effective reads); Runner `setVars` spec on the clean path.
-6. **Docs**: align `docs/cli-reference.md`, `design/cli.md`, and close the `workflow-profile` path and string-only-value gaps in `design/workflow/variables.md`.
+4. **Web**: migrate `entities/settings/api/client.ts` and `entities/issue/api/client.ts` to `/variables`; update MSW handlers (`_issueDetailMsw.tsx`, `AiSettingsSectionTestSupport.tsx`) and Web tests (`SettingsPage.spec.tsx`, `IssueDetailPage.spec.tsx`, browser specs under `packages/web/tests/browser`); update server path-contract specs (`PathContractRegressionSpecs.cs`, `IssueWorkflowProfileApiConsistencySpecs.cs`, `IssueWorkflowProductLoopSpecs.cs`, `RuntimeSettingsSpecs.cs`, `AgentSessionLaunchRoutesSpecs.cs`).
+5. **CLI**: add `VariableCommands`; register under `project`/`issue`/`run`; remove `--var`/`--stage-var`/`--vars-file` from `MohistCliCommands.ProjectWorkflow.cs` and the Issue workflow-config commands.
+6. **Tests**: CLI specs (shared rules across scopes, Run `--effective`, target resolution, local usage failures, no-remote paths); server specs (write-boundary rejection, clean routes, effective reads); Runner `setVars` spec on the clean path; Web specs on the clean path.
+7. **Docs**: align `docs/cli-reference.md`, `design/cli.md`, and close the `workflow-profile` path and string-only-value gaps in `design/workflow/variables.md`.
 
 **Rollback**: revert the change set; persisted `VariableBundle` JSON is unaffected because storage columns and the bundle shape are unchanged.
 

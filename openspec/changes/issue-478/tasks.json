@@ -6,7 +6,7 @@
       "id": "T-001",
       "title": "Establish the clean Variables resource API with write-boundary validation",
       "spec": "specs/variable-resources/spec.md",
-      "description": "Rename Project, Issue, and Run variable routes from workflow-profile/variables to clean /variables (GET/PUT/PATCH) in ProjectRoutes, IssueRoutes.WorkflowProfile, and WorkflowRoutes, and remove the now-redundant workflow-profile variable routes. Add a shared VariableBundleShapeValidator invoked at the top of each manager's Set/Patch (ProjectWorkflowProfileManager, IssueWorkflowProfileManager, WorkflowRunProfileManager) that rejects non-object vars roots and non-object stages.<stage>.vars roots before any save, leaving the original value unchanged. Update the Runner setVars patch URL (packages/runner/src/server/connection.ts) to /api/workflow-runs/{id}/variables. Keep effective read routes, the merge algorithm, ProjectVariablesFilter, and the Run ETag read-modify-write unchanged. Cover with server specs and a runner setVars spec on the clean path.",
+      "description": "Rename Project, Issue, and Run variable routes from workflow-profile/variables to clean /variables (GET/PUT/PATCH) in ProjectRoutes, IssueRoutes.WorkflowProfile, and WorkflowRoutes, and remove the now-redundant workflow-profile variable routes. Add a shared VariableBundleShapeValidator invoked at the top of each manager's Set/Patch (ProjectWorkflowProfileManager, IssueWorkflowProfileManager, WorkflowRunProfileManager) that rejects non-object vars roots and non-object stages.<stage>.vars roots before any save, leaving the original value unchanged. Update every caller of the removed routes in the same change: the Runner setVars patch URL (packages/runner/src/server/connection.ts) and the Web production API clients (packages/web/src/entities/settings/api/client.ts and packages/web/src/entities/issue/api/client.ts) to /variables, plus their MSW handlers and Web tests. Update the server path-contract regression specs and other server specs asserting the old path. Keep effective read routes, the merge algorithm, ProjectVariablesFilter, and the Run ETag read-modify-write unchanged. Cover with server specs, a runner setVars spec, and Web specs on the clean path.",
       "acceptanceCriteria": [
         "GET /api/projects/{id}/variables, /api/projects/{id}/issues/{number}/variables, and /api/workflow-runs/{id}/variables each return only that scope's own Variables",
         "PUT replaces and PATCH deep-merges the addressed scope only (Project/Issue/Run), with null in a PATCH acting as a delete instruction that is not persisted",
@@ -16,15 +16,18 @@
         "A PATCH body that cannot be parsed as JSON is rejected with a domain error; the original value is unchanged",
         "Effective read routes (/variables/effective and /variables/effective/{keyPath} with optional ?stage=) remain unchanged and still return the Project→Issue→Run merge and stage overlay",
         "Runner setVars PATCH targets /api/workflow-runs/{id}/variables with a vars-only body (no stages), verified by connection.ts and a runner spec",
-        "dotnet build Mohist.sln succeeds with TreatWarningsAsErrors and the new server specs pass; npm test -w packages/runner passes"
+        "Web production clients call /variables: entities/settings/api/client.ts (GET/PATCH) and entities/issue/api/client.ts (GET/PUT/PATCH) no longer reference workflow-profile/variables",
+        "Web MSW handlers and specs (_issueDetailMsw.tsx, AiSettingsSectionTestSupport.tsx, SettingsPage.spec.tsx, IssueDetailPage.spec.tsx, browser specs) use the /variables path",
+        "Server path-contract specs (PathContractRegressionSpecs.cs, IssueWorkflowProfileApiConsistencySpecs.cs, IssueWorkflowProductLoopSpecs.cs, RuntimeSettingsSpecs.cs, AgentSessionLaunchRoutesSpecs.cs) assert the /variables path, not workflow-profile/variables",
+        "dotnet build Mohist.sln succeeds with TreatWarningsAsErrors and the new server specs pass; npm test -w packages/runner passes; npm run typecheck -w packages/web and npm run test:run -w packages/web pass"
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Renamed variable routes in ProjectRoutes.cs, IssueRoutes.WorkflowProfile.cs, WorkflowRoutes.cs; new VariableBundleShapeValidator wired into the three managers; updated packages/runner/src/server/connection.ts; server specs and runner setVars spec",
+      "output": "Renamed variable routes in ProjectRoutes.cs, IssueRoutes.WorkflowProfile.cs, WorkflowRoutes.cs; new VariableBundleShapeValidator wired into the three managers; updated packages/runner/src/server/connection.ts; migrated packages/web/src/entities/settings/api/client.ts and packages/web/src/entities/issue/api/client.ts plus Web MSW handlers/tests; updated server path-contract specs; server, runner, and web specs",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design D4 (validation in managers as single authority) and D5 (in-place rename, no aliases). No VariableBundle shape, merge, precedence, or DefaultVars/DefaultStages change (owned by #474). The Runner URL update is bundled because setVars breaks the moment the route is renamed."
+      "notes": "Design D4 (validation in managers as single authority) and D5 (in-place rename, no aliases). No VariableBundle shape, merge, precedence, or DefaultVars/DefaultStages change (owned by #474). The Runner URL and Web client updates are bundled because both break the moment the workflow-profile/variables routes are removed; the server path-contract regression specs and Web specs that assert the old path must move with the rename."
     },
     {
       "id": "T-002",

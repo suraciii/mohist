@@ -26,6 +26,10 @@ Each scope's `variable` leaf SHALL accept `--stage <stage>`. When `--stage` is p
 - **WHEN** `issue variable set 42 review.strict true` and `issue variable set 42 review.strict --value-json true --stage check` are both run
 - **THEN** a workflow-wide `get 42 review.strict` returns the string `true`, while `get 42 review.strict --stage check` returns the boolean `true`
 
+#### Scenario: list --stage returns the scope's own raw stage slice
+- **WHEN** `issue variable list 42 --stage check` is run
+- **THEN** the output is only that Issue scope's own `check` Stage Variables, with no merge of workflow-wide or other-scope values
+
 ### Requirement: Positional string value has no type coercion
 
 `set <key> <value>` SHALL store the positional value verbatim as a JSON string. No positional value SHALL be implicitly converted to boolean, number, object, or array.
