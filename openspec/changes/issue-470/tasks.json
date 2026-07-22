@@ -27,11 +27,12 @@
       "id": "T-002",
       "title": "Deliver the tri-state OTel status baseline",
       "spec": "specs/otel-runtime-status/spec.md#otel-status-has-exactly-three-states",
-      "description": "Expose T-001 through fixed /otel/api/status and mo otel status, wire normal startup/off behavior, and deliver the production one-shot storage readiness probe. Process/growth fields remain unavailable and routes empty until later tasks.",
+      "description": "Expose T-001 through fixed /otel/api/status and mo otel status, wire normal startup/off behavior, and deliver the production one-shot storage readiness probe with timeout-before-initialization and fakeable metadata-length seams. Process/growth fields remain unavailable and routes empty until later tasks.",
       "acceptanceCriteria": [
         "Status is always reachable with Server and reports off/healthy/degraded; enabled starts unverified, normal collector success and one readiness probe establish healthy.",
-        "Production IOtelStorageProbe composes IOtelReadinessConnectionFactory and IFileSystem: one connection with one-second busy timeout, fixed initialization, PRAGMA schema_version, then exactly one database/WAL/SHM length read.",
-        "Named shared-memory SQLite tests verify production SQL; throwing connection-factory fakes verify corrupt/locked/open mapping; FakeFileSystem verifies metadata order/count with no host storage.",
+        "T-002 adds OtelDb.OpenReadinessConnection: before constructing/opening the connection it clones the read-write string with Default Timeout=1, then runs existing fixed initialization; it is the production target of IOtelReadinessConnectionFactory and the probe reads PRAGMA schema_version once.",
+        "T-002 adds nullable IFileSystem.GetFileLength to every production/test implementation; the probe calls database/WAL/SHM once each, treats null as absent/zero, and propagates other metadata failures.",
+        "A named shared-memory SQLite test verifies the production OtelDb method returns DefaultTimeout=1 with initialized schema, without wall-clock lock timing; throwing connection-factory fakes verify corrupt/locked/open mapping; FakeFileSystem verifies missing/error/order/count with no host storage.",
         "Fixed payload/unavailable fields are correct; old count status is removed and status snapshot does no dependencies, COUNT(*) or history work.",
         "Before T-003 installs resource sampling, off runs no listener/exporter/sampler/maintenance/Meter measurements/aggregation; /api/health remains successful and OTel self-feedback tests terminate.",
         "CLI validates/render states/unavailable values and old/server-down payload behavior. Focused server/CLI tests and npm test pass."
@@ -39,7 +40,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "IOtelReadinessConnectionFactory and production IOtelStorageProbe, fixed status DTO/API/CLI, normal startup/off wiring, and health/feedback/no-scan/probe tests.",
+      "output": "OtelDb readiness-open operation, IOtelReadinessConnectionFactory, IFileSystem metadata-length extension and production IOtelStorageProbe; fixed status DTO/API/CLI, normal startup/off wiring, and health/feedback/no-scan/probe tests.",
       "dependsOn": [
         "T-001"
       ],
@@ -54,7 +55,7 @@
       "acceptanceCriteria": [
         "OtelStatusInitializer registration and implementation are removed/replaced, not retained; exactly one immediate startup probe exists after this task.",
         "One serial loop coalesces ticks, never overlaps storage probes, starts no new work on shutdown and awaits the current fixed-operation call; no filesystem elapsed/cancellation guarantee or abandoned Task.Run worker exists.",
-        "CPU normalization, working set, GC heap, two-sample null behavior, 60-second seven-slot growth ring and 1-GiB design budget match D5.",
+        "Immediate working-set/GC-heap availability, CPU normalization with first-sample warm-up null, 60-second seven-slot growth ring and 1-GiB design budget match D5.",
         "Success followed by failure invalidates cached storage values, omits those gauges and returns null while storage_read activates; off still refreshes status-only process values but performs no storage call and emits no Meter measurement.",
         "Controllable operation signals, fake process data and existing probe seams test behavior without real time/storage. Focused tests and npm test pass."
       ],
@@ -72,19 +73,20 @@
       "id": "T-004",
       "title": "Install request-local work accounting",
       "spec": "specs/runtime-observability-metrics/spec.md#runtime-signals-are-available-through-a-standard-meter-and-a-local-summary",
-      "description": "Deliver RequestWorkScope/Snapshot and the HTTP, EF, Orleans and HttpClient accounting boundaries as one independently tested request-metrics module. Keep scopes active for canonical and compatibility agent reads while OTel is off, but suppress Meter publication then and clear scope across incoming Orleans turns.",
+      "description": "Deliver RequestWorkScope snapshots/atomic close/detach suppression and the HTTP, EF, Orleans and HttpClient accounting boundaries as one independently tested request-metrics module. Keep scopes active for canonical and compatibility agent reads while OTel is off, but suppress Meter publication then and clear scope across incoming Orleans turns.",
       "acceptanceCriteria": [
         "Middleware creates/clears scope when OTel enabled or an agent canonical/compatibility route runs; CompleteRequest and Meter publication occur only while enabled.",
-        "Snapshot() is immutable/readable before middleware completion without closing scope; later awaited work increments until final snapshot.",
+        "Snapshot() is immutable/readable before middleware completion without closing scope; CloseAndSnapshot atomically closes at response completion, with increments before close included and increments after close ignored.",
         "Business EF commands, caller-side Orleans sends and innermost physical HTTP sends/retries count once; all production/custom test DbContextFactory roots install one interceptor.",
         "Incoming Orleans filter saves/clears/restores scope; real in-process chain proves no grain-to-grain or grain-DB leakage.",
+        "RequestWorkScope.SuppressFlow clears only its ambient slot while detached work is queued; separate deterministic tests prove post-close increments no-op, a suppressed child observes no current scope, and each migrated SystemUpdateService/BackgroundHermesIssueNotificationDispatcher launcher starts its callback without that scope.",
         "OTel endpoints/maintenance create no scope and direct otel.db is excluded. Off agent scopes count locally but emit/retain nothing.",
         "Route/method/status label normalization and forbidden identities match D2. Adapter, snapshot, parallel, retry, off and feedback tests plus npm test pass."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "RequestWorkScope/Snapshot, middleware, EF interceptor, Orleans incoming/outgoing filters, HttpClient handler, composition-root updates and integration/unit tests.",
+      "output": "RequestWorkScope Snapshot/CloseAndSnapshot/SuppressFlow, migrated detached launchers, middleware, EF interceptor, Orleans incoming/outgoing filters, HttpClient handler, composition-root updates and integration/unit tests.",
       "dependsOn": [
         "T-001"
       ],

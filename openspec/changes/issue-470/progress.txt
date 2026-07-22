@@ -11,9 +11,9 @@ Issue 470 plan repair progress
 - [completed] Validated proposal/spec/design/task consistency, 7-task JSON anchors/DAG, 14 requirements/35 scenarios, and confirmed self-review.md remains unchanged.
 
 Current self-review repair:
-- [completed] New F1/F4: process pressure remains available in `off`, while collector/storage work, route retention and all Meter measurements remain disabled; task wording now distinguishes Meter construction from measurement.
-- [in progress] New F2: define a deterministic request-scope close/detach boundary and tests.
-- [pending] New F3: make the production readiness-open and file-length seams explicit against current APIs.
+- [completed] New F1/F4: immediate working-set/GC-heap pressure remains available in `off` and CPU is null only for first-sample warm-up; collector/storage work, route retention and all Meter measurements remain disabled, with construction distinguished from measurement.
+- [completed] New F2: request accounting closes atomically at response completion, adapters no-op after close, detached launchers suppress scope flow, and separate tests prove close immutability, null child scope and both launcher migrations.
+- [completed] New F3: T-002 owns `OtelDb.OpenReadinessConnection` using `Default Timeout=1` before connection construction/initialization plus nullable `IFileSystem.GetFileLength` across all implementations/fakes.
 - [pending] Revalidate all artifacts and confirm `self-review.md` remains untouched.
 
 Commits:

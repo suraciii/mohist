@@ -1,6 +1,6 @@
 ### Requirement: Runtime signals are available through a standard Meter and a local summary
 
-Mohist SHALL emit runtime observability signals through a standard .NET `Meter` and SHALL update an in-process summary from the same observations. The signals SHALL cover stable-route request count and latency, database-call and downstream-call count, current process CPU, working set and GC heap pressure, telemetry received, saved, rejected and dropped, and observability storage usage and growth. Reading the local summary SHALL NOT depend on an external metrics backend or on exporting the local metrics to the built-in collector.
+Mohist SHALL emit runtime observability signals through a standard .NET `Meter` and SHALL update an in-process summary from the same observations. The signals SHALL cover stable-route request count and latency, database-call and downstream-call count, current process CPU, working set and GC heap pressure, telemetry received, saved, rejected and dropped, and observability storage usage and growth. A request observation SHALL close atomically at response completion; work that executes later in a detached background context MUST NOT mutate that completed request. Reading the local summary SHALL NOT depend on an external metrics backend or on exporting the local metrics to the built-in collector.
 
 #### Scenario: A request updates both observation surfaces
 
@@ -13,6 +13,12 @@ Mohist SHALL emit runtime observability signals through a standard .NET `Meter` 
 - **WHEN** no external metrics reader or backend is configured
 - **THEN** Mohist SHALL continue maintaining the local runtime summary used by its status surface
 - **AND** the absence of an external metrics system SHALL NOT change Workflow or Session behavior
+
+#### Scenario: Detached work outlives its originating response
+
+- **WHEN** a request launches background work that executes after the response-completion boundary
+- **THEN** the completed route observation SHALL remain unchanged by that later work
+- **AND** the background execution SHALL NOT retain the request's ambient work scope
 
 ### Requirement: Metric identity has stable low cardinality
 

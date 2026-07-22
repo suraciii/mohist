@@ -7,7 +7,8 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **WHEN** the Server is reachable and observability is disabled
 - **THEN** the status API and `mo otel status` SHALL report `off`
 - **AND** the status read SHALL NOT require the collector, exporter or storage-maintenance work to be running
-- **AND** current process CPU, working set and GC heap pressure SHALL remain available from the bounded process sampler
+- **AND** current working set and GC heap pressure SHALL remain available from the immediate bounded process sample
+- **AND** CPU utilization MAY be unavailable only during the first-sample warm-up before an elapsed-time delta exists
 - **AND** storage usage and growth SHALL be unavailable because the OTel storage probe is not running
 
 #### Scenario: Collection and storage are operating normally
