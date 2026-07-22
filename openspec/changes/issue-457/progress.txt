@@ -78,3 +78,38 @@
 - The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
 - Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
 - The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.
+
+## T-003 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The shared `Select` is base-ui's combobox-style trigger + popup (role="combobox" on the trigger, role="option" on the items, popup rendered through a portal). Native `<select>` + `<option>` is gone — the existing tests had to be rewritten to drive the control via `userEvent.click(trigger)` + `userEvent.click(option)`.
+- The `data-testid` hook moves onto the `SelectTrigger` (which spreads `...props` to the underlying combobox); `getByTestId` resolves to the trigger element, not to a `<select>`. Confirmed against the existing `ProjectDefaultWorkflowControl.test.tsx` pattern, which already exercises `screen.getByTestId('project-default-workflow-select')` on a `SelectTrigger`.
+- base-ui `Select` accepts `value=""` as a normal item (no rejection, no special-casing). The `stringifyAsValue` helper preserves empty strings (vs. the `value == null` → `''` serialization, which only fires for nullish values, not for the literal empty string). So the `__all__` sentinel fallback in design D4 was not needed.
+- `SelectValue` exposes a `placeholder` prop for the "no selection" display, but the more reliable approach is to render the label as children when known and let the placeholder show only when the resolved value is empty/null. So the trigger is wrapped in `<SelectValue placeholder="All statuses">{statusFilter ? statusLabel(statusFilter) : 'All statuses'}</SelectValue>` — this keeps the displayed label deterministic and tests `within(trigger).getByText('All statuses')` / `'Failed'` / etc. without having to open the popup.
+- The `SelectTrigger` `size="sm"` token gives the existing compact 7px height, and the explicit `className="h-7 min-w-[140px] text-xs font-normal"` carries over the visual treatment (small height, tokenized border, small font, no bold) so the row still matches the original look. `font-normal` is needed because the trigger's default style declares `text-sm` (not bold) but the visual context is a label-row that does not want weight contrast; it is also necessary because the inherited parent label is `text-[11px]` and the trigger's `text-sm` would otherwise feel too big.
+- The 5-options stage list assertion (`['All stages', 'Plan', 'Build', 'Check', 'Integrate']`) used to read off `select.querySelectorAll('option')` directly. After the migration, base-ui only mounts the option elements when the popup is open, so the test now opens the popup via `user.click(stageFilter)` and reads `screen.findAllByRole('option')`. The order matches because `WORKFLOW_PIPELINE_STAGES` is the pipeline order and the leading `SelectItem value=""` (the "All stages" item) is rendered first.
+- The "option is not disabled" check that used to be `checkOption.disabled` is now `checkOption.getAttribute('data-disabled')` — base-ui emits `data-disabled` on the option element. When the option is not disabled, the attribute is absent (returns `null`), so the assertion becomes `expect(...).toBeNull()`.
+- For the sort control, the test used to assert `sortSelect.value === 'createdAt'`. After the migration, there is no `.value` to read on a combobox; the test now asserts `within(sortSelect).getByText('Created')` (the visible label inside the trigger) plus a `tagName !== 'SELECT'` guard so the native-select invariant is locked in code.
+- Added one extra test that exercises the empty-string "All …" path end-to-end (`lets a user clear a filter by selecting the "All …" option`) — set a status filter, observe the notice appear, then re-open the popup and pick "All statuses" and confirm the notice disappears and both sessions are visible. This locks the null-mapping boundary that the migration just introduced (`v === '' ? null : v`).
+
+### Decisions confirmed against spec
+
+- Used the shared `Select` / `SelectContent` / `SelectItem` / `SelectTrigger` / `SelectValue` from `@/shared/ui/components/select` (same import path as the rest of the app).
+- Modeled the "All …" null option as `value=""` (per design D4). The `__all__` sentinel fallback was not needed because base-ui accepts empty-string item values.
+- Preserved the existing `data-testid` hooks (`workflow-sessions-status-filter`, `workflow-sessions-stage-filter`, `workflow-sessions-sort`) by moving them onto the `SelectTrigger`.
+- Reused the existing `STATUS_LABELS / STAGE_LABELS / SORT_LABELS` maps for option labels and the trigger's displayed value.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5072 tests passed (+1 test over T-002 baseline: the new "All …" clear-filter test).
+- Focused run of `WorkflowSessionsPanel.test.tsx` — 17 tests passed, including the rewritten shared-Select interactions and the new "All …" clear test.
+- `rg "<select|HTMLSelectElement|querySelectorAll\('option'\)" packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.test.tsx` — zero matches.
+- `rg "data-testid" packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx` — all three filter hooks (`workflow-sessions-status-filter`, `workflow-sessions-stage-filter`, `workflow-sessions-sort`) are still present, now on the `SelectTrigger` instead of a `<select>`.
+
+### Out of scope (noted, not done)
+
+- The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
+- Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
+- The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.

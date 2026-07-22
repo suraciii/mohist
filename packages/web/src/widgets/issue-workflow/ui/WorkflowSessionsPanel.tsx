@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ActivityIcon, AlertCircleIcon, CheckCircle2Icon, CircleIcon, MessageSquareIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { useWorkflowRunSessions, type WorkflowRunSession } from '../../../entities/coder-session'
 import { useProjectPath } from '../../../entities/project'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
@@ -199,49 +200,70 @@ function SessionFilterControls({
     <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1" data-testid="workflow-sessions-controls">
       <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <span>Status</span>
-        <select
-          aria-label="Filter sessions by status"
-          data-testid="workflow-sessions-status-filter"
+        <Select
           value={statusFilter ?? ''}
-          onChange={(e) => onStatusChange(e.target.value || null)}
-          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onValueChange={(value) => onStatusChange(value === '' ? null : value)}
         >
-          <option value="">All statuses</option>
-          {availableStatuses.map((status) => (
-            <option key={status} value={status}>{statusLabel(status)}</option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label="Filter sessions by status"
+            data-testid="workflow-sessions-status-filter"
+            size="sm"
+            className="h-7 min-w-[140px] text-xs font-normal"
+          >
+            <SelectValue placeholder="All statuses">{statusFilter ? statusLabel(statusFilter) : 'All statuses'}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All statuses</SelectItem>
+            {availableStatuses.map((status) => (
+              <SelectItem key={status} value={status}>{statusLabel(status)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
       <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <span>Stage</span>
-        <select
-          aria-label="Filter sessions by stage"
-          data-testid="workflow-sessions-stage-filter"
+        <Select
           value={stageFilter ?? ''}
-          onChange={(e) => onStageChange((e.target.value as WorkflowPipelineStage) || null)}
-          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onValueChange={(value) => onStageChange(value === '' ? null : (value as WorkflowPipelineStage))}
         >
-          <option value="">All stages</option>
-          {WORKFLOW_PIPELINE_STAGES.map((stage) => (
-            <option key={stage} value={stage}>
-              {STAGE_LABELS[stage]}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label="Filter sessions by stage"
+            data-testid="workflow-sessions-stage-filter"
+            size="sm"
+            className="h-7 min-w-[120px] text-xs font-normal"
+          >
+            <SelectValue placeholder="All stages">{stageFilter ? STAGE_LABELS[stageFilter] : 'All stages'}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All stages</SelectItem>
+            {WORKFLOW_PIPELINE_STAGES.map((stage) => (
+              <SelectItem key={stage} value={stage}>
+                {STAGE_LABELS[stage]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
       <label className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
         <span>Sort</span>
-        <select
-          aria-label="Sort sessions"
-          data-testid="workflow-sessions-sort"
+        <Select
           value={sortKey}
-          onChange={(e) => onSortChange(e.target.value as WorkflowSessionSortKey)}
-          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onValueChange={(value) => onSortChange(value as WorkflowSessionSortKey)}
         >
-          {(['createdAt', 'tokens', 'duration'] as const).map((key) => (
-            <option key={key} value={key}>{SORT_LABELS[key]}</option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label="Sort sessions"
+            data-testid="workflow-sessions-sort"
+            size="sm"
+            className="h-7 min-w-[100px] text-xs font-normal"
+          >
+            <SelectValue>{SORT_LABELS[sortKey]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {(['createdAt', 'tokens', 'duration'] as const).map((key) => (
+              <SelectItem key={key} value={key}>{SORT_LABELS[key]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
     </div>
   )

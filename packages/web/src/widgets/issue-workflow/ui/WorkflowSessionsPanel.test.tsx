@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import { createQueryClient, render as renderWithProviders } from '../../../../tests/test-utils'
 import { WorkflowSessionsPanel } from './WorkflowSessionsPanel'
@@ -144,7 +145,8 @@ describe('WorkflowSessionsPanel', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders a compact filter/sort control row above the session list', () => {
+  it('renders a compact filter/sort control row above the session list', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -156,20 +158,26 @@ describe('WorkflowSessionsPanel', () => {
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
     expect(screen.getByTestId('workflow-sessions-controls')).toBeInTheDocument()
-    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
+    const statusFilter = screen.getByTestId('workflow-sessions-status-filter')
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter')
+    const sortSelect = screen.getByTestId('workflow-sessions-sort')
 
-    expect(statusFilter.value).toBe('')
-    expect(stageFilter.value).toBe('')
-    expect(sortSelect.value).toBe('createdAt')
+    expect(within(statusFilter).getByText('All statuses')).toBeInTheDocument()
+    expect(within(stageFilter).getByText('All stages')).toBeInTheDocument()
+    expect(within(sortSelect).getByText('Created')).toBeInTheDocument()
 
-    const stageOptions = Array.from(stageFilter.querySelectorAll('option')).map((o) => o.textContent)
-    expect(stageOptions).toEqual(['All stages', 'Plan', 'Build', 'Check', 'Integrate'])
-    expect(Array.from(stageFilter.querySelectorAll('option')).map((o) => o.disabled)).toEqual([false, false, false, false, false])
+    expect(statusFilter.tagName).not.toBe('SELECT')
+    expect(stageFilter.tagName).not.toBe('SELECT')
+    expect(sortSelect.tagName).not.toBe('SELECT')
+
+    await user.click(stageFilter)
+    const stageOptions = await screen.findAllByRole('option')
+    expect(stageOptions.map((o) => o.textContent)).toEqual(['All stages', 'Plan', 'Build', 'Check', 'Integrate'])
+    expect(stageOptions.map((o) => o.getAttribute('data-disabled'))).toEqual([null, null, null, null, null])
   })
 
-  it('filtering by status hides non-matching sessions and surfaces a notice', () => {
+  it('filtering by status hides non-matching sessions and surfaces a notice', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -181,16 +189,20 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
-    fireEvent.change(statusFilter, { target: { value: 'failed' } })
+    const statusFilter = screen.getByTestId('workflow-sessions-status-filter')
+    await user.click(statusFilter)
+    const failedOption = await screen.findByRole('option', { name: 'Failed' })
+    await user.click(failedOption)
 
+    expect(within(statusFilter).getByText('Failed')).toBeInTheDocument()
     expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
     expect(screen.queryByText('review-repair')).not.toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
     expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 3 sessions')
   })
 
-  it('filtering by stage hides non-matching sessions', () => {
+  it('filtering by stage hides non-matching sessions', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -201,14 +213,18 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    fireEvent.change(stageFilter, { target: { value: 'build' } })
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter')
+    await user.click(stageFilter)
+    const buildOption = await screen.findByRole('option', { name: 'Build' })
+    await user.click(buildOption)
 
+    expect(within(stageFilter).getByText('Build')).toBeInTheDocument()
     expect(screen.queryByText('proposal-draft')).not.toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
   })
 
-  it('sorting by tokens reorders visible sessions', () => {
+  it('sorting by tokens reorders visible sessions', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -241,8 +257,10 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
-    fireEvent.change(sortSelect, { target: { value: 'tokens' } })
+    const sortSelect = screen.getByTestId('workflow-sessions-sort')
+    await user.click(sortSelect)
+    const tokensOption = await screen.findByRole('option', { name: 'Tokens' })
+    await user.click(tokensOption)
 
     const links = screen.getAllByRole('link')
     const rendered = links.map((link) => link.getAttribute('href'))
@@ -253,7 +271,8 @@ describe('WorkflowSessionsPanel', () => {
     ])
   })
 
-  it('shows an empty-result message when filters hide every session', () => {
+  it('shows an empty-result message when filters hide every session', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -264,13 +283,16 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    fireEvent.change(stageFilter, { target: { value: 'check' } })
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter')
+    await user.click(stageFilter)
+    const checkOption = await screen.findByRole('option', { name: 'Check' })
+    await user.click(checkOption)
 
     expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
   })
 
-  it('lets a user select an absent executable stage and shows an empty result', () => {
+  it('lets a user select an absent executable stage and shows an empty result', async () => {
+    const user = userEvent.setup()
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
@@ -281,14 +303,41 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
-    const checkOption = within(stageFilter).getByRole('option', { name: 'Check' }) as HTMLOptionElement
-    expect(checkOption.disabled).toBe(false)
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter')
+    await user.click(stageFilter)
+    const checkOption = await screen.findByRole('option', { name: 'Check' })
+    expect(checkOption.getAttribute('data-disabled')).toBeNull()
+    await user.click(checkOption)
 
-    fireEvent.change(stageFilter, { target: { value: 'check' } })
-
-    expect(stageFilter.value).toBe('check')
+    expect(within(stageFilter).getByText('Check')).toBeInTheDocument()
     expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
+  })
+
+  it('lets a user clear a filter by selecting the "All …" option', async () => {
+    const user = userEvent.setup()
+    setWorkflowRunSessions({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'compile-assets', stage: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const statusFilter = screen.getByTestId('workflow-sessions-status-filter')
+    await user.click(statusFilter)
+    await user.click(await screen.findByRole('option', { name: 'Failed' }))
+    expect(within(statusFilter).getByText('Failed')).toBeInTheDocument()
+    expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 2 sessions')
+
+    await user.click(statusFilter)
+    await user.click(await screen.findByRole('option', { name: 'All statuses' }))
+
+    expect(within(statusFilter).getByText('All statuses')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-sessions-filter-notice')).not.toBeInTheDocument()
+    expect(screen.getByText('proposal-draft')).toBeInTheDocument()
+    expect(screen.getByText('compile-assets')).toBeInTheDocument()
   })
 })
 
