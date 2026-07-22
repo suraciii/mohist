@@ -84,7 +84,14 @@ public static class AgentSessionLaunchRoutes
                 WorkspacePath: req.Context?.WorkspacePath,
                 Title: null);
 
-            var runtimeError = ValidateRuntimeOverride(req.Runtime);
+            var runtimeOverride = req.Runtime;
+            if (runtimeOverride is null && req.Context?.IssueNumber is int issueNumber)
+            {
+                var issue = await issueQuerier.GetAsync(project.Id, issueNumber);
+                runtimeOverride = ReadIssueRuntimeOverride(issue?.AgentConfig);
+            }
+
+            var runtimeError = ValidateRuntimeOverride(runtimeOverride);
             if (runtimeError is not null)
             {
                 return ApiResults.BadRequest(runtimeError, "runtime_invalid");
@@ -98,7 +105,7 @@ public static class AgentSessionLaunchRoutes
                     prompt,
                     launchContext,
                     triggerLabels: null,
-                    runtimeOverride: req.Runtime,
+                    runtimeOverride: runtimeOverride,
                     ct: ct);
             }
             catch (ArgumentException ex)
@@ -149,13 +156,30 @@ public static class AgentSessionLaunchRoutes
 
     private static string? ValidateRuntimeOverride(string? runtime)
     {
-        if (string.IsNullOrWhiteSpace(runtime)) return null;
+        if (runtime is null) return null;
         if (!Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes.Contains(runtime))
         {
             return $"runtime '{runtime}' is not supported; the agent runtime accepts only " +
                 string.Join(", ", Mohist.Server.Infrastructure.AgentConfigSchema.AllowedRuntimes) + ".";
         }
         return null;
+    }
+
+    private static string? ReadIssueRuntimeOverride(
+        IReadOnlyDictionary<string, object?>? agentConfig)
+    {
+        if (agentConfig is null
+            || !agentConfig.TryGetValue("runtime", out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string rawValue => rawValue,
+            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        };
     }
 }
 

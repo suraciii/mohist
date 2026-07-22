@@ -294,6 +294,52 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task Launch_WithIssueRuntimeOverride_UsesIssueRuntimeWhenRequestOmitsRuntime()
+    {
+        var projectId = await CreateProjectAsync("launch-issue-runtime-override");
+        var agent = await CreateAgentAsync(projectId, "issue-runtime-override-agent", runtime: "opencode");
+        var issueNumber = await CreateIssueAsync(projectId, "Issue runtime override");
+
+        using var patch = await _fixture.Client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow-profile/variables",
+            new { vars = new { agent = new { runtime = "pi" } } });
+        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new
+            {
+                prompt = "use the issue backend",
+                context = new { issueNumber },
+            });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var info = await session.GetAsync();
+
+        Assert.NotNull(info);
+        Assert.Equal("pi", info!.Runtime);
+    }
+
+    [Fact]
+    public async Task IssueWorkflowVariables_RejectInvalidAgentRuntime()
+    {
+        var projectId = await CreateProjectAsync("issue-runtime-invalid");
+        var issueNumber = await CreateIssueAsync(projectId, "Invalid issue runtime");
+
+        using var response = await _fixture.Client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow-profile/variables",
+            new { vars = new { agent = new { runtime = "unknown" } } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+        Assert.Contains("runtime", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task Launch_WithUnknownRuntimeOverride_Returns400()
     {
         var projectId = await CreateProjectAsync("launch-runtime-invalid");

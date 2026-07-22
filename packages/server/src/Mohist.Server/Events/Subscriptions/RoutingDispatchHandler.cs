@@ -176,13 +176,18 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         var issue = await services.GetRequiredService<IssueQuerier>()
             .GetAsync(projectId, issueNumber.Value);
         if (issue?.AgentConfig is null
-            || !issue.AgentConfig.TryGetValue("runtime", out var value)
-            || value is not string runtime)
+            || !issue.AgentConfig.TryGetValue("runtime", out var value))
         {
             return null;
         }
 
-        return string.IsNullOrWhiteSpace(runtime) ? null : runtime;
+        var runtime = value switch
+        {
+            string raw => raw,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        };
+        return runtime;
     }
 
     internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(

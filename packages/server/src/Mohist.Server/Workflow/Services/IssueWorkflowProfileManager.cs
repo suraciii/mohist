@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
@@ -124,6 +125,8 @@ public class IssueWorkflowProfileManager : IScopedService
 
     public async Task<VariableBundle> SetVariablesAsync(string projectId, int issueNumber, VariableBundle bundle)
     {
+        ValidateAgentRuntimes(bundle);
+
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.IssueWorkflowProfiles
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.IssueNumber == issueNumber);
@@ -158,6 +161,29 @@ public class IssueWorkflowProfileManager : IScopedService
 
     private static string SerializeDefinition(WorkflowDefinition def) =>
         JsonSerializer.Serialize(def, WorkflowYamlSerializer.JsonOptions);
+
+    private static void ValidateAgentRuntimes(VariableBundle bundle)
+    {
+        ValidateAgentRuntime(bundle.Vars, "vars.agent.runtime");
+        if (bundle.Stages is null) return;
+
+        foreach (var (stage, stageVariables) in bundle.Stages)
+            ValidateAgentRuntime(stageVariables.Vars, $"stages.{stage}.vars.agent.runtime");
+    }
+
+    private static void ValidateAgentRuntime(JsonElement? vars, string path)
+    {
+        if (vars is not { ValueKind: JsonValueKind.Object }
+            || !vars.Value.TryGetProperty("agent", out var agent)
+            || agent.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var error = AgentConfigSchema.ValidateRuntime(agent);
+        if (error is not null)
+            throw new ArgumentException(error.Replace("agentConfig.runtime", path, StringComparison.Ordinal));
+    }
 
     private static async Task<IssueWorkflowProfile?> FindProfileAsync(
         MohistDbContext db,

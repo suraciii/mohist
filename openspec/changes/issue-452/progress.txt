@@ -249,3 +249,9 @@ Test results:
 - Blank JSON runtime strings are rejected by `AgentConfigSchema` instead of defaulting to OpenCode.
 - Pi AgentJob diagnostic failures preserve `kind: "pi"` in terminal output.
 - Verification: runner typecheck and focused Pi AgentJob tests passed; server solution build, focused schema tests, and the focused routed-override spec passed. The full server spec command was attempted but exceeded its command timeout before reporting.
+
+## Review follow-up fixes
+
+- Manual Agent launches with an issue context now derive the issue's effective `agent.runtime` when the request omits an explicit runtime override.
+- Issue root and per-stage workflow-variable writes validate `agent.runtime` through the shared runtime schema and return `invalid_agent_config` for unsupported values.
+- Verification: solution build, all server unit tests, and the focused manual-launch/invalid-runtime specs passed.
