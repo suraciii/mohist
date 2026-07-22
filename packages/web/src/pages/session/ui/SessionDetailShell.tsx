@@ -15,7 +15,7 @@ import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
-import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
 export interface SessionDetailShellComponents {
@@ -190,6 +190,9 @@ export function SessionDetailShell({
     handleRecoverySuccess,
     issueNumber,
     cancel,
+    emptyStateKind,
+    historicalRuntimeTarget,
+    historicalRuntimeId,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -464,7 +467,13 @@ export function SessionDetailShell({
               isStreaming={isStreaming}
               scrollContainerRef={scrollContainerRef}
             />
-          ) : isRunning ? <SessionWaitingState /> : <SessionEmptyState />}
+          ) : (
+            <SessionEmptyStateView
+              kind={emptyStateKind ?? (isRunning ? 'running-no-content' : 'terminal-no-content')}
+              historicalRuntimeTarget={historicalRuntimeTarget}
+              historicalRuntimeId={historicalRuntimeId}
+            />
+          )}
         </div>
 
         {showFollowupComposer && (
@@ -966,23 +975,55 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
   )
 }
 
-function SessionWaitingState() {
-  return (
-    <div className="flex items-center justify-center flex-1">
-      <div className="text-center space-y-3">
-        <div className="text-info text-lg">Waiting for activity...</div>
-        <p className="text-muted-foreground text-sm">The session has started but no activity recorded yet.</p>
+function SessionEmptyStateView({
+  kind,
+  historicalRuntimeTarget,
+  historicalRuntimeId,
+}: {
+  kind: EmptyStateKind
+  historicalRuntimeTarget: string | null
+  historicalRuntimeId: string | null
+}) {
+  if (kind === 'runtime-filtered') {
+    return (
+      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="runtime-filtered">
+        <div className="text-center space-y-3">
+          <div className="text-muted-foreground text-lg">The current runtime has no content</div>
+          {historicalRuntimeTarget && historicalRuntimeId ? (
+            <p className="text-muted-foreground text-sm">
+              Content is available from a historical runtime.{' '}
+              <Link
+                to={historicalRuntimeTarget}
+                data-testid="session-empty-state-history-link"
+                className="text-info hover:text-info/80 transition-colors"
+              >
+                View historical runtime
+              </Link>
+            </p>
+          ) : (
+            <p className="text-muted-foreground text-sm">Content is available from a historical runtime.</p>
+          )}
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-function SessionEmptyState() {
+  if (kind === 'running-no-content') {
+    return (
+      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="running-no-content">
+        <div className="text-center space-y-3">
+          <div className="text-info text-lg">The session has started but no content has been received</div>
+          <p className="text-muted-foreground text-sm">The session is running but no content has been received yet.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex items-center justify-center flex-1">
+    <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind="terminal-no-content">
       <div className="text-center space-y-3">
-        <div className="text-muted-foreground text-lg">No activity recorded for this session</div>
-        <p className="text-muted-foreground text-sm">This session has no recorded transcript data.</p>
+        <div className="text-muted-foreground text-lg">No content was received for this session</div>
+        <p className="text-muted-foreground text-sm">This session completed without recording any content.</p>
       </div>
     </div>
   )

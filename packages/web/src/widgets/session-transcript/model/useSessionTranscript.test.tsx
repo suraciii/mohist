@@ -70,6 +70,71 @@ function persistedEvent(text: string): SessionTurn {
   }
 }
 
+function WrapperWithoutBinding({
+  events,
+  isRunning = true,
+}: {
+  events: SessionTurn[]
+  isRunning?: boolean
+}) {
+  const result = useSessionTranscript({
+    issueNumber: 84,
+    sessionId: 'session-84',
+    runtimeSessionId: '',
+    runtime: null,
+    initialTurns: events,
+    isRunning,
+  })
+  const text = result.turns
+    .flatMap((turn) => turn.assistant)
+    .filter((part) => part.type === 'text' || part.type === 'reasoning')
+    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+    .join('')
+  return <div data-testid="transcript">{text}</div>
+}
+
+function WrapperHistorical({
+  events,
+  isRunning = true,
+}: {
+  events: SessionTurn[]
+  isRunning?: boolean
+}) {
+  const result = useSessionTranscript({
+    issueNumber: 84,
+    sessionId: 'session-84',
+    runtimeSessionId: 'runtime-84',
+    runtime: 'opencode',
+    isHistoricalRuntimeView: true,
+    initialTurns: events,
+    isRunning,
+  })
+  const text = result.turns
+    .flatMap((turn) => turn.assistant)
+    .filter((part) => part.type === 'text' || part.type === 'reasoning')
+    .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+    .join('')
+  return <div data-testid="transcript">{text}</div>
+}
+
+function renderSessionTranscriptWithoutBinding(events: SessionTurn[], isRunning = true) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <WrapperWithoutBinding events={events} isRunning={isRunning} />
+    </QueryClientProvider>,
+  )
+}
+
+function renderHistoricalSessionTranscript(events: SessionTurn[], isRunning = true) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <WrapperHistorical events={events} isRunning={isRunning} />
+    </QueryClientProvider>,
+  )
+}
+
 describe('useSessionTranscript', () => {
   it('does not let running persisted refetch overwrite live transcript tail', () => {
     const initial = [persistedEvent('persisted')]
@@ -189,6 +254,120 @@ describe('useSessionTranscript', () => {
     expect(transcript).toBe('usage:\n\nLet me read the file.')
     expect(transcript).not.toContain('usage:Let me')
     expect(transcript).toContain('\n\n')
+  })
+
+  it('accepts events when page physical binding is temporarily missing but logical session identity matches', () => {
+    renderSessionTranscriptWithoutBinding([persistedEvent('persisted')])
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: '',
+        runtime: '',
+        text: ' live',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
+  })
+
+  it('accepts events when page physical binding is missing and event provides a runtimeSessionId', () => {
+    renderSessionTranscriptWithoutBinding([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-new',
+        runtime: 'opencode',
+        text: ' live',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
+  })
+
+  it('rejects events from a different logical session', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-other',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('rejects events that omit runtimeSessionId when page has a physical binding', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('rejects events with ambiguous identity when page has no binding and event has no sessionId', () => {
+    renderSessionTranscriptWithoutBinding([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('historical runtime view rejects events that omit physical runtime identity', () => {
+    renderHistoricalSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('historical runtime view accepts events with full matching identity', () => {
+    renderHistoricalSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: ' live',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
+  })
+
+  it('historical runtime view rejects events with different physical runtime identity', () => {
+    renderHistoricalSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-different',
+        runtime: 'opencode',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
   })
 
   it('reasoning.delta interrupt closes the open text part and a later text delta opens a new part (distinct blocks)', () => {

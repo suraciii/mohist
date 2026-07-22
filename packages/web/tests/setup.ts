@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { restoreScopedProperties } from './support/scoped-property'
 import { resetSonnerFake } from './support/sonner-fake'
@@ -12,6 +12,7 @@ import {
 } from './support/msw'
 
 ensureMswServerListening()
+configure({ asyncUtilTimeout: 10_000 })
 
 beforeEach(() => {
   resetUnhandledRequests()

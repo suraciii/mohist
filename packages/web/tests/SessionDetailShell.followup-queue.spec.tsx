@@ -59,6 +59,9 @@ function makeData(sessionKey: string): SessionDataSourceResult {
     isThinking: false,
     isStreaming: false,
     displayTurns: [],
+    emptyStateKind: null,
+    historicalRuntimeTarget: null,
+    historicalRuntimeId: null,
     issueNumber: 123,
   }
 }

@@ -1,0 +1,48 @@
+{
+  "project": "mohist",
+  "description": "Make empty session transcripts diagnostically accurate and retain safe realtime visibility during temporary binding metadata gaps.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Preserve safe realtime session visibility",
+      "spec": "specs/agent-session-live-content-visibility/spec.md#Live transcript events use the strongest available session identity",
+      "description": "Update shared transcript matching and both session data sources to use the canonical logical AgentSession identity already carried by realtime envelopes. Allow fallback only for an unanchored active view whose page binding is unavailable, and retain strict physical-runtime and historical-view isolation.",
+      "acceptanceCriteria": [
+        "A live event with matching canonical session and runtime identity appears in the active transcript.",
+        "An active session with temporarily missing physical binding metadata accepts a realtime event only when the existing canonical logical AgentSession ID proves the target session.",
+        "Events with conflicting logical session IDs or physical runtime IDs are rejected; an event that omits its runtime ID after the page binding is known is rejected; and an explicit ?rt= historical view never accepts fallback live events.",
+        "Workflow pages use the canonical AgentSession ID from detail or the session list rather than substituting the route session name.",
+        "Focused Web hook/data-source tests cover matching, missing-page-binding fallback, missing-event-binding rejection, mismatch rejection, summary-loading subscription, and historical isolation.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared Web matching safely displays provable active-session events without cross-session or historical-runtime leakage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not change the session-scoped realtime envelope, runtime-event HTTP routes, persistence, or server-side binding validation."
+    },
+    {
+      "id": "T-002",
+      "title": "Diagnose empty session transcript causes",
+      "spec": "specs/agent-session-empty-state-diagnostics/spec.md#Empty transcript states identify the observed cause",
+      "description": "Add conditional unfiltered transcript evidence for an empty explicit runtime view, derive historical runtimes with visible content from existing turns and lineage, and pass the result through the shared session data-source contract. Update the session detail empty state to distinguish no uploaded content from runtime-filtered content and link to an eligible historical runtime in the same logical session.",
+      "acceptanceCriteria": [
+        "A running session with no persisted content states that it started but no content has been received; a terminal counterpart states that no content was received and does not wait for activity.",
+        "An empty explicit runtime view with visible content in another lineage runtime states that the current runtime has no content and offers a same-session historical-runtime link.",
+        "An empty transcript without proof of content in another runtime never reports a runtime mismatch and exposes no history-switch action.",
+        "The unfiltered comparison read is issued only for an empty explicit runtime-filtered view and uses existing transcript APIs without a schema, endpoint, or server filtering change.",
+        "Focused Web tests cover running and terminal no-content states, filtered-runtime diagnosis, same-session history navigation, and the no-evidence negative case.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Session pages give cause-accurate empty-state guidance and expose a safe historical-runtime path when content is filtered from the current view.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Treat only lineage runtimes with visible assistant content as actionable history; do not create a general diagnostics panel."
+    }
+  ]
+}

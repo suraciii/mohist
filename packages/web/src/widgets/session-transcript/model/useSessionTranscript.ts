@@ -31,10 +31,60 @@ interface UseSessionTranscriptOptions {
   sessionId: string
   runtimeSessionId: string
   runtime?: string | null
+  isHistoricalRuntimeView?: boolean
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
   terminalInvalidationKey?: readonly unknown[]
+}
+
+function isNonEmptyStr(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function matchesSessionEvent(
+  pageCanonicalId: string,
+  pageRuntimeSessionId: string,
+  pageRuntime: string | null | undefined,
+  isHistoricalView: boolean | undefined,
+  detail: {
+    sessionId?: string | null
+    runtimeSessionId?: string | null
+    runtime?: string | null
+  },
+): boolean {
+  const eventSid = detail.sessionId
+  const eventRsid = detail.runtimeSessionId
+  const eventRt = detail.runtime
+
+  if (isNonEmptyStr(eventSid) && eventSid !== pageCanonicalId) return false
+
+  if (isHistoricalView) {
+    const pageRsid = isNonEmptyStr(pageRuntimeSessionId) ? pageRuntimeSessionId : ''
+    if (!pageRsid || !isNonEmptyStr(eventRsid)) return false
+    if (eventRsid !== pageRsid) return false
+    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
+    return true
+  }
+
+  const hasPageRsid = isNonEmptyStr(pageRuntimeSessionId)
+  const hasEventRsid = isNonEmptyStr(eventRsid)
+
+  if (hasPageRsid && hasEventRsid) {
+    if (eventRsid !== pageRuntimeSessionId) return false
+    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
+    return true
+  }
+
+  if (hasPageRsid && !hasEventRsid) return false
+
+  if (!hasPageRsid) {
+    if (!isNonEmptyStr(eventSid)) return false
+    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
+    return true
+  }
+
+  return false
 }
 
 export interface UseSessionTranscriptResult {
@@ -55,6 +105,7 @@ export function useSessionTranscript({
   sessionId,
   runtimeSessionId,
   runtime,
+  isHistoricalRuntimeView = false,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -172,8 +223,7 @@ export function useSessionTranscript({
       runtime?: string | null
     }) => {
       if (!mountedRef.current) return false
-      if (detail.sessionId !== sessionId || detail.runtimeSessionId !== runtimeSessionId) return false
-      return runtime == null || detail.runtime === runtime
+      return matchesSessionEvent(sessionId, runtimeSessionId, runtime, isHistoricalRuntimeView, detail)
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -536,7 +586,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, isHistoricalRuntimeView])
 
   return {
     turns,
