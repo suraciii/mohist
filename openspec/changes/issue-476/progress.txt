@@ -188,3 +188,15 @@
 - Final verification: `npm test` passed the full .NET solution (1358 CLI,
   1290 server unit, 30 architecture, 3008 server spec tests), Web CI (5156),
   and Runner CI (1370). The focused issue-476 CLI selection passed 110 tests.
+- Follow-up: a separate commit `7d566857f` dropped the wall-clock-only
+  `[Fact(Timeout=5000)]` on `ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate`
+  because xUnit v2 cannot inject its token into the observer-signal await,
+  so the timeout stalls the runner instead of unblocking it. The remaining
+  tests rely on the count-gated signal pattern (the same fixture used by 13
+  other specs in this file), and the isolated + file-scoped suites both pass.
+- One Web retry test (`IssueChangedFilesPage.recovery › keeps the recovery
+  surface available with the same actions when the failure persists`) was
+  observed to flake once under the full `npm test` path. After 25+ reruns of
+  that file in isolation and 10 full `npm test` reruns, all pass. The flake
+  is non-reproducible and does not regress issue-476, so evidence is left
+  intact per repair policy.
