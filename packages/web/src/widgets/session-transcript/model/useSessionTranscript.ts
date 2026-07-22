@@ -176,14 +176,18 @@ export function useSessionTranscript({
     setNewContentAvailable(false)
   }, [])
 
-  const invalidateAndRefetch = useCallback(() => {
-    setIsFinalizing(true)
+  const invalidateSessionQueries = useCallback(() => {
     for (const queryKey of sessionQueryKeys ?? []) {
       queryClient.invalidateQueries({ queryKey })
     }
     const invKey = terminalInvalidationKey ?? ['issues', issueNumber, 'coder-sessions', sessionId]
     queryClient.invalidateQueries({ queryKey: invKey })
   }, [queryClient, issueNumber, sessionId, sessionQueryKeys, terminalInvalidationKey])
+
+  const invalidateAndRefetch = useCallback(() => {
+    setIsFinalizing(true)
+    invalidateSessionQueries()
+  }, [invalidateSessionQueries])
 
   useEffect(() => {
     if (hasLiveTailRef.current && isRunning) {
@@ -491,6 +495,43 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
+      onAgentEvent('session.followup_completed', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        const now = new Date().toISOString()
+        setTurns((prev) => closeLatestTurn(prev, now))
+        setIsThinking(false)
+        clearStreaming()
+        invalidateSessionQueries()
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('session.followup_failed', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        const now = new Date().toISOString()
+        const errorPart = createErrorPart(detail.failureReason ?? 'Follow-up failed', 'failed', now)
+        setTurns((prev) => {
+          const next = closeLatestTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, errorPart],
+          }
+          return next
+        })
+        setIsThinking(false)
+        clearStreaming()
+        invalidateSessionQueries()
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
 
@@ -586,7 +627,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, isHistoricalRuntimeView])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, invalidateSessionQueries, isHistoricalRuntimeView])
 
   return {
     turns,
