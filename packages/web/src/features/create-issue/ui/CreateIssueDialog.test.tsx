@@ -390,7 +390,6 @@ describe('CreateIssueDialog model + variant chips', () => {
     _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
     const user = userEvent.setup()
     renderDialog()
-
     await user.click(modelTrigger())
 
     for (const variant of ['low', 'medium', 'high']) {
@@ -409,7 +408,6 @@ describe('CreateIssueDialog model + variant chips', () => {
     _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     const user = userEvent.setup()
     renderDialog()
-
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
 
     await user.click(modelTrigger())
@@ -431,19 +429,15 @@ describe('CreateIssueDialog model + variant chips', () => {
 
   it('loads Pi models and sends the selected backend on create', async () => {
     _modelsData.models = ['pi/anthropic/claude']
-    const user = userEvent.setup()
     renderDialog()
-
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Pi issue' } })
     fireEvent.change(screen.getByTestId('create-issue-runtime'), { target: { value: 'pi' } })
-    await user.click(modelTrigger())
+    fireEvent.click(modelTrigger())
     expect(await screen.findByText('pi/anthropic/claude')).toBeInTheDocument()
     expect(screen.queryByText('gpt-4')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Create' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
-    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
-    expect(callBody.agentConfig).toEqual({ runtime: 'pi' })
+    expect((await createIssueHandler.mock.calls[0][0].request.clone().json()).agentConfig).toEqual({ runtime: 'pi' })
   })
 
   it('does not transiently clear the variant when a chip is clicked', async () => {
