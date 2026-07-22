@@ -463,7 +463,7 @@ describe("WorkExecutor artifact capture", () => {
       workDir,
       undefined,
       fakeRuntime as never,
-      new AgentJobExecutor(connection as never, fakeRuntime as never),
+      new AgentJobExecutor(connection as never, { openCode: fakeRuntime as never, pi: null }),
     )
 
     const work = buildWork({ files: [{ path: "review.md" }] })

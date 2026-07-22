@@ -172,6 +172,7 @@ describe("RunnerHost", () => {
         "coderModels",
         "connectionId",
         "projectId",
+        "runtimeCatalogs",
       ])
     } finally {
       controller.abort()

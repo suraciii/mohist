@@ -6,7 +6,8 @@ import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from
 import { includesWorkflowProfileId } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
-import { clearProjectDefaultWorkflowProfile, disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { DEFAULT_AGENT_RUNTIME, isAgentRuntime, type AgentRuntime } from './client'
+import { clearProjectDefaultWorkflowProfile, disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, getModels, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
@@ -86,28 +87,29 @@ export function useUpdateOpencodeModel() {
   })
 }
 
-export function availableModelIdsQueryOptions(projectId: string | null | undefined) {
+export function availableModelIdsQueryOptions(projectId: string | null | undefined, runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+  const normalized = isAgentRuntime(runtime) ? runtime : DEFAULT_AGENT_RUNTIME
   return {
-    queryKey: ['opencode-model-ids', projectId],
+    queryKey: ['opencode-model-ids', normalized, projectId],
     queryFn: async () => {
-      const response = await getOpencodeModels(projectId)
+      const response = await getModels(projectId, normalized)
       return { models: response.models, modelVariants: response.modelVariants ?? {} }
     },
     enabled: !!projectId,
   }
 }
 
-export function useAvailableModelIds() {
+export function useAvailableModelIds(runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
   const { projectId } = useProject()
-  return useQuery<{ models: string[]; modelVariants: OpencodeModelVariants }>(availableModelIdsQueryOptions(projectId))
+  return useQuery<{ models: string[]; modelVariants: OpencodeModelVariants }>(availableModelIdsQueryOptions(projectId, runtime))
 }
 
 export function selectModelVariants(data: { models: string[]; modelVariants: OpencodeModelVariants } | undefined) {
   return data?.modelVariants ?? {}
 }
 
-export function useModelVariants() {
-  const { data } = useAvailableModelIds()
+export function useModelVariants(runtime: AgentRuntime | string = DEFAULT_AGENT_RUNTIME) {
+  const { data } = useAvailableModelIds(runtime)
   return selectModelVariants(data)
 }
 

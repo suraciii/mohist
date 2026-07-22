@@ -1,6 +1,9 @@
 import { request, projectApiPath } from '../../../shared/api/client'
 import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/types'
 
+type AgentRuntime = 'opencode' | 'pi'
+const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'opencode'
+
 export interface AgentInfo {
   id: string
   projectId: string
@@ -90,16 +93,20 @@ export function unarchiveAgent(projectId: string, id: string) {
   })
 }
 
-export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): { model: string | null; variant: string | null } {
+export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): { model: string | null; variant: string | null; runtime: AgentRuntime } {
   const config = agent?.agentConfig
-  if (!config || typeof config !== 'object') return { model: null, variant: null }
+  if (!config || typeof config !== 'object') return { model: null, variant: null, runtime: DEFAULT_AGENT_RUNTIME }
   const rawModel = typeof config.model === 'string' ? config.model : null
   const model = rawModel && rawModel.trim() ? rawModel : null
-  if (!model) return { model: null, variant: null }
+  const runtime = config.runtime === 'opencode' || config.runtime === 'pi'
+    ? config.runtime
+    : DEFAULT_AGENT_RUNTIME
+  if (!model) return { model: null, variant: null, runtime }
   const rawVariant = typeof config.variant === 'string' ? config.variant : null
   return {
     model,
     variant: rawVariant && rawVariant.trim() ? rawVariant : null,
+    runtime,
   }
 }
 
@@ -107,14 +114,16 @@ export function writeAgentModelAndVariant(
   _current: Record<string, unknown> | null | undefined,
   model: string | null,
   variant: string | null,
+  runtime: AgentRuntime = DEFAULT_AGENT_RUNTIME,
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
-    return null
+    return runtime === DEFAULT_AGENT_RUNTIME ? null : { runtime }
   }
   next.model = model
   if (variant !== null) {
     next.variant = variant
   }
+  next.runtime = runtime
   return next
 }

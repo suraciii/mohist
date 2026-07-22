@@ -63,13 +63,14 @@ describe('unarchiveAgent', () => {
 
 describe('readAgentModelAndVariant', () => {
   it('returns null model and variant when agent config is missing', () => {
-    expect(readAgentModelAndVariant(null)).toEqual({ model: null, variant: null })
+    expect(readAgentModelAndVariant(null)).toEqual({ model: null, variant: null, runtime: 'opencode' })
   })
 
   it('returns null model and variant when agent config is not an object', () => {
     expect(readAgentModelAndVariant({ agentConfig: 'not-an-object' as unknown as Record<string, unknown> })).toEqual({
       model: null,
       variant: null,
+      runtime: 'opencode',
     })
   })
 
@@ -78,7 +79,7 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: 'anthropic/claude', variant: 'high' },
       }),
-    ).toEqual({ model: 'anthropic/claude', variant: 'high' })
+    ).toEqual({ model: 'anthropic/claude', variant: 'high', runtime: 'opencode' })
   })
 
   it('drops empty/whitespace model and variant', () => {
@@ -86,7 +87,7 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { model: '   ', variant: '' },
       }),
-    ).toEqual({ model: null, variant: null })
+    ).toEqual({ model: null, variant: null, runtime: 'opencode' })
   })
 
   it('omits the variant when no model is set', () => {
@@ -94,7 +95,7 @@ describe('readAgentModelAndVariant', () => {
       readAgentModelAndVariant({
         agentConfig: { variant: 'high' },
       }),
-    ).toEqual({ model: null, variant: null })
+    ).toEqual({ model: null, variant: null, runtime: 'opencode' })
   })
 })
 
@@ -103,6 +104,7 @@ describe('writeAgentModelAndVariant', () => {
     expect(writeAgentModelAndVariant(null, 'anthropic/claude', 'high')).toEqual({
       model: 'anthropic/claude',
       variant: 'high',
+      runtime: 'opencode',
     })
   })
 
@@ -115,12 +117,14 @@ describe('writeAgentModelAndVariant', () => {
     ).toEqual({
       model: 'anthropic/claude',
       variant: 'low',
+      runtime: 'opencode',
     })
   })
 
   it('drops the variant when null is passed', () => {
     expect(writeAgentModelAndVariant({ model: 'm', variant: 'high' }, 'm', null)).toEqual({
       model: 'm',
+      runtime: 'opencode',
     })
   })
 
@@ -136,5 +140,11 @@ describe('writeAgentModelAndVariant', () => {
 
   it('returns null when the input is null and both fields are null', () => {
     expect(writeAgentModelAndVariant(null, null, null)).toBeNull()
+  })
+
+  it('preserves runtime through a read-modify-write round trip', () => {
+    const read = readAgentModelAndVariant({ agentConfig: { model: 'pi/model', variant: 'medium', runtime: 'pi' } })
+    expect(writeAgentModelAndVariant({ model: 'pi/model', variant: 'medium', runtime: 'pi' }, read.model, 'high', read.runtime))
+      .toEqual({ model: 'pi/model', variant: 'high', runtime: 'pi' })
   })
 })

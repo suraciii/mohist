@@ -6,6 +6,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Events.Subscriptions;
 
@@ -67,22 +68,42 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             var execution = await resolver.ResolveAsync(evt, ct);
             if (!execution.IsReady)
             {
+                var (issueNumber, _) = PreflightLineage(evt, execution);
+                var issueRuntimeOverride = await ResolveIssueRuntimeOverrideAsync(
+                    services,
+                    projectId,
+                    issueNumber,
+                    ct);
                 await RecordPreflightFailureAsync(
                     services,
                     agent,
                     outcome,
                     evt,
                     execution,
+                    issueRuntimeOverride,
                     ct);
                 continue;
             }
 
+            var issueNumberForLaunch = execution.Context!.IssueNumber
+                ?? (CloudEventLineage.TryReadPositiveNumber(
+                    evt.Extensions,
+                    EventCatalog.Lineage.Issue,
+                    out var envelopeIssueNumber)
+                    ? envelopeIssueNumber
+                    : null);
+            var runtimeOverride = await ResolveIssueRuntimeOverrideAsync(
+                services,
+                projectId,
+                issueNumberForLaunch,
+                ct);
             await launcher.LaunchRoutedAsync(
                 agent,
                 outcome.RenderedPromptPreview!,
                 execution.Context!,
                 evt,
                 outcome.Rule.Id,
+                runtimeOverride,
                 ct);
         }
     }
@@ -99,6 +120,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
         RuleOutcome outcome,
         CloudEvent evt,
         RoutedExecutionContextResolution resolution,
+        string? runtimeOverride,
         CancellationToken ct)
     {
         var detail = resolution.FailureMessage ?? "routed launch preflight failed";
@@ -136,9 +158,23 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             AgentConfigJson: agent.AgentConfig is { ValueKind: not System.Text.Json.JsonValueKind.Undefined } config ? config.GetRawText() : null,
             Model: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(agent.AgentConfig).Variant,
-            Prompt: outcome.RenderedPromptPreview);
+            Prompt: outcome.RenderedPromptPreview,
+            Runtime: AgentLauncher.ResolveRuntime(agent.AgentConfig, runtimeOverride));
         await jobGrain.EnsurePreparedAsync(preflightPlan);
         await jobGrain.AdvancePreparedLaunchAsync();
+    }
+
+    private static async Task<string?> ResolveIssueRuntimeOverrideAsync(
+        IServiceProvider services,
+        string projectId,
+        int? issueNumber,
+        CancellationToken ct)
+    {
+        if (issueNumber is not > 0)
+            return null;
+
+        return await services.GetRequiredService<IssueWorkflowProfileManager>()
+            .GetAgentRuntimeOverrideAsync(projectId, issueNumber.Value);
     }
 
     internal static (int? IssueNumber, int? EpicNumber) PreflightLineage(

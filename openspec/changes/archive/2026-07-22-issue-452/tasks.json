@@ -1,0 +1,91 @@
+{
+  "project": "mohist-local",
+  "description": "Mohist Agent execution-backend selection (opencode|pi, snapshot-fixed) and a per-runtime model catalog (Pi = configured-credential models only).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: execution-backend config, resolution, snapshot, launch, dispatch, and runtime-aware generic open/attach",
+      "spec": "specs/agent-execution-backend/spec.md",
+      "description": "Make the server route a Mohist Agent Job to its selected backend. Add `runtime` to the shared `AgentConfigSchema` — both `AllowedKeys`/`Validate` (with opencode|pi validation) AND the hardcoded key list inside `Filter` so the key survives the write-side merge paths (default opencode). Add an optional `runtime` field to the manual launch request body (`AgentSessionLaunchRequest`) as the launch-time override, and a `ResolveRuntime(agentConfig, launchOverride)` helper implementing `launchOverride ?? agentConfig.runtime ?? \"opencode\"`, reused by manual launch (passes the request override), routed launch (passes none), and routed preflight. Snapshot the resolved runtime onto `AgentJobInput.Runtime` (next free Orleans Id) and `RoutedAgentLaunchPlan.Runtime` (next free Id), append-only. Thread the resolved runtime into `OpenAgentSessionCommand.AgentRuntime` on both launch paths (replacing the hardcoded `opencode` literals), emit `runtime` on the work dispatch in `BuildDispatch`, and make the generic agent-session open/attach routes read the session's persisted runtime instead of a literal. The AgentJob grain recovery/re-dispatch must read the snapshot, not fresh Agent config.",
+      "acceptanceCriteria": [
+        "`AgentConfigSchema.Validate` accepts `runtime: opencode|pi`, rejects any other value with an actionable message, and treats an absent key as valid; the same validation covers Agent CRUD and issue agentConfig writes (unit test).",
+        "`AgentConfigSchema.Filter` projects `runtime` alongside `model`/`variant` — a round-trip through `Filter` does not drop the key (unit test).",
+        "Resolution precedence holds: a launch-time `runtime` override on the request wins over Agent config; no override falls back to Agent config; both absent resolve to `opencode` (unit test on the resolver, plus a spec test exercising the launch request field end-to-end).",
+        "The manual launch request body accepts an optional `runtime` override; the routed launch uses the Agent's configured backend (no override) (spec test).",
+        "The resolved runtime is captured onto `AgentJobInput.Runtime` and `RoutedAgentLaunchPlan.Runtime` using new append-only Orleans field ids with no reordering of existing ids.",
+        "Manual and routed launches open the AgentSession with the resolved runtime; no `opencode` literal remains in the launch or `AdvancePreparedLaunchAsync` paths (spec test).",
+        "`BuildDispatch` emits `runtime` on the work envelope for an agent-job dispatch; the generic agent-session open/attach routes use the session's persisted runtime rather than a hardcoded literal (spec test).",
+        "Editing the Agent's backend config after launch does not change an in-flight job's runtime; grain recovery/re-dispatch reuses the snapshotted runtime (spec test).",
+        "`dotnet build Mohist.sln` is clean (TreatWarningsAsErrors) and the affected server spec/unit tests pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server opens Pi-runtime AgentSessions, dispatches agent-jobs carrying `runtime`, and generic open/attach derive runtime from the session snapshot; a launch-time `runtime` override is accepted and resolved.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Covers design D1-D5 and D4-server. OQ1 is resolved (design D2): the launch-time override is a per-launch `runtime` field on the manual launch request body — this is the owned write path for AC #2, so the override is exercisable end-to-end. The routed path uses the Agent's configured backend (a per-rule override is out of scope). Orleans field ids are append-only. This task also satisfies the server-side half of `agent-job-runtime-execution` (dispatch carries runtime; runtime-aware generic open/attach)."
+    },
+    {
+      "id": "T-002",
+      "title": "Runner: AgentJob executor selects the runtime from the dispatch",
+      "spec": "specs/agent-job-runtime-execution/spec.md#executor-selects-runtime-from-the-dispatch",
+      "description": "Make the runner execute an AgentJob on the backend the dispatch carries. `AgentJobExecutor` reads `runtime` from the dispatch payload and selects `PiRuntime` or `OpenCodeRuntime` instead of the hardcoded `opencode` literal; `host.ts` wires both runtimes to the executor (reusing the late-binding accessor shape already used by Session command routing). A chosen runtime that is not ready must fail with an actionable `runtime-unavailable` error with no silent OpenCode fallback. Add `runtime` to the executor's known-keys set so it is not flagged as an unknown option. Parameterize the terminal AgentJob output (`buildAgentJobOutput`, today hardcoded `kind: \"opencode\"`) from the selected runtime so a Pi-executed job is not mislabeled. Verify that Pi-executed turn facts (transcript/tool/usage/cost/model) project through the existing AgentSession observer and that an invalid/uncredentialed selected model surfaces an actionable failure rather than being swallowed.",
+      "acceptanceCriteria": [
+        "`AgentJobExecutor` selects `PiRuntime` for a dispatch carrying `runtime: pi` and `OpenCodeRuntime` for `runtime: opencode`, using injected fake runtimes (unit test).",
+        "When the selected runtime is not ready, the turn fails with an actionable `runtime-unavailable` error and does NOT silently fall back to OpenCode (unit test).",
+        "`runtime` in the dispatch payload is not reported as an unknown option key (unit test).",
+        "The terminal AgentJob output labels the run with the runtime that executed — a Pi-executed job's output is not labeled `opencode` (unit test asserting the output runtime/kind reflects the selected runtime).",
+        "A Pi-executed AgentJob turn's transcript, tool, usage, cost, and model facts project through the existing `RuntimeTurnObserver`/`AgentSessionRuntimeEvents` path (unit/spec test with a fake PiRuntime).",
+        "An invalid or uncredentialed selected model surfaces an actionable failure (the runtime remains the final validator; the executor does not swallow the error) (unit test with a fake runtime returning a model/turn failure).",
+        "`npm run typecheck` and `npm test` in packages/runner pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner executes Mohist Agent Jobs on the dispatch-selected backend, end-to-end with the server change in T-001.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Covers design D4-runner and the executor-facing requirements of `agent-job-runtime-execution` (executor selection, runtime-not-ready failure, terminal output runtime labeling, shared session infrastructure, actionable uncredentialed-model failure). Session command routing by binding runtime is already runtime-aware (issue 451) — verify, do not rebuild."
+    },
+    {
+      "id": "T-003",
+      "title": "Per-runtime model catalog: Runner reports the Pi catalog and the Server serves models by runtime",
+      "spec": "specs/runtime-model-catalog/spec.md",
+      "description": "Deliver a per-runtime model catalog as a configuration aid. The Runner reads `piRuntime.catalog()` and reports it tagged by runtime alongside the existing OpenCode discovery in registration. On the Server, store catalogs keyed by runtime in the runner registry (the existing flat opencode catalog becomes the `opencode` entry) and generalize the model-catalog endpoint to serve by `?runtime=opencode|pi` (default opencode). The Pi catalog must contain only configured-credential models (Pi's `getAvailable()` already returns only those). The catalog must remain a configuration aid only — no prevalidation that rejects a valid-credential model solely because it is absent from the catalog.",
+      "acceptanceCriteria": [
+        "Runner registration reports both the OpenCode catalog and the Pi catalog, each tagged by runtime; the Pi catalog contains only models from providers with configured credentials (unit test with a fake PiRuntime catalog).",
+        "The model-catalog API `?runtime=pi` returns the Pi catalog and `?runtime=opencode` (or omitted) returns the OpenCode catalog (spec test with a seeded registry).",
+        "`RunnerRegistryGrain` aggregates catalogs per runtime across registered runners (unit test).",
+        "The catalog does not prevalidate model legality: a model absent from the reported catalog is not rejected solely on that basis (legality is finally validated by the runtime at turn time) (unit/spec test).",
+        "Server `dotnet build` + tests pass; runner `npm run typecheck` + `npm test` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`GET .../models?runtime=pi` returns the configured-credential Pi model catalog; the OpenCode default path is preserved.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Covers design D6 and the backend half of `runtime-model-catalog` (Runner reporting + Server registry/API). Storage-shape choice is design Open Question OQ2; implement the recommended runtime-keyed map. This vertical is independent of the execution path (T-001/T-002) and may proceed in parallel. The `/opencode/models` runtime query is additive (route and `{models, modelVariants}` shape preserved, `?runtime=` defaults to opencode); the Web consumer is updated in T-004."
+    },
+    {
+      "id": "T-004",
+      "title": "Web: execution-backend selector and backend-aware model selection",
+      "spec": "specs/runtime-model-catalog/spec.md#web-backend-selector-drives-the-model-list",
+      "description": "Let users pick a backend and see the right models. The Mohist Agent editor gains an execution-backend selector that drives which catalog feeds the model picker; the agentConfig read/write helper is extended to preserve the `runtime` key alongside `model`/`variant`. Issue-level and per-stage model selection (`IssueModelSelector`, `CreateIssueDialog`) list models for the selected backend, with the Pi group showing only configured-credential models. The shared model-catalog query becomes runtime-parameterized (`getModels(projectId, runtime)`).",
+      "acceptanceCriteria": [
+        "The Mohist Agent editor presents an execution-backend selector; selecting `pi` drives the model picker to list the Pi catalog and selecting `opencode` lists the OpenCode catalog (component/unit test).",
+        "The agentConfig read/write helper preserves the `runtime` key alongside `model`/`variant` across a read-modify-write round trip (unit test).",
+        "Issue-level and per-stage model selection list models for the selected backend; the Pi group includes only configured-credential models (component test).",
+        "`npm run typecheck` and `npm run test:run` in packages/web pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Users can configure a Mohist Agent for the Pi backend and see Pi (configured-credential) models in the Agent editor and issue/stage model pickers.",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Covers design D7 and the Web-facing requirements of `runtime-model-catalog` (backend selector, issue/stage grouping). Depends on T-001 for the `agentConfig.runtime` schema/write and on T-003 for the runtime-parameterized catalog API."
+    }
+  ]
+}

@@ -14,6 +14,26 @@ beforeEach(() => {
 })
 
 describe('IssueModelSelector per-stage variant chips', () => {
+  it('uses the stage backend when loading its model catalog', async () => {
+    mocks.useAvailableModelIds.mockImplementation((runtime: string) => ({
+      data: { models: runtime === 'pi' ? ['pi/anthropic/claude'] : ['openai/gpt-4'], modelVariants: {} },
+      isLoading: false,
+      error: null,
+    }))
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: { build: { vars: { agent: { runtime: 'opencode' } } } },
+    })
+    renderSelector()
+    openAdvanced()
+    const buildRuntime = await waitFor(() => screen.getByTestId('issue-stage-runtime-build'))
+    expect(buildRuntime.tagName).not.toBe('SELECT')
+    expect(buildRuntime).toHaveTextContent('OpenCode')
+    fireEvent.click(await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement))
+    expect(await screen.findByText('gpt-4')).toBeInTheDocument()
+    expect(screen.queryByText('claude')).not.toBeInTheDocument()
+  })
+
   it('renders compact variant chips for stages whose model has variants', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {

@@ -167,6 +167,72 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task AdvancePreparedLaunchAsync_PiRuntime_OpensSessionWithPi()
+    {
+        // Issue-452 design D3 + D5: the routed path reads the runtime
+        // from the canonical RoutedAgentLaunchPlan; the session is
+        // opened with the snapshotted runtime, not a hardcoded literal.
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"routed-pi-dispatch-runner-{Guid.NewGuid():N}");
+        var eventId = "evt-routed-pi-dispatch";
+        var ruleId = "rule-routed-pi-dispatch";
+        var plan = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-pi-dispatch")
+            with { Runtime = "pi" };
+
+        var job = JobGrain(plan.JobKey);
+        await job.EnsurePreparedAsync(plan);
+        await job.AdvancePreparedLaunchAsync();
+
+        var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
+        var info = await session.GetAsync();
+        Assert.NotNull(info);
+        Assert.Equal("pi", info!.Runtime);
+
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var state = await runner.GetRuntimeStateAsync();
+        var work = Assert.Single(state.ActiveWorks, item => item.OwnerId == plan.JobKey);
+        Assert.False(string.IsNullOrWhiteSpace(work.WorkId));
+    }
+
+    [Fact]
+    public async Task OnActivate_AfterCrash_ReusesSnapshottedRuntime()
+    {
+        // Crash-injection: an activation loss after the plan is durable
+        // but before dispatch advances must still resume the plan with
+        // the snapshotted runtime. Recovery must not re-read mutable
+        // Agent config (issue-452 design D2 / scenario "Replay reuses
+        // the snapshotted backend").
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
+            $"routed-runtime-recovery-runner-{Guid.NewGuid():N}");
+        var eventId = "evt-routed-runtime-recovery";
+        var ruleId = "rule-routed-runtime-recovery";
+        var plan = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-runtime-recovery")
+            with { Runtime = "pi" };
+
+        var job = JobGrain(plan.JobKey);
+        await job.EnsurePreparedAsync(plan);
+
+        await DeactivateGrainAsync(job);
+        await job.GetStatusAsync();
+        await DeactivateGrainAsync(job);
+        await job.GetStatusAsync();
+
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(10));
+
+        var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
+        var info = await session.GetAsync();
+        Assert.NotNull(info);
+        Assert.Equal("pi", info!.Runtime);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var state = await runner.GetRuntimeStateAsync();
+        var work = Assert.Single(state.ActiveWorks, item => item.OwnerId == plan.JobKey);
+        Assert.False(string.IsNullOrWhiteSpace(work.WorkId));
+    }
+
+    [Fact]
     public async Task AdvancePreparedLaunchAsync_NoRunner_StaysPendingAndKeepsReminder()
     {
         // No runner is registered: dispatch cannot reach Runner

@@ -31,7 +31,8 @@ public static class RunnerRoutes
                 req.CoderModels,
                 BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                 CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
-                ActionCatalog: req.ActionCatalog));
+                ActionCatalog: req.ActionCatalog,
+                RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs)));
             return Results.Ok();
         });
 
@@ -59,7 +60,8 @@ public static class RunnerRoutes
                     req.CoderModels,
                     BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                     CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
-                    ActionCatalog: req.ActionCatalog);
+                    ActionCatalog: req.ActionCatalog,
+                    RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs));
                 await runner.HeartbeatRepairAsync(info);
 
                 if (!string.IsNullOrWhiteSpace(req.ConnectionId))
@@ -372,9 +374,14 @@ public static class RunnerRoutes
             // — labels are intentionally left untouched so the launch
             // identity (projectId, agentId, agentName, source-kind) is
             // preserved by AgentSessionMetadata.Merge.
+            //
+            // The session's own runtime is authoritative (issue-452
+            // design D5): the launch endpoint pinned the backend at
+            // launch time, so we read it back from the session rather
+            // than hardcoding opencode.
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
                 runnerId,
-                "opencode",
+                existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 WorkDir: req.WorkDir,
                 Metadata: BuildGenericAgentSessionMetadata(req)));
             return Results.Ok(ToRunnerGenericAgentSession(session));
@@ -394,8 +401,13 @@ public static class RunnerRoutes
 
             try
             {
+                // Issue-452 design D5: the session's persisted runtime is
+                // authoritative for the generic path. The launch endpoint
+                // pinned it at launch time; attach binds the physical
+                // session to that backend rather than a hardcoded literal.
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid, Runtime: "opencode"));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid,
+                    Runtime: existing.Runtime ?? AgentConfigSchema.OpenCodeRuntime));
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId)
                     && !string.IsNullOrWhiteSpace(req.WorkId))
                 {
@@ -582,6 +594,29 @@ public static class RunnerRoutes
         return normalized.Count == 0 ? null : normalized;
     }
 
+    private static Dictionary<string, RuntimeCatalogEntry>? NormalizeRuntimeCatalogs(Dictionary<string, RuntimeCatalogEntry>? catalogs)
+    {
+        if (catalogs is null || catalogs.Count == 0)
+            return null;
+
+        var normalized = new Dictionary<string, RuntimeCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in catalogs)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key) || entry.Value is null)
+                continue;
+
+            var models = (entry.Value.Models ?? [])
+                .Where(model => !string.IsNullOrWhiteSpace(model))
+                .Select(model => model.Trim())
+                .Where(model => model.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            normalized[entry.Key.Trim()] = new RuntimeCatalogEntry(models, NormalizeCoderModelVariants(entry.Value.Variants));
+        }
+
+        return normalized.Count == 0 ? null : normalized;
+    }
+
     /// <summary>
     /// Project the server's <see cref="CleanupPolicyOptions"/> into the
     /// wire DTO returned by <c>GET /api/runner/{runnerId}/config</c>.
@@ -626,7 +661,8 @@ public record RunnerRegisterRequest(
     string[]? CoderModels = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
-    ActionCatalog? ActionCatalog = null);
+    ActionCatalog? ActionCatalog = null,
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
@@ -637,7 +673,8 @@ public record RunnerHeartbeatRequest(
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
     string? ConnectionId = null,
-    ActionCatalog? ActionCatalog = null);
+    ActionCatalog? ActionCatalog = null,
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

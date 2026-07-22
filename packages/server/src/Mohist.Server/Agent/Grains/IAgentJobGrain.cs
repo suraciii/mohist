@@ -139,6 +139,15 @@ public enum AgentJobStatus
 /// definitions. The agent config is stored as a raw JSON string so
 /// Orleans' serializer keeps the canonical bytes verbatim.
 /// </para>
+///
+/// <para>
+/// <see cref="Runtime"/> is the resolved execution backend (issue-452
+/// design D2). It is captured here so editing the Agent's backend
+/// config after launch cannot change the in-flight execution; recovery
+/// reuses the snapshotted runtime rather than re-reading mutable
+/// Agent config. Field id is append-only (next free after Variant /
+/// Prompt).
+/// </para>
 /// </summary>
 [GenerateSerializer]
 public sealed record RoutedAgentLaunchPlan(
@@ -160,7 +169,8 @@ public sealed record RoutedAgentLaunchPlan(
     [property: Id(15)] string? AgentConfigJson = null,
     [property: Id(16)] string? Model = null,
     [property: Id(17)] string? Variant = null,
-    [property: Id(18)] string? Prompt = null);
+    [property: Id(18)] string? Prompt = null,
+    [property: Id(19)] string? Runtime = null);
 
 /// <summary>
 /// Whether the canonical routed-launch plan is executable or already
@@ -188,6 +198,18 @@ public sealed record AgentJobInput(
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkspacePath = null,
     [property: Id(3)] string? ProjectId = null,
+    /// <summary>
+    /// Resolved execution backend snapshot captured at launch time
+    /// (issue-452 design D2). Null only on raw-prompt-only validation
+    /// dispatches that never resolve an Agent profile; resolved
+    /// launches always pin the runtime (defaulting to
+    /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
+    /// executor can pick the right runtime and recovery reuses the
+    /// snapshotted value rather than re-reading mutable Agent config.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="ProjectId"/>).
+    /// </summary>
+    [property: Id(4)] string? Runtime = null,
     /// <summary>
     /// Resolved Agent profile identity captured at launch time. Carried
     /// through to dispatch for traceability. Null when the job is a

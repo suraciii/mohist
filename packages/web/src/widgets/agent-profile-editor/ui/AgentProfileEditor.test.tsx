@@ -29,18 +29,21 @@ const mocks = {
 }
 
 useMswServer(
-  http.get('*/api/projects/:projectId/opencode/models', () =>
-    HttpResponse.json({
+  http.get('*/api/projects/:projectId/opencode/models', ({ request }) => {
+    const models = new URL(request.url).searchParams.get('runtime') === 'pi'
+      ? ['pi/anthropic/claude']
+      : ['openai/gpt-4', 'anthropic/claude']
+    return HttpResponse.json({
       success: true,
       data: {
-        models: ['openai/gpt-4', 'anthropic/claude'],
+        models,
         modelVariants: {
           'openai/gpt-4': ['standard'],
           'anthropic/claude': ['low', 'medium', 'high'],
         },
       },
-    }),
-  ),
+    })
+  }),
 )
 
 const operationsHook: AgentProfileEditorOperationsHook = () => ({
@@ -157,7 +160,7 @@ describe('AgentProfileEditor', () => {
 
       expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentConfig: { model: 'anthropic/claude', variant: 'high' },
+          agentConfig: { model: 'anthropic/claude', variant: 'high', runtime: 'opencode' },
         }),
         expect.any(Object),
       )
@@ -242,7 +245,7 @@ describe('AgentProfileEditor', () => {
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium' })
+       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', variant: 'medium', runtime: 'opencode' })
 
       cleanup()
       renderEditor({ agent: { ...existingAgent, agentConfig: updateCall.data.agentConfig } })
@@ -257,7 +260,7 @@ describe('AgentProfileEditor', () => {
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude' })
+       expect(updateCall.data.agentConfig).toEqual({ model: 'anthropic/claude', runtime: 'opencode' })
     })
 
     it('clear selection clears both model and variant', async () => {
@@ -311,8 +314,24 @@ describe('AgentProfileEditor', () => {
       const callArgs = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
       const agentConfig = callArgs.data.agentConfig as Record<string, unknown> | null
       expect(agentConfig).not.toBeNull()
-      expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'variant'])
+       expect(Object.keys(agentConfig ?? {}).sort()).toEqual(['model', 'runtime', 'variant'])
       AssertNoLegacyKey(agentConfig)
+    })
+
+    it('selecting Pi loads Pi models and persists the runtime', async () => {
+      renderEditor()
+      fireEvent.change(screen.getByTestId('agent-runtime'), { target: { value: 'pi' } })
+      await waitFor(() => expect(document.querySelector('#agent-model')).toBeInTheDocument())
+      fireEvent.click(document.querySelector('#agent-model') as HTMLElement)
+      await waitFor(() => expect(document.querySelector('[data-model-id="pi/anthropic/claude"]')).toBeInTheDocument())
+      expect(document.querySelector('[data-model-id="openai/gpt-4"]')).not.toBeInTheDocument()
+      fireEvent.click(document.querySelector('[data-model-id="pi/anthropic/claude"]') as HTMLElement)
+      fillRequiredFields()
+      fireEvent.click(screen.getByTestId('editor-save'))
+      expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({ agentConfig: expect.objectContaining({ runtime: 'pi' }) }),
+        expect.any(Object),
+      )
     })
   })
 

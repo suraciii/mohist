@@ -457,7 +457,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: string.Empty,
-            AgentRuntime: "opencode",
+            AgentRuntime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath,
             Metadata: metadata));
 
@@ -480,6 +480,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Model: plan.Model,
                 WorkspacePath: plan.WorkspacePath,
                 ProjectId: plan.ProjectId,
+                Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 AgentId: plan.AgentId,
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: null,
@@ -509,6 +510,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Model: plan.Model,
                 WorkspacePath: plan.WorkspacePath,
                 ProjectId: plan.ProjectId,
+                Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 AgentId: plan.AgentId,
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
@@ -544,6 +546,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
         && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
         && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.Runtime, right.Runtime, StringComparison.Ordinal)
         && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
         && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
@@ -557,6 +560,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Model, right.Model, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Model));
         if (!string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspacePath));
         if (!string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ProjectId));
+        if (!string.Equals(left.Runtime, right.Runtime, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Runtime));
         if (!string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentId));
         if (!string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentInstructions));
         if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
@@ -778,6 +782,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             with["model"] = JSON.SerializeToElement(input.Model);
         if (!string.IsNullOrWhiteSpace(input.Variant))
             with["variant"] = JSON.SerializeToElement(input.Variant);
+        // Issue-452 design D4: the dispatch envelope carries the
+        // snapshot-fixed runtime so the runner AgentJob executor can
+        // select the right runtime (PiRuntime / OpenCodeRuntime). The
+        // raw-prompt-only validation path leaves Runtime unset on the
+        // input; in that case the runner falls back to its existing
+        // single-runtime readiness check.
+        if (!string.IsNullOrWhiteSpace(input.Runtime))
+            with["runtime"] = JSON.SerializeToElement(input.Runtime);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
