@@ -15,7 +15,8 @@ Workflow 是 Prompt 的一个消费者；Standalone Agent 使用同一个 Projec
 ## Resolution
 
 WorkflowProfile 只保存 Prompt key 引用，例如 `${{ prompts.proposal }}`，不保存 Prompt
-body。Runner 在执行 task 时按 Project 和 key 读取并渲染 body：
+body。Server 为新 attempt 建立 context snapshot 时按 Project 和 key 读取当前 body；Runner
+在调用 Action 前按 [`task-dispatch.md`](workflow/task-dispatch.md) 渲染：
 
 ```plantuml
 @startuml
@@ -25,12 +26,14 @@ rectangle "WorkflowProfile\nprompts.<key>" as Profile
 rectangle "Prompt Resolver" as Resolver
 rectangle "Project Prompts\nkey -> body" as ProjectPrompts
 rectangle "Builtin Prompts\nkey -> body" as Builtin
+rectangle "Attempt Context\nPrompt body snapshot" as Context
 rectangle "Rendered Prompt" as Rendered
 
 Profile --> Resolver : projectId + key
 ProjectPrompts --> Resolver : configured body
 Builtin --> Resolver : fallback on miss
-Resolver --> Rendered : render with dispatch context
+Resolver --> Context : current body
+Context --> Rendered : Runner renders
 @enduml
 ```
 
@@ -45,9 +48,8 @@ resolvePrompt(projectId, key):
 Prompt 不做跨 scope merge，也不产生 `EffectivePrompts` collection。同名 Prompt body 是
 一个完整字符串；Project 配置整体替换 builtin body。
 
-Profile 写入时可以校验 Prompt key 的语法。Runner 每次实际执行 task 时都重新解析 Prompt
-body；Project Prompt 和 builtin fallback 都不存在该 key 时，本次执行失败并返回可行动的
-领域错误。
+Profile 写入时可以校验 Prompt key 的语法。每个新 attempt 都重新解析 Prompt body；Project
+Prompt 和 builtin fallback 都不存在该 key 时，本次执行失败并返回可行动的领域错误。
 
 ## Rendering
 
@@ -56,14 +58,15 @@ PromptTemplateEngine.Render(body, variables)
   ${{ path.to.value }} -> dispatch context lookup
 ```
 
-渲染使用本次 task dispatch 携带的 Effective Stage Variables 与 runtime context，并与
-Workflow Definition 的模板表达式共享同一语法：根命名空间封闭；任一表达式解析不出值
-时本次 task 失败；嵌入字符串的值必须是 scalar，对象或数组会失败；表达式占据整个值时
-保留 JSON 类型；`\${{` 产生字面 `${{`。递归展开必须有确定的深度上限。
+渲染使用本次 attempt context 携带的 Prompt body、Effective Stage Variables 与 runtime
+context，并与 Workflow Definition 的模板表达式共享同一语法：根命名空间封闭；任一
+表达式解析不出值时本次 task 失败；嵌入字符串的值必须是 scalar，对象或数组会失败；
+表达式占据整个值时保留 JSON 类型；`\${{` 产生字面 `${{`。递归展开必须有确定的深度上限。
 
-Prompt 不保存 revision 或 body snapshot。每次执行都使用当时读取到的最新 Prompt；同一个
-TaskRun 被 redeliver 或 retry 产生新 TaskRun 时也重新读取。Action 收到渲染后的 Prompt
-后，本次 Action 调用不再读取 Prompt resource。
+Prompt resource 不保存 revision。attempt 开始时读取当前 body 并纳入 context snapshot；
+attempt 被接受后不再受 Prompt 更新影响。尚未派发的 task、人工 retry 和 recovery
+continuation 都建立新 attempt，因而读取当时的最新 body。Action 收到渲染后的 Prompt 后，
+本次 Action 调用不再读取 Prompt resource。
 
 Workflow 只依赖 Prompt key。Action 最终接收渲染后的 Prompt text，不能再次读取 Prompt
 resource 或 Variables resource。
@@ -110,8 +113,9 @@ Issue 和 WorkflowRun 不提供 Prompt API。
 
 - 当前 Project Prompt 同时暴露 `/templates`、`/workflow-profile/prompts` 等重复路径；目标
   只保留 Project `/prompts` resource。
-- 当前部分 Profile 解析代码会预先组装 Prompt map；目标实现只传 key，并在执行时读取
-  单个 Project Prompt。
+- 当前 Prompt map 被混入名为 Variables 的 dispatch payload。目标 attempt context 继续保留
+  `prompts.*` 独立命名空间，并与原始 task declaration 分开；它不是 Variables，也不能被
+  rendered input 覆盖。
 - 当前 builtin Prompt 仍使用 `openspecChangeDir`、`project`、`approvalFeedback` 等表外根，
   且未解析表达式仍可能保留原文；目标是与 Workflow Definition 使用同一封闭语言与失败
   语义。

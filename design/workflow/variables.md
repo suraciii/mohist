@@ -157,9 +157,12 @@ Variables resource 本身仍支持其他调用方显式修改 `stages`。
 
 ### Changes
 
-- 每次派发 task 时重新解析当前 Stage 的 Effective Stage Variables。
-- 已派发 task 的 input 固定，不受后续变量调整影响。
-- 尚未派发的 task 使用最新变量；retry 是新派发，也使用 retry 时的最新变量。
+- 建立每个 attempt 的 context snapshot 时，重新解析当前 Stage 的 Effective Stage
+  Variables。Variables resolution 只产生 context，不展开 task declaration；展开边界见
+  [`task-dispatch.md`](task-dispatch.md)。
+- attempt 被接受后，其 context snapshot 和 rendered input 固定，不受后续变量调整影响。
+- 尚未派发的 task 使用最新变量；人工 retry 与 recovery continuation 都是新 attempt，也使用
+  各自开始时的最新变量。
 - task `setVars` 在 Action 成功返回后、task 报告完成前执行。任一 output 投影失败时，
   Run Variables 不变，task 失败。
 
@@ -248,8 +251,10 @@ revision。
 - 当前 merge 可以用持久化 `null` 屏蔽前一个 scope 的值；目标模型暂不提供这一额外状态，
   `null` 只用于清除当前 scope 的声明并恢复继承。
 - 当前没有在所有写入边界统一拒绝非 object 根；目标 validator 必须在写入前拒绝。
-- 当前变量已经在 dispatch 前实时解析；实现阶段仍需确认每次派发的 resolved input 是否
-  都被完整记录。
+- 当前普通 dispatch 已实时解析 Variables，但 Server 会先把 task declaration 展开，
+  recovery self retry 因而可能把旧值固化进后续 attempt。issue #465 分离 declaration、
+  attempt context 与 rendered input；该 issue 不给 Variables resource 增加 revision，审计是否
+  需要额外 revision 仍是上面的开放问题。
 
 本 WIP spec 固定目标语义，不把当前 `VariableBundle`、API DTO 或数据库 JSON 当作领域
 对象。实现可以使用 resolver 或 provider 隐藏读取与合并；这些是内部实现细节，不进入

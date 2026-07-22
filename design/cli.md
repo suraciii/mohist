@@ -39,9 +39,10 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 
 `run` 是 WorkflowRun 的命令行短名。`workflow` 是 WorkflowProfile 的导航名；group help 的首句必须写明它管理 Workflow Profile，不能让用户把它理解成 WorkflowRun。CLI 短名不引入新的领域概念，也不改变 [`domain-analysis.md`](domain-analysis.md) 的所有权。
 
-`workflow edit` 修改 Profile 资源，而不是只为未来 Run 准备配置。绑定该 Profile 的活动
-WorkflowRun 会在后续 Stage 初始化时读取新的 Definition；修改 Issue 选择或 Project
-默认值则不会切换活动 Run 的 Profile。`workflow edit --help` 必须明确这一运行中影响。
+`workflow edit` 修改 Profile 资源，而不是只为未来 Run 准备配置。Profile ID 绑定、
+Definition 与 Variables 的生效时机由产品 [Workflow Profile spec](../docs/workflow-profiles.md#选择-profile)
+统一定义；CLI 不复制另一套生命周期规则。`workflow edit --help` 必须明确该操作可能影响
+活动 Run，并链接 `run --help` 以区分 Profile 与执行。
 
 ### Canonical ownership
 
@@ -71,9 +72,10 @@ resource command 表达资源及其状态变化。subarea 最多一层，用于 
 - area 使用短、稳定、通常为单数的英文词：`repo`、`run`、`skill`，不为了对应类型名写成 `repository`、`workflow-run`、`skills`。
 - 资源读取统一为 `list` / `view`，资源修改统一为 `create` / `edit` / `delete`。
 - `add` / `remove` 只表达集合或关系变化；`archive` / `restore` 只表达可恢复的软删除。
-- `get` / `set` / `unset` 只用于明确的键值模型。
+- `get` / `set` / `unset` 只用于明确的键值行为；资源不需要为了对称同时提供三者。
 - 状态变化使用领域动词。`retry`、`rerun`、`pause`、`stop` 的语义不能由 CRUD 词替代。
 - 同一 action 在所有 area 保持同一动作类别。不同语义不能只因实现复用而使用同一个词。
+- 命名对称不是新增命令的理由。没有独立产品行为的 action 不进入命令树。
 - flag 使用完整、稳定的 kebab-case 名称。高频且行业惯例明确时才增加短 flag。
 
 ### One capability, one path
@@ -284,6 +286,8 @@ hint: <one executable recovery, only when certain>
 
 - stable code 使用小写 snake_case，表示调用方可据此分类的产品错误，不表示内部异常类型。
 - parse、文件、互斥参数和 JSON field 错误在本地返回，不发远程请求。
+- 未知 area 或 action 返回用法错误 `2`，只展示最近一级的相关 usage；不能回退到根帮助并
+  成功退出。
 - domain error 保留对象身份、当前状态、要求状态和拒绝原因。
 - transport error 区分“确定未提交”与“提交结果未知”。CLI 不自动重发状态修改；只有确认安全时才给出 retry hint。
 - 没有确定恢复动作时省略 hint，不能用 “try again later” 掩盖未知原因。

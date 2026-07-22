@@ -208,6 +208,8 @@ CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只�
   目标模型会统一为 Project 的 Workflow Profile collection。
 - 当前有活动 Workflow 时还不能更换 Issue 的 Profile；目标行为允许提前选择下一次运行
   使用的 Profile，同时保持当前运行不变。
-- 当前 Definition 已在 Stage 进入时重新读取，Variables 和 Prompts 按各自时机读取；
-  Profile collection 迁移必须保留这些语义，不能为 WorkflowRun 引入 Definition snapshot。
+- 当前 Definition 已在 Stage 进入时重新读取，普通 task 也会在开始前读取当前 Variables 和
+  Prompts；但 recovery self retry 仍可能把上一次使用的值带入后续 retry（issue #465）。
+  Profile collection 迁移必须保留正文语义，不能为 WorkflowRun 引入 Definition snapshot，
+  也不能把某次 task 使用的输入变成后续 attempt 的声明。
 - 当前部分内置 task 仍使用旧 Action Input；目标接口以 Action 文档为准。

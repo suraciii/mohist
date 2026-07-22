@@ -20,14 +20,16 @@
   `when` 的 handler 只匹配存在 error 的结果；Action 对恢复零感知。
 - 恢复任务是真实的 Workflow 任务，出现在 graph、时间线与状态中。
 - 触发恢复的任务以 completed 结束：它产出了后续工作。
-- 恢复任务模板中的 `${{ failure.* }}` 由 runner 构造时就地展开，见
-  [`task-dispatch.md`](task-dispatch.md)。
+- Runner 构造 handler task 时只展开绑定触发 attempt 的 `${{ failure.* }}`；其它表达式保留
+  在新 task declaration 中，见 [`task-dispatch.md`](task-dispatch.md)。
+- `retrySelf` 复制触发 attempt 的原始 task declaration 与剩余预算，不复制本次 Action
+  收到的 rendered input。新 attempt 会用自己的 context snapshot 重新展开 declaration。
 
 | 层 | 职责 |
 |---|---|
 | workflow YAML | 声明 `budget` 与 `handlers`（可选 `when`、`tasks`、`retrySelf`） |
 | Action | 返回 output 或 error，零恢复感知 |
-| runner executor | 先匹配显式 `when`，再为存在 error 的结果匹配默认 handler；显式 `null` 取满额 `budget`，数值 clamp 到声明范围；构造 `addTasks` |
+| runner executor | 先匹配显式 `when`，再为存在 error 的结果匹配默认 handler；显式 `null` 取满额 `budget`，数值 clamp 到声明范围；从原始 declaration 构造 `addTasks` |
 | 引擎 | 机械插入 `addTasks`；把 `recoveryRemaining` 当不透明的每 attempt 状态透传；人工 retry 只从定义性字段重建 |
 
 ## 剩余预算（recoveryRemaining）
@@ -41,7 +43,7 @@ YAML budget:2 ──► TaskRun ──────────► WorkItem / dis
                   RecoveryRemaining                                 │ 匹配且 remaining > 0
                         ▲                                           │
                         └── RuntimeTaskInput ◄────── addTasks ◄─────┘
-                            (retrySelf: recovery 原样, recoveryRemaining = remaining - 1)
+                            (retrySelf: declaration 原样, recoveryRemaining = remaining - 1)
 ```
 
 - 读写权威只有一个：runner `tryRecovery`。引擎对该字段只透传，从不读值。
@@ -54,8 +56,9 @@ YAML budget:2 ──► TaskRun ──────────► WorkItem / dis
 
 不变量：**budget 界定一轮连续自动恢复；人工 retry 开启新一轮，拿满额预算。**
 
-机制：人工 retry（`RetryFailedTask`）经 `TaskRun.ToDefinition()` 只从定义性字段重建新
-attempt。哪些字段构成「定义」在 `ToDefinition()` 一处收敛，执行状态
+机制：人工 retry（`RetryFailedTask`）经 `TaskRun.ToDefinition()` 只从原始 declaration
+字段重建新 attempt。哪些字段构成「定义」在 `ToDefinition()` 一处收敛；其中的 `with` /
+`expect` 必须仍包含 Workflow 表达式，不能是上一次 attempt 的 rendered input。执行状态
 （`recoveryRemaining`）从结构上进不了重建路径。新 attempt 到 runner 时
 `recoveryRemaining` 显式为 `null`，runner 按声明的 `budget` 初始化本轮，自动恢复循环
 重新可用。失败的 attempt 及其已消耗的数值状态保持不变。
@@ -86,8 +89,10 @@ handler = recovery.handlers.find(h => h.when && matchesWhen(h.when, context))
     ?? (result.error ? recovery.handlers.find(h => h.when is absent) : null)
 
 if handler && remaining > 0:
-    addTasks = handler.tasks with their own full recoveryRemaining
-        + (retrySelf ? retryTask(recovery unchanged, recoveryRemaining = remaining - 1) : [])
+    handlerTasks = bindFailureReferences(handler.tasks, context)
+    selfRetry = copyOriginalDeclaration(work)
+    addTasks = handlerTasks with their own full recoveryRemaining
+        + (retrySelf ? selfRetry with recoveryRemaining = remaining - 1 : [])
     return completed + addTasks
 
 if result.error is absent:
@@ -110,7 +115,7 @@ message 分支。
   "status": "completed",
   "addTasks": [
     { "id": "recover:rebase", "uses": "mohist/rebase", "with": {...} },
-    { "id": "merge-pr", "uses": "mohist/merge-github-pr", "with": {...}, "recovery": {"budget": 2, ...}, "recoveryRemaining": 1 }
+    { "id": "merge-pr", "uses": "mohist/merge-github-pr", "with": {"options": "${{ vars.agent }}"}, "recovery": {"budget": 2, ...}, "recoveryRemaining": 1 }
   ]
 }
 ```
@@ -130,3 +135,9 @@ result.completed
 result.failed
   → mark task failed → stage failed → workflow failed
 ```
+
+## Status
+
+当前 recovery self retry 从本次 rendered input 构造 `addTasks`，会把 `${{ vars.* }}` 等引用
+固化为旧值；之后的人工 retry 继续复制该值。issue #465 负责改为复制原始 declaration，
+并以 model-a → model-b 场景验证新 attempt 使用最新 context。
