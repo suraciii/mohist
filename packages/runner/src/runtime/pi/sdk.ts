@@ -74,6 +74,7 @@ export interface PiSdkServices {
   catalog(): Promise<readonly { readonly provider: string; readonly id: string; readonly thinkingLevels?: readonly string[] }[]>
   createSession(cwd: string): Promise<PiSdkSession>
   openSession(path: string, cwd: string): Promise<PiSdkSession>
+  validateSessionFile?(path: string): Promise<void>
   model(provider: string, id: string): unknown
   close(): Promise<void>
 }
@@ -110,6 +111,13 @@ export const realPiSdkFactory: PiSdkFactory = {
         const manager = SessionManager.open(path, undefined, sessionCwd)
         const session = (await createAgentSession({ cwd: sessionCwd, agentDir, modelRuntime, settingsManager, resourceLoader, sessionManager: manager, noTools: "builtin" })).session
         return wrapAgentSession(session)
+      },
+      async validateSessionFile(path) {
+        const { readFile } = await import("node:fs/promises")
+        const content = await readFile(path, "utf8")
+        for (const line of content.split("\n")) {
+          if (line.trim().length > 0) JSON.parse(line)
+        }
       },
       async close() {},
     }

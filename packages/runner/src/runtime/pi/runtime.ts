@@ -457,8 +457,11 @@ export class PiRuntime {
     let session: PiSdkSession
     try {
       const cached = this.sessions.get(path)
+      if (cached && this.state.services.validateSessionFile) {
+        await this.state.services.validateSessionFile(path)
+        return { ok: true, value: cached }
+      }
       const opened = await this.state.services.openSession(path, workDir)
-      if (cached && opened !== cached) opened.dispose()
       session = cached ?? opened
       this.sessions.set(path, session)
       return { ok: true, value: session }

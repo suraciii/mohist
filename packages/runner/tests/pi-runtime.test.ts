@@ -363,8 +363,10 @@ describe("PiRuntime", () => {
       createSession: async () => session,
       openSession: async (path: string) => {
         expect(path).toBe(session.sessionFile)
-        if (missing) throw new Error("session file is gone")
         return session
+      },
+      validateSessionFile: async () => {
+        if (missing) throw new Error("session file is gone")
       },
       model: (provider: string, id: string) => ({ provider, id }),
       close: async () => {},
