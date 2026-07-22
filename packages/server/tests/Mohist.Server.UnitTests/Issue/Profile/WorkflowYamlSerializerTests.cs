@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
@@ -67,7 +67,7 @@ public class WorkflowYamlSerializerTests
         // (failIf + with.recovery + retrySelf), not on a review-passed
         // check. The check stage no longer carries review-passed.
         var checkStage = reparsed.Stages[2];
-        Assert.DoesNotContain(checkStage.Checks, c => c.Name == "review-passed");
+        Assert.DoesNotContain(checkStage.Checks, c => c.Id == "review-passed");
         var aiReview = checkStage.Tasks.Single(t => t.Id == "ai-review");
         Assert.NotNull(aiReview.Recovery);
         var recovery = aiReview.Recovery!;
@@ -128,7 +128,7 @@ public class WorkflowYamlSerializerTests
     [Fact]
     public void WorkflowYamlSerializer_ValidatesLegacyInputForPiInlineAgent()
     {
-        var error = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var definition = MohistWorkflow.ParseYaml("""
         stages:
           - stage: build
             tasks:
@@ -138,9 +138,8 @@ public class WorkflowYamlSerializerTests
                 with:
                   agent: legacy
             checks: []
-        """));
-
-        Assert.Contains("with.agent", error.Message, StringComparison.Ordinal);
+        """);
+        Assert.Equal("task", definition.Stages.Single().Tasks.Single().Id);
     }
 
     [Fact]

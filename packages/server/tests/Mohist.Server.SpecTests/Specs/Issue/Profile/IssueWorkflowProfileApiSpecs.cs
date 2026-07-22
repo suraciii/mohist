@@ -94,6 +94,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 tasks:
                   - id: source-label-task
                     title: Source Label Task
+                    uses: spec/task
                 checks: []
             """;
         var customResponse = await _client.PutAsJsonAsync(
@@ -129,6 +130,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                 tasks:
                   - id: custom-task
                     title: Custom Task
+                    uses: spec/task
                 checks: []
             """;
         var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
@@ -248,7 +250,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     title: Replacement Plan Task
                     uses: mohist/opencode
                 checks:
-                  - name: replacement-plan-check
+                  - id: replacement-plan-check
                     title: Replacement Plan Check
                     uses: mohist/check-typecheck
               - stage: build
@@ -257,7 +259,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     title: New Synced Task
                     uses: mohist/opencode
                 checks:
-                  - name: new-build-check
+                  - id: new-build-check
                     title: New Build Check
                     uses: mohist/check-typecheck
             """;
@@ -287,7 +289,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var buildStage = updatedDefinition.Stages.FirstOrDefault(s => s.Stage == "build");
         Assert.NotNull(buildStage);
         Assert.Contains(buildStage.Tasks, t => t.Id == "new-synced-task");
-        Assert.Contains(buildStage.Checks, c => c.Name == "new-build-check");
+        Assert.Contains(buildStage.Checks, c => c.Id == "new-build-check");
     }
 
     private const string NoArtifactTemplateYaml = """
@@ -332,7 +334,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                   prompt: ${{ prompts.self-review }}
                   options: ${{ vars.agent }}
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:
@@ -355,7 +357,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                           items: tasks
                           base: ${{ prompts.build }}
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:

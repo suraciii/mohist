@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;

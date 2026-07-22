@@ -1,4 +1,4 @@
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -46,7 +46,13 @@ public static class WorkflowProfileCatalog
         return SystemProfileIds.FirstOrDefault(isEnabled);
     }
 
-    public static WorkflowDefinition ParseYaml(string yaml) => WorkflowYamlSerializer.FromYaml(yaml);
+    public static WorkflowDefinition ParseYaml(string yaml)
+    {
+        var result = WorkflowDefinitionParser.Parse(yaml);
+        if (!result.IsValid)
+            throw new InvalidOperationException(string.Join("; ", result.Errors.Select(error => $"{error.Path}: {error.Message}")));
+        return result.Definition!;
+    }
 
     public static WorkflowDefinition? GetDefinition(string profileId)
     {
@@ -61,7 +67,7 @@ public static class WorkflowProfileCatalog
     {
         var path = ResolveDefinitionPath(fileName)
             ?? throw new FileNotFoundException($"Workflow definition not found: {fileName}");
-        return new WorkflowProfile(id, name, description, WorkflowYamlSerializer.FromYaml(File.ReadAllText(path)));
+        return new WorkflowProfile(id, name, description, ParseYaml(File.ReadAllText(path)));
     }
 
     private static string? ResolveDefinitionPath(string fileName)

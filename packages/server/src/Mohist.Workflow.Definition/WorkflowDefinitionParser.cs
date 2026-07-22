@@ -257,8 +257,8 @@ public static class WorkflowDefinitionParser
 
             return new TaskDefinition(
                 id,
-                uses,
                 title,
+                uses,
                 with,
                 expect,
                 artifacts,
@@ -304,7 +304,7 @@ public static class WorkflowDefinitionParser
             var uses = RequireString(map, "uses", $"{path}.uses", errors, emittedPaths) ?? string.Empty;
             var withNode = GetValue(map, "with");
             var with = ReadObjectMap(withNode, $"{path}.with", errors, emittedPaths);
-            return new CheckDefinition(id, uses, title, with);
+            return new CheckDefinition(id, title, uses, with);
         }
 
         private static TaskArtifactCapture? BuildArtifacts(

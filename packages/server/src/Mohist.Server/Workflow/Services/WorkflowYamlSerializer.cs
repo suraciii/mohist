@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -167,7 +167,7 @@ public static class WorkflowYamlSerializer
         var setVars = ParseTaskSetVars(map, id);
         var recovery = ParseTaskRecovery(map, id);
 
-        return new TaskDefinition(id, title, uses, JsonElementMap(withMap), JsonElementMap(expectMap), artifacts, setVars, recovery);
+        return new TaskDefinition(id, title, uses ?? string.Empty, JsonElementMap(withMap), JsonElementMap(expectMap), artifacts, setVars, recovery);
     }
 
     private static void ValidateExpectVerdictMarkers(string taskId, Dictionary<string, object?>? expectMap)
@@ -397,22 +397,24 @@ public static class WorkflowYamlSerializer
     private static CheckDefinition ToCheck(object? value)
     {
         var map = Map(value, "check");
-        var name = String(map, "name");
-        if (string.IsNullOrWhiteSpace(name))
-            throw new InvalidOperationException("Workflow check requires name");
+        var id = String(map, "id");
+        if (string.IsNullOrWhiteSpace(id))
+            id = String(map, "name");
+        if (string.IsNullOrWhiteSpace(id))
+            throw new InvalidOperationException("Workflow check requires id");
 
         var title = String(map, "title");
         if (string.IsNullOrWhiteSpace(title))
-            throw new InvalidOperationException($"Workflow check {name} requires title");
+            throw new InvalidOperationException($"Workflow check {id} requires title");
 
         if (map.ContainsKey("repairLimit") || map.ContainsKey("repairTask"))
             throw new InvalidOperationException(
-                $"Workflow check '{name}' uses obsolete check-level repair. Move this verification into a task and use task-level recovery.");
+                $"Workflow check '{id}' uses obsolete check-level repair. Move this verification into a task and use task-level recovery.");
 
         return new CheckDefinition(
-            name,
+            id,
             title,
-            NullIfEmpty(String(map, "uses")),
+            NullIfEmpty(String(map, "uses")) ?? string.Empty,
             JsonElementMap(OptionalMap(map, "with")));
     }
 
@@ -482,7 +484,7 @@ public static class WorkflowYamlSerializer
     {
         var map = new Dictionary<string, object?>
         {
-            ["name"] = check.Name,
+            ["id"] = check.Id,
             ["title"] = check.Title,
         };
         if (check.Uses is not null) map["uses"] = check.Uses;

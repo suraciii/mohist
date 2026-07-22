@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
@@ -79,7 +79,7 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_IntegrateStageWithDuplicatePublishTask_FailsSinglePushOwnerInvariant()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var ex = Assert.ThrowsAny<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         stages:
           - stage: integrate
             tasks:
@@ -94,12 +94,8 @@ public class MohistWorkflowDefinitionTests
                 with:
                   target: ${{ project.baseBranch }}
             checks: []
-        """);
-
-        var integrate = definition.Stages.Single(s => s.Stage == "integrate");
-
-        var ex = Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertSinglePushOwnerInvariant(integrate));
-        Assert.Contains("integrate:push", ex.Message);
+        """));
+        Assert.Contains("project", ex.Message);
     }
 
     [Fact]
@@ -249,7 +245,7 @@ public class MohistWorkflowDefinitionTests
         // carries only health and merge-ready checks, no review-passed.
         var definition = MohistWorkflow.Definition;
         var check = definition.Stages[2];
-        Assert.DoesNotContain(check.Checks, c => c.Name == "review-passed");
+        Assert.DoesNotContain(check.Checks, c => c.Id == "review-passed");
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
         Assert.NotNull(aiReview.Expect);

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
@@ -234,11 +234,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.Single(plan.Checks);
         var check = plan.Checks.Single();
-        Assert.Equal("plan-artifacts", check.Name);
+        Assert.Equal("plan-artifacts", check.Id);
         Assert.Equal("mohist/openspec-artifacts", check.Uses);
          Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(check, "changeDir"));
 
-        var names = plan.Checks.Select(c => c.Name).ToArray();
+        var names = plan.Checks.Select(c => c.Id).ToArray();
         Assert.DoesNotContain(names, n => n == "proposal-complete");
         Assert.DoesNotContain(names, n => n == "specs-complete");
         Assert.DoesNotContain(names, n => n == "design-complete");
@@ -251,24 +251,24 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var plan = MohistWorkflow.Definition.Stages.Single(s => s.Stage == "plan");
 
-        var checkNames = plan.Checks.Select(c => c.Name).ToArray();
+        var checkNames = plan.Checks.Select(c => c.Id).ToArray();
         Assert.Equal(new[] { "plan-artifacts", "health" }, checkNames);
 
-        var planArtifacts = plan.Checks.Single(c => c.Name == "plan-artifacts");
+        var planArtifacts = plan.Checks.Single(c => c.Id == "plan-artifacts");
         Assert.Equal("mohist/openspec-artifacts", planArtifacts.Uses);
          Assert.Equal("openspec/changes/issue-${{ issue.number }}", ReadStringWith(planArtifacts, "changeDir"));
 
-        Assert.DoesNotContain(plan.Checks, c => c.Name == "proposal-complete");
-        Assert.DoesNotContain(plan.Checks, c => c.Name == "specs-complete");
-        Assert.DoesNotContain(plan.Checks, c => c.Name == "design-complete");
-        Assert.DoesNotContain(plan.Checks, c => c.Name == "tasks-valid");
-        Assert.DoesNotContain(plan.Checks, c => c.Name == "self-review-passed");
+        Assert.DoesNotContain(plan.Checks, c => c.Id == "proposal-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Id == "specs-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Id == "design-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Id == "tasks-valid");
+        Assert.DoesNotContain(plan.Checks, c => c.Id == "self-review-passed");
 
         var selfReviewTask = plan.Tasks.Single(t => t.Id == "self-review");
         Assert.NotNull(selfReviewTask.Recovery);
         Assert.Equal("output.promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
 
-        var health = plan.Checks.Single(c => c.Name == "health");
+        var health = plan.Checks.Single(c => c.Id == "health");
         Assert.Equal("core/script", health.Uses);
         Assert.Equal("git diff --check", ReadStringWith(health, "run"));
     }
@@ -352,12 +352,12 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.Single(check.Checks);
         var status = check.Checks.Single();
-        Assert.Equal("github-pr-status", status.Name);
+        Assert.Equal("github-pr-status", status.Id);
         Assert.Equal("mohist/github-pr-status", status.Uses);
         Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(status, "prNumber"));
         Assert.Null(ReadStringWith(status, "expect"));
 
-        var names = check.Checks.Select(c => c.Name).ToArray();
+        var names = check.Checks.Select(c => c.Id).ToArray();
         Assert.DoesNotContain(names, n => n == "health");
         Assert.DoesNotContain(names, n => n == "review-passed");
         Assert.DoesNotContain(names, n => n == "merge-ready");
@@ -391,7 +391,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.Single(integrate.Checks);
         var mergeVerified = integrate.Checks.Single();
-        Assert.Equal("merge-verified", mergeVerified.Name);
+        Assert.Equal("merge-verified", mergeVerified.Id);
         Assert.Equal("mohist/github-pr-status", mergeVerified.Uses);
         Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(mergeVerified, "prNumber"));
         Assert.Equal("merged", ReadStringWith(mergeVerified, "expect"));
@@ -685,24 +685,24 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
     // ===================== Helpers =====================
 
-    private static IEnumerable<Mohist.Server.Workflow.Domain.Definition.TaskDefinition> CollectAllTasks(
-        Mohist.Server.Workflow.Domain.Definition.StageDefinition stage)
+    private static IEnumerable<Mohist.Workflow.Definition.TaskDefinition> CollectAllTasks(
+        Mohist.Workflow.Definition.StageDefinition stage)
     {
         foreach (var task in stage.Tasks)
             foreach (var visited in CollectWithNested(task))
                 yield return visited;
     }
 
-    private static IEnumerable<Mohist.Server.Workflow.Domain.Definition.TaskDefinition> CollectAllTasks(
-        params Mohist.Server.Workflow.Domain.Definition.StageDefinition[] stages)
+    private static IEnumerable<Mohist.Workflow.Definition.TaskDefinition> CollectAllTasks(
+        params Mohist.Workflow.Definition.StageDefinition[] stages)
     {
         foreach (var stage in stages)
             foreach (var task in CollectAllTasks(stage))
                 yield return task;
     }
 
-    private static IEnumerable<Mohist.Server.Workflow.Domain.Definition.TaskDefinition> CollectWithNested(
-        Mohist.Server.Workflow.Domain.Definition.TaskDefinition task)
+    private static IEnumerable<Mohist.Workflow.Definition.TaskDefinition> CollectWithNested(
+        Mohist.Workflow.Definition.TaskDefinition task)
     {
         yield return task;
     }
@@ -725,7 +725,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     }
 
     private static IEnumerable<JsonElement> EnumerateRecoveryTaskElements(
-        Mohist.Server.Workflow.Domain.Definition.StageDefinition stage)
+        Mohist.Workflow.Definition.StageDefinition stage)
     {
         foreach (var task in stage.Tasks)
         {
@@ -743,7 +743,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         }
     }
 
-    private static bool? ReadBoolWith(Mohist.Server.Workflow.Domain.Definition.TaskDefinition task, string key)
+    private static bool? ReadBoolWith(Mohist.Workflow.Definition.TaskDefinition task, string key)
     {
         if (task.With is null || !task.With.TryGetValue(key, out var element) || element is null) return null;
         if (element.Value.ValueKind == JsonValueKind.True) return true;
@@ -758,13 +758,13 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         return element.Value.GetBoolean();
     }
 
-    private static string? ReadStringWith(Mohist.Server.Workflow.Domain.Definition.TaskDefinition task, string key)
+    private static string? ReadStringWith(Mohist.Workflow.Definition.TaskDefinition task, string key)
     {
         if (task.With is null || !task.With.TryGetValue(key, out var element) || element is null) return null;
         return element.Value.ValueKind == JsonValueKind.String ? element.Value.GetString() : element.Value.GetRawText();
     }
 
-    private static string? ReadStringWith(Mohist.Server.Workflow.Domain.Definition.CheckDefinition check, string key)
+    private static string? ReadStringWith(Mohist.Workflow.Definition.CheckDefinition check, string key)
     {
         if (check.With is null || !check.With.TryGetValue(key, out var element) || element is null) return null;
         return element.Value.ValueKind == JsonValueKind.String ? element.Value.GetString() : element.Value.GetRawText();
@@ -821,8 +821,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     }
 
     private static void AssertTaskWithMapsMatchExcept(
-        Mohist.Server.Workflow.Domain.Definition.TaskDefinition expected,
-        Mohist.Server.Workflow.Domain.Definition.TaskDefinition actual)
+        Mohist.Workflow.Definition.TaskDefinition expected,
+        Mohist.Workflow.Definition.TaskDefinition actual)
     {
         Assert.Equal(JsonSerializer.Serialize(expected.With), JsonSerializer.Serialize(actual.With));
     }

@@ -15,8 +15,8 @@ public sealed record TaskArtifactCapture(IReadOnlyList<TaskArtifactDeclaration> 
 
 public sealed record TaskDefinition(
     string Id,
-    string Uses,
     string? Title = null,
+    string Uses = "",
     Dictionary<string, JsonElement?>? With = null,
     Dictionary<string, JsonElement?>? Expect = null,
     TaskArtifactCapture? Artifacts = null,
@@ -34,8 +34,8 @@ public sealed record RecoveryHandlerDefinition(
 
 public sealed record CheckDefinition(
     string Id,
-    string Uses,
     string? Title = null,
+    string Uses = "",
     Dictionary<string, JsonElement?>? With = null);
 
 public sealed record StageDefinition(
@@ -49,3 +49,17 @@ public sealed record StageDefinition(
 public sealed record WorkflowDefinition(
     IReadOnlyList<StageDefinition> Stages,
     ApprovalConfig? Approval = null);
+
+public sealed record WorkflowProfile(
+    string Id,
+    string Name,
+    string Description,
+    WorkflowDefinition Definition);
+
+public sealed record WorkflowStructure(
+    string Id,
+    IReadOnlyList<StageStructure> Stages);
+
+public sealed record StageStructure(
+    string Stage,
+    bool RequiresApproval);

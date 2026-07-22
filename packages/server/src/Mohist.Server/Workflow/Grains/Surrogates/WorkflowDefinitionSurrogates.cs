@@ -1,11 +1,47 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Orleans.Serialization;
 
 namespace Mohist.Server.Workflow.Grains.Surrogates;
 
 // Only runtime slices that cross grain calls need Orleans surrogates here.
 // Full workflow definitions stay in the profile/persistence path and use JSON.
+
+[GenerateSerializer]
+public struct TaskArtifactDeclarationSurrogate
+{
+    [Id(0)] public string Path;
+}
+
+[RegisterConverter]
+public sealed class TaskArtifactDeclarationSurrogateConverter : IConverter<TaskArtifactDeclaration, TaskArtifactDeclarationSurrogate>
+{
+    public TaskArtifactDeclaration ConvertFromSurrogate(in TaskArtifactDeclarationSurrogate surrogate) =>
+        new(surrogate.Path);
+
+    public TaskArtifactDeclarationSurrogate ConvertToSurrogate(in TaskArtifactDeclaration value) => new()
+    {
+        Path = value.Path,
+    };
+}
+
+[GenerateSerializer]
+public struct TaskArtifactCaptureSurrogate
+{
+    [Id(0)] public List<TaskArtifactDeclaration> Files;
+}
+
+[RegisterConverter]
+public sealed class TaskArtifactCaptureSurrogateConverter : IConverter<TaskArtifactCapture, TaskArtifactCaptureSurrogate>
+{
+    public TaskArtifactCapture ConvertFromSurrogate(in TaskArtifactCaptureSurrogate surrogate) =>
+        new(surrogate.Files);
+
+    public TaskArtifactCaptureSurrogate ConvertToSurrogate(in TaskArtifactCapture value) => new()
+    {
+        Files = value.Files.ToList(),
+    };
+}
 
 [GenerateSerializer]
 public struct StageDefinitionSurrogate
@@ -27,11 +63,11 @@ public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefiniti
     public StageDefinitionSurrogate ConvertToSurrogate(in StageDefinition value) => new()
     {
         Stage = value.Stage,
-        Tasks = value.Tasks,
-        Checks = value.Checks,
+        Tasks = value.Tasks.ToList(),
+        Checks = value.Checks.ToList(),
         RequiresApproval = value.RequiresApproval,
         LockBehavior = value.LockBehavior,
-        Resources = value.Resources,
+        Resources = value.Resources?.ToList(),
     };
 }
 
@@ -39,8 +75,8 @@ public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefiniti
 public struct TaskDefinitionSurrogate
 {
     [Id(0)] public string Id;
-    [Id(1)] public string Title;
-    [Id(2)] public string? Uses;
+    [Id(1)] public string? Title;
+    [Id(2)] public string Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
     [Id(4)] public TaskArtifactCapture? Artifacts;
     [Id(5)] public Dictionary<string, JsonElement?>? Expect;
@@ -112,9 +148,9 @@ public sealed class RecoveryHandlerDefinitionSurrogateConverter : IConverter<Rec
 [GenerateSerializer]
 public struct CheckDefinitionSurrogate
 {
-    [Id(0)] public string Name;
-    [Id(1)] public string Title;
-    [Id(2)] public string? Uses;
+    [Id(0)] public string Id;
+    [Id(1)] public string? Title;
+    [Id(2)] public string Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
 }
 
@@ -122,11 +158,11 @@ public struct CheckDefinitionSurrogate
 public sealed class CheckDefinitionSurrogateConverter : IConverter<CheckDefinition, CheckDefinitionSurrogate>
 {
     public CheckDefinition ConvertFromSurrogate(in CheckDefinitionSurrogate surrogate) =>
-        new(surrogate.Name, surrogate.Title, surrogate.Uses, surrogate.With);
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With);
 
     public CheckDefinitionSurrogate ConvertToSurrogate(in CheckDefinition value) => new()
     {
-        Name = value.Name,
+        Id = value.Id,
         Title = value.Title,
         Uses = value.Uses,
         With = value.With,

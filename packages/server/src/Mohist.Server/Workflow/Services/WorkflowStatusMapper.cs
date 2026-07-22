@@ -1,5 +1,5 @@
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
@@ -121,7 +121,7 @@ public static class WorkflowStatusMapper
         return stageDefinition.Tasks
             .Select(t => new TaskStatusView(
                 t.Id,
-                t.Title,
+                t.Title ?? t.Id,
                 t.Uses,
                 "pending",
                 TaskRunExtensions.ExtractRequiredFiles(t.Expect),
@@ -154,7 +154,7 @@ public static class WorkflowStatusMapper
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];
         return stageDefinition.Checks
-            .Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, "pending", null))
+            .Select(c => new CheckStatusView(c.Id, c.Title ?? c.Id, c.Uses, "pending", null))
             .ToList();
     }
 

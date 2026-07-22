@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -99,6 +101,75 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.True(await _manager.DeleteTemplateAsync("proj-del", "t1"));
         Assert.False(await _manager.DeleteTemplateAsync("proj-del", "t1"));
+    }
+
+    [Fact]
+    public async Task GetTemplateProfile_TamperedStoredDefinitionSurfacesDefinitionError()
+    {
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = "proj-tampered",
+                TemplateId = "tampered",
+                Template = """
+                    {"id":"tampered","name":"Tampered","description":"","definition":{"stages":[]}}
+                    """,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
+            _manager.GetTemplateProfileAsync("proj-tampered", "tampered"));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal("stages", error.Path);
+        Assert.Equal(ValidationSource.Definition, error.Source);
+    }
+
+    [Fact]
+    public async Task CreateTemplate_InlineAgentGuardReturnsActionError()
+    {
+        var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
+            _manager.CreateTemplateAsync("proj-action-error", """
+                stages:
+                  - stage: build
+                    tasks:
+                      - id: run
+                        uses: mohist/opencode
+                        with:
+                          agent: legacy
+                    checks: []
+                """));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal("stages[0].tasks[0].with.agent", error.Path);
+        Assert.Equal(ValidationSource.Action, error.Source);
+    }
+
+    [Fact]
+    public async Task DefinitionMigrationMapsLegacyCheckNameToId()
+    {
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = "proj-migrate",
+                TemplateId = "legacy",
+                Template = """
+                    {"id":"legacy","name":"Legacy","description":"","definition":{"stages":[{"stage":"build","tasks":[],"checks":[{"name":"lint","title":"Lint","uses":"mohist/check"}]}]}}
+                    """,
+            });
+            await db.SaveChangesAsync();
+            await WorkflowProfileDataUpgrader.UpgradeAsync(db);
+        }
+
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.ProjectWorkflowTemplates.SingleAsync(x => x.ProjectId == "proj-migrate");
+            Assert.Contains("\"id\":\"lint\"", row.Template, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"name\":\"lint\"", row.Template, StringComparison.Ordinal);
+        }
     }
 
     // ===================== Default template =====================

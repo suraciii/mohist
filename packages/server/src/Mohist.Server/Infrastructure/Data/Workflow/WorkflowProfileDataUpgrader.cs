@@ -1,9 +1,11 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Workflow.Domain.Definition;
-using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -33,7 +35,7 @@ public static class WorkflowProfileDataUpgrader
         }
 
         if (diagnostics.Count > 0)
-            throw new InvalidOperationException("Workflow Profile migration requires Variables relocation:\n" + string.Join("\n", diagnostics));
+            throw new InvalidOperationException("Workflow Profile Definition migration failed:\n" + string.Join("\n", diagnostics));
 
         if (projectRows.Count > 0 || issueRows.Count > 0)
             await db.SaveChangesAsync(cancellationToken);
@@ -55,12 +57,17 @@ public static class WorkflowProfileDataUpgrader
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) throw new JsonException("Profile payload must be an object");
-            if (root.TryGetProperty("definition", out _)) return true;
-
             var variablePaths = new List<string>();
+            var definitionElement = root.TryGetProperty("definition", out var storedDefinition)
+                ? storedDefinition
+                : root;
+            if (definitionElement.ValueKind != JsonValueKind.Object)
+                throw new JsonException("Profile definition must be an object");
+
             if (root.TryGetProperty("variables", out _)) variablePaths.Add("variables");
             if (root.TryGetProperty("defaults", out _)) variablePaths.Add("defaults");
-            if (root.TryGetProperty("stages", out var stages) && stages.ValueKind == JsonValueKind.Array)
+            if (definitionElement.TryGetProperty("variables", out _)) variablePaths.Add("variables");
+            if (definitionElement.TryGetProperty("stages", out var stages) && stages.ValueKind == JsonValueKind.Array)
             {
                 var index = 0;
                 foreach (var stage in stages.EnumerateArray())
@@ -77,18 +84,53 @@ public static class WorkflowProfileDataUpgrader
                 return false;
             }
 
-            var definition = JsonSerializer.Deserialize<WorkflowDefinition>(json, JSON.Options)
+            var definitionNode = JsonNode.Parse(definitionElement.GetRawText())?.AsObject()
+                ?? throw new JsonException("Profile definition must be an object");
+            MapCheckNamesToIds(definitionNode);
+            var definition = JsonSerializer.Deserialize<WorkflowDefinition>(definitionNode.ToJsonString(JSON.Options), JSON.Options)
                 ?? throw new JsonException("Definition payload is null");
             var description = root.TryGetProperty("description", out var descriptionElement)
                 ? descriptionElement.GetString() ?? string.Empty
                 : string.Empty;
-            profile = new WorkflowProfile(id, name, description, definition);
+            var parsed = WorkflowDefinitionParser.Parse(SerializeDefinition(definition));
+            if (!parsed.IsValid)
+            {
+                diagnostic = string.Join("; ", parsed.Errors.Select(error => $"{error.Path}: {error.Message}"));
+                return false;
+            }
+            profile = new WorkflowProfile(id, name, description, parsed.Definition!);
             return true;
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
-            diagnostic = exception.Message;
+            diagnostic = exception is JsonException jsonException && jsonException.Path is not null
+                ? $"{jsonException.Path.TrimStart('$', '.')}: {exception.Message}"
+                : exception.Message;
             return false;
         }
     }
+
+    private static void MapCheckNamesToIds(JsonObject definition)
+    {
+        if (definition["stages"] is not JsonArray stages) return;
+        foreach (var stage in stages.OfType<JsonObject>())
+        {
+            if (stage["checks"] is not JsonArray checks) continue;
+            foreach (var check in checks.OfType<JsonObject>())
+            {
+                if (check["id"] is null && check.TryGetPropertyValue("name", out var name))
+                {
+                    check.Remove("name");
+                    check["id"] = name;
+                }
+            }
+        }
+    }
+
+    private static string SerializeDefinition(WorkflowDefinition definition) =>
+        new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .Build()
+            .Serialize(definition);
 }

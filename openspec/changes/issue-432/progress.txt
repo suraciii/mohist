@@ -232,4 +232,25 @@ T-002 (Template-language static validation and single-owner root table)
   before the map is built (existing behavior preserved by T-001).
 - If the validator library ever needs to surface `tasks.<id>` errors at
   a different path (e.g. inside a deeper `with` object), the path is
-  already composed from the `JsonElement` walk — no extra plumbing.
+   already composed from the `JsonElement` walk — no extra plumbing.
+
+T-003 (Server consumes the validator, migrates built-ins, separates error sources)
+
+## Codebase Patterns
+
+- Profile metadata remains a carrier concern. `WorkflowProfileYamlParser` removes only `id`, `name`, and `description` before handing the remaining YAML to `WorkflowDefinitionParser.Parse`.
+- Stored custom Profiles use `Mohist.Workflow.Definition.WorkflowProfile` and `JSON.Options`; `WorkflowProfilePersistence.Deserialize` always runs `WorkflowDefinitionValidator.Validate` and throws `WorkflowDefinitionValidationException` instead of returning null.
+- API save routes place the complete sorted `ValidationError` list in `details`, with `ValidationSource` serialized as `definition` or `action` by the shared JSON options.
+
+## Implementation Discoveries
+
+- The server-side duplicate Definition model had to be removed after production imports were moved to the library; keeping it caused ambiguous type resolution and would have preserved two semantic models.
+- Runtime `StageCheck` and wire DTOs still use `Name` as a historical output field, but the library Definition and YAML input use `CheckDefinition.Id`.
+- The existing `WorkflowProfileDataUpgrader` is the startup one-shot migration hook. It now maps legacy check `name` to `id`, deserializes the library model, re-emits YAML through the authoritative parser, and stops startup with Profile/path diagnostics on failure.
+- The inline-agent `with.agent`, `with.kind`, `with.type`, and legacy inline `with.expect` checks remain outside the Definition validator in `WorkflowActionGuards`; they emit `ValidationSource.Action` errors only on save.
+
+## Acceptance Criteria Mapping
+
+- `ProjectWorkflowProfileManager`, `IssueWorkflowProfileManager`, and `WorkflowProfileCatalog` use the authoritative parser for YAML and library JSON persistence for stored Profiles.
+- Tampered stored Definition, action-source guard, and legacy check-name migration regressions are covered in `ProjectWorkflowProfileManagerSpecs`.
+- Both built-in Profiles use `id` for every check; the catalog loads them through `Parse`.

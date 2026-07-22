@@ -1,7 +1,7 @@
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SystemInfo;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
@@ -75,7 +75,7 @@ public static class SystemRoutes
                     s.Stage,
                     s.RequiresApproval,
                     s.Tasks.Select(t => t.Id).ToList(),
-                    s.Checks.Select(c => c.Name).ToList())).ToList()));
+                     s.Checks.Select(c => c.Id).ToList())).ToList()));
         });
 
         app.MapPost("/api/system/update", async (SystemUpdateRequest? request, SystemUpdateService updates, CancellationToken ct) =>

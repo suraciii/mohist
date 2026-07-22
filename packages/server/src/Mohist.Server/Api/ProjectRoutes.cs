@@ -328,6 +328,13 @@ public static class ProjectRoutes
                 var template = await manager.CreateTemplateAsync(project.Id, req.Yaml);
                 return Results.Json(new { success = true, data = template }, statusCode: 201);
             }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(
+                    "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
+                    "workflow_shape",
+                    ex.Errors);
+            }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.BadRequest(ex.Message);
@@ -357,6 +364,13 @@ public static class ProjectRoutes
                 return template is not null
                     ? ApiResults.Ok(template)
                     : ApiResults.NotFound("Project template not found");
+            }
+            catch (WorkflowDefinitionValidationException ex)
+            {
+                return ApiResults.BadRequest(
+                    "Workflow profile is invalid: " + string.Join("; ", ex.Errors.Select(error => $"{error.Path}: {error.Message}")),
+                    "workflow_shape",
+                    ex.Errors);
             }
             catch (InvalidOperationException ex)
             {

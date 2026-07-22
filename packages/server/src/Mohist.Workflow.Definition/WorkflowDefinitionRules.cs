@@ -410,7 +410,9 @@ internal static class WorkflowDefinitionRules
             {
                 AddError(errors, emittedPaths,
                     $"{taskPath}.expect.markers[{markerIndex}].oneOf",
-                    "expect.markers[].oneOf must be a non-empty list");
+                    marker.TryGetProperty("contains", out _)
+                        ? "verdict marker must use a non-empty oneOf list"
+                        : "expect.markers[].oneOf must be a non-empty list");
             }
             else
             {

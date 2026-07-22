@@ -98,12 +98,12 @@ stages:
           files:
             - path: openspec/changes/issue-${{ issue.number }}/self-review.md
     checks:
-      - name: plan-artifacts
+      - id: plan-artifacts
         title: Plan artifacts complete
         uses: mohist/openspec-artifacts
         with:
           changeDir: openspec/changes/issue-${{ issue.number }}
-      - name: health
+      - id: health
         title: Health
         uses: core/script
         with:
