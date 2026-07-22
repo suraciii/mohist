@@ -6,10 +6,12 @@
       "id": "T-001",
       "title": "Server: execution-backend config, resolution, snapshot, launch, dispatch, and runtime-aware generic open/attach",
       "spec": "specs/agent-execution-backend/spec.md",
-      "description": "Make the server route a Mohist Agent Job to its selected backend. Add `runtime` to the shared `AgentConfigSchema` whitelist with opencode|pi validation (default opencode). Add a `ResolveRuntime` helper implementing `issueOverride ?? agentConfig.runtime ?? \"opencode\"` (issue override sourced from the issue's `vars.agent.runtime` per design D2/OQ1), reused by manual launch, routed launch, and routed preflight. Snapshot the resolved runtime onto `AgentJobInput.Runtime` (next free Orleans Id) and `RoutedAgentLaunchPlan.Runtime` (next free Id), append-only. Thread the resolved runtime into `OpenAgentSessionCommand.AgentRuntime` on both launch paths (replacing the hardcoded `opencode` literals), emit `runtime` on the work dispatch in `BuildDispatch`, and make the generic agent-session open/attach routes read the session's persisted runtime instead of a literal. The AgentJob grain recovery/re-dispatch must read the snapshot, not fresh Agent config.",
+      "description": "Make the server route a Mohist Agent Job to its selected backend. Add `runtime` to the shared `AgentConfigSchema` — both `AllowedKeys`/`Validate` (with opencode|pi validation) AND the hardcoded key list inside `Filter` so the key survives the write-side merge paths (default opencode). Add an optional `runtime` field to the manual launch request body (`AgentSessionLaunchRequest`) as the launch-time override, and a `ResolveRuntime(agentConfig, launchOverride)` helper implementing `launchOverride ?? agentConfig.runtime ?? \"opencode\"`, reused by manual launch (passes the request override), routed launch (passes none), and routed preflight. Snapshot the resolved runtime onto `AgentJobInput.Runtime` (next free Orleans Id) and `RoutedAgentLaunchPlan.Runtime` (next free Id), append-only. Thread the resolved runtime into `OpenAgentSessionCommand.AgentRuntime` on both launch paths (replacing the hardcoded `opencode` literals), emit `runtime` on the work dispatch in `BuildDispatch`, and make the generic agent-session open/attach routes read the session's persisted runtime instead of a literal. The AgentJob grain recovery/re-dispatch must read the snapshot, not fresh Agent config.",
       "acceptanceCriteria": [
         "`AgentConfigSchema.Validate` accepts `runtime: opencode|pi`, rejects any other value with an actionable message, and treats an absent key as valid; the same validation covers Agent CRUD and issue agentConfig writes (unit test).",
-        "Resolution precedence holds: issue `vars.agent.runtime` override wins over Agent config; no override falls back to Agent config; both absent resolve to `opencode` (unit test on the resolver).",
+        "`AgentConfigSchema.Filter` projects `runtime` alongside `model`/`variant` — a round-trip through `Filter` does not drop the key (unit test).",
+        "Resolution precedence holds: a launch-time `runtime` override on the request wins over Agent config; no override falls back to Agent config; both absent resolve to `opencode` (unit test on the resolver, plus a spec test exercising the launch request field end-to-end).",
+        "The manual launch request body accepts an optional `runtime` override; the routed launch uses the Agent's configured backend (no override) (spec test).",
         "The resolved runtime is captured onto `AgentJobInput.Runtime` and `RoutedAgentLaunchPlan.Runtime` using new append-only Orleans field ids with no reordering of existing ids.",
         "Manual and routed launches open the AgentSession with the resolved runtime; no `opencode` literal remains in the launch or `AdvancePreparedLaunchAsync` paths (spec test).",
         "`BuildDispatch` emits `runtime` on the work envelope for an agent-job dispatch; the generic agent-session open/attach routes use the session's persisted runtime rather than a hardcoded literal (spec test).",
@@ -19,20 +21,21 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Server opens Pi-runtime AgentSessions, dispatches agent-jobs carrying `runtime`, and generic open/attach derive runtime from the session snapshot.",
+      "output": "Server opens Pi-runtime AgentSessions, dispatches agent-jobs carrying `runtime`, and generic open/attach derive runtime from the session snapshot; a launch-time `runtime` override is accepted and resolved.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Covers design D1-D5 and D4-server. The issue-level override source is design Open Question OQ1; implement the recommended source (issue `vars.agent.runtime`, read at launch when an issue context is present) — the resolution-precedence contract is fixed by the spec regardless of source. Orleans field ids are append-only. This task also satisfies the server-side half of `agent-job-runtime-execution` (dispatch carries runtime; runtime-aware generic open/attach)."
+      "notes": "Covers design D1-D5 and D4-server. OQ1 is resolved (design D2): the launch-time override is a per-launch `runtime` field on the manual launch request body — this is the owned write path for AC #2, so the override is exercisable end-to-end. The routed path uses the Agent's configured backend (a per-rule override is out of scope). Orleans field ids are append-only. This task also satisfies the server-side half of `agent-job-runtime-execution` (dispatch carries runtime; runtime-aware generic open/attach)."
     },
     {
       "id": "T-002",
       "title": "Runner: AgentJob executor selects the runtime from the dispatch",
       "spec": "specs/agent-job-runtime-execution/spec.md#executor-selects-runtime-from-the-dispatch",
-      "description": "Make the runner execute an AgentJob on the backend the dispatch carries. `AgentJobExecutor` reads `runtime` from the dispatch payload and selects `PiRuntime` or `OpenCodeRuntime` instead of the hardcoded `opencode` literal; `host.ts` wires both runtimes to the executor (reusing the late-binding accessor shape already used by Session command routing). A chosen runtime that is not ready must fail with an actionable `runtime-unavailable` error with no silent OpenCode fallback. Add `runtime` to the executor's known-keys set so it is not flagged as an unknown option. Verify that Pi-executed turn facts (transcript/tool/usage/cost/model) project through the existing AgentSession observer and that an invalid/uncredentialed selected model surfaces an actionable failure rather than being swallowed.",
+      "description": "Make the runner execute an AgentJob on the backend the dispatch carries. `AgentJobExecutor` reads `runtime` from the dispatch payload and selects `PiRuntime` or `OpenCodeRuntime` instead of the hardcoded `opencode` literal; `host.ts` wires both runtimes to the executor (reusing the late-binding accessor shape already used by Session command routing). A chosen runtime that is not ready must fail with an actionable `runtime-unavailable` error with no silent OpenCode fallback. Add `runtime` to the executor's known-keys set so it is not flagged as an unknown option. Parameterize the terminal AgentJob output (`buildAgentJobOutput`, today hardcoded `kind: \"opencode\"`) from the selected runtime so a Pi-executed job is not mislabeled. Verify that Pi-executed turn facts (transcript/tool/usage/cost/model) project through the existing AgentSession observer and that an invalid/uncredentialed selected model surfaces an actionable failure rather than being swallowed.",
       "acceptanceCriteria": [
         "`AgentJobExecutor` selects `PiRuntime` for a dispatch carrying `runtime: pi` and `OpenCodeRuntime` for `runtime: opencode`, using injected fake runtimes (unit test).",
         "When the selected runtime is not ready, the turn fails with an actionable `runtime-unavailable` error and does NOT silently fall back to OpenCode (unit test).",
         "`runtime` in the dispatch payload is not reported as an unknown option key (unit test).",
+        "The terminal AgentJob output labels the run with the runtime that executed — a Pi-executed job's output is not labeled `opencode` (unit test asserting the output runtime/kind reflects the selected runtime).",
         "A Pi-executed AgentJob turn's transcript, tool, usage, cost, and model facts project through the existing `RuntimeTurnObserver`/`AgentSessionRuntimeEvents` path (unit/spec test with a fake PiRuntime).",
         "An invalid or uncredentialed selected model surfaces an actionable failure (the runtime remains the final validator; the executor does not swallow the error) (unit test with a fake runtime returning a model/turn failure).",
         "`npm run typecheck` and `npm test` in packages/runner pass."
@@ -43,7 +46,7 @@
       "output": "Runner executes Mohist Agent Jobs on the dispatch-selected backend, end-to-end with the server change in T-001.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Covers design D4-runner and the executor-facing requirements of `agent-job-runtime-execution` (executor selection, runtime-not-ready failure, shared session infrastructure, actionable uncredentialed-model failure). Session command routing by binding runtime is already runtime-aware (issue 451) — verify, do not rebuild."
+      "notes": "Covers design D4-runner and the executor-facing requirements of `agent-job-runtime-execution` (executor selection, runtime-not-ready failure, terminal output runtime labeling, shared session infrastructure, actionable uncredentialed-model failure). Session command routing by binding runtime is already runtime-aware (issue 451) — verify, do not rebuild."
     },
     {
       "id": "T-003",
@@ -63,7 +66,7 @@
       "output": "`GET .../models?runtime=pi` returns the configured-credential Pi model catalog; the OpenCode default path is preserved.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Covers design D6 and the backend half of `runtime-model-catalog` (Runner reporting + Server registry/API). Storage-shape choice is design Open Question OQ2; implement the recommended runtime-keyed map. This vertical is independent of the execution path (T-001/T-002) and may proceed in parallel. The `/opencode/models` route/response generalization is the BREAKING change noted in the proposal; the Web consumer is updated in T-004 in the same change."
+      "notes": "Covers design D6 and the backend half of `runtime-model-catalog` (Runner reporting + Server registry/API). Storage-shape choice is design Open Question OQ2; implement the recommended runtime-keyed map. This vertical is independent of the execution path (T-001/T-002) and may proceed in parallel. The `/opencode/models` runtime query is additive (route and `{models, modelVariants}` shape preserved, `?runtime=` defaults to opencode); the Web consumer is updated in T-004."
     },
     {
       "id": "T-004",
