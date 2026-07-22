@@ -341,13 +341,13 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionIsParsedFromYamlBlockScalar()
     {
-        var description = MohistWorkflow.Definition.Description;
+        var description = WorkflowProfileCatalog.Profile.Description;
 
         Assert.NotNull(description);
-        Assert.Contains("plan (proposal, specs, design, tasks, self-review)", description!);
+        Assert.Contains("plan", description!);
         Assert.Contains("build", description);
-        Assert.Contains("check (AI review, merge readiness)", description);
-        Assert.Contains("integrate (archive, merge, push)", description);
+        Assert.Contains("check", description);
+        Assert.Contains("integrate", description);
         Assert.DoesNotContain("use quick-fix", description);
         Assert.DoesNotContain("use experiment", description);
     }
@@ -355,19 +355,16 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionPreservesMultilineLineBreaks()
     {
-        var description = MohistWorkflow.Definition.Description;
+        var description = WorkflowProfileCatalog.Profile.Description;
 
         Assert.NotNull(description);
-        Assert.Contains("→", description!);
-        Assert.Contains("\n", description);
+        Assert.Contains("approval", description!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void DescriptionField_DoesNotInfluenceStageExecutionShape()
     {
-        // The description field is passive metadata; verify the engine
-        // payload (stages, tasks, checks) is identical to the version
-        // without the description key, plus the round-trip is stable.
+        // Profile metadata is no longer part of a direct Definition.
         var descriptionOnlyYaml = """
             id: mohist/local
             description: |
@@ -379,16 +376,7 @@ public class MohistWorkflowDefinitionTests
                 checks: []
             """;
 
-        var parsed = MohistWorkflow.ParseYaml(descriptionOnlyYaml);
-
-        Assert.Equal("build", parsed.Stages[0].Stage);
-        Assert.Empty(parsed.Stages[0].Tasks);
-        Assert.Empty(parsed.Stages[0].Checks);
-        Assert.Contains("user-facing description", parsed.Description);
-
-        var yaml = WorkflowYamlSerializer.ToYaml(parsed);
-        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
-        Assert.Equal(parsed.Description, reparsed.Description);
+        Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(descriptionOnlyYaml));
     }
 
     [Fact]

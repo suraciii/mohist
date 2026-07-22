@@ -1,13 +1,3 @@
-description: |
-  Default general-purpose Mohist pipeline: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (archive, merge, push).
-  Requires human approval at the plan and check stages, then squashes and pushes the working branch directly into the repository base branch.
-  Typical duration: 20-60 minutes for a focused change.
-  Not suited for: trivial one-line fixes, throwaway spikes, or quick experiments — these don't warrant a full plan-check-integrate cycle.
-
-variables:
-  agent: {}
-  archive: null
-
 approval:
   feedback:
     tasks:

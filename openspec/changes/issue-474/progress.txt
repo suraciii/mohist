@@ -1,0 +1,21 @@
+## Codebase Patterns
+
+- Workflow Definition YAML is parsed through `WorkflowYamlSerializer`; task-level `artifacts`, `recovery`, and `setVars` remain valid executable fields.
+- Built-in workflow files are pure behavior assets. Profile names and descriptions belong to `WorkflowProfileCatalog`.
+- Project and issue workflow persistence keeps the existing storage keys and stores a `WorkflowProfile` envelope in the existing template column.
+- Startup and later stage loads resolve through `WorkflowProfileManager`; the selected profile id is used for `WorkflowStructure` because pure Definitions do not own identity.
+
+## T-001 Decisions
+
+- Direct Definition YAML/JSON rejects only the known removed fields and stage `variables`; broad unknown-field validation remains outside this task.
+- `FromProfileYaml` is an API/persistence boundary for existing custom-profile input. It separates profile metadata before passing the remaining document through the pure Definition parser.
+- `WorkflowProfileDataUpgrader` converts old persisted definition rows once, preserving project/template and issue identities. Rows with embedded variables fail with a diagnostic containing the profile identity and variable paths.
+- Effective variable resolution no longer patches Definition/global-config variables. Issue/Run default initialization and remaining variable behavior are reserved for T-002.
+
+## Verification Notes
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` passes.
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj --no-build --no-restore` passes: 1298 tests.
+- Workflow YAML focused unit tests pass: 36 tests.
+- Workflow profile catalog focused spec passes: 16 tests.
+- The pre-existing full spec suite still contains failures based on embedded Definition Variables and old definition-shaped fixtures; those scenarios are explicitly migrated by issue-474 T-002 / fixture updates rather than restored with a dual-read path.

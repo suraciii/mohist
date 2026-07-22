@@ -33,13 +33,13 @@ public class ProjectWorkflowProfileManager : IScopedService
         [
             new SystemTemplateInfo(
                 Id: WorkflowProfileCatalog.LocalId,
-                Name: "Mohist Local",
-                Description: WorkflowProfileCatalog.ResolveDescription(WorkflowProfileCatalog.Definition),
+                Name: WorkflowProfileCatalog.Profile.Name,
+                Description: WorkflowProfileCatalog.Profile.Description,
                 IsDefault: true),
             new SystemTemplateInfo(
                 Id: WorkflowProfileCatalog.GithubPrId,
-                Name: "Mohist GitHub PR",
-                Description: WorkflowProfileCatalog.ResolveDescription(WorkflowProfileCatalog.GithubPrWorkflowDefinition),
+                Name: WorkflowProfileCatalog.GithubPrProfileAsset.Name,
+                Description: WorkflowProfileCatalog.GithubPrProfileAsset.Description,
                 IsDefault: false),
         ];
     }
@@ -88,7 +88,11 @@ public class ProjectWorkflowProfileManager : IScopedService
             .OrderBy(x => x.TemplateId)
             .ToListAsync();
 
-        return rows.Select(x => new ProjectTemplateInfo(x.ProjectId, x.TemplateId, x.CreatedAt, x.UpdatedAt)).ToList();
+        return rows.Select(x =>
+        {
+            var profile = DeserializeProfile(x.Template);
+            return new ProjectTemplateInfo(x.ProjectId, x.TemplateId, x.CreatedAt, x.UpdatedAt, profile?.Name, profile?.Description);
+        }).ToList();
     }
 
     public async Task<WorkflowDefinition?> GetTemplateAsync(string projectId, string templateId)
@@ -96,7 +100,15 @@ public class ProjectWorkflowProfileManager : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
-        return row is null ? null : DeserializeDefinition(row.Template);
+        return row is null ? null : DeserializeProfile(row.Template)?.Definition;
+    }
+
+    public async Task<WorkflowProfile?> GetTemplateProfileAsync(string projectId, string templateId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectWorkflowTemplates.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
+        return row is null ? null : DeserializeProfile(row.Template);
     }
 
     public async Task<ProjectTemplateInfo> CreateTemplateAsync(string projectId, string yaml)
@@ -106,29 +118,30 @@ public class ProjectWorkflowProfileManager : IScopedService
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var def = WorkflowYamlSerializer.FromYaml(yaml);
-        if (string.IsNullOrWhiteSpace(def.Id))
-            throw new InvalidOperationException("Template YAML must include an id");
+        var profile = WorkflowYamlSerializer.FromProfileYaml(yaml, "workflow");
+        var templateId = profile.Id;
+        if (string.IsNullOrWhiteSpace(templateId))
+            throw new InvalidOperationException("Template id is required");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var exists = await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == def.Id);
+        var exists = await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (exists)
-            throw new InvalidOperationException($"Template '{def.Id}' already exists in project '{projectId}'");
+            throw new InvalidOperationException($"Template '{templateId}' already exists in project '{projectId}'");
 
         var now = DateTimeOffset.UtcNow;
         var row = new ProjectWorkflowTemplateRow
         {
             ProjectId = projectId,
-            TemplateId = def.Id,
-            Template = SerializeDefinition(def),
+            TemplateId = templateId,
+            Template = SerializeProfile(profile),
             CreatedAt = now,
             UpdatedAt = now,
         };
         db.ProjectWorkflowTemplates.Add(row);
         await db.SaveChangesAsync();
 
-        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt);
+        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
     }
 
     public async Task<ProjectTemplateInfo?> UpdateTemplateAsync(string projectId, string templateId, string yaml)
@@ -136,20 +149,20 @@ public class ProjectWorkflowProfileManager : IScopedService
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var def = WorkflowYamlSerializer.FromYaml(yaml);
-        if (!string.Equals(def.Id, templateId, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Template id mismatch: expected '{templateId}' but YAML declares '{def.Id}'");
+        var profile = WorkflowYamlSerializer.FromProfileYaml(yaml, templateId);
+        if (!string.Equals(profile.Id, templateId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Template id mismatch: expected '{templateId}' but YAML declares '{profile.Id}'");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowTemplates
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        row.Template = SerializeDefinition(def);
+        row.Template = SerializeProfile(profile);
         row.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
-        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt);
+        return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt, profile.Name, profile.Description);
     }
 
     public async Task<bool> DeleteTemplateAsync(string projectId, string templateId)
@@ -535,15 +548,15 @@ public class ProjectWorkflowProfileManager : IScopedService
         return await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
     }
 
-    private static string SerializeDefinition(WorkflowDefinition def) =>
-        JsonSerializer.Serialize(def, WorkflowYamlSerializer.JsonOptions);
+    private static string SerializeProfile(WorkflowProfile profile) =>
+        JsonSerializer.Serialize(profile, WorkflowYamlSerializer.JsonOptions);
 
-    private static WorkflowDefinition? DeserializeDefinition(string json)
+    private static WorkflowProfile? DeserializeProfile(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return JsonSerializer.Deserialize<WorkflowDefinition>(json, WorkflowYamlSerializer.JsonOptions);
+            return WorkflowYamlSerializer.FromProfileJson(json);
         }
         catch
         {

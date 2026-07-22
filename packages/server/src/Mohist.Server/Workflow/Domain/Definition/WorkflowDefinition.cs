@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Workflow.Domain.Definition;
 
@@ -41,9 +42,32 @@ public sealed record StageDefinition(
     List<TaskDefinition> Tasks,
     List<CheckDefinition> Checks,
     bool RequiresApproval = false,
-    Dictionary<string, JsonElement?>? Variables = null,
     string? LockBehavior = null,
-    List<string>? Resources = null);
+    List<string>? Resources = null)
+{
+    public StageDefinition(
+        string Stage,
+        List<TaskDefinition> Tasks,
+        List<CheckDefinition> Checks,
+        Dictionary<string, JsonElement?>? Variables,
+        string? LockBehavior = null,
+        List<string>? Resources = null)
+        : this(Stage, Tasks, Checks, false, LockBehavior, Resources)
+    {
+    }
+
+    public StageDefinition(
+        string Stage,
+        List<TaskDefinition> Tasks,
+        List<CheckDefinition> Checks,
+        bool RequiresApproval,
+        Dictionary<string, JsonElement?>? Variables,
+        string? LockBehavior = null,
+        List<string>? Resources = null)
+        : this(Stage, Tasks, Checks, RequiresApproval, LockBehavior, Resources)
+    {
+    }
+}
 
 public sealed record ApprovalFeedbackConfig(IReadOnlyList<TaskDefinition>? Tasks = null);
 
@@ -66,16 +90,46 @@ public sealed record StageStructure(
     bool RequiresApproval);
 
 public sealed record WorkflowDefinition(
-    string Id,
     List<StageDefinition> Stages,
-    string? Name = null,
-    string? Description = null,
-    Dictionary<string, JsonElement?>? Variables = null,
-    Dictionary<string, JsonElement?>? Defaults = null,
-    Dictionary<string, string>? Artifacts = null,
     ApprovalConfig? Approval = null)
 {
+    // Kept only so older in-process callers can be migrated independently. The
+    // value is deliberately not part of the Definition JSON contract.
+    [JsonIgnore]
+    public string Id { get; init; } = "workflow";
+
+    [JsonIgnore] public string? Name { get; init; }
+    [JsonIgnore] public string? Description { get; init; }
+    [JsonIgnore] public Dictionary<string, JsonElement?>? Variables { get; init; }
+    [JsonIgnore] public Dictionary<string, JsonElement?>? Defaults { get; init; }
+    [JsonIgnore] public Dictionary<string, string>? Artifacts { get; init; }
+
+    public WorkflowDefinition(
+        string Id,
+        List<StageDefinition> Stages,
+        string? Name = null,
+        string? Description = null,
+        Dictionary<string, JsonElement?>? Variables = null,
+        Dictionary<string, JsonElement?>? Defaults = null,
+        Dictionary<string, string>? Artifacts = null,
+        ApprovalConfig? Approval = null)
+        : this(Stages, Approval)
+    {
+        this.Id = Id;
+        this.Name = Name;
+        this.Description = Description;
+        this.Variables = Variables;
+        this.Defaults = Defaults;
+        this.Artifacts = Artifacts;
+    }
+
     public WorkflowStructure ToStructure() => new(
         Id,
         Stages?.Select(s => new StageStructure(s.Stage, s.RequiresApproval)).ToList() ?? new List<StageStructure>());
 }
+
+public sealed record WorkflowProfile(
+    string Id,
+    string Name,
+    string Description,
+    WorkflowDefinition Definition);
