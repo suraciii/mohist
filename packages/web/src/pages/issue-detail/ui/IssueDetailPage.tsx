@@ -9,6 +9,9 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundState } from '@/shared/ui/not-found-state'
+import { ErrorState } from '@/shared/ui/error-state'
+import { ApiError } from '@/shared/api/client'
+import { IssueDetailPageSkeleton } from './IssueDetailPageSkeleton'
 import { BranchBar, WorkflowView, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
@@ -101,7 +104,7 @@ export function IssueDetailPage({
     mutationDependencies,
   )
 
-  const { data: issue, isLoading, isError } = useIssue(issueNumber)
+  const { data: issue, isLoading, isError, error, refetch } = useIssue(issueNumber)
   const isCompositeParent = !!issue && (issue.children?.length ?? 0) > 0
   const workflowDataEnabled = !!issue && !isCompositeParent
   const { data: agentStatus } = useAgentStatus()
@@ -216,15 +219,27 @@ export function IssueDetailPage({
   })
 
   if (isError) {
-    return <NotFoundState />
+    const isNotFound = error instanceof ApiError && error.status === 404
+    if (isNotFound) {
+      return <NotFoundState />
+    }
+    return (
+      <ErrorState
+        title="Failed to load issue"
+        message={
+          error instanceof Error && error.message
+            ? error.message
+            : 'We could not load this issue. Please try again.'
+        }
+        onRetry={() => {
+          void refetch()
+        }}
+      />
+    )
   }
 
   if (isLoading || !issue) {
-    return (
-      <div className="flex items-center justify-center flex-1">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    )
+    return <IssueDetailPageSkeleton />
   }
 
   const workflowStage = isCompositeParent ? null : (issue.workflowStage ?? null)

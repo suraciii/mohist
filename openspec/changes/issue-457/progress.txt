@@ -170,3 +170,42 @@
 - Did not introduce JS-driven scroll-spy, `position: fixed`, or `IntersectionObserver` — the design rejects those (D6 alternative-rejected).
 - Did not change the rail card ordering, the rail card set, the narrow-viewport stacking behavior, or any of the other tier weights. The change is purely the two cosmetic/D6 concerns.
 
+
+## T-006 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The skeleton originally reused `data-testid="status-header-tier"` for its top region. That collided with the page's real `status-header-tier` — when `waitFor(() => screen.getByTestId('status-header-tier'))` was used by `IssueDetailPage.status-header.test.tsx`, the skeleton satisfied it first, and the subsequent assertions on `status-headline` / `issue-decision-surface` (which don't exist in the skeleton) failed. Renamed the skeleton's top region to `status-header-tier-skeleton` so the loading and loaded phases have disjoint testids. The cross-tier and navigation tests that previously passed still pass with this rename.
+- `IssueDetailPage.navigation.spec.tsx` had a single assertion `expect(screen.getByText('Loading...')).toBeInTheDocument()` for the "waits for asynchronous issue content before revealing the requested target" test. Per the spec requirement (per-section skeletons, no bare Loading... line), replaced with `expect(screen.getByTestId('issue-detail-page-skeleton')).toBeInTheDocument()` and added a negative `expect(screen.queryByText(/^Loading\.{0,3}$/)).toBeNull()` to lock the absence.
+- The new `ErrorState` component only renders its Retry button when `onRetry` is provided. Tests that exercise the default branch must pass an `onRetry` (even a noop) to get the button to appear. This is the same shape `SectionState` uses for its error variant, so it matches existing app conventions.
+- `ApiError` is imported from `@/shared/api/client`. The 404 classification is `error instanceof ApiError && error.status === 404` — same pattern used by `RunnerDetailPage.tsx:297`, so the invariant "404 vs transient" is consistent across the app.
+- Added two MSW helpers to `_issueDetailMsw.tsx`: `mockIssueError(status, message)` (returns `{ success: false, error, code }` with the given HTTP status, tagging the code as `not_found` for 404 or `transport_error` otherwise) and `mockIssuePending()` (returns a never-resolving promise + a `resolve(issue)` callback, mirroring the existing `mockIssueDiffPending` shape). The `mockIssueError` defaults to a non-404 transient error so callers don't accidentally pass 404 by mistake; the 404 case is an explicit second-arg call site.
+- `ErrorState` uses semantic theme tokens (`bg-danger-subtle`, `border-danger-border`, `text-danger`, `text-danger-foreground/80`) — no literal palette. The `ErrorState.test.tsx` locks this with a class-name negative assertion (`/border-(red|amber|gray|blue)-\d/` and `/bg-(red|amber|gray|blue)-\d/` both absent), same shape the BranchBar/TaskLogPanel tests use for the theme-tokens invariant.
+- `ErrorState` carries `data-error-state="transient"` on its outer div. This is the visible-distinct signal vs `NotFoundState` (which uses no such marker and renders `text-gray-400` / `text-blue-600`); tests rely on testid divergence but a downstream test could also assert the attribute.
+
+### Decisions confirmed against spec
+
+- Used `Failed to load issue` as the title (matches D7's "lightweight ErrorState with `Button variant='outline'` retry" intent; truthful, not generic).
+- Used the original `ApiError.message` when present; falls back to the generic copy only when the error has no message (e.g. a plain thrown value). Matches D7's "Retry button wired to `refetch()`" — the message tells the user what failed, the Retry button gives them a path forward.
+- The Retry button uses the shared `Button` `variant="outline"` (per D7), not a destructive or primary variant — it is an affordance, not the page's primary action.
+- Reused the existing `Skeleton` primitive from `@/shared/ui/components/skeleton` (no new skeleton component, per the design's "reuse existing primitives" goal).
+- Did NOT tokenize `NotFoundState`'s literal `gray-400` / `blue-600` palette (explicitly out of scope per D7 and the task notes).
+- Did NOT touch the page-level container, narrow-viewport behavior, scroll ancestor, or any other layout concern (the scope is loading + error only).
+- Did NOT add a JS-driven `refetch` retry interval, a refresh-button outside the ErrorState, or a separate `error-state-retry` icon — design D7 specifies "Retry button wired to `refetch()`", nothing more.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 381 files / 5090 tests passed (+3 files / +15 tests over T-005 baseline).
+- Focused run of the three new test files — 15 tests passed (5 async-states, 4 skeleton, 6 ErrorState).
+- `rg "Loading\\.\\.\\.|Loading\\.\\.\\.\\." packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` — zero matches. The bare Loading... line is gone.
+- `rg "border-(red|amber|blue|gray)\\d|text-(red|amber|blue|gray)\\d|bg-(red|amber|blue|gray)\\d" packages/web/src/shared/ui/error-state.tsx` — zero matches; only semantic `danger-*` tokens.
+- `rg "data-testid=\"status-header-tier\"" packages/web/src/pages/issue-detail/ui/IssueDetailPageSkeleton.tsx` — zero matches; the skeleton's top region is `status-header-tier-skeleton` (disjoint from the page's `status-header-tier`).
+- `git diff --stat` — 3 modified files (IssueDetailPage.tsx, _issueDetailMsw.tsx, IssueDetailPage.navigation.spec.tsx), 5 new files (IssueDetailPageSkeleton.tsx, IssueDetailPageSkeleton.test.tsx, IssueDetailPage.async-states.test.tsx, error-state.tsx, error-state.test.tsx).
+
+### Out of scope (noted, not done)
+
+- NotFoundState's literal `text-gray-400` / `text-blue-600` palette is untouched (per task notes and D7 — out of scope; tracked as follow-up).
+- The narrow-viewport loading branch still gets the same desktop+rail skeleton (the skeleton's `lg:col-span-2` / `lg:grid-cols-3` collapse via Tailwind's responsive prefix); no narrow-viewport-specific skeleton variant was added (the design says "a small IssueDetailPageSkeleton that mirrors page structure").
+- Section-level skeletons (commits, diff) still use their own `Loading changes...` / `Loading artifact list...` copy; the page-level fix is the issue-detail-page-skeleton shell per design D7. The sub-section degradation is documented as out of scope.
+- `ErrorState` is a generic shared component (default title + message). Per-call sites can override, but no call site other than `IssueDetailPage` consumes it yet; downstream widgets may adopt it later.

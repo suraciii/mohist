@@ -128,7 +128,8 @@ describe('IssueDetailPage fragment navigation', () => {
     server.use(http.get('*/api/projects/:projectId/issues/:number', () => issueResponse))
 
     renderPage('/project-scope/issues/14#comments')
-    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    expect(screen.getByTestId('issue-detail-page-skeleton')).toBeInTheDocument()
+    expect(screen.queryByText(/^Loading\.{0,3}$/)).toBeNull()
     expect(scrollIntoView).not.toHaveBeenCalled()
 
     await waitFor(() => expect(resolveIssue).toBeTypeOf('function'), { timeout: 5000 })
