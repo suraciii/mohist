@@ -4,7 +4,24 @@ import { diagnostic, piError, resetDiagnostic } from "./errors.js"
 import { isProviderFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from "./policy.js"
 import { createPiProjector } from "./projector.js"
 import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from "./sdk.js"
-import type { PiDiagnostic, PiProviderErrorPolicy, PiResult, PiRuntimeEvent, PiSessionCreateRequest, PiSessionResult, PiTurnObserver, PiTurnRequest, PiTurnResult, PiReadyState, PiCatalog } from "./types.js"
+import type {
+  PiCancelFacts,
+  PiCancelRequest,
+  PiCancelResult,
+  PiDiagnostic,
+  PiFollowupRequest,
+  PiFollowupResult,
+  PiProviderErrorPolicy,
+  PiReadyState,
+  PiCatalog,
+  PiResult,
+  PiRuntimeEvent,
+  PiSessionCreateRequest,
+  PiSessionResult,
+  PiTurnObserver,
+  PiTurnRequest,
+  PiTurnResult,
+} from "./types.js"
 
 export interface PiClock {
   readonly now: () => number
@@ -25,10 +42,24 @@ const defaultClock: PiClock = { now: () => Date.now(), setTimeout: (callback, de
 export class PiRuntime {
   private readonly deps: PiRuntimeDeps
   private readonly sessions = new Map<string, PiSdkSession>()
+  private readonly sessionMutexes = new Map<string, Promise<unknown>>()
   private readonly state: { ready: boolean; diagnostic: PiDiagnostic | null; catalog: PiCatalog | null; services: PiSdkServices | null } = { ready: false, diagnostic: null, catalog: null, services: null }
   private startInFlight: Promise<PiResult<PiReadyState>> | null = null
 
   constructor(deps: PiRuntimeDeps) { this.deps = deps }
+
+  private withSessionLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionMutexes.get(path)
+    if (previous) {
+      const settled = previous.catch(() => undefined)
+      const current = settled.then(operation)
+      this.sessionMutexes.set(path, current.catch(() => undefined))
+      return current
+    }
+    const current = operation()
+    this.sessionMutexes.set(path, current.catch(() => undefined))
+    return current
+  }
 
   async start(): Promise<PiResult<PiReadyState>> {
     if (this.state.ready) return { ok: true, value: this.readyState(), diagnostics: [] }
@@ -101,10 +132,10 @@ export class PiRuntime {
     const cancel = () => { if (!fixed) fixAndAbort(this.finishFailure("interrupted", "Pi turn was interrupted", diagnostics)) }
     signal.addEventListener("abort", cancel, { once: true })
     try {
-      const promptOutcome = await Promise.race([
+      const promptOutcome = await this.withSessionLock(path, () => Promise.race([
         session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => "completed" as const),
         fixedSignal.then(() => "fixed" as const),
-      ])
+      ]))
       if (fixed) return fixed
       if (lastMessageFailed(session.messages)) return this.failure("turn-failed", "Pi turn failed", [diagnostic("turn-failed", this.mask(lastMessageError(session.messages) ?? "Pi reported an error"))])
       report(projector.reconcile(session.messages))
@@ -121,7 +152,163 @@ export class PiRuntime {
     }
   }
 
-  async shutdown(): Promise<void> { for (const session of this.sessions.values()) session.dispose(); this.sessions.clear(); await this.state.services?.close(); this.state.services = null; this.state.ready = false }
+  /**
+   * Follow-up against a bound Pi Session (issue #451 / design D5).
+   *
+   * Branches on the physical Pi session's `isStreaming`:
+   *  - Busy → `await session.steer(text)`. The running turn's
+   *    projection is owned by the active `runTurn` subscription; this
+   *    method does not start a new turn. Resolves accepted. `steer`
+   *    does not acquire the per-session prompt mutex (it injects into
+   *    a running turn).
+   *  - Idle → acquire the per-session prompt mutex (D10), set up a
+   *    `createPiProjector` subscription, and call
+   *    `session.prompt(text, { expandPromptTemplates: false, preflight })`.
+   *    The Follow-up resolves as accepted when `preflight(true)` fires
+   *    (Pi confirmed reception), and as a failure when `preflight(false)`
+   *    fires (Pi rejected reception — missing model or credentials) or
+   *    when `prompt()` throws. A background continuation holds the
+   *    mutex and the subscription until `prompt()` resolves, then
+   *    tears both down. No automatic retry — a preflight-rejected
+   *    Follow-up stays rejected.
+   *
+   * Both branches keep the physical Pi Session binding unchanged
+   * (`runtimeSessionId` is returned as the persisted path). A missing
+   * bound session file surfaces as `missing-session` with a Reset hint
+   * (no silent new session).
+   */
+  async followup(request: PiFollowupRequest, observer?: PiTurnObserver): Promise<PiFollowupResult> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    if (!request.prompt || request.prompt.trim().length === 0) return this.failure("invalid-input", "Pi follow-up prompt must be non-empty")
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure("missing-session", "Pi follow-up requires a bound Session", [resetDiagnostic()])
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    if (!session.ok) return session.failure
+
+    if (session.value.isStreaming) {
+      try {
+        await session.value.steer(request.prompt)
+        return {
+          ok: true,
+          value: { runtimeSessionId: path, workDir: request.target.workDir },
+          diagnostics: [],
+        }
+      } catch (cause) {
+        return this.failure("turn-failed", "Pi steer failed", [diagnostic("steer-failed", this.mask(message(cause)))])
+      }
+    }
+
+    const projector = createPiProjector(path, request.target.workDir, this.deps.masker ?? createCredentialMaskerFromEnvironment())
+    const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+    return new Promise<PiFollowupResult>((resolve) => {
+      let settled = false
+      const settle = (result: PiFollowupResult) => {
+        if (settled) return
+        settled = true
+        resolve(result)
+      }
+      void this.withSessionLock(path, async () => {
+        const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
+        try {
+          await session.value.prompt(request.prompt, {
+            expandPromptTemplates: false,
+            preflight: (success) => {
+              if (success) {
+                settle({
+                  ok: true,
+                  value: { runtimeSessionId: path, workDir: request.target.workDir },
+                  diagnostics: [],
+                })
+              } else {
+                settle(this.failure(
+                  "turn-failed",
+                  "Pi rejected follow-up reception (preflight rejected the prompt)",
+                  [diagnostic("preflight-rejected", "Pi preflight rejected the follow-up prompt — model or credentials missing")],
+                ))
+              }
+            },
+          })
+          report(projector.reconcile(session.value.messages))
+        } catch (cause) {
+          settle(this.failure("turn-failed", "Pi follow-up prompt failed", [diagnostic("prompt-failed", this.mask(message(cause)))]))
+        } finally {
+          unsubscribe()
+        }
+      })
+    })
+  }
+
+  /**
+   * Cancel against an active Pi Session turn (issue #451 / design D6).
+   *
+   * Resolves/opens the session (missing file → `missing-session` with a
+   * Reset hint). Reuses the existing `abortAndDiagnose` pattern:
+   * `await session.abort()` then read `session.isStreaming` to confirm
+   * stop. The result facts carry an explicit `stopConfirmed` flag
+   * (`true` when `isStreaming` cleared after abort; `false` otherwise).
+   *
+   * Both stop-confirmed and stop-unconfirmed return `cancelled: true`
+   * (the abort was attempted); `stopConfirmed: false` is a first-class
+   * field so the upper layers can surface `interruptUnconfirmed` to the
+   * API/user instead of reporting a still-running turn as safely
+   * stopped. `cancel` does not acquire the per-session prompt mutex —
+   * it must be able to interrupt an in-flight prompt.
+   */
+  async cancel(request: PiCancelRequest): Promise<PiCancelResult> {
+    if (!this.state.ready || !this.state.services) return this.unavailable()
+    const runtimeSessionId = request.target.runtimeSessionId
+    if (!runtimeSessionId) return this.failure("missing-session", "Pi cancel requires a bound Session", [resetDiagnostic()])
+    const path = normalizedPath(runtimeSessionId)
+    if (!path) return this.failure("incompatible-runtime", "Pi runtimeSessionId must be an absolute session-file path")
+    const session = await this.resolveFollowupSession(path, request.target.workDir)
+    if (!session.ok) return session.failure
+
+    const diagnostics: PiDiagnostic[] = []
+    let stopConfirmed = true
+    try {
+      await session.value.abort()
+      await Promise.resolve()
+      if (session.value.isStreaming) {
+        stopConfirmed = false
+        diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped")))
+      }
+    } catch (cause) {
+      stopConfirmed = false
+      diagnostics.push(diagnostic("abort-unconfirmed", this.mask(message(cause))))
+    }
+    const facts: PiCancelFacts = { runtimeSessionId: path, workDir: request.target.workDir, cancelled: true, stopConfirmed }
+    return { ok: true, value: facts, diagnostics }
+  }
+
+  private async resolveFollowupSession(path: string, workDir: string): Promise<{ ok: true; value: PiSdkSession } | { ok: false; failure: PiResult<never> }> {
+    if (!this.state.services) return { ok: false, failure: this.unavailable() }
+    let session: PiSdkSession
+    try {
+      session = this.sessions.get(path) ?? await this.state.services.openSession(path, workDir)
+      this.sessions.set(path, session)
+      return { ok: true, value: session }
+    } catch (cause) {
+      return {
+        ok: false,
+        failure: this.failure(
+          "missing-session",
+          "The bound Pi Session is missing or corrupt — issue a Reset to establish a fresh Pi Session, then retry",
+          [resetDiagnostic(), diagnostic("session-open-failed", this.mask(message(cause)))],
+        ),
+      }
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    for (const session of this.sessions.values()) session.dispose()
+    this.sessions.clear()
+    this.sessionMutexes.clear()
+    await this.state.services?.close()
+    this.state.services = null
+    this.state.ready = false
+  }
 
   private async attemptStart(): Promise<PiResult<PiReadyState>> {
     this.state.ready = false

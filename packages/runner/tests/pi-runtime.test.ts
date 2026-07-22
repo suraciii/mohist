@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CredentialMasker } from "../src/runtime/task-log.js"
-import { PiRuntime, createPiProjector, parseProviderErrorPolicy, type PiClock, type PiSdkFactory, type PiSdkSession, type PiSdkServices } from "../src/runtime/pi/index.js"
+import { PiRuntime, createPiProjector, parseProviderErrorPolicy, type PiClock, type PiPromptOptions, type PiSdkFactory, type PiSdkSession, type PiSdkServices } from "../src/runtime/pi/index.js"
 
 class FakeSession implements PiSdkSession {
   readonly sessionFile = "/virtual/sessions/one.jsonl"
@@ -14,10 +14,24 @@ class FakeSession implements PiSdkSession {
   modelCalls: unknown[] = []
   thinkingCalls: string[] = []
   private listeners = new Set<(event: unknown) => void>()
-  promptCompletion: (() => void) | null = null
+  private completions: Array<{ resolve: () => void; text: string }> = []
+  /** When set to false, the next preflight callback will be invoked with false. Resets to true after use. */
+  nextPreflightResult: boolean = true
+  /** Captures preflight invocations in order. */
+  preflightCalls: Array<{ text: string; success: boolean }> = []
 
   subscribe(listener: (event: unknown) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
-  prompt(text: string): Promise<void> { this.promptCalls.push(text); this.isStreaming = true; return new Promise<void>((resolve) => { this.promptCompletion = () => { this.isStreaming = false; resolve() } }) }
+  prompt(text: string, options?: PiPromptOptions): Promise<void> {
+    this.promptCalls.push(text)
+    const preflight = options?.preflight
+    if (preflight) {
+      const success = this.nextPreflightResult
+      this.nextPreflightResult = true
+      this.preflightCalls.push({ text, success })
+      queueMicrotask(() => preflight(success))
+    }
+    return new Promise<void>((resolve) => { this.completions.push({ resolve, text }) })
+  }
   steer(text: string): Promise<void> { this.steerCalls.push(text); return Promise.resolve() }
   abort(): Promise<void> { this.abortCalls++; this.isStreaming = false; return Promise.resolve() }
   compact(): Promise<void> { this.compactCalls++; return Promise.resolve() }
@@ -25,7 +39,13 @@ class FakeSession implements PiSdkSession {
   setThinkingLevel(level: string): void { this.thinkingCalls.push(level) }
   dispose(): void {}
   emit(event: unknown): void { this.listeners.forEach((listener) => listener(event)) }
-  complete(content = "final answer"): void { this.messages.push({ role: "assistant", content }); this.promptCompletion?.() }
+  complete(content = "final answer"): void {
+    this.messages.push({ role: "assistant", content })
+    const head = this.completions.shift()
+    if (head) { this.isStreaming = this.completions.length > 0; head.resolve() }
+  }
+  /** Number of currently pending (in-flight) prompts awaiting `complete()`. */
+  pendingPrompts(): number { return this.completions.length }
 }
 
 class FakeClock implements PiClock {
@@ -152,6 +172,233 @@ describe("PiRuntime", () => {
     await missing.start()
     const missingResult = await missing.runTurn({ target: { runtime: "pi", runtimeSessionId: "/virtual/missing.jsonl", workDir: "/workspace" }, prompt: "no replacement" }, new AbortController().signal)
     expect(missingResult).toMatchObject({ ok: false, error: { kind: "missing-session" } })
+  })
+
+  it("followup joins an active Pi turn via steer and never starts a new turn", async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const events: unknown[] = []
+    const result = await runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "additional guidance" },
+      { onEvent: (event) => events.push(event) },
+    )
+    expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace" } })
+    expect(session.steerCalls).toEqual(["additional guidance"])
+    expect(session.promptCalls).toEqual([])
+    expect(events).toEqual([])
+  })
+
+  it("followup starts a new turn when idle and resolves once Pi confirms reception", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const events: unknown[] = []
+    const followup = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "follow me" },
+      { onEvent: (event) => events.push(event) },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["follow me"])
+    expect(session.preflightCalls).toEqual([{ text: "follow me", success: true }])
+    const accepted = await followup
+    expect(accepted).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace" } })
+    session.complete("done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.pendingPrompts()).toBe(0)
+  })
+
+  it("followup fails when Pi preflight rejects reception and does not retry", async () => {
+    const session = new FakeSession()
+    session.nextPreflightResult = false
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const events: unknown[] = []
+    const followup = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "ping" },
+      { onEvent: (event) => events.push(event) },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const result = await followup
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("turn-failed")
+    expect(result.error.diagnostics.some((diag) => diag.code === "preflight-rejected")).toBe(true)
+    expect(session.promptCalls).toEqual(["ping"])
+    expect(events).toEqual([])
+  })
+
+  it("followup reports missing-session with a Reset hint when the bound file is absent", async () => {
+    const session = new FakeSession()
+    const missingFactory: PiSdkFactory = {
+      create: async () => ({
+        catalog: async () => [],
+        createSession: async () => session,
+        openSession: async () => { throw new Error("session file is corrupt") },
+        model: () => ({}),
+        close: async () => {},
+      }),
+    }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: missingFactory })
+    await runtime.start()
+    const result = await runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: "/virtual/missing.jsonl", workDir: "/workspace" }, prompt: "ping" },
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("missing-session")
+    expect(result.error.message.toLowerCase()).toContain("reset")
+    expect(result.error.diagnostics.some((diag) => diag.code === "missing-session")).toBe(true)
+    expect(session.promptCalls).toEqual([])
+    expect(session.steerCalls).toEqual([])
+  })
+
+  it("followup projects turn events through the observer until prompt resolves", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const events: unknown[] = []
+    const followup = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "go" },
+      { onEvent: (event) => events.push(event) },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await followup
+    session.emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read" })
+    expect(events.some((event) => (event as { type?: unknown }).type === "tool")).toBe(true)
+    session.complete("done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    session.emit({ type: "tool_execution_end", toolCallId: "tool-2", toolName: "read" })
+    expect(events.some((event) => (event as { type?: unknown }).type === "tool" && (event as { payload?: { toolCallId?: string } }).payload?.toolCallId === "tool-2")).toBe(false)
+  })
+
+  it("cancel confirms stop and reports stopConfirmed true when abort clears isStreaming", async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
+    expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace", cancelled: true, stopConfirmed: true } })
+    expect(session.abortCalls).toBe(1)
+  })
+
+  it("cancel reports stopConfirmed false and surfaces the unconfirmed diagnostic when isStreaming persists", async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    let persistStreaming = true
+    const originalAbort = session.abort.bind(session)
+    session.abort = async () => { await originalAbort(); session.isStreaming = persistStreaming; return }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.value.cancelled).toBe(true)
+    expect(result.value.stopConfirmed).toBe(false)
+    expect(result.value.runtimeSessionId).toBe("/virtual/sessions/one.jsonl")
+    expect(result.diagnostics.some((diag) => diag.code === "abort-unconfirmed")).toBe(true)
+    expect(session.abortCalls).toBe(1)
+  })
+
+  it("cancel reports missing-session with a Reset hint when the bound file is absent", async () => {
+    const session = new FakeSession()
+    const missingFactory: PiSdkFactory = {
+      create: async () => ({
+        catalog: async () => [],
+        createSession: async () => session,
+        openSession: async () => { throw new Error("session file is corrupt") },
+        model: () => ({}),
+        close: async () => {},
+      }),
+    }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: missingFactory })
+    await runtime.start()
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: "/virtual/missing.jsonl", workDir: "/workspace" } })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("expected failure")
+    expect(result.error.kind).toBe("missing-session")
+    expect(result.error.message.toLowerCase()).toContain("reset")
+    expect(session.abortCalls).toBe(0)
+  })
+
+  it("serializes a concurrent idle follow-up with an in-flight workflow turn on the same session", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const events: unknown[] = []
+    const workflowTurn = runtime.runTurn(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "workflow" },
+      new AbortController().signal,
+      { onEvent: (event) => events.push(event) },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["workflow"])
+    const followup = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "followup" },
+      { onEvent: (event) => events.push(event) },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["workflow"])
+    expect(session.promptCalls).toHaveLength(1)
+    session.complete("wf done")
+    await workflowTurn
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["workflow", "followup"])
+    await followup
+    session.complete("fu done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  })
+
+  it("serializes two concurrent idle follow-ups on the same session", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const first = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "first" },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["first"])
+    const second = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "second" },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["first"])
+    expect(session.promptCalls).toHaveLength(1)
+    const firstResult = await first
+    expect(firstResult.ok).toBe(true)
+    session.complete("first done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["first", "second"])
+    await second
+    session.complete("second done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  })
+
+  it("does not rotate the physical Pi Session binding across a Follow-up (busy or idle)", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    session.isStreaming = true
+    const busy = await runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "busy follow" },
+    )
+    expect(busy).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl" } })
+    session.isStreaming = false
+    const idle = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "idle follow" },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const idleResult = await idle
+    expect(idleResult).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl" } })
+    session.complete()
+    await new Promise<void>((resolve) => setImmediate(resolve))
   })
 })
 

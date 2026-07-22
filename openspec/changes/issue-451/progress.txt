@@ -18,3 +18,29 @@
 - The fake `FakeSession` in `packages/runner/tests/pi-runtime.test.ts` now carries a `compactCalls` counter and a `compact()` method stub so the test boundary continues to type-check; T-003 will exercise the behaviour through real PiRuntime.compact tests.
 - `runtime/pi/index.ts` re-exports the new types and `PiPromptOptions` / `PiPromptPreflightResult`. No SDK DTO leaks across the module boundary.
 - T-001 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm test -w packages/runner` all pass (108 files / 1,258 tests).
+
+## T-002 Notes
+
+- `PiRuntime` now owns a per-physical-session async mutex — `Map<sessionPath, Promise<unknown>>` plus a private `withSessionLock(path, operation)` helper. The helper invokes `operation()` synchronously when no predecessor is queued (preserves the existing single-microtask latency that the existing tests rely on, e.g. `expect(session.promptCalls).toEqual([...])` after one `await Promise.resolve()`); otherwise it chains onto the previous tail so concurrent callers wait without re-ordering. `shutdown()` clears the map.
+- `PiRuntime.runTurn` now wraps the `session.prompt` race inside `withSessionLock(path, …)`. Workflow turns are still serialized externally by `WorkflowSessionTurnCoordinator`, but this is the load-bearing mutual-exclusion for the follow-up path.
+- `PiRuntime.followup(request, observer?)` branches on the physical Pi session's `isStreaming`:
+  - Busy → `await session.steer(text)`; resolves accepted with the persisted `runtimeSessionId`. `steer` does NOT acquire the mutex — it injects into the active turn whose projection is owned by `runTurn`'s subscription.
+  - Idle → acquires the mutex, subscribes a `createPiProjector` filtered through the optional observer, and calls `session.prompt(text, { expandPromptTemplates: false, preflight })`. The follow-up resolves on the first `preflight(success)` / `preflight(failure)` callback (or the `prompt()` rejection) — no replay. A background continuation holds the mutex and the subscription until `prompt()` resolves, then `report(projector.reconcile(session.messages))` runs and the subscription is torn down in `finally`.
+  - `runtimeSessionId` is unchanged on either branch (test `does not rotate the physical Pi Session binding across a Follow-up (busy or idle)` enforces this).
+  - Missing bound file → `missing-session` + `resetDiagnostic` + an error message containing "Reset", surfaced through `resolveFollowupSession`. The runtime never silently creates a new session.
+- `PiRuntime.cancel(request)` opens the session (missing → `missing-session` + Reset hint), then `await session.abort()` followed by reading `session.isStreaming`. The result facts carry `cancelled: true` plus `stopConfirmed: boolean` (`false` when `isStreaming` persists or abort threw). `cancel` does NOT acquire the prompt mutex — it must be able to interrupt an in-flight prompt.
+- A private `resolveFollowupSession(path, workDir)` helper centralises the open-or-cache path for `followup` and `cancel`. Both surface the Reset hint as part of the error message body (not just diagnostics) so the user-facing assertion `expect(error.message.toLowerCase()).toContain("reset")` matches.
+- `FakeSession` was extended to support `PiPromptOptions` (the new `preflight` callback is invoked via `queueMicrotask` to mimic the SDK's async-reception semantics) and to maintain a queue of pending prompt completions so concurrent follow-ups are observable; `nextPreflightResult` lets a test force a preflight rejection. The fake's `prompt()` no longer auto-sets `isStreaming` — `complete()` and `abort()` still do. This decoupling lets both concurrent follow-ups observe `isStreaming === false` so the mutex (not the busy branch) is what serializes them; existing tests that exercise the busy path continue to set `session.isStreaming = true` explicitly.
+- New fake-SDK tests (in `tests/pi-runtime.test.ts`):
+  - followup busy → steer (no new turn)
+  - followup idle accepted after preflight
+  - followup idle preflight rejected → failure with `preflight-rejected` diagnostic, no retry
+  - followup idle projects events through the observer until `complete()` resolves the prompt; events after `complete()` are NOT delivered (subscription torn down)
+  - followup missing-session + Reset hint
+  - cancel confirmed → `stopConfirmed: true`, no diagnostic
+  - cancel unconfirmed (abort clears then `isStreaming` is reset) → `stopConfirmed: false` + `abort-unconfirmed` diagnostic
+  - cancel missing-session + Reset hint
+  - `serializes a concurrent idle follow-up with an in-flight workflow turn on the same session` — only one `prompt()` on the wire until the first completes, then the second fires
+  - `serializes two concurrent idle follow-ups on the same session` — same invariant for two concurrent follow-ups
+  - `does not rotate the physical Pi Session binding across a Follow-up (busy or idle)` — `runtimeSessionId` unchanged on both branches
+- T-002 verification: `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, and `npm test -w packages/runner` all pass (108 files / 1,269 tests).
