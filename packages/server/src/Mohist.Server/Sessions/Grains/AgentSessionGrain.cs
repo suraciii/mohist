@@ -6,7 +6,6 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Runner.Services.SignalR;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -23,7 +22,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
-    private readonly RunnerConnectionTracker _connections;
+    private readonly IAgentSessionConnectionRegistry _connections;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -41,7 +40,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IDbContextFactory<MohistDbContext> dbFactory,
         ITranscriptEventPublisher transcriptPublisher,
         TimeProvider timeProvider,
-        RunnerConnectionTracker connections,
+        IAgentSessionConnectionRegistry connections,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -878,6 +877,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
             events.AddRange(domainEvents);
+
+            if (e.Type == RuntimeEventTypes.SessionActivity)
+            {
+                var activityPayload = JSON.DeserializeElement(e.PayloadJson);
+                if (ParseActivity(activityPayload) == AgentSessionActivity.Idle)
+                {
+                    var operationId = AgentSessionJsonHelper.GetStringProp(activityPayload, "operationId");
+                    if (!string.IsNullOrWhiteSpace(operationId))
+                    {
+                        var pending = GetPendingFollowups(session);
+                        SetPendingFollowups(session, pending.Where(lease =>
+                            !string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)).ToArray());
+                    }
+                }
+            }
 
             var payloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson;
             var classifiedPayload = ClassifyTurnFailedPayload(session, e.Type, payloadJson, now);

@@ -35,3 +35,12 @@
 - Removed the runtime-session lineage component and historical runtime matching path from the transcript hook. The remaining legacy test fixtures still mention removed lineage fields but no production consumer reads them.
 - Added direct activity-mapper coverage for idle/active/unknown, unknown fallback, follow-up eligibility, and idle-only recovery eligibility.
 - `npm run typecheck -w packages/web` passes. The focused activity tests pass. Full Web tests still contain pre-T-004 terminal/history expectations; full `npm run build`/`npm test` also remain blocked by the pre-existing T-001/T-002 server spec compilation failures and the runner-disconnect architecture-rule failure.
+
+## Verification Repair
+
+- Initial `git status` and `git diff` were clean; the failed verification did not leave generated changes.
+- Reproduced `npm test`: the first failure was stale SpecTests compilation against the removed `Status`/time-window APIs, followed by the architecture rule rejecting the concrete Runner tracker dependency from `AgentSessionGrain`.
+- Migrated the directly affected server specs to `activity`/`session.activity`/CAS semantics and registered a Sessions-owned `IAgentSessionConnectionRegistry`; the grain no longer depends on the Runner concrete type, so ArchTests pass.
+- Added follow-up idle activity handling that clears the matching accepted follow-up lease, which is required now that legacy follow-up terminal events are removed.
+- Focused server verification passes: `GenericAgentSessionSummarySpecs` and `AgentSessionRecoveryGrainSpecs` (35 tests). Runner typecheck and all 1,379 runner tests pass.
+- Full server/Web suites still fail in legacy tests that assert removed `session.closed`, `session.followup_*`, terminal status values, reset hints, runtime lineage, or Session-ended UI labels. Those failures are contract-test migration work, not verification side effects.

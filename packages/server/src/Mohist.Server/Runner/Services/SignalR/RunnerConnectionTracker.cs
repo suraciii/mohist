@@ -1,9 +1,10 @@
 using System.Collections.Concurrent;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Runner.Services.SignalR;
 
-public class RunnerConnectionTracker : ISingletonService
+public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectionRegistry
 {
     private readonly ConcurrentDictionary<string, string> _connections = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _sessions = new();

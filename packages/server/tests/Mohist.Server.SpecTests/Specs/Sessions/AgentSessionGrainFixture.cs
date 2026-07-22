@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans.Configuration;
 using Orleans.TestingHost;
@@ -56,6 +57,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
              siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
              siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
+             siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
+                 sp.GetRequiredService<RunnerConnectionTracker>());
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
         });
         Cluster = builder.Build();
