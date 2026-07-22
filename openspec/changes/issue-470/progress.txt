@@ -1,24 +1,7 @@
-Issue 470 plan repair progress
+Issue 470 current plan repair
 
-- [completed] F1/F2: literal unscoped paths are restored as explicit project-selector aliases; response-local work accounting remains active while OTel is off and publication remains gated.
-- [completed] F3: cancellation/wall-clock claims are removed; the serialized probe has fixed operation count, a one-second SQLite busy timeout, no abandoned worker, and explicit host-filesystem limitations.
-- [completed] F4: every observed route qualifies for a threshold-free ranked view; formula and ordinal route-name tie-breaker are normative.
-- [completed] F5: #470 delivers and tests the rejection publication/status contract with a fake protection publisher; #437/#471 own the real policy and producer.
-- [completed] F6: fallback attempts stop and disposal, constructs an alternate only if both succeed, and treats either shutdown failure as terminal.
-- [completed] F7: incoming Orleans calls suppress ambient scope, Snapshot() is an accepted dependency, test composition roots are covered, and the oversized baseline is split into publication core (T-001), status (T-002), and sampling (T-003).
-- [completed] Follow-up feasibility check: readiness uses PRAGMA schema_version rather than SELECT 1 so the probe touches database metadata/read locking without history scans.
-- [completed] Final audit follow-up: production probe tests use IOtelReadinessConnectionFactory + FakeFileSystem seams; the continuous sampler solely owns startup/repeated probing with no temporary initializer; request accounting and route aggregation are separate tasks.
-- [completed] Validated proposal/spec/design/task consistency, 7-task JSON anchors/DAG, 14 requirements/35 scenarios, and confirmed self-review.md remains unchanged.
-
-Current self-review repair:
-- [completed] New F1/F4: immediate working-set/GC-heap pressure remains available in `off` and CPU is null only for first-sample warm-up; collector/storage work, route retention and all Meter measurements remain disabled, with construction distinguished from measurement.
-- [completed] New F2: request accounting closes atomically at response completion, adapters no-op after close, detached launchers suppress scope flow, and separate tests prove close immutability, null child scope and both launcher migrations.
-- [completed] New F3: T-002 owns `OtelDb.OpenReadinessConnection` using `Default Timeout=1` before connection construction/initialization plus nullable `IFileSystem.GetFileLength` across all implementations/fakes.
-- [completed] Final consistency follow-up: `process_read` has explicit enabled/off/recovery semantics, and T-003 is the sole hosted startup/repeated sampler while T-002 delivers an unhosted reusable probe.
-- [completed] Revalidated all artifacts with two independent PASS reviews: 7-task DAG and anchors, 14 requirements/38 scenarios, clean diff checks, and unchanged `self-review.md` hash `acb584c33f262a196b334b8e18f6cfa3e8f22b85c937d07db2fdc87441e1e955`.
-
-Commits:
-- afdff7b3e records the existing failing self-review unchanged.
-- 4a03b9d95 contains the first complete F1-F7 repair batch; subsequent refinements close probe testability, startup ownership, literal aliases, and task sizing before the final progress commit.
-- 4103fe5a4 repairs off-state process/status and Meter-measurement semantics.
-- f2f8c1c9b defines the storage readiness and request close/detach boundaries.
+- [completed] F2: design names `SuppressInstrumentationScope` and its exact HTTP/background lifetime, composed with existing inbound/exporter filters.
+- [completed] F3: `MohistHostRunner`, `IMohistHostFactory`, `IMohistHost`, and `IOtelBindFailureClassifier` define the deterministic fallback test boundary.
+- [completed] F4: process/storage failure atomically invalidates cached fields and growth/CPU baselines; recovery starts fresh warm-up.
+- [in progress] F1: merge status mapping, readiness, and sampler/startup into one independently usable task and update the DAG.
+- [pending] Revalidate proposal/spec/design/task consistency and confirm `self-review.md` remains unchanged.

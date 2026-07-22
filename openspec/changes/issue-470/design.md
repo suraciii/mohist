@@ -46,7 +46,7 @@ Its public API accepts source-owned facts:
 - `PublishCollector(CollectorResult result)`
 - `GetSnapshot()`
 
-The source map is private. Process publication alone owns `process_read`, storage publication owns `storage_read`, ingest outcomes own `storage_write` and `ingest_protection`, and collector publication owns `collector`. Success clears only the caller's source. Mutations and snapshots share one lock; transition logging occurs after releasing it.
+The source map is private. Process publication alone owns `process_read`, storage publication owns `storage_read`, ingest outcomes own `storage_write` and `ingest_protection`, and collector publication owns `collector`. Success clears only the caller's source. `PublishProcess(failure)` atomically sets CPU utilization, working set, and GC heap to null and discards the prior CPU baseline; the first later success establishes a new baseline with null utilization. `PublishStorage(failure)` atomically sets usage, growth, and growth-window values to null and clears the growth sample ring while retaining the configured budget; the first later success starts a new growth baseline. Mutations and snapshots share one lock; transition logging occurs after releasing it.
 
 `GetSnapshot()` evaluates five-minute protection expiry using injected time, applies any resulting state transition, copies immutable state, and emits a pending transition log after the lock. It performs no database, filesystem, HTTP, or grain call. A status read can therefore trigger protection recovery without making status history-dependent.
 
@@ -61,6 +61,8 @@ Alternative considered: publish independent aggregate integers from the ingester
 Create `Meter("Mohist.Server.Runtime")` and the exact instruments, units, and attribute sets declared by the runtime-metrics spec. The same fact methods update Meter instruments and local state. Request methods, status codes, routes, and agent paths are normalized before publication; identity-bearing values never reach labels.
 
 Observable callbacks read cached samples only. They never call `Process`, SQLite, or the filesystem. While OTel is off, callbacks return no measurements even though process sampling continues for status. No `AddOtlpExporter` metrics registration is added: the existing endpoint defaults to the same built-in receiver and is trace-oriented. A `MeterListener` contract test locks the full catalog and bounded label values.
+
+Self-observation filtering keeps the existing ASP.NET path filter for all `/otel` requests and the exporter-URI HttpClient filter as defense in depth. Add one `OtelSuppressionMiddleware` immediately inside routing for `/otel/v1` and `/otel/api`; it enters `OpenTelemetry.SuppressInstrumentationScope.Begin()` around the awaited endpoint delegate, suppressing child EF, Orleans, and HttpClient instrumentation after the ASP.NET filter has excluded the server Activity. The sampler enters the same scope around each awaited storage probe and any future callback registered through the OTel maintenance executor. Process reads and RuntimeObservability publication happen outside that scope because they do not create equivalent child observations. The scope is lexical, disposed in `finally`, and flows with the awaited execution context; it is separate from `RequestWorkScope` and never changes operation results.
 
 Alternative considered: use only ASP.NET Core, EF Core, and HttpClient built-in metrics. Rejected because their labels are not Mohist's compatibility contract and they do not provide the local route or agent summary.
 
@@ -105,7 +107,7 @@ One `OtelDiagnosticsSampler` owns diagnostic sampling. Its `StartAsync` performs
 
 The serial async loop waits for `ApplicationStarted`. A host that fails before that signal never probes storage. After the signal, an enabled host performs one immediate storage probe. Every subsequent injected 10-second tick reads process resources in both enabled and off states and independently probes storage only when enabled. Process and storage exceptions are caught and published separately, so one failure cannot skip or invalidate the other sample. Ticks coalesce while an iteration runs. Shutdown starts no new iteration and awaits the current fixed-operation probe; it does not abandon work on `Task.Run`.
 
-`IProcessResourceReader` returns total CPU time, working set, and GC heap size. CPU utilization is the CPU-time delta divided by injected elapsed time and processor count, clamped to `[0,1]`. The first valid sample and the first success after failure establish a baseline with null utilization. Storage growth uses the oldest and newest valid samples in a seven-slot, 60-second ring; growth and `growth_window_seconds` are null until two samples exist, then the window reports their actual elapsed seconds up to 60.
+`IProcessResourceReader` returns total CPU time, working set, GC heap size, and logical processor count in one fakeable sample. CPU utilization is the CPU-time delta divided by injected elapsed time and that sample's positive processor count, clamped to `[0,1]`. The first valid sample and the first success after failure establish a baseline with null utilization. A non-positive processor count is a process-read failure, not a host-dependent fallback. Storage growth uses the oldest and newest valid samples in a seven-slot, 60-second ring; growth and `growth_window_seconds` are null until two samples exist, then the window reports their actual elapsed seconds up to 60. Process and storage failure publication uses D1's atomic cache invalidation, so stale values and pre-failure growth baselines never reappear after recovery.
 
 `IOtelStorageProbe` composes `IOtelReadinessConnectionFactory` and `IFileSystem`. `OtelDb.OpenReadinessConnection()` clones the read/write-create string with `Default Timeout=1`, opens it, and returns without calling `EnsureInitialized` or acquiring `_initGate`; readiness must not wait behind ingestion schema initialization. The probe performs one `PRAGMA schema_version` header/read-lock operation, then calls nullable `GetFileLength` exactly once for `otel.db`, WAL, and SHM. Missing files contribute zero; other errors propagate. The probe never counts rows or enumerates telemetry history. SQLite command wait is bounded; host filesystem calls are not cancellable and have no wall-clock guarantee.
 
@@ -129,13 +131,15 @@ Alternative considered: one mutable degraded flag. Rejected because one subsyste
 
 Alternative considered: keep rejection degraded until restart. Rejected because transient protection would never recover.
 
-### D7. Fallback transfers runtime identity and collector failure explicitly
+### D7. A testable host runner owns fallback and state transfer
 
-Refactor host construction to accept a shared `RuntimeEpoch` and initial `CollectorResult`. Normal construction starts collector-unverified. On classified OTLP bind failure, `Program` records the failure details outside the failed container, awaits `StopAsync`, and always attempts `DisposeAsync`. If either fails, no alternate host is built: throw the single failure or an `AggregateException` preserving stop then dispose errors when both fail.
+Move startup orchestration out of top-level statements into an internal `MohistHostRunner`. It accepts `IMohistHostFactory` and `IOtelBindFailureClassifier`. `IMohistHostFactory.CreatePrimary` and `CreateAlternate` return an `IMohistHost` exposing `Services`, `StartAsync`, `StopAsync`, `DisposeAsync`, and `WaitForShutdownAsync`; the production adapter wraps `WebApplication`, while tests use signal-controlled fake hosts. The factory accepts a shared `RuntimeEpoch` and initial `CollectorResult`, and remains responsible for configuring Kestrel, Orleans, routes, and DI. The classifier wraps `OtelBindFailureDetector` and receives the exception plus configured OTLP endpoint. Top-level `Program` only builds production adapters, captures the epoch, and invokes the runner.
+
+Normal construction starts collector-unverified; after primary `StartAsync` succeeds, the runner publishes collector-online through the host's services before waiting for shutdown. On classified OTLP bind failure, the runner stores failure details outside the failed container, awaits `StopAsync`, and always attempts `DisposeAsync`. If either fails, no alternate host is built: throw the single failure or an `AggregateException` preserving stop then dispose errors when both fail.
 
 Only after clean shutdown does `BuildAlternateApp` receive the same epoch plus `collector_bind_failed`. The alternate omits only the OTLP listener, preserves `Mohist:Otel:Enabled`, and seeds its new `RuntimeObservability` with that collector result before `StartAsync`. The failed primary can publish its initial process sample but never receives `ApplicationStarted`; only the alternate enters post-start sampling, so exactly one storage probe occurs across both host attempts.
 
-A lifecycle integration test uses injected host/probe signals rather than real sockets. It asserts stop/dispose ordering, no alternate on either failure, one surviving silo/sampler, zero primary storage probes, one alternate immediate probe, no OTLP listener, and degraded status with core health successful.
+Runner unit tests use fake factory/hosts/classifier to trigger generic failure, classified bind failure, stop failure, dispose failure, and dual failure without ports. A separate WebApplication composition spec verifies the production factory's alternate omits only the OTLP listener and preserves Orleans/routes/Enabled. Together they assert stop/dispose ordering, no alternate on shutdown failure, one surviving silo/sampler, zero primary storage probes, one alternate immediate probe, and degraded status with core health successful.
 
 Alternative considered: set `Mohist:Otel:Enabled=false` for fallback. Rejected because it hides configured intent and reports `off` instead of collector degradation.
 
@@ -156,6 +160,7 @@ Alternative considered: expose global agent counters or only ratios. Rejected be
 - `[Ambient scope leaks across Orleans or detached work] ->` Clear it for incoming grain turns, close atomically at response completion, and queue fire-and-forget work through the scope-suppressing launcher.
 - `[Infrastructure adapters miss direct calls] ->` Define database calls as `MohistDbContext` commands and downstream calls as caller-side Orleans plus factory-created HTTP sends; contract tests lock those boundaries.
 - `[Automatic tracing appears to duplicate counters] ->` Adapters increment integers only and never start Activities; Trace and amplification retain distinct roles.
+- `[OTel child instrumentation forms a feedback loop] ->` Keep the inbound/exporter filters and wrap awaited OTel endpoint, probe, and maintenance work in `SuppressInstrumentationScope`; tests assert suppression disposal and unaffected non-OTel traces.
 - `[Route buckets approximate the boundary] ->` Use half-open arithmetic and test exact fractional/integral boundaries; over-retention remains strictly below one second.
 - `[Synchronous metadata work blocks shutdown] ->` Use fixed operation count and SQLite command timeout, never abandon a worker, and explicitly accept that a host filesystem call can delay shutdown.
 - `[Route cardinality exceeds the cap] ->` Fold overflow into visible `other` while preserving fixed memory.
@@ -168,11 +173,11 @@ Alternative considered: expose global agent counters or only ratios. Rejected be
 ## Migration Plan
 
 1. Add `RuntimeEpoch`, `RuntimeObservability`, typed ingest preparation/outcomes, source-owned degradation state, and the fixed Meter catalog.
-2. Add the fixed status DTO/API/CLI mapping and the non-initializing storage readiness probe, without scheduling storage yet.
-3. Add the sole sampler with startup process publication, `ApplicationStarted` storage gating, recurring independent samples, and resource gauges.
-4. Add request scope, infrastructure adapters, background launcher, and relevant production/test composition-root wiring.
+2. Deliver one usable status module: fixed API/CLI mapping, non-initializing readiness probe, startup/recurring sampler, normal collector publication, and resource gauges.
+3. Add request scope, infrastructure adapters, background launcher, and relevant production/test composition-root wiring.
+4. Complete feedback exclusion with inbound/exporter filters and suppression scopes around endpoint and background OTel work.
 5. Add the bounded route ring and status/CLI ranking.
-6. Refactor fallback lifecycle and explicit epoch/collector-result transfer.
+6. Refactor fallback into `MohistHostRunner` with explicit epoch/collector-result transfer and fakeable host lifecycle.
 7. Extract shared agent handlers, add compatibility resolution, and publish response-local/path counters.
 8. Run focused Server unit/spec and CLI tests, then repository `npm test`; verify no generated Git changes remain.
 
