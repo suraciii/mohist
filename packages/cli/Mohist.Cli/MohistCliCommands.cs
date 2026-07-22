@@ -18,6 +18,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
         root.Subcommands.Add(SkillsCommands.Build(provider));
+        root.Subcommands.Add(RunCommands.Build(api));
         root.Subcommands.Add(WorkflowCommands.Build(api));
         var environment = provider.GetService<IEnvironmentVariableProvider>()
             ?? SystemEnvironmentVariableProvider.Instance;

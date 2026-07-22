@@ -1,0 +1,91 @@
+# issue-476 / mo run consolidation — working memory
+
+## T-001 (completed) — `mo run` command tree + target resolver + seven control verbs
+
+### What landed
+- `packages/cli/Mohist.Cli/MohistCliCommands.Run.cs` — new `internal static partial class RunCommands` with:
+  - `Build(MohistCliApi api)` registering the `run` command at root with seven
+    subcommands: approve / reject / retry / rerun / pause / resume / stop.
+  - `ResolveRunTargetAsync(api, runId, issueNumber, project)` shared helper:
+    mutual-exclusion / missing-target validation fail locally with exit 2 and
+    zero HTTP requests; `--issue` resolution reads the issue's `workflowRunId`
+    via one-shot GET to `/api/projects/{projectId}/issues/{number}`; missing
+    `workflowRunId` exits non-zero with `Issue #N has no active workflow run.`.
+  - Each verb shares the same Run ID / `--issue` / `--project` option set and
+    uses `PrintMutationResourceAsync` with the shared `RunControlDescriptor`
+    (fields: `workflowRunId, approved, rejected, retried, rerun, rerunFromStage,
+    paused, resumed, stopped, status, stage, issueRef`) so `--json` field
+    selection + bare `--json` discovery work uniformly.
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs` — registers `RunCommands.Build(api)`
+  at root, immediately before the existing `WorkflowCommands.Build(api)` (the
+  legacy workflow command is still present at this stage; T-004 deletes it).
+- `packages/cli/tests/Mohist.Cli.Tests/CliRunControlSpecs.cs` — 40 tests
+  covering every acceptance criterion: help shape (seven verbs, no
+  `rerun-from-stage`), Run-ID vs `--issue` vs both-vs-neither, missing
+  `workflowRunId` diagnostic, server-error surfacing, `--json` field
+  projection (no `{success,data,error}` wrapper), reject without `--message`
+  (exit 1, no HTTP), rerun `--from-stage` (including blank), pause without
+  `--yes`, stop `--yes` / non-interactive prompt gating.
+
+### Design / contract decisions worth remembering
+- **Output option**: each control verb uses `MohistCliCommands.JsonSelectionOption()`
+  (no default value, `Arity.ZeroOrOne`) so bare `--json` returns Discovery and
+  `--json a,b` returns Selected. The Discovery / Invalid branch is checked
+  BEFORE the target resolver runs, so `mo run approve wr_abc --json` lists
+  fields and exits 0 without any HTTP call.
+- **Resolver return contract**: `(string? RunId, int Exit)`. Exit 0 with a
+  non-null run id means "proceed"; exit 2 (UsageFailure) means a usage error
+  (both / neither target provided); exit 1 (OperationFailure) means the issue
+  GET failed or the issue has no bound run. The error message is written to
+  `api.Error` before returning so the verb's caller doesn't need to repeat it.
+- **`--project` merging**: verbs accept the canonical `--project` plus the
+  hidden legacy `--project-id` alias (issue #475). `MergeProject(project, projectId)`
+  picks whichever is set; the resolver still surfaces mismatches via
+  `api.ResolveProject(project, projectId)`.
+- **Stop confirmation prompt**: writes the confirmation prompt to `api.Error`
+  (matches design D5) and reads a line from `api.Invocation.Input`. Confirmed
+  if the line (trimmed) starts with `y`/`Y` (case-insensitive). Non-interactive
+  contexts (no prompts → standard input is `TextReader.Null` or
+  `MOHIST_PROMPT_DISABLED=1`) require `--yes` and exit 1 without HTTP.
+- **No `--dry-run`**: per design Open Questions, the new `run` commands do
+  not inherit the legacy `--dry-run` flag. The acceptance criteria don't ask
+  for it.
+- **No `rerun-from-stage` subcommand**: only the `rerun --from-stage` flag
+  variant exists. The help text + acceptance criteria explicitly forbid the
+  `rerun-from-stage` subcommand.
+
+### Cross-task coordination
+- The shared `ResolveRunTargetAsync` helper is exposed as
+  `internal static` so T-002 (reads: `run view` / `watch`) and T-003
+  (feedback: `run feedback list/view`) can reuse it. Their target-resolution
+  spec is identical: one of positional Run ID or `--issue`, never both.
+- T-004 owns the actual removal of:
+  - `MohistCliCommands.Workflow.cs` and `MohistCliCommands.Workflow.Reads.cs`
+  - The `WorkflowCommands.Build(api)` registration
+  - Control verbs from `MohistCliCommands.Issue.Lifecycle.cs`
+    (`BuildAction("approve"/"retry"/"force-stop"/"resume")`, `BuildReject`,
+    `BuildRerun`, `BuildRerunFromStage`, `BuildStop`)
+  - `MohistCliCommands.Issue.Feedback.cs`
+  - The corresponding `CliWorkflowControlSpecs` (rename to
+    `CliRunControlSpecs` — done here in T-001; the legacy file is preserved
+    for now and will be removed in T-004), `CliIssueRejectAndStopSpecs`,
+    `CliIssueRerunFromStageSpecs`, feedback portions of
+    `CliIssueCommentAndFeedbackSpecs`, and the rename of
+    `CliWorkflowReadsSpecs` to `CliRunReadsSpecs`.
+  - `CliRootCommandShapeTests.survivingResourceGroups`: drop `"workflow"`, add
+    `"run"`.
+
+### Test patterns worth keeping
+- `CliTestFactory.CreateSync(responder, activeProjectId)` builds the
+  standard `RecordingHttpHandler` + `HttpClient` (base address
+  `http://localhost:3456`) + `StringWriter`s + `FakeFileSystem`
+  (which carries the active project id via
+  `~/.mohist/cli-state.json`). Use `activeProjectId: null` to assert that
+  the verb does not consult the active project.
+- For `--issue` resolution tests, mock two endpoints:
+  - `GET /api/projects/{projectId}/issues/{number}` → `data.workflowRunId`
+  - `POST /api/workflow-runs/{boundRunId}/{verb}` → success envelope
+- For server-error surfacing, `RecordingHttpHandler.JsonError(message, code, statusCode)`
+  produces a `{ success: false, error, code }` body that
+  `MohistCliApi.WriteFailureAsync` surfaces verbatim on stderr with the
+  `(code=…)` suffix.
