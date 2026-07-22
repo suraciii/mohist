@@ -22,14 +22,14 @@ CI MUST prove the validator catches unknown fields by injecting one into a golde
 - **WHEN** CI injects an unknown field into an otherwise valid golden-case Definition
 - **THEN** validation fails and the build reports the same unknown-field error the validator produces elsewhere
 
-### Requirement: Skeleton and fragment snippets are excluded from validation
+### Requirement: Only the complete example is validated; fragments are excluded
 
-CI MUST NOT validate syntax skeletons that carry `<...>` placeholders or scattered documentation fragments, and those snippets MUST NOT produce false-positive failures.
+CI MUST validate only the single complete Workflow Definition example and MUST NOT validate the smaller fenced snippets scattered through the documentation, which are partial syntax fragments (or skeleton snippets carrying placeholders) rather than complete Definitions. Those excluded snippets MUST NOT produce false-positive failures.
 
-#### Scenario: placeholder skeleton is not validated
-- **WHEN** a documentation snippet contains `<...>` placeholders
+#### Scenario: partial syntax snippet is not validated
+- **WHEN** the documentation contains a small fenced snippet illustrating one field or construct rather than a complete Definition
 - **THEN** CI does not run the validator against it and reports no failure
 
-#### Scenario: scattered fragments are not validated
-- **WHEN** a documentation snippet is an incomplete fragment rather than a complete Definition
-- **THEN** CI does not run the validator against it and reports no failure
+#### Scenario: only the complete example block is validated
+- **WHEN** the documentation contains one complete fenced example alongside several partial snippets
+- **THEN** CI validates only the complete example block and excludes every partial snippet

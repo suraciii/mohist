@@ -10,6 +10,10 @@ Workflow Definition YAML MUST be validated through one authoritative `Parse(yaml
 - **WHEN** the validator library is referenced by the CLI
 - **THEN** it introduces no Orleans and no ASP.NET dependency
 
+#### Scenario: load validates a deserialized model through the same rules
+- **WHEN** the runtime load path deserializes a stored Profile into the library model
+- **THEN** it validates that model with the same rule set as `Parse(yaml)` and surfaces a Definition error rather than silently dropping the Profile
+
 ### Requirement: Full single-pass error collection
 
 The validator MUST collect every detectable problem in one pass instead of interrupting on the first error. Every error MUST carry a YAML path that locates the offending node and a message written in domain language. Errors MUST NOT expose exception stack traces or implementation terms.
@@ -60,11 +64,23 @@ The Definition top level MUST accept only `approval` and `stages`. `stages` MUST
 
 ### Requirement: Identifiers are unique and required fields are enforced
 
-Each stage `name`, task `id`, and check `id` MUST be non-empty and unique within its scope: stage names unique across the Definition, task ids unique within their task list, and check ids unique within their stage. A task and a check MUST declare a `uses` action. The Definition MUST NOT require `title`.
+Each stage identifier (the `stage` field), task `id`, and check `id` MUST be non-empty and unique within its scope: stage identifiers unique across the Definition, task ids unique within their task list, and check ids unique within their stage. A task and a check MUST declare a `uses` action. The Definition MUST NOT require `title`.
 
 #### Scenario: duplicate task id rejected
 - **WHEN** two tasks in the same task list share the id `build`
 - **THEN** the validator reports a duplicate-identifier error at the second task
+
+#### Scenario: duplicate stage identifier rejected
+- **WHEN** two stages declare the same `stage` name
+- **THEN** the validator reports a duplicate-identifier error at the second stage
+
+#### Scenario: duplicate check id rejected
+- **WHEN** two checks in the same stage share the id `lint`
+- **THEN** the validator reports a duplicate-identifier error at the second check
+
+#### Scenario: empty stage identifier rejected
+- **WHEN** a stage declares an empty or missing `stage` field
+- **THEN** the validator reports that the stage identifier is required
 
 #### Scenario: missing uses rejected
 - **WHEN** a task or check omits `uses`
