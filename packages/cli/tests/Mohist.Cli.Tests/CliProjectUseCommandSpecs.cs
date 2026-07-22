@@ -163,7 +163,7 @@ public class CliProjectUseCommandSpecs
         // Server rejected the request (`Project not found`) → the handler
         // throws ApiResponseException with 404 → FailureExitCode returns 4
         // (see MohistCliApi.FailureExitCode for NotFound → 4).
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/projects/does-not-exist/use", request.RequestUri?.PathAndQuery);

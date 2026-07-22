@@ -100,11 +100,11 @@ public sealed class CliResourceOutputSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
-            http, ["issue", "show", "7", "--output", "json"], output, error, fs, executor);
+            http, ["issue", "show", "7", "--json", "id"], output, error, fs, executor);
 
         Assert.Equal(2, exit);
         Assert.Empty(output.ToString());
-        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 

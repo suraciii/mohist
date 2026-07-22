@@ -68,7 +68,7 @@ public class IssueCliRemainingProjectRefTests
     {
         var help = RenderHelp(["issue", "create", "--help"]);
 
-        Assert.DoesNotContain("--output", help);
+        Assert.DoesNotContain("--json", help);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class IssueCliRemainingProjectRefTests
     {
         var help = RenderHelp(["issue", "update", "--help"]);
 
-        Assert.DoesNotContain("--output", help);
+        Assert.DoesNotContain("--json", help);
     }
 
     [Theory]
@@ -91,7 +91,7 @@ public class IssueCliRemainingProjectRefTests
     {
         var help = RenderHelp(["issue", subcommand, "--help"]);
 
-        Assert.DoesNotContain("--output", help);
+        Assert.DoesNotContain("--json", help);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class IssueCliRemainingProjectRefTests
     {
         var help = RenderHelp(["issue", "workflow", "timeline", "--help"]);
 
-        Assert.DoesNotContain("--output", help);
+        Assert.DoesNotContain("--json", help);
     }
 
     [Fact]

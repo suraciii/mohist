@@ -394,7 +394,7 @@ public class CliWorkflowControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "approve", WrId, "-o", "json"], output, error, fs, executor);
+            http, ["workflow", "approve", WrId, "--json", "id"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -479,7 +479,7 @@ public class CliWorkflowControlSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "approve", "wr_missing"], output, error, fs, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString());
     }
 

@@ -15,7 +15,7 @@ public class ProjectCliOutputModeTests
     {
         var help = RenderHelp(["project", "list", "--help"]);
 
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public class ProjectCliOutputModeTests
     {
         var help = RenderHelp(["project", "show", "--help"]);
 
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             output,
             error,
             new FakeFileSystem(),
@@ -106,7 +106,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             output,
             error,
             fileSystem,
@@ -153,7 +153,7 @@ public class ProjectCliOutputModeTests
         var explicitError = new StringWriter();
         var explicitExit = await MohistCliCommands.RunAsync(
             new HttpClient(explicitHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "json"],
+            ["project", "list", "--json", "id"],
             explicitOutput,
             explicitError,
             new FakeFileSystem(),
@@ -184,7 +184,7 @@ public class ProjectCliOutputModeTests
         jsonHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(jsonHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "json"],
+            ["project", "list", "--json", "id"],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -195,7 +195,7 @@ public class ProjectCliOutputModeTests
         tableHttp.EnqueueJson(HttpStatusCode.OK, json);
         await MohistCliCommands.RunAsync(
             new HttpClient(tableHttp) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list", "--output", "table"],
+            ["project", "list",],
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
@@ -259,7 +259,7 @@ public class ProjectCliOutputModeTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "show", "mohist-local", "--output", "table"],
+            ["project", "show", "mohist-local",],
             output,
             error,
             new FakeFileSystem(),

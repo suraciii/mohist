@@ -48,7 +48,7 @@ public class CliLabelCatalogSpecs
             new { key = "module", description = "Classifies the subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list", "-o", "table"], output, error, fs, executor);
+            http, ["label", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -93,7 +93,7 @@ public class CliLabelCatalogSpecs
             new { key = "refactor", description = "Technical refactoring that does not change observable behavior", origin = "System" });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list", "-o", "table"], output, error, fs, executor);
+            http, ["label", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();

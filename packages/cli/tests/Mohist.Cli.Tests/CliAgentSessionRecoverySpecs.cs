@@ -68,7 +68,7 @@ public class CliAgentSessionRecoverySpecs
             Task.FromResult(RecoveryResponse(operation)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", operation, StableSessionId, "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", operation, StableSessionId, "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

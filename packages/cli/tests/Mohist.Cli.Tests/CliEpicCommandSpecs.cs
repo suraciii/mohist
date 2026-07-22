@@ -29,7 +29,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -53,7 +53,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -260,7 +260,7 @@ public class CliEpicCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--project", "proj_override", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--project", "proj_override",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_override/epics/", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -273,7 +273,7 @@ public class CliEpicCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "--project", "proj_by_id", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--project", "proj_by_id",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_by_id/epics/", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -290,7 +290,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "json"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"id\": \"epic_8\"", output.ToString(), StringComparison.Ordinal);
@@ -438,7 +438,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "list",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -463,7 +463,7 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "list", "-o", "json"], output, error, fileSystem, executor);
+            http, ["epic", "list", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -517,7 +517,7 @@ public class CliEpicCommandSpecs
             http, ["epic", "start", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exitCode);
-        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -605,7 +605,7 @@ public class CliEpicCommandSpecs
             http, ["epic", "pause", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exitCode);
-        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -693,7 +693,7 @@ public class CliEpicCommandSpecs
             http, ["epic", "resume", "8", "--output", "yaml"], output, error, fileSystem, executor);
 
         Assert.Equal(2, exitCode);
-        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 }

@@ -137,7 +137,7 @@ public class CliAgentCommandSpecs
         })));
         var output = new StringWriter();
 
-        var exitCode = await RunAsync(handler, ["agent", "show", "reviewer", "--output", "table"], output: output, fileSystem: FileSystemWithProject());
+        var exitCode = await RunAsync(handler, ["agent", "show", "reviewer",], output: output, fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_123/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);

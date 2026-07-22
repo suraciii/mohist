@@ -39,7 +39,7 @@ public class WorkflowCliProfileListTests
     {
         var help = await RenderHelp(["project", "workflow", "profile", "list", "--help"]);
 
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]

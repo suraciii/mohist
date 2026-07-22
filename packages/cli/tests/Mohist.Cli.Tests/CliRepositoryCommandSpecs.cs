@@ -40,12 +40,12 @@ public class CliRepositoryCommandSpecs
 
     public static IEnumerable<object[]> MutationOutputCases()
     {
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--output", "table" }, false];
-        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--output", "json" }, true];
-        yield return [new[] { "repo", "set-default", "origin", "--output", "table" }, false];
-        yield return [new[] { "repo", "set-default", "origin", "--output", "json" }, true];
-        yield return [new[] { "repo", "delete", "origin", "--output", "table" }, false];
-        yield return [new[] { "repo", "delete", "origin", "--output", "json" }, true];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", }, false];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--json", "id" }, true];
+        yield return [new[] { "repo", "set-default", "origin", }, false];
+        yield return [new[] { "repo", "set-default", "origin", "--json", "id" }, true];
+        yield return [new[] { "repo", "delete", "origin", }, false];
+        yield return [new[] { "repo", "delete", "origin", "--json", "id" }, true];
     }
 
     private static (RecordingHttpHandler handler, HttpClient http, StringWriter output, StringWriter error, FakeFileSystem fs, FakeCommandExecutor executor)
@@ -318,7 +318,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "set-default", "origin", "--output", "table"],
+            ["repo", "set-default", "origin",],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -397,7 +397,7 @@ public class CliRepositoryCommandSpecs
             ["repo", "delete", "missing"],
             output, error, fs, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Single(handler.Requests);
         Assert.Contains("missing", error.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("deleted", output.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -606,7 +606,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "list", "-o", "table"],
+            ["repo", "list",],
             output, error, fs, executor);
 
         Assert.True(exitCode == 0, error.ToString());
@@ -645,7 +645,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "list", "-o", "json"],
+            ["repo", "list", "--json", "id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -705,7 +705,7 @@ public class CliRepositoryCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "-o", "json"],
+            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git", "--json", "id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

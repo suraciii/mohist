@@ -159,7 +159,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "-o", "json"],
+            http, ["agent", "session", "launch", "reviewer", "--prompt", "Hi", "--json", "id"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -522,7 +522,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "followup", "sess_123", "--text", "Hi", "-o", "json"],
+            http, ["agent", "session", "followup", "sess_123", "--text", "Hi", "--json", "id"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -603,7 +603,7 @@ public class CliAgentSessionCommandSpecs
             http, ["agent", "session", "followup", "sess_missing", "--text", "Hi"],
             output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Agent session sess_missing not found", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("session_not_found", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
@@ -695,7 +695,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "cancel", "sess_123", "-o", "json"],
+            http, ["agent", "session", "cancel", "sess_123", "--json", "id"],
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
@@ -714,7 +714,7 @@ public class CliAgentSessionCommandSpecs
             http, ["agent", "session", "cancel", "nope"],
             output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Agent session nope not found", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("session_not_found", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
@@ -763,7 +763,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--json", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -792,7 +792,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "reviewer", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "reviewer",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(2, handler.Requests.Count);
@@ -833,7 +833,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "reviewer", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "reviewer", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -866,7 +866,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "reviewer", "--status", "failed", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "reviewer", "--status", "failed", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(2, handler.Requests.Count);
@@ -891,7 +891,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "nope", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "nope",], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Agent 'nope' not found", error.ToString(), StringComparison.Ordinal);
@@ -909,7 +909,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "agent_missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "agent_missing",], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Agent 'agent_missing' not found", error.ToString(), StringComparison.Ordinal);
@@ -956,7 +956,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_123", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_123",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -1009,7 +1009,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_failed", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_failed",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1049,7 +1049,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_ok", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_ok",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1079,7 +1079,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_failed", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_failed", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1106,7 +1106,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_ok", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_ok", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1135,7 +1135,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_123", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_123", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1151,9 +1151,9 @@ public class CliAgentSessionCommandSpecs
                 "Agent session sess_missing not found", "session_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "show", "sess_missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Agent session sess_missing not found", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
     }
@@ -1178,7 +1178,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "transcript", "sess_123", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "transcript", "sess_123",], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -1212,7 +1212,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "transcript", "sess_123", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "transcript", "sess_123", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -1228,9 +1228,9 @@ public class CliAgentSessionCommandSpecs
                 "Agent session sess_missing not found", "session_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "transcript", "sess_missing", "-o", "table"], output, error, fileSystem, executor);
+            http, ["agent", "session", "transcript", "sess_missing",], output, error, fileSystem, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("Agent session sess_missing not found", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
     }
@@ -1248,7 +1248,7 @@ public class CliAgentSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "show", "sess_123", "-o", "json"],
+            http, ["agent", "session", "show", "sess_123", "--json", "id"],
             showOutput, showError, showFs, showExec);
 
         Assert.Equal(0, exitCode);
@@ -1281,7 +1281,7 @@ public class CliAgentSessionCommandSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["agent", "session", "list", "agent_123", "-o", "json"], output, error, fileSystem, executor);
+            http, ["agent", "session", "list", "agent_123", "--json", "id"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(2, handler.Requests.Count);

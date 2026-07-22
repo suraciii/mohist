@@ -36,7 +36,7 @@ public sealed class CliRoutingCommandSpecs
                 new JsonObject { ["position"] = 2, ["name"] = "B", ["agentId"] = "b", ["status"] = "active", ["continue"] = true }),
         })));
 
-        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "list", "--project", "proj_test", "--output", "table"], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["routing", "rule", "list", "--project", "proj_test",], output, error, fs, executor);
 
         Assert.True(exit == 0, $"exit={exit}, error={error}");
         var text = output.ToString();

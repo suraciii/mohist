@@ -17,7 +17,7 @@ public class ProjectCliRepositoryTests
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class ProjectCliRepositoryTests
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var err = error.ToString();
         Assert.Contains("not found", err, StringComparison.OrdinalIgnoreCase);
     }

@@ -82,7 +82,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -112,7 +112,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "--scope", "global", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list", "--scope", "global",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -137,7 +137,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "--scope", "project", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list", "--scope", "project",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -157,7 +157,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "--project", "proj_other", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list", "--project", "proj_other",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -179,7 +179,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -208,7 +208,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -235,7 +235,7 @@ public class CliRunnerCommandSpecs
         env["NO_COLOR"] = "1";
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -300,7 +300,7 @@ public class CliRunnerCommandSpecs
         env["NO_COLOR"] = null;
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["runner", "list", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -324,7 +324,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "list",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -345,7 +345,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "list", "--scope", "project", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["runner", "list", "--scope", "project", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -512,7 +512,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-busy", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-busy",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -554,7 +554,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-idle", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-idle",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -578,7 +578,7 @@ public class CliRunnerCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["runner", "show", "r-ghost"], output, error, fileSystem, executor, env);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-ghost", request.RequestUri?.PathAndQuery);
         var stderr = error.ToString();
@@ -636,7 +636,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-busy", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-busy", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -687,7 +687,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-x", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-x",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -716,7 +716,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "show", "r-capacity", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["runner", "show", "r-capacity",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-capacity", handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -832,7 +832,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "status", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["runner", "status", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -880,7 +880,7 @@ public class CliRunnerCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["runner", "status", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["runner", "status", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;

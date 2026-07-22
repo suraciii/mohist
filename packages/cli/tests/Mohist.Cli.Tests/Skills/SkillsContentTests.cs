@@ -42,7 +42,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "list", "--json"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "list", "--json", "name,description"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var items = JsonSerializer.Deserialize<List<SkillListItem>>(stdout.ToString(), JsonOptions);
@@ -95,7 +95,7 @@ public sealed class SkillsContentTests
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist", "--json"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist", "--json", "name,description,content"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var item = JsonNode.Parse(stdout.ToString())!.AsObject();
@@ -142,7 +142,7 @@ public sealed class SkillsContentTests
         using var jsonStdout = new StringWriter();
 
         var exitCode = await BuildRootCommand(stdout).Parse(["skills", "path", "mohist"]).InvokeAsync();
-        var jsonExitCode = await BuildRootCommand(jsonStdout).Parse(["skills", "path", "mohist", "--json"]).InvokeAsync();
+        var jsonExitCode = await BuildRootCommand(jsonStdout).Parse(["skills", "path", "mohist", "--json", "name,path"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         Assert.Equal(0, jsonExitCode);
@@ -172,7 +172,7 @@ public sealed class SkillsContentTests
         var assets = new SkillAssetService(_files, _environment, resolver);
 
         var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
-        var jsonExitCode = await BuildRootCommand(jsonStdout, assets: assets).Parse(["skills", "path", "mohist", "--json"]).InvokeAsync();
+        var jsonExitCode = await BuildRootCommand(jsonStdout, assets: assets).Parse(["skills", "path", "mohist", "--json", "name,path"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         Assert.Equal(0, jsonExitCode);

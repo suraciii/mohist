@@ -139,7 +139,7 @@ public class CliIssueCommentAndFeedbackSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "-o", "json"],
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "ok", "--json", "id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -197,7 +197,7 @@ public class CliIssueCommentAndFeedbackSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "Looks good", "-o", "table"],
+            ["issue", "comment", "add", "42", "--author", "Ada", "--body", "Looks good",],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);

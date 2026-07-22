@@ -159,7 +159,7 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "list", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -211,7 +211,7 @@ public class CliIssueTemplateCommandSpecs
         var executor = new FakeCommandExecutor();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "list", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("No issue templates", output.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -328,7 +328,7 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -353,7 +353,7 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -375,13 +375,13 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode1 = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature",], output, error, fs, executor);
         Assert.Equal(0, exitCode1);
         var featureText = output.ToString();
         output.GetStringBuilder().Clear();
 
         var exitCode2 = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "mohist/default",], output, error, fs, executor);
         Assert.Equal(0, exitCode2);
         var aliasText = output.ToString();
 
@@ -411,7 +411,7 @@ public class CliIssueTemplateCommandSpecs
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "nonexistent"], output, error, fs, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 

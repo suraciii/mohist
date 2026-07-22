@@ -80,7 +80,7 @@ public sealed class CliEventsDeadLetterCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
-            ["events", "dead-letter", "list", "-o", "json"],
+            ["events", "dead-letter", "list", "--json", "id"],
             env.Output,
             env.Error,
             env.FileSystem,

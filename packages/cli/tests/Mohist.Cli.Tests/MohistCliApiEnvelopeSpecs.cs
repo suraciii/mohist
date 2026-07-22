@@ -133,7 +133,7 @@ public class MohistCliApiEnvelopeSpecs
     {
         using var response = EmptyResponse(HttpStatusCode.NotFound);
 
-        Assert.Equal(4, MohistCliApi.FailureExitCode(response));
+        Assert.Equal(1, MohistCliApi.FailureExitCode(response));
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class MohistCliApiEnvelopeSpecs
     [Fact]
     public void FailureExitCode_StatusCodeOverload_NotFoundStatus_ReturnsFour()
     {
-        Assert.Equal(4, MohistCliApi.FailureExitCode(HttpStatusCode.NotFound));
+        Assert.Equal(1, MohistCliApi.FailureExitCode(HttpStatusCode.NotFound));
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class MohistCliApiEnvelopeSpecs
 
         var exit = await api.PrintGetAsync("/api/anything");
 
-        Assert.Equal(4, exit);
+        Assert.Equal(1, exit);
         Assert.Contains("Not here", api.Error.ToString());
     }
 
@@ -240,7 +240,7 @@ public class MohistCliApiEnvelopeSpecs
 
         var exit = await api.PrintGetAsync("/api/anything");
 
-        Assert.Equal(4, exit);
+        Assert.Equal(1, exit);
         var stderr = api.Error.ToString();
         Assert.Contains("Not found", stderr);
         Assert.Contains("missing", stderr);
@@ -271,7 +271,7 @@ public class MohistCliApiEnvelopeSpecs
 
         var result = await api.PostAndReadAsync("/api/anything", new { });
 
-        Assert.Equal(4, result.ExitCode);
+        Assert.Equal(1, result.ExitCode);
         Assert.Null(result.Data);
         Assert.Equal("Missing", result.Error);
         Assert.Equal("not_found", result.Code);

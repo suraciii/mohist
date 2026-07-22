@@ -70,7 +70,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "table"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models",], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -94,7 +94,7 @@ public class CliOpencodeModelsCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -140,7 +140,7 @@ public class CliOpencodeModelsCommandSpecs
             activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["opencode", "models", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["opencode", "models", "--json", "id"], output, error, fileSystem, executor, env);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("No project resolved", error.ToString(), StringComparison.Ordinal);

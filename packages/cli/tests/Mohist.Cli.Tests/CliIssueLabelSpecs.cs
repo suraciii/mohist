@@ -408,7 +408,7 @@ public class CliIssueLabelSpecs
         }));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list", "-o", "table"], output, error, fs, executor);
+            http, ["label", "list",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();

@@ -92,7 +92,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReqs = handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
@@ -115,7 +115,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "json"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42", "--json", "id"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -202,7 +202,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "get", "42", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "get", "42",], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Issue 42 not found", error.ToString());
@@ -376,7 +376,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "set", "42", "--var", "foo=bar", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "set", "42", "--var", "foo=bar",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -689,7 +689,7 @@ public class CliIssueWorkflowConfigSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "workflow", "config", "clear", "42", "--var", "foo", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "workflow", "config", "clear", "42", "--var", "foo",], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

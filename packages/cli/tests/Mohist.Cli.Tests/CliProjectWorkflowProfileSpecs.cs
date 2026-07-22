@@ -232,7 +232,7 @@ public class CliProjectWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["project", "workflow", "profile", "list", "--project", "proj_abc", "-o", "json"],
+            ["project", "workflow", "profile", "list", "--project", "proj_abc", "--json", "id"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -318,7 +318,7 @@ public class CliProjectWorkflowProfileSpecs
             ["project", "workflow", "profile", "list", "--described", "--project", "missing-project"],
             output, error, fs, executor);
 
-        Assert.Equal(4, exitCode);
+        Assert.Equal(1, exitCode);
         var getReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Get);
         Assert.Equal("/api/workflow-profiles?project=missing-project", getReq.RequestUri?.PathAndQuery);
         Assert.Contains("Project 'missing-project' not found", error.ToString());

@@ -37,7 +37,7 @@ public class IssueCliProjectRefAndOutputTests
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class IssueCliProjectRefAndOutputTests
 
         Assert.Contains("--project", help);
         Assert.DoesNotContain("--project-id", help);
-        Assert.Contains("--output", help);
+        Assert.Contains("--json", help);
     }
 
     [Fact]
@@ -344,7 +344,7 @@ public class IssueCliProjectRefAndOutputTests
         Assert.Equal(2, exitCode);
         Assert.Empty(http.Requests);
         var err = error.ToString();
-        Assert.Contains("--output", err);
+        Assert.Contains("--json", err);
     }
 
     [Fact]
