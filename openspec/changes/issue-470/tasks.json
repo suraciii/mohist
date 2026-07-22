@@ -33,7 +33,7 @@
         "Production IOtelStorageProbe composes IOtelReadinessConnectionFactory and IFileSystem: one connection with one-second busy timeout, fixed initialization, PRAGMA schema_version, then exactly one database/WAL/SHM length read.",
         "Named shared-memory SQLite tests verify production SQL; throwing connection-factory fakes verify corrupt/locked/open mapping; FakeFileSystem verifies metadata order/count with no host storage.",
         "Fixed payload/unavailable fields are correct; old count status is removed and status snapshot does no dependencies, COUNT(*) or history work.",
-        "Off runs no listener/exporter/sampler/maintenance/Meter/aggregation; /api/health remains successful and OTel self-feedback tests terminate.",
+        "Before T-003 installs resource sampling, off runs no listener/exporter/sampler/maintenance/Meter measurements/aggregation; /api/health remains successful and OTel self-feedback tests terminate.",
         "CLI validates/render states/unavailable values and old/server-down payload behavior. Focused server/CLI tests and npm test pass."
       ],
       "priority": 2,
@@ -50,18 +50,18 @@
       "id": "T-003",
       "title": "Add continuous process and storage pressure sampling",
       "spec": "specs/otel-runtime-status/spec.md#status-exposes-storage-ingestion-and-process-pressure",
-      "description": "Replace T-002's one-shot initializer with one serialized sampler that immediately reuses the same production probe and then follows injected 10-second ticks. Add CPU, working set, GC heap and storage growth gauges/status without claiming host-filesystem cancellation.",
+      "description": "Replace T-002's one-shot initializer with one serialized sampler that reads process resources in every state, reuses the production storage probe only while enabled, and then follows injected 10-second ticks. Add CPU, working set, GC heap and storage growth gauges/status without claiming host-filesystem cancellation.",
       "acceptanceCriteria": [
         "OtelStatusInitializer registration and implementation are removed/replaced, not retained; exactly one immediate startup probe exists after this task.",
-        "One serial loop coalesces ticks, never overlaps probes, starts no new work on shutdown and awaits the current fixed-operation call; no filesystem elapsed/cancellation guarantee or abandoned Task.Run worker exists.",
+        "One serial loop coalesces ticks, never overlaps storage probes, starts no new work on shutdown and awaits the current fixed-operation call; no filesystem elapsed/cancellation guarantee or abandoned Task.Run worker exists.",
         "CPU normalization, working set, GC heap, two-sample null behavior, 60-second seven-slot growth ring and 1-GiB design budget match D5.",
-        "Success followed by failure invalidates cached values, omits gauges and returns null while storage_read activates; off samples nothing.",
+        "Success followed by failure invalidates cached storage values, omits those gauges and returns null while storage_read activates; off still refreshes status-only process values but performs no storage call and emits no Meter measurement.",
         "Controllable operation signals, fake process data and existing probe seams test behavior without real time/storage. Focused tests and npm test pass."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "OtelDiagnosticsSampler replacing the one-shot initializer, process reader, repeated probe scheduling, resource gauges/status fields and deterministic tests.",
+      "output": "OtelDiagnosticsSampler replacing the one-shot initializer, always-on bounded process reader, enabled-only storage scheduling, gated resource gauges/status fields and deterministic tests.",
       "dependsOn": [
         "T-002"
       ],
