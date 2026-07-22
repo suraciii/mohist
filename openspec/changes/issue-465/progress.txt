@@ -18,3 +18,9 @@
 - Handler-created tasks still expand only `failure.*`; `${{ vars.* }}` remains in their declaration for the later dispatch snapshot.
 - Baseline verification passed before edits: `npm test -w packages/runner` (116 files, 1348 tests) and `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RunnerPollRecoveryStateApiSpecs` (3 tests).
 - Final verification passed: `npm run typecheck -w packages/runner`; `npm test -w packages/runner` (116 files, 1350 tests); `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RunnerPollRecoveryStateApiSpecs` (3 tests); and `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue` (1 test).
+
+## Verification Repair
+
+- Full `npm run verify` initially failed the Server architecture size ratchet because issue-465 regression coverage grew `WorkflowItemTranslatorSpecs.cs` to 24,003 bytes without an allowance and `DispatchAndLoadingSpecs.cs` to 29,546 bytes against a 27,215-byte allowance.
+- The cause was test-file growth, not an implementation or assertion failure. Raw translator dispatch tests and variable-snapshot retry tests were moved into dedicated `*Specs.cs` files, preserving their assertions and keeping each source below the 24,000-byte budget.
+- The focused architecture ratchet, affected Server specs, and Runner typecheck/tests passed after the repair.
