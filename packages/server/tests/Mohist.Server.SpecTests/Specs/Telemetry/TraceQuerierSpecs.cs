@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Otel;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -12,6 +14,13 @@ public class TraceQuerierSpecs : IDisposable
     private readonly TraceQuerier _querier;
     private readonly OtelCollectorStatus _status;
     private readonly TraceIngester _ingester;
+    private readonly FakeTimeProvider _timeProvider;
+    private readonly TaskCompletionSource<bool> _readerStarted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _queryInterrupted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _connectionDisposed =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
     private readonly Microsoft.Data.Sqlite.SqliteConnection _keeper;
 
@@ -20,7 +29,15 @@ public class TraceQuerierSpecs : IDisposable
         (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
         _status = new OtelCollectorStatus();
-        _querier = new TraceQuerier(_db, _status, new InMemoryServerFileSystem());
+        _timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
+        _querier = new TraceQuerier(
+            _db,
+            _status,
+            new InMemoryServerFileSystem(),
+            _timeProvider,
+            () => _readerStarted.TrySetResult(true),
+            () => _queryInterrupted.TrySetResult(true),
+            () => _connectionDisposed.TrySetResult(true));
     }
 
     public void Dispose()
@@ -182,42 +199,183 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteRawQuery_SelectAllRows_ReturnsDictionaries()
+    public async Task ExecuteBoundedQuery_SelectAllRows_ReturnsDictionaries()
     {
         SeedTrace("t1", "svc-a", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 2);
         SeedTrace("t2", "svc-b", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 5);
 
-        var rows = await _querier.ExecuteRawQuery(
+        var result = await _querier.ExecuteBoundedQuery(
             $"SELECT {OtelDb.TracesServiceNameColumn}, {OtelDb.TracesSpanCountColumn} FROM {OtelDb.TracesTable} ORDER BY {OtelDb.TracesStartTimeColumn}");
 
-        Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, r => Equals(r[OtelDb.TracesServiceNameColumn], "svc-a") && Equals(r[OtelDb.TracesSpanCountColumn], 2L));
-        Assert.Contains(rows, r => Equals(r[OtelDb.TracesServiceNameColumn], "svc-b") && Equals(r[OtelDb.TracesSpanCountColumn], 5L));
+        Assert.False(result.Truncated);
+        Assert.Equal(2, result.Rows.Count);
+        Assert.Contains(result.Rows, r => Equals(r[OtelDb.TracesServiceNameColumn], "svc-a") && Equals(r[OtelDb.TracesSpanCountColumn], 2L));
+        Assert.Contains(result.Rows, r => Equals(r[OtelDb.TracesServiceNameColumn], "svc-b") && Equals(r[OtelDb.TracesSpanCountColumn], 5L));
     }
 
     [Fact]
-    public async Task ExecuteRawQuery_AggregateCount_ReturnsSingleRow()
+    public async Task ExecuteBoundedQuery_AggregateCount_ReturnsSingleRow()
     {
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
         SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
 
-        var rows = await _querier.ExecuteRawQuery($"SELECT COUNT(*) AS total FROM {OtelDb.TracesTable}");
+        var result = await _querier.ExecuteBoundedQuery($"SELECT COUNT(*) AS total FROM {OtelDb.TracesTable}");
 
-        Assert.Single(rows);
-        var row = rows[0];
+        Assert.False(result.Truncated);
+        Assert.Single(result.Rows);
+        var row = result.Rows[0];
         Assert.Equal(2L, row["total"]);
     }
 
     [Fact]
-    public async Task ExecuteRawQuery_NullCell_BecomesNullInDictionary()
+    public async Task ExecuteBoundedQuery_NullCell_BecomesNullInDictionary()
     {
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
 
-        var rows = await _querier.ExecuteRawQuery(
+        var result = await _querier.ExecuteBoundedQuery(
             $"SELECT {OtelDb.TracesTraceIdColumn}, NULL AS maybe FROM {OtelDb.TracesTable}");
 
-        Assert.Single(rows);
-        Assert.Null(rows[0]["maybe"]);
+        Assert.False(result.Truncated);
+        Assert.Single(result.Rows);
+        Assert.Null(result.Rows[0]["maybe"]);
+    }
+
+    [Fact]
+    public void MaxQueryResponseRows_IsFixedAtOneThousand()
+    {
+        Assert.Equal(1000, TraceQuerier.MaxQueryResponseRows);
+    }
+
+    [Fact]
+    public void MaxQueryResponseBytes_IsFixedAtFourMiB()
+    {
+        Assert.Equal(4 * 1024 * 1024, TraceQuerier.MaxQueryResponseBytes);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_ManyRows_TruncatesAtRowLimitWithReason()
+    {
+        var query = """
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < 2500
+            )
+            SELECT x FROM cnt;
+            """;
+
+        var result = await _querier.ExecuteBoundedQuery(query);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.RowLimitTruncateReason, result.TruncateReason);
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, result.Rows.Count);
+        Assert.Equal(1L, result.Rows[0]["x"]);
+        Assert.Equal((long)TraceQuerier.MaxQueryResponseRows, result.Rows[^1]["x"]);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_SingleLargeCell_TruncatesAtByteLimitWithoutMaterializing()
+    {
+        const int oversizedChars = 8 * 1024 * 1024;
+
+        var result = await _querier.ExecuteBoundedQuery(
+            $"SELECT substr(replace(hex(zeroblob({oversizedChars})), '0', 'x'), 1, {oversizedChars}) AS big");
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.ByteLimitTruncateReason, result.TruncateReason);
+        Assert.Empty(result.Rows);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_ModerateRowsUnderByteLimit_TruncatesBeforeRowLimit()
+    {
+        // Each row carries a 6 KiB TEXT cell, so 1000 rows would exceed the
+        // 4 MiB byte cap by row ~700. The row cap (1000) is never reached.
+        const int rowCount = 1000;
+        const int cellBytes = 6 * 1024;
+
+        var recursiveQuery = $$"""
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < {{rowCount}}
+            )
+            SELECT hex(randomblob({{cellBytes / 2}})) AS payload FROM cnt;
+            """;
+
+        var recursiveResult = await _querier.ExecuteBoundedQuery(recursiveQuery);
+
+        Assert.True(recursiveResult.Truncated);
+        Assert.Equal(TraceQuerier.ByteLimitTruncateReason, recursiveResult.TruncateReason);
+        Assert.True(recursiveResult.Rows.Count < TraceQuerier.MaxQueryResponseRows);
+        Assert.True(recursiveResult.Rows.Count > 0);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_RecursiveCteAmplification_RespectsBothCaps()
+    {
+        var smallRowQuery = """
+            WITH RECURSIVE cnt(x) AS (
+                SELECT 1
+                UNION ALL
+                SELECT x + 1 FROM cnt WHERE x < 100000
+            )
+            SELECT x FROM cnt;
+            """;
+
+        var result = await _querier.ExecuteBoundedQuery(smallRowQuery);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.RowLimitTruncateReason, result.TruncateReason);
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, result.Rows.Count);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_WithinBothCaps_DoesNotMarkTruncated()
+    {
+        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
+
+        var result = await _querier.ExecuteBoundedQuery(
+            $"SELECT {OtelDb.TracesServiceNameColumn} FROM {OtelDb.TracesTable}");
+
+        Assert.False(result.Truncated);
+        Assert.Null(result.TruncateReason);
+    }
+
+    [Fact]
+    public void OpenConnection_HandleIsVisibleAndNonNull()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+
+        Assert.NotNull(connection.Handle);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_ExecutionBudgetInterruptsRecursiveReader()
+    {
+        var query = """
+            WITH RECURSIVE numbers(value) AS (
+                SELECT 1
+                UNION ALL
+                SELECT value + 1 FROM numbers WHERE value < 100000000
+            )
+            SELECT value FROM numbers;
+            """;
+
+        var execution = Task.Run(() => _querier.ExecuteBoundedQuery(query));
+        await _readerStarted.Task;
+        _timeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
+
+        var exception = await Record.ExceptionAsync(() => execution);
+
+        Assert.NotNull(exception);
+        Assert.True(
+            exception is OperationCanceledException
+                || exception is SqliteException { SqliteErrorCode: 9 },
+            $"Expected cancellation or SQLITE_INTERRUPT (9), got {exception}");
+        Assert.True(_queryInterrupted.Task.IsCompletedSuccessfully);
+        Assert.True(_connectionDisposed.Task.IsCompletedSuccessfully);
     }
 
     [Fact]

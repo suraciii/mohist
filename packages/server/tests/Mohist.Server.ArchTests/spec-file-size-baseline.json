@@ -24,6 +24,7 @@
   "Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs": 30462,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs": 27070,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionTranscriptAxisSpecs.cs": 31206,
+  "Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs": 27947,
   "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 31304,
   "Mohist.Server.SpecTests/Specs/Workflow/Artifacts/WorkflowArtifactUploadServiceSpecs.cs": 34116,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/DispatchAndLoadingSpecs.cs": 27215,

@@ -13,6 +13,9 @@ public static class ApiResults
 
     public static IResult NotFound(string error) => Fail(error, 404, "not_found");
 
+    public static IResult PayloadTooLarge(string error, string? code = null, object? details = null) =>
+        Fail(error, 413, code ?? "payload_too_large", details);
+
     public static IResult Conflict(string error, string? code = null, object? details = null) => Fail(error, 409, code ?? "conflict", details);
 
     public static IResult BadRequest(string error, string? code = null, object? details = null) => Fail(error, 400, code ?? "bad_request", details);

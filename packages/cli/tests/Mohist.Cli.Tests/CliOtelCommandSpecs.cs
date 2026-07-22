@@ -73,6 +73,37 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
+    public async Task OtelQuery_LocalPath_ReturnsAllRowsWithoutHttpTruncationMetadata()
+    {
+        var dbPath = "/tmp/otel-unbounded-local.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var rows = new List<object?[]>(capacity: 1001);
+        for (var i = 1; i <= 1001; i++)
+            rows.Add([i]);
+
+        var executor = FakeOtelQueryExecutor.ReturningColumns(["value"], rows);
+        var handler = new ThrowingHttpHandler();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["otel", "query", "SELECT value FROM traces", "-d", dbPath],
+            output,
+            error,
+            fileSystem: fileSystem,
+            queryExecutor: executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(1003, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Contains("1001", output.ToString());
+        Assert.DoesNotContain("truncated", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(error.ToString());
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
     public async Task OtelQuery_DoesNotRequireServer()
     {
         var dbPath = "/tmp/otel-no-server.db";
