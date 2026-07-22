@@ -53,6 +53,12 @@ Every domain or service failure diagnostic SHALL include a stable error code. Wh
 - **THEN** stderr SHALL include the stable error code and available failure context
 - **AND** SHALL NOT include a recovery hint
 
+#### Scenario: A Server failure omits its error code
+
+- **WHEN** a Server failure envelope has no non-blank `code`
+- **THEN** the CLI SHALL emit the stable fallback code `http-<status>` using that response's HTTP status
+- **AND** SHALL preserve the envelope's message and available details on stderr
+
 ### Requirement: Non-interactive invocations never wait for input
 
 When stdin is not a TTY or `MOHIST_PROMPT_DISABLED=1` is set, the CLI SHALL NOT prompt or wait for input. A command that needs a value or confirmation in that mode SHALL fail immediately with a stderr diagnostic that identifies the missing requirement and an explicit non-interactive way to provide it.

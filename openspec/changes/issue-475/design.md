@@ -64,7 +64,7 @@ Alternative considered: add a Server `fields` query parameter and project at eac
 
 ### D4: Normalize transport responses and failures before rendering
 
-`CliResponseReader` is the only HTTP boundary for migrated command handlers. It parses the existing success envelope once, keeps `data` private until result rendering, and maps a failure into `CliFailure { Code, Message, Details, AttemptState }`. Server `code` and `details` are preserved; if a transport or bare HTTP failure lacks a code, the reader supplies a stable CLI transport code such as `server-unavailable` or `http-<status>`. The diagnostic formatter extracts affected object, current state, and rejection reason from known detail members when present, then emits one hint only from an explicit `CliHintResolver` mapping.
+`CliResponseReader` is the only HTTP boundary for migrated command handlers. It parses the existing success envelope once, keeps `data` private until result rendering, and maps a failure into `CliFailure { Code, Message, Details, AttemptState }`. A non-blank Server `code` is preserved. Any HTTP failure without one, including a normal error envelope, receives the stable fallback `http-<status>`; transport failures receive a stable transport code such as `server-unavailable`. The diagnostic formatter preserves the envelope message and details, extracts affected object, current state, and rejection reason from known detail members when present, then emits one hint only from an explicit `CliHintResolver` mapping.
 
 The hint resolver is a closed mapping from stable codes and structured details to command lines. It returns no hint by default. This prevents speculative advice and makes the "one hint" rule mechanically enforceable.
 
@@ -83,7 +83,7 @@ Alternative considered: replace the command tree with a generated DSL or reflect
 - [Client-side projection still transfers full Server payloads] -> Keep field descriptors and projection in the CLI for this change; measure payload pressure before proposing an API-level `fields` protocol.
 - [Migrating many command partials can leave one legacy path behind] -> Add command-tree structural guards and migrate by command family with stdout, stderr, exit-code, and no-request-on-local-error specs.
 - [Current-directory context can select the wrong workspace if markers are stale] -> `mo project use` writes the marker, resolution uses the nearest marker only, explicit `--project` wins, and malformed markers fail locally rather than falling through silently.
-- [Server failures are not uniformly detailed today] -> Preserve existing `code` and `details`, synthesize only stable transport/HTTP codes when absent, and add structured details only where a command needs them to satisfy its diagnostic contract.
+- [Server failures are not uniformly detailed today] -> Preserve existing non-blank `code` and `details`; synthesize `http-<status>` for every code-less HTTP failure and a stable transport code for every transport failure; add structured details only where a command needs them to satisfy its diagnostic contract.
 - [A write may succeed after the client loses the response] -> Treat every post-send transport exception as outcome unknown, return exit `1`, and never retry automatically.
 - [Redirecting legacy progress text can affect human scripts] -> This is an intentional contract change; stage command-family migration with documented stdout/stderr assertions and retain no compatibility alias.
 

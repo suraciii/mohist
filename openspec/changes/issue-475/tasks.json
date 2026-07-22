@@ -10,9 +10,10 @@
       "acceptanceCriteria": [
         "The root command path returns 0, 1, 2, or 130 according to success, operation failure, local usage failure, or cancellation, and local errors print only nearest-level usage to stderr.",
         "All migrated command output keeps normal results on stdout and sends diagnostics, hints, confirmations, and progress to stderr; no error envelope is printed as a successful result.",
+        "A non-blank Server error code is preserved, while every code-less HTTP failure envelope emits the stable fallback http-<status> and preserves its message and details.",
         "Non-TTY and MOHIST_PROMPT_DISABLED=1 calls do not read stdin or modify state when confirmation or another prompt would be required.",
         "Mutating request failures distinguish proven unsubmitted requests from outcome-unknown requests, return 1, and never retry an outcome-unknown request automatically.",
-        "CLI unit/spec coverage uses fake terminal, cancellation, filesystem, and HTTP collaborators for exit classes, error context/hints, prompt suppression, and transport attempt states; npm test -w packages/cli passes."
+        "CLI unit/spec coverage uses fake terminal, cancellation, filesystem, and HTTP collaborators for exit classes, coded and code-less failure envelopes, error context/hints, prompt suppression, and transport attempt states; npm test -w packages/cli passes."
       ],
       "priority": 1,
       "mode": "AFK",
