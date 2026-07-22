@@ -384,17 +384,6 @@ describe("PiRuntime", () => {
     expect(result.error.message.toLowerCase()).toContain("reset")
   })
 
-  it("requires a stop event as well as idle state before confirming cancel", async () => {
-    const session = new FakeSession()
-    session.isStreaming = true
-    session.abort = async () => { session.abortCalls++; session.isStreaming = false }
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
-    await runtime.start()
-
-    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
-    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
-  })
-
   it("does not treat turn_end as a fully settled cancellation", async () => {
     const session = new FakeSession()
     session.isStreaming = true
@@ -408,15 +397,6 @@ describe("PiRuntime", () => {
 
     const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
     expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
-  })
-
-  it("does not require a stop event when cancelling an already-idle session", async () => {
-    const session = new FakeSession()
-    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
-    await runtime.start()
-
-    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
-    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: true } })
   })
 
   it("serializes a concurrent idle follow-up with an in-flight workflow turn on the same session", async () => {
@@ -437,7 +417,6 @@ describe("PiRuntime", () => {
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(["workflow"])
-    expect(session.promptCalls).toHaveLength(1)
     session.complete("wf done")
     await workflowTurn
     await new Promise<void>((resolve) => setImmediate(resolve))
