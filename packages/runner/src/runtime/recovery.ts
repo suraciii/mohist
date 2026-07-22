@@ -1,4 +1,4 @@
-import type { AddTaskInput, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { AddTaskInput, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import { isObject } from "../core/json.js"
 import { getPath } from "../core/json-path.js"
 
@@ -26,7 +26,7 @@ export class UnresolvedFailureReferenceError extends Error {
 }
 
 export function tryRecovery(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   result: WorkItemResult,
   variables?: JsonObject | null,
 ): WorkItemResult | null {
@@ -73,12 +73,12 @@ export function tryRecovery(
       id: retryId,
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
-      with: work.with,
-      artifacts: work.artifacts,
-      setVars: work.setVars ?? null,
-      recovery: work.recovery,
+      with: cloneJsonObject(work.with),
+      artifacts: cloneJsonObject(work.artifacts),
+      setVars: work.setVars ? structuredClone(work.setVars) : null,
+      recovery: cloneJsonObject(work.recovery),
       recoveryRemaining: remaining - 1,
-      expect: work.expect ?? null,
+      expect: cloneJsonObject(work.expect),
     })
   }
 
@@ -337,7 +337,7 @@ function describeFailureValue(value: JsonValue | undefined): string {
   return fields.length === 0 ? "has no fields" : `fields [${fields.join(", ")}]`
 }
 
-function failureResult(work: RenderedWorkItem, message: string): WorkItemResult {
+function failureResult(work: DispatchWorkItem, message: string): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
   const failureMessage = `${label}: ${message}`
   return {
@@ -364,6 +364,10 @@ function stringField(obj: JsonObject, key: string): string | null {
 function objectField(obj: JsonObject, key: string): JsonObject | null {
   const value = obj[key]
   return isObject(value) ? value : null
+}
+
+function cloneJsonObject(value: JsonObject | null | undefined): JsonObject | null {
+  return value ? structuredClone(value) : null
 }
 
 function recordField(obj: JsonObject, key: string): Record<string, string> | null {

@@ -12,7 +12,7 @@ import {
   uploadCapturedArtifacts,
 } from "../src/runtime/artifact-capture.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
-import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import { createTestTempDir } from "./support/temp-dir.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
@@ -63,7 +63,7 @@ beforeEach(async () => {
   outsideDir = await createTestTempDir("mohist-artifact-capture-outside-")
 })
 
-function workItem(artifacts: JsonObject | null): RenderedWorkItem {
+function workItem(artifacts: JsonObject | null): DispatchWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-1",

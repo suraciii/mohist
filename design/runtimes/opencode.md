@@ -31,7 +31,9 @@ type OpenCodeActionOutput = null | {
 }
 ```
 
-现有 prompt resolver 在进入 Runtime 前把 `prompt` 解析为非空字符串。`model` 使用
+Runner 在调用 Action 前的执行入口把 `prompt` 渲染为非空字符串后再交给 OpenCode Runtime
+处理；本节只描述 Action 接收的输入形状与 Runtime 行为，不承担渲染权威（见
+[`task-dispatch.md`](../workflow/task-dispatch.md)）。`model` 使用
 OpenCode 的 `providerID/modelID` 形式。OpenCode model ID 自身可能继续包含 `/`，因此
 Runtime 只按第一个 `/` 分割。`variant` 始终是独立字段，不能拼进 model ID。
 
@@ -43,11 +45,13 @@ Runtime。OpenCode 的默认 agent、tools、plugins、permissions 与自动压�
 仍含遗留键（如 `type`、liveness 配置）的已持久化 `vars.agent` 可以继续绑定，直到
 写入路径完成收敛。`model` 或 `variant` 存在但不是字符串时，返回 invalid input。
 
-Action 不读取 Workflow Variables。Runner Action executor 按
-[`task-dispatch.md`](../workflow/task-dispatch.md) 在调用 Action 前展开并校验 `with`；
-`OpenCodeActionInput` 只是本次 attempt 的最终执行输入，不承担 declaration、Variables 或
-context 的传播。`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，
-OpenCode 把它应用到当前或默认 model。
+Action 不读取 Workflow variables。模板求值时机由 [`task-dispatch.md`](../workflow/task-dispatch.md)
+统一规定：Server dispatch 不再展开 `with` / `expect`，Runner 在调用 Action 前的执行入口
+按 attempt 快照渲染原始 `with`，再交给 manifest 校验和 Action 输入。本节只描述 OpenCode
+Action 接收的输入形状与 Runtime 行为，不承担渲染权威。
+
+`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，OpenCode
+把它应用到当前或默认 model。
 
 创建新的物理 Session 时，把显式 model 传给 Session creation 和第一个 Prompt。复用
 现有物理 Session 时，每个 Prompt 携带本次指定的 model 与 variant；成熟 Session API
@@ -55,11 +59,13 @@ OpenCode 把它应用到当前或默认 model。
 时保留当前 Session 选择；首次没有选择时使用 OpenCode 默认值。改变 model
 或 variant 不会轮换物理 Session。
 
-Runner 的 Workflow task executor 在 `OpenCodeActionInput` 之外单独接收 `expect` 与
-artifact 声明，并在 OpenCode Action 返回后应用它们。只有命中 promise 时才把对应值
-作为 Action Output 暴露；`{ promise }` 由 task executor 依据 Workflow 拥有的 `expect`
-合成，Action 与 Runtime 都不产生该字段。Runtime 身份、transcript、model、usage、
-诊断信息与 expectation 明细保存在原有 state / read model 中，不塞进 Action output。
+Runner 的 Workflow task executor 在 attempt 快照上渲染 `with`，把渲染并 manifest 校验
+后的结果作为 `OpenCodeActionInput` 交给 Action；`expect` 与 artifact 声明独立于 Action
+输入，由 executor 在 Action 返回后应用。Action 与 Runtime 都不读取 Workflow Variables
+或完整 dispatch context。只有命中 promise 时才把对应值作为 Action Output 暴露；`{ promise }`
+由 task executor 依据 Workflow 拥有的 `expect` 合成，Action 与 Runtime 都不产生该字段。
+Runtime 身份、transcript、model、usage、诊断信息与 expectation 明细保存在原有 state /
+read model 中，不塞进 Action output。
 
 规范化回合事实包含回合的最终 assistant 文本。task executor 用它评估
 `path: _output` 的 expect marker；该文本经由 Action result 的回合事实提供，

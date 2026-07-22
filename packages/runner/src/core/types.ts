@@ -19,17 +19,17 @@ export interface TaskArtifactDeclaration {
 /**
  * Mirrors the server domain `WorkItem` (C#) returned by
  * `IWorkflowGrain.PollWorkAsync`. The control plane hands the runner the
- * declaration shape: a task or checks variant with the unrendered
- * templates (`with`), the declared artifacts, and the declared `setVars`.
- * No resolved variables, no rendered execution context, no loaded
+ * declaration shape: a task or checks variant with the raw templates
+ * (`with`), the declared artifacts, and the declared `setVars`. No
+ * resolved variables, no rendered execution context, no loaded
  * prompts. The runner-grain's `WorkflowItemTranslator` owns the
- * WorkItem→WorkDispatch rendering; this TS type is the in-memory
+ * WorkItem→WorkDispatch serialization; this TS type is the in-memory
  * counterpart the runner process would hold if it ever needs to speak
  * the domain shape (e.g., for mirroring tests or boundary checks).
  *
- * Runtime execution still consumes the rendered envelope exposed via
+ * Runtime execution still consumes the dispatch envelope exposed via
  * `WorkDispatchResponse` — see `poll()` on `ServerConnection`. The two
- * shapes are intentionally separate so the rendered envelope can carry
+ * shapes are intentionally separate so the dispatch envelope can carry
  * `variables`, `prompts`, `projectId`, `issueNumber`, etc. without
  * smuggling them into the domain protocol.
  */
@@ -63,12 +63,12 @@ export interface TaskArtifactCapture {
 
 /**
  * HTTP envelope returned by the runner poll endpoint. The server's
- * runner-grain renders a domain `WorkItem` into
- * a `WorkDispatch` and serializes the rendered envelope here so the
- * runner process can execute without re-rendering. The fields include
- * the pre-rendered `with`/`artifacts`, `variables`/`prompts`, issue
- * linkage, and the owner identity (`ownerKind` + `agentJobId` for
- * agent-job work, `workflowRunId` for workflow work).
+ * runner-grain serializes a domain `WorkItem` into a `WorkDispatch`
+ * carrying the raw `with`/`artifacts` declarations alongside the
+ * `variables`/`prompts` snapshot, issue linkage, and the owner
+ * identity (`ownerKind` + `agentJobId` for agent-job work,
+ * `workflowRunId` for workflow work). The Runner is the single
+ * execution-boundary renderer for those raw declarations.
  */
 export interface ParentIssueContext {
   title: string
@@ -81,10 +81,10 @@ export type WorkDispatchResponse = {
   uses?: string | null
   with?: string | null
   /**
-   * Task-level completion contract rendered by the server for this
-   * dispatch and re-expanded by the runner's executor. The Action
-   * Input (`with`) MUST NOT contain this. Mirrors `WorkDispatch.Expect`
-   * on the server.
+   * Task-level completion contract carried verbatim from the dispatch.
+   * The Runner parses and re-renders it against the dispatch snapshot;
+   * the Action Input (`with`) MUST NOT contain this. Mirrors
+   * `WorkDispatch.Expect` on the server.
    */
   expect?: string | null
   variables?: string | null
@@ -146,11 +146,11 @@ export interface RunnerConfigResponse {
  * `outputs`, `setVars`) are decoded into structured objects/arrays so
  * the runtime can traverse them without re-parsing. This is the
  * runner's internal "work item" — it is NOT a mirror of the server
- * domain `WorkItem`. The runner process only
- * ever sees this rendered envelope; the unrendered domain shape lives
- * on the server.
+ * domain `WorkItem`. The `with` and `expect` fields are raw
+ * declarations (template references preserved) and the `variables`
+ * field is the dispatch context snapshot the runner renders against.
  */
-export interface RenderedWorkItem {
+export interface DispatchWorkItem {
   workflowRunId: string
   workId: string
   workType: string

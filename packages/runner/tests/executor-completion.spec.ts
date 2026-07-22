@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { succeed, fail, validateActionOutputShape } from "../src/actions/action-result.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import type { ActionResult, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, DispatchWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import { defineTestActions } from "./support/action-registry-test.js"
 
@@ -31,7 +31,7 @@ function execute(result: ActionResult) {
     {} as never,
     workDir,
   )
-  const work: RenderedWorkItem = {
+  const work: DispatchWorkItem = {
     workflowRunId: "wf-completion", workId: "review.1", workType: "task", stage: "check",
     title: "Review", uses: "test/action", with: {}, variables: { workspace: { path: workDir, branch: null, changeDir: null } },
   }

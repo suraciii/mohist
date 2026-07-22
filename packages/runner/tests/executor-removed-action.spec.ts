@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import type { RenderedWorkItem } from "../src/core/types.js"
+import type { DispatchWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import { ActionRegistry } from "../src/actions/registry.js"
@@ -50,7 +50,7 @@ function executorFor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<RenderedWorkItem>): RenderedWorkItem {
+function buildWork(overrides: Partial<DispatchWorkItem>): DispatchWorkItem {
   return {
     workflowRunId: "wf-removed-action",
     workId: "review.1",

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
@@ -119,7 +119,7 @@ function connection(): Pick<ServerConnection, "uploadArtifact" | "report"> {
   } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
 }
 
-function buildWork(repo: string, workflowRunId: string, stage: string, workId: string): RenderedWorkItem {
+function buildWork(repo: string, workflowRunId: string, stage: string, workId: string): DispatchWorkItem {
   return {
     workflowRunId,
     workId,
@@ -138,7 +138,7 @@ function buildWork(repo: string, workflowRunId: string, stage: string, workId: s
   }
 }
 
-function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): RenderedWorkItem {
+function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): DispatchWorkItem {
   return {
     workflowRunId,
     workId: "agent:job.1",

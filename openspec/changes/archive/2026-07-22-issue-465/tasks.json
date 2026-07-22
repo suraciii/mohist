@@ -1,0 +1,47 @@
+{
+  "project": "mohist",
+  "description": "Preserve raw workflow task declarations across dispatch and recovery retries while rendering each attempt at the Runner boundary.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Move task input rendering to the Runner boundary",
+      "spec": "specs/task-input-rendering-boundary/spec.md#Dispatch raw task declarations with an attempt snapshot",
+      "description": "Change Server workflow task and check dispatches to serialize raw `with` and task-level `expect` declarations alongside the existing attempt snapshot, removing the obsolete Server input-expansion path. Rename the parsed Runner representation to `DispatchWorkItem`, make the executor and check pipeline defensively clone then render immediate inputs from the carried snapshot before manifest validation, and retain deferred inputs unchanged without exposing a raw Action input channel.",
+      "acceptanceCriteria": [
+        "Static tasks, checks, and Action-created follow-up tasks dispatch literal template declarations while the dispatch variables and prompt payload remain the attempt snapshot.",
+        "Runner task and check execution render immediate nested inputs and `expect` with correct JSON types, reject unresolved immediate whole-value references before invocation, and validate only the rendered Action input.",
+        "Manifest-deferred inputs retain nested template references, and an Action cannot mutate the dispatch declaration through a deferred input reference.",
+        "`RenderedWorkItem`, the Server dispatch input expander, and their obsolete unit coverage are removed; no internal Runner type or documentation calls raw dispatch work rendered.",
+        "Focused Server and Runner tests cover raw dispatch, immutable snapshots, task/check rendering, deferred propagation, and source-declaration immutability; `npm run typecheck -w packages/runner`, `npm test -w packages/runner`, and the affected Server test suite pass.",
+        "The dispatch, Action, OpenCode runtime, variables/profile, and product documentation are synchronized with the single Runner rendering boundary without changing the public Workflow DSL."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Raw-declaration workflow dispatches and Runner-side rendered execution inputs, with updated boundary documentation and regression coverage.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep Effective Stage Variable resolution and prompt loading on the Server at dispatch time. The Runner must consume the carried snapshot and local workspace facts only; do not add rawWith, rawTask, or a post-dispatch variables fetch."
+    },
+    {
+      "id": "T-002",
+      "title": "Preserve declarations through recovery self-retry",
+      "spec": "specs/recovery-self-retry-declaration/spec.md#Preserve the original declaration for self-retry",
+      "description": "Make recovery continuations explicitly preserve a cloned raw task declaration when `retrySelf` is selected, including task-level `expect`, artifacts, `setVars`, recovery configuration, identity, and decremented remaining budget. Retain the existing handler matching, failure-only expansion, follow-up ordering, and manual-retry budget semantics, and document the recovery declaration invariant.",
+      "acceptanceCriteria": [
+        "A `retrySelf` generated after an attempt renders `${{ vars.agent }}` as model-a persists `${{ vars.agent }}` in both `with` and task-level `expect`, never the rendered model-a value.",
+        "After the stage agent variable changes to model-b before the self-retry dispatch, the retry Action invocation and recorded Session model use model-b while the triggering attempt remains bound to model-a.",
+        "Recovery handler tasks substitute only triggering `failure.*` references and retain other templates for their own dispatch; matching, ordering, budget decrement, exhaustion, and manual-retry reset behavior remain unchanged.",
+        "Runner recovery and cross-boundary regression tests cover placeholder survival, the model-a to model-b retry path, failure-reference preservation, and budget behavior; `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass alongside affected Server integration/spec tests.",
+        "`design/workflow/recovery.md` records that self-retry copies the raw dispatch declaration and remaining budget rather than rendered Action input."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Recovery self-retries that persist raw declarations and re-render against their own attempt snapshots, with end-to-end regression coverage.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "T-002 consumes `DispatchWorkItem` from T-001. Do not reconstruct retries from Workflow definitions or persist rendered input; historical baked TaskRuns remain unchanged."
+    }
+  ]
+}

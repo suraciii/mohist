@@ -22,8 +22,13 @@
 - 触发恢复的任务以 completed 结束：它产出了后续工作。
 - Runner 构造 handler task 时只展开绑定触发 attempt 的 `${{ failure.* }}`；其它表达式保留
   在新 task declaration 中，见 [`task-dispatch.md`](task-dispatch.md)。
-- `retrySelf` 复制触发 attempt 的原始 task declaration 与剩余预算，不复制本次 Action
-  收到的 rendered input。新 attempt 会用自己的 context snapshot 重新展开 declaration。
+- 恢复任务模板中的 `${{ failure.* }}` 由 runner 构造时就地展开，见
+  [`task-dispatch.md`](task-dispatch.md)。
+- `retrySelf` 必须复制触发 attempt 的原始 dispatch 声明，而不是本次 Action 的 rendered input。
+  `with`、task-level `expect`、artifacts、`setVars`、recovery 配置和任务身份都要深拷贝；只把
+  `recoveryRemaining` 作为独立状态减一。这样后续 dispatch 仍可用自己的变量快照重新展开
+  `${{ vars.* }}`，而触发 attempt 已经得到的值不会固化进 retry。
+- 新 attempt 会用自己的 context snapshot 重新展开 declaration。
 
 | 层 | 职责 |
 |---|---|

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
@@ -77,7 +77,7 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
 })
 
-function buildWork(artifacts: JsonObject | null, uses = "test/action"): RenderedWorkItem {
+function buildWork(artifacts: JsonObject | null, uses = "test/action"): DispatchWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-1",

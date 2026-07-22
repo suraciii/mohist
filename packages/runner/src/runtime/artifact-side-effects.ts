@@ -1,5 +1,5 @@
 import { renderTemplate, unresolvedReferences } from "../core/template.js"
-import type { ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -26,7 +26,7 @@ export type ArtifactCaptureBatch =
 const MAX_MESSAGE_LEN = 4000
 
 export function renderArtifactDeclarations(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   variables: JsonObject,
 ): RenderedArtifactDeclarations {
   if (!work.artifacts) return { kind: "ok", artifacts: null }
@@ -53,7 +53,7 @@ export function renderArtifactDeclarations(
 
 export async function captureAndUploadArtifactsForWork(
   connection: ArtifactUploader,
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   workspaceRoot: string,
   workDir: string,
   result: WorkItemResult,
@@ -76,7 +76,7 @@ export async function captureAndUploadArtifactsForWork(
 }
 
 export async function captureArtifactsForWork(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   workspaceRoot: string,
   workDir: string,
   renderedArtifacts: JsonObject | null,
@@ -100,7 +100,7 @@ export async function captureArtifactsForWork(
 
 export async function uploadCapturesForWork(
   connection: ArtifactUploader,
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   captures: ReadonlyArray<CapturedArtifact>,
   signal: AbortSignal,
 ): Promise<UploadedCaptures> {

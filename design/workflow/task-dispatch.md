@@ -1,36 +1,44 @@
 # Task Dispatch
 
-## Attempt input
+本文是 task 输入模板求值时机的单一权威。`tasks[*].with` 与 task-level `expect` 是
+Workflow 声明的一部分；服务端按原始形态随 dispatch 一起发送，不预先展开模板；Runner
+在调用 Action 之前的执行入口统一展开。Prompt body、Effective Stage Variables、
+runtime context 与 failure context 是 attempt 不可变快照的组成部分。
 
-`TaskRun` 和持久 `WorkItem` 保存 task declaration，而不是某次执行得到的值。`with` 与
-task-level `expect` 中的 `${{ }}` 表达式在 task 的整个生命周期内保持原样。人工 retry、
-recovery continuation 和 redelivery 都不能把某次 rendered input 写回 declaration。
+## 渲染边界
 
-每个 attempt 按以下顺序建立输入：
+模板求值只发生在 Runner 调用 Action 之前的执行入口，**不**发生在 Server dispatch 阶段：
 
-1. Server 读取当前 Effective Stage Variables、Project Prompts 和其它 Server-owned runtime
-   context，形成该 attempt 的 context snapshot。
-2. dispatch 同时携带未展开的 `with` / `expect` declaration 与 context snapshot。两者是不同
-   数据，不能用一个 `with` 字段同时表示 declaration 和 rendered input。
-3. Runner 解析本次 workspace，将 Runner-owned context 合入 snapshot，然后在调用 Action
-   前把 declaration 展开为局部 rendered input。
-4. Runner 按 Action manifest 校验 rendered input，再调用 Action。展开值只存在于本次
-   Action 调用中；Runner 和引擎不得把它复制进 TaskRun、后续 `addTasks` 或 retry 来源。
-   Action 明确返回的动态 task declaration 仍按 `add-tasks` 能力处理。
+- Server 持久化 task 时保存原始 `with` / `expect` 声明，不展开模板。
+- 每次 dispatch 在 wire 上携带原始 `with` / `expect`，并附加该 attempt 的不可变上下文
+  快照：
+  - Effective Stage Variables（按 [`variables.md`](variables.md) 在 dispatch 时解析并冻结）；
+  - 已加载的 Project Prompt body（按 key 在 dispatch 时读取）；
+  - runtime context（`workflow.runId`、`stage.name`、`work.*`、`issue.*`、`repository.*`、
+    `tasks.<id>.outputs.*`、`workspace.*`）；
+  - 适用时的 failure context（`failure.*`，仅恢复任务）。
+- Runner 在 manifest 校验之前、调用 Action 之前，从原始 `with` / `expect` 在该 attempt
+  快照上渲染本次执行的局部 inputs。渲染产生新结构，**不**修改 dispatch 携带的原始
+  `with` / `expect`，**不**写入持久化的 task 定义、Action `addTasks` 定义或 retry 来源。
+- 渲染完成后再走 manifest 校验、`working-directory` 解析和 Action 调用。Action 只接收
+  渲染并校验后的单一输入通道，**不**接收 raw input、Variables resource 或完整 dispatch
+  context。
 
-attempt 的 context snapshot 在 Runner 接受该 attempt 后固定。已经开始的 attempt 不因
-Variables 或 Prompt 更新而改变；尚未派发的 task，以及 retry 或 recovery 创建的新 attempt，
-重新取得当前 context。Runner 不在 Action 执行中再次向 Server 拉取更新后的 Variables。
+attempt 一经 dispatch，其上下文快照在该 attempt 生命周期内保持不变；后续对 Variables、
+Prompts、Profile Definition 或 stage overlay 的修改只影响尚未 dispatch 的 task，以及后续
+attempt（retry、recovery continuation、rerun-from-stage）。已经派发的 attempt 不因事后
+修改而改变。
 
-## Task configuration expansion
+## 模板表达式规则
 
-`tasks[*].with` 和 task-level `expect` 可以包含 `${{ }}` 表达式。Runner 使用本次 attempt 的
-context snapshot 统一展开：
+下表是所有 attempt 共享的求值规则，规则由 Runner 在渲染阶段执行；dispatch 阶段不参与
+求值：
 
 ```text
 ${{ path }} 占据整个值      -> 替换为对应值并保留 JSON 类型
 其他可解析表达式           -> 替换为对应 dispatch context
-${{ prompts.<key> }}       -> 替换为该 attempt 读取到的 Prompt body
+${{ prompts.<key> }}       -> dispatch 时已按 Project Prompt key 加载 body，此处只参与
+                              与 `with` / `expect` 同一语法的求值
 字符串内嵌入的表达式       -> 值转文本拼入；解析不出值或值为对象/数组 -> 任务失败
 任一完整表达式解析不出值   -> 任务失败
 普通值                    -> 原样保留
@@ -39,26 +47,15 @@ ${{ prompts.<key> }}       -> 替换为该 attempt 读取到的 Prompt body
 嵌入拼接与 `\${{` 转义的作者可见语法以
 [docs 的模板表达式节](../../docs/workflow-definition.md#模板表达式) 为权威。
 
-Prompt body 不属于持久化的 task declaration。建立新 attempt 时按 key 读取当前 body，并与
-其它 context 一起固定；完整解析与 fallback 规则见
-[`../prompt-management.md`](../prompt-management.md)。
+`expect` 渲染后只作为 Workflow 拥有的完成契约，不进入 Action 输入通道。
 
-`${{ failure.* }}` 例外：Runner 构造 recovery handler task 时，只把绑定触发 attempt 的
-`failure.*` 就地展开。插入引擎的 task declaration 不再含该表达式；其中的 `vars.*`、
-`prompts.*` 和其它普通引用继续保持原样，在该恢复 task 自己的 attempt 开始时展开。
+## Deferred 渲染
 
-Variables 的解析、跨 scope merge 与动态生效语义见 [`variables.md`](variables.md)。
-Runner 局部生成的 rendered `with` 是 Action 唯一的变量与配置输入；Action 不再次读取
-Variables resource。`with` 内部不再做 same-key deep-merge，配置进入 Action 只能通过显式
-`options: ${{ vars.agent }}` 等整值 `${{ vars.* }}` 绑定。
-
-Action manifest 可以把确实需要传播模板的一个 input 声明为 `render: deferred`。Runner 对
-该 input 保留内部表达式，但仍通过同一个 manifest 校验和 Action input 通道传入；Action
-不会额外获得 raw task、Variables 或完整 context。其它 input 默认立即递归展开。
-
-`expect` 不支持 deferred rendering。Runner 在 Action 调用前单独展开，并在 Action 返回后
-作为 Workflow 拥有的 task 完成契约执行。它不进入 `with`，也不属于 Runtime-specific
-Action Input。
+`render: deferred` 是 Action manifest 输入字段上的声明：被声明的字段在 Runner 渲染阶段
+保持原值（含内部 `${{ ... }}`）原样进入 manifest 校验和 Action 调用；未声明 deferred 的
+字段在 Runner 渲染阶段按上面的规则递归展开，包括嵌套的对象与数组。Action 只能从
+deferred 字段读到保留的内部模板，**不**能从任何输入通道读到 raw `with` / `expect`、
+Variables resource 或完整 dispatch context。
 
 Runner 为每个 WorkItem 只解析一次 workspace，并把结果作为 `ActionContext.workDir` 交给
 Action。Action 不得从 `variables.workspace.path` 重新选择工作目录；后者只是 dispatch
@@ -68,34 +65,62 @@ context 的可见事实，不是第二个执行入口。
 无法完成模板展开，Runner 必须返回确定的 `invalid-input` 失败。已经 claim 的 TaskRun 必须
 以精确的 `workerId + workId` 报告失败；不得靠 poll redelivery 重试同一份确定无效的输入。
 
+## Prompt body 求值
+
+Prompt body 不属于持久化的 task input。Server 在 dispatch 时按 `prompts.<key>` 把 body
+加载进 attempt 快照；Runner 在渲染阶段对快照中的 body 做 `${{ ... }}` 求值，规则与
+`with` / `expect` 共享同一语法与失败语义。redelivery、retry 与 rerun 都基于自己的快照
+重新读取并渲染，因此一次 attempt 使用的 Prompt body 与该 attempt 的 dispatch 时刻绑定。
+
+## Effective Variables 解析
+
+Variables 的资源、跨 scope merge 与动态生效语义见 [`variables.md`](variables.md)。Server
+在 dispatch 时按当前 Stage 解析 Effective Stage Variables 并冻结为该 attempt 快照的一部分；
+Runner 不再读取 Variables resource，不在 dispatch 后拉取最新变量。`vars.*` 在 attempt
+整个生命周期内只在 attempt 快照里出现一次。
+
+`${{ failure.* }}` 由 Runner 构造恢复任务时就地展开——触发恢复的任务 output 只在 Runner
+手上，见 [`recovery.md`](recovery.md)。其余表达式（包括恢复任务里未与触发 attempt 绑定
+的其他 `vars.*`）继续保留原始声明，在该 attempt 的渲染阶段统一展开。
+
 ## Dispatch context
 
 作者可见的命名空间清单以 [docs 的模板表达式表](../../docs/workflow-definition.md#模板表达式)
-为权威；本表只补充实现侧来源：
+为权威；本表只补充实现侧来源与求值时机：
 
-| Variable | Source |
-|---|---|
-| `workflow.runId` | dispatch |
-| `stage.name` | dispatch |
-| `work.*` | dispatch；包括 `id`、`type`、`title`、`attempt` |
-| `work.approvalFeedback.*` | 仅由 ApprovalFeedback 产生的 task；包括 `id`、`stage`、`createdAt`、`summary` |
-| `issue.*` | Issue context；包括 `projectId`、`number`、`title`、`body` |
-| `repository.*` | Issue 的目标仓库引用；dispatch 时从 Project Repository resource 解析 |
-| `workspace.*` | Runner 执行时解析的 workspace |
-| `vars.*` | Effective Stage Variables |
-| `tasks.<id>.outputs.*` | previous task output |
-| `prompts.<key>` | Project Prompt；Server 建立 attempt context 时按 key 读取当前 body |
-| `failure.output` | 触发恢复的任务 output；runner 构造恢复任务时展开，仅恢复任务可用 |
-| `failure.error.code` | 触发恢复的 error code；仅恢复任务可用 |
-| `failure.error.message` | 触发恢复的可操作错误文案；仅恢复任务可用 |
+| Variable | Source | Timing |
+|---|---|---|
+| `workflow.runId` | dispatch | dispatch 时固定 |
+| `stage.name` | dispatch | dispatch 时固定 |
+| `work.*` | dispatch；包括 `id`、`type`、`title`、`attempt` | dispatch 时固定 |
+| `work.approvalFeedback.*` | 仅由 ApprovalFeedback 产生的 task；包括 `id`、`stage`、`createdAt`、`summary` | dispatch 时固定 |
+| `issue.*` | Issue context；包括 `projectId`、`number`、`title`、`body` | dispatch 时固定 |
+| `repository.*` | Issue 的目标仓库引用；dispatch 时从 Project Repository resource 解析 | dispatch 时固定 |
+| `workspace.*` | Runner 执行时解析的 workspace | Runner 执行入口 |
+| `vars.*` | Effective Stage Variables | dispatch 时解析并冻结为 attempt 快照的一部分 |
+| `tasks.<id>.outputs.*` | previous task output | dispatch 时固定 |
+| `prompts.<key>` | Project Prompt body；按 key 读取 | dispatch 时加载进快照；Runner 渲染阶段求值 |
+| `failure.output` | 触发恢复的任务 output；Runner 构造恢复任务时展开 | 仅恢复任务可用 |
+| `failure.error.code` | 触发恢复的 error code | 仅恢复任务可用 |
+| `failure.error.message` | 触发恢复的可操作错误文案 | 仅恢复任务可用 |
 
-Runtime context、Workflow Variables 与 Project Prompts 是三个独立命名空间。完整的
-dispatch/report 流程见 [`../runner.md`](../runner.md)。
+Runtime context、Workflow Variables 与 Project Prompts 是三个独立命名空间，attempt 快照中
+保留各自的来源与求值时机。完整的 dispatch / report 流程见 [`../runner.md`](../runner.md)。
 
 Effective Variables 只放在 `vars` 下，不把变量 key 复制成顶层裸名；Runtime context 也不
 写回或合并进 Variables。`work.approvalFeedback` 只随由该反馈产生的 task 存在，普通 task
 不携带。OpenSpec 目录不是 runtime context，由 Profile 与 Prompt 使用
 `openspec/changes/issue-${{ issue.number }}` 明文表达。
+
+## 校验时机
+
+Profile 保存/更新时的 catalog 校验只检查常量输入与 Action 契约（未知 `uses`、未知输入键、
+缺 `required`、常量输入的类型错），含模板表达式的输入只校验键名。dispatch 不再做
+Server 侧展开，模板表达式的值校验、类型校验与 required 校验在 Runner 渲染并应用
+manifest 后执行；不通过即 attempt 失败为 `invalid-input`，Action 不被调用。
+
+持久 WorkItem 的 `uses` 在 dispatch 命中已退役 Action 时仍按 dispatch 拒绝处理：Runner
+在 manifest 校验阶段识别到 tombstone，以 tombstone 指引文案失败为不可重试。
 
 ### 子 Issue Plan 的父背景
 
@@ -114,10 +139,3 @@ Repository 不进入 WorkflowRun snapshot 或 Run Variables。Issue 只保存目
 dispatch 使用该引用读取 Project Repository resource。未完成 Issue 会阻止目标 Repository
 的 git 地址或 base branch 被修改，因此同一个 WorkflowRun 的各次 dispatch 读取稳定的
 执行属性，而 WorkflowRun 不需要复制它们。完整规则见 [`../repositories.md`](../repositories.md)。
-
-## Status
-
-当前 Server 在生成 `WorkDispatch` 时先展开 `with` / `expect`，Runner 又把该展开值用于
-recovery continuation。这样 `retrySelf` 和后续人工 retry 会把旧 Variables 固化为新的 task
-declaration。issue #465 负责分离原始 declaration 与 attempt rendered input，并把 Runner
-收敛为唯一 task input 展开边界。

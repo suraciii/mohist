@@ -29,7 +29,7 @@ import {
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from "./pi/index.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
 import { loadBuildInfo } from "./build-info.js"
-import type { RenderedWorkItem } from "../core/types.js"
+import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 import {
@@ -74,7 +74,7 @@ interface AwaitingAckEntry {
  * work, the workflowRunId for workflow work. Matches the server-side
  * `workKey` convention (design/workflow/scheduling.md §Interfaces).
  */
-function workKey(work: RenderedWorkItem): string {
+function workKey(work: DispatchWorkItem): string {
   const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
   const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
   return `${ownerKind}:${ownerId}:${work.workId}`
@@ -139,7 +139,7 @@ export class RunnerHost {
   // and leaves awaitingAck only when the owner acks (Accepted or Stale).
   // The keys of both Maps together form the process's full poll report.
   private readonly inFlight = new Map<string, InFlightEntry>()
-  private readonly awaitingAck = new Map<string, { work: RenderedWorkItem; entry: AwaitingAckEntry }>()
+  private readonly awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
 
   constructor(
     private readonly options: RunnerOptions,
@@ -462,7 +462,7 @@ export class RunnerHost {
         continue
       }
 
-      let works: RenderedWorkItem[]
+      let works: DispatchWorkItem[]
       try {
         works = await this.pollOnce(signal)
       } catch (error) {
@@ -541,7 +541,7 @@ export class RunnerHost {
     return diagnostic ? `pi runtime not ready (${diagnostic.code}): ${diagnostic.message}` : "pi runtime not ready; skipping poll"
   }
 
-  private async pollOnce(signal: AbortSignal): Promise<RenderedWorkItem[]> {
+  private async pollOnce(signal: AbortSignal): Promise<DispatchWorkItem[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
       return await this.connection.poll(bounded.signal, this.pollReport())
@@ -573,7 +573,7 @@ export class RunnerHost {
    * a host teardown (SIGINT) still reaches the owner instead of aborting.
    */
   private async executeAndTransition(
-    work: RenderedWorkItem,
+    work: DispatchWorkItem,
     signal: AbortSignal,
     key: string,
   ): Promise<void> {
@@ -682,7 +682,7 @@ export class RunnerHost {
    * (re-thrown) without a synthesized result — the caller checks
    * `signal.aborted` before recording a failure.
    */
-  private async executeWork(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  private async executeWork(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
     // dispatches upload under `work.agentJobId`, workflow dispatches
     // under `work.workflowRunId`. Routing through a single uploadTaskLog

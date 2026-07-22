@@ -227,8 +227,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
         Assert.StartsWith("T-001.", dynamicTask.WorkId);
-        Assert.Contains("openai/gpt-5.4", dynamicTask.With);
+        Assert.Contains("${{ vars.agent }}", dynamicTask.With);
+        Assert.DoesNotContain("openai/gpt-5.4", dynamicTask.With);
         Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
+        Assert.NotNull(dynamicTask.Variables);
+        using var varsDoc = JsonDocument.Parse(dynamicTask.Variables!);
+        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("openai/gpt-5.4", agent.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -257,12 +262,17 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         Assert.StartsWith("T-001.", dynamicTask.WorkId);
         Assert.Contains("Implement feature", dynamicTask.With);
-        Assert.Contains("openai/gpt-5.4", dynamicTask.With);
+        Assert.Contains("${{ vars.agent }}", dynamicTask.With);
+        Assert.DoesNotContain("openai/gpt-5.4", dynamicTask.With);
         Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
+        Assert.NotNull(dynamicTask.Variables);
+        using var varsDoc = JsonDocument.Parse(dynamicTask.Variables!);
+        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("openai/gpt-5.4", agent.GetProperty("model").GetString());
     }
 
     [Fact]
-    public async Task StageWithAgentVariables_TaskAgentTemplateResolvesToStageAgentAtDispatch()
+    public async Task StageWithAgentVariables_TaskAgentTemplatePreservedAndSnapshotCarriesStageAgent()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
@@ -288,12 +298,15 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         Assert.StartsWith("ai-review.", task.WorkId);
         using var with = JsonDocument.Parse(task.With!);
-        var agent = with.RootElement.GetProperty("options");
-        Assert.Equal(JsonValueKind.Object, agent.ValueKind);
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
+        Assert.Equal("${{ vars.agent }}", with.RootElement.GetProperty("options").GetString());
         Assert.Equal("${{ prompts.review }}", with.RootElement.GetProperty("prompt").GetString());
         Assert.DoesNotContain("kimi-for-coding/k2p6", task.With);
+        Assert.DoesNotContain("openai/gpt-5.5", task.With);
+        Assert.NotNull(task.Variables);
+        using var varsDoc = JsonDocument.Parse(task.Variables!);
+        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -334,9 +347,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (task, _) = await PollWorkAnyAsync();
 
         Assert.StartsWith("T-001.", task.WorkId);
-        Assert.Contains("minimax-coding-plan/MiniMax-M3", task.With);
+        Assert.Contains("${{ vars.agent }}", task.With);
+        Assert.DoesNotContain("minimax-coding-plan/MiniMax-M3", task.With);
         Assert.DoesNotContain("old-coding/legacy", task.With);
         Assert.DoesNotContain("kimi-for-coding/k2p6", task.With);
+        Assert.NotNull(task.Variables);
+        using var varsDoc = JsonDocument.Parse(task.Variables!);
+        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -370,8 +388,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (task, _) = await PollWorkAnyAsync();
 
         Assert.StartsWith("T-001.", task.WorkId);
-        Assert.Contains("minimax-coding-plan/MiniMax-M3", task.With);
+        Assert.Contains("${{ vars.agent }}", task.With);
+        Assert.DoesNotContain("minimax-coding-plan/MiniMax-M3", task.With);
         Assert.DoesNotContain("old-coding/legacy", task.With);
+        Assert.NotNull(task.Variables);
+        using var varsDoc = JsonDocument.Parse(task.Variables!);
+        var agent = varsDoc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -559,98 +582,4 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Equal("Failed", status);
     }
 
-    [Fact]
-    public async Task RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue()
-    {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
-        [
-            new StageDefinition(
-                "build",
-                [new("load-tasks", "Load tasks", "spec/load")],
-                [new("check-1", "Check 1", "spec/check")],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "model-a" })
-                })
-        ]));
-
-        var (load, r1) = await PollWorkAnyAsync();
-
-        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
-            new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
-                    {"options":"${{ vars.agent }}"}
-                    """))
-            ]));
-
-        await ReportAsync(r1, load.WorkId, "completed");
-
-        var (dynamicTask, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
-        Assert.Contains("model-a", dynamicTask.With);
-
-        await ReportAsync(r2, dynamicTask.WorkId, "failed", "expected flaky");
-
-        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
-            Stages: new Dictionary<string, StageVariables>
-            {
-                ["build"] = new(JsonSerializer.SerializeToElement(new
-                {
-                    agent = new { type = "opencode", model = "model-b" }
-                }))
-            }));
-
-        await workflow.RetryAsync();
-
-        var (retriedTask, r3) = await PollWorkAnyAsync();
-        Assert.StartsWith("T-001.2", retriedTask.WorkId);
-        Assert.Contains("model-b", retriedTask.With);
-        Assert.DoesNotContain("model-a", retriedTask.With);
-
-        await ReportAsync(r3, retriedTask.WorkId, "completed");
-
-        var (check, r4) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(r4, check, "check-1");
-    }
-
-    [Fact]
-    public async Task RuntimeTaskWithBakedLiteral_Retry_UsesBakedValue()
-    {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
-        [
-            new StageDefinition(
-                "build",
-                [new("load-tasks", "Load tasks", "spec/load")],
-                [new("check-1", "Check 1", "spec/check")])
-        ]));
-
-        var (load, r1) = await PollWorkAnyAsync();
-
-        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
-            new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/opencode", JsonSerializer.Deserialize<JsonElement>("""
-                    {"options":{"type":"opencode","model":"model-a"}}
-                    """))
-            ]));
-
-        await ReportAsync(r1, load.WorkId, "completed");
-
-        var (dynamicTask, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("T-001.1", dynamicTask.WorkId);
-        Assert.Contains("model-a", dynamicTask.With);
-
-        await ReportAsync(r2, dynamicTask.WorkId, "failed", "expected flaky");
-
-        await workflow.RetryAsync();
-
-        var (retriedTask, r3) = await PollWorkAnyAsync();
-        Assert.StartsWith("T-001.2", retriedTask.WorkId);
-        Assert.Contains("model-a", retriedTask.With);
-        Assert.DoesNotContain("model-b", retriedTask.With);
-
-        await ReportAsync(r3, retriedTask.WorkId, "completed");
-
-        var (check, r4) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(r4, check, "check-1");
-    }
 }

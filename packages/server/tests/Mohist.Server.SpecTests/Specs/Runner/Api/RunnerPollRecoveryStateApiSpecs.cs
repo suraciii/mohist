@@ -60,6 +60,8 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                         id = "review",
                         title = "Review",
                         uses = "spec/review",
+                        with = new { options = "${{ vars.agent }}" },
+                        expect = new { markers = new[] { new { path = "review.md", failIf = "${{ vars.marker }}" } } },
                         recovery = new
                         {
                             budget = 2,
@@ -77,6 +79,10 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             var continuation = await PollAsync(runnerId);
             Assert.True(continuation.TryGetProperty("recoveryRemaining", out var continuationState));
             Assert.Equal(1, continuationState.GetInt32());
+            using var continuationWith = JsonDocument.Parse(continuation.GetProperty("with").GetString()!);
+            Assert.Equal("${{ vars.agent }}", continuationWith.RootElement.GetProperty("options").GetString());
+            using var continuationExpect = JsonDocument.Parse(continuation.GetProperty("expect").GetString()!);
+            Assert.Equal("${{ vars.marker }}", continuationExpect.RootElement.GetProperty("markers")[0].GetProperty("failIf").GetString());
         }
         finally
         {

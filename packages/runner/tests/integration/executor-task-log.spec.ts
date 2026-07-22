@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createDefaultRegistry } from "../../src/actions/registry.js"
-import type { RenderedWorkItem, WorkItemResult } from "../../src/core/types.js"
+import type { DispatchWorkItem, WorkItemResult } from "../../src/core/types.js"
 import { WorkExecutor } from "../../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../../src/runtime/git-probe.js"
 import { TaskLogCollector } from "../../src/runtime/task-log.js"
@@ -46,7 +46,7 @@ function buildExecutor(workspaceManager: WorkspaceManager = verifyOnlyWorkspaceM
   )
 }
 
-function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
+function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: "wf-task-log-integration",
     workId: "task-log-process-output",
@@ -59,7 +59,7 @@ function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem 
   }
 }
 
-async function runWith(work: RenderedWorkItem): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
+async function runWith(work: DispatchWorkItem): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
   const collector = new TaskLogCollector()
   const execution = await buildExecutor().executeWithLog(work, new AbortController().signal, collector)
   return { result: execution.result, collector: execution.collector }

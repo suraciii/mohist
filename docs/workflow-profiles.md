@@ -17,7 +17,8 @@ Issue 启动 Workflow 时确定本次运行使用的 Profile。之后更换 Issu
 
 Profile 内容不是运行时快照。编辑本次运行所选 Profile 时，新的 Definition 会用于之后
 进入的 Stage；已经进入的 Stage 和已经开始的 task 不被追溯改变。Variables 在每个 task
-开始前重新解析，Prompt 在实际执行时读取。
+开始前重新解析，Prompt 在实际执行时读取；这些 task 的输入在该 task 开始时确定，执行
+期间固定不变。
 
 Mohist 默认提供：
 

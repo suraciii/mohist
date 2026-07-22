@@ -504,11 +504,6 @@ public class WorkflowProfileManager : IScopedService
         return new PromptPreviewResult(rendered, missing, depth);
     }
 
-    public static Dictionary<string, JsonElement?>? ExpandTaskWith(
-        VariableBundle? effectiveVars,
-        Dictionary<string, JsonElement?>? taskWith) =>
-        TaskWithExpander.Expand(effectiveVars, taskWith);
-
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(
         MohistDbContext db, string projectId, string templateId)
     {
