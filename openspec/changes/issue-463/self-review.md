@@ -1,43 +1,38 @@
-# Self-Review — Issue 463
+# Self-Review — Issue 463 (pass 2)
 
 Reviewing `proposal.md`, `design.md`, `tasks.json`, and `specs/` against the issue.
 
+## Prior findings — verified fixed
+
+- **P1 (activity-state spec wording):** `agent-session-followup-activity-state` Requirement 1 now consistently says "new **active** round", the body clarifies "active/thinking round, not the mere rendering of the prompt," and the mechanism parenthetical is mechanism-agnostic. It now matches design D3. ✓
+- **P2 (web `model.resolved` field):** a "Web model.resolved event carries `resolvedModel`" requirement+scenario was added to `agent-session-model-resolution-event`; design D2/Context, proposal (What Changes/Capability/Impact), and T-002 (description, acceptance, output, notes) all now cover aligning the web live-event type to `resolvedModel`. ✓
+
 ## Verified correct (no change needed)
 
-- **D1 delivery premise holds.** Transcript events ARE filtered by the per-connection subscription set (`SignalRTranscriptEventPublisher.cs:49` → `ShouldNotify`). Adding `session.followup_completed`/`session.followup_failed` to the web canonical set unblocks delivery. T-001 is sound.
-- **T-002 upload premise holds.** Pi runtime events reach the server transcript: collected into `events` (`pi.ts:122`) and reported via `reportWithTerminalSignal` (`pi.ts:147`); the agent-job path uploads per-event (`agent-job-executor.ts:136-153`). So a Pi `model.resolved` will be accumulated and surface through the summary. (Note for implementers: Pi reports turn facts at turn end, not streamed — acceptable, not a regression.)
-- **D3 rationale holds.** The follow-up input is enqueued before the terminal in every path (`followup-handler.ts:91` before `:106`), so refreshing `LastDataAt` on the input would leave the session active after `session.followup_failed` and break the recovery invariant (`AgentSessionRecoveryGrainSpecs.cs:322`). The web-side reconciliation is the correct call.
-- **Coverage.** All three issue acceptance criteria map to tasks (T-001, T-002, T-003). Issue Non-Goals (no followup-flow refactor, no change to the terminal local-fallback) are respected. `tasks.json` is valid JSON with an acyclic, strictly-lower-priority dependency graph.
+- D1 delivery premise holds — transcript events are filtered by the per-connection subscription set (`SignalRTranscriptEventPublisher.cs:49`).
+- T-002 upload premise holds — Pi runtime events reach the server transcript (`pi.ts:122,147`; `agent-job-executor.ts:136-153`).
+- D3 rationale holds — the follow-up input is enqueued before the terminal in every path, so server-side `LastDataAt` refresh would break the recovery invariant (`AgentSessionRecoveryGrainSpecs.cs:322`).
+- `tasks.json` is valid JSON with an acyclic, strictly-lower-priority DAG; every spec requirement has ≥1 `#### Scenario` with SHALL + WHEN/THEN. All three issue acceptance criteria map to tasks.
 
-## Problems that must be fixed
+## Problem that must be fixed
 
-### P1 — Activity-state spec scenario contradicts the chosen design (spec ↔ design inconsistency)
+### P3 — Follow-up terminal spec/task conflates a follow-up-operation terminal with a session terminal
 
-`specs/agent-session-followup-activity-state/spec.md`, Requirement 1, Scenario 1 reads:
+A follow-up terminal is **operation-scoped**, not session-scoped. The server maps `session.followup_completed` / `session.followup_failed` to `TranscriptPartTypes.Status` and uses them only to terminate the follow-up *lease* (`AgentSessionGrain.cs:729-730`, `TerminatesFollowupLease` at `:1352`), never to close the session. Only `session.closed` makes a session globally terminal. The recovery spec even proves the session is reported `inactive` — not `failed` — after `session.followup_failed` (`AgentSessionRecoveryGrainSpecs.cs:322`). A session stays usable for further follow-ups after either terminal.
 
-> **WHEN** the web presents a follow-up user input as a new round
-> **THEN** the session's reported status SHALL be active
+Despite this, the plan asserts the **session** flips to a global terminal:
 
-Read literally ("new round" = any rendered follow-up round), this demands the session be `active` whenever a follow-up round is rendered. But `design.md` D3 deliberately renders the follow-up prompt as a round while the session is inactive, gating only the active/thinking indicator on runtime response events. So the scenario, read literally, contradicts D3 — and the only way to satisfy it would be to refresh server activity on the follow-up input, which D3 rejects because it breaks the recovery invariant.
+- `specs/agent-session-followup-terminal-visibility/spec.md`, Requirement "Web converges session state on a follow-up terminal event":
+  - Scenario "Completed follow-up converges to completed state" → "the session's presented state SHALL become completed"
+  - Scenario "Failed follow-up converges to failed state" → "the session's presented state SHALL become failed"
+- `tasks.json` T-001 acceptance criterion: "On receiving `session.followup_completed` the session's presented state becomes completed; on `session.followup_failed` it becomes failed".
 
-The requirement body text uses "new **active** round" consistently; Scenario 1 dropped "active". An implementer or test author reading Scenario 1 literally would write `render follow-up round ⇒ assert status active`, which cannot pass under D3.
+This contradicts both the server's behavior and T-001's own description / design D1, which say the right thing: "close the in-flight follow-up **round** to the corresponding outcome … invalidate the `agent-session`/`agent-activity` queries so the session card/list **refetches the server-derived status**". An implementer following the spec scenarios would flip the session card/list to "completed"/"failed" on every follow-up — a visible bug (a ready-for-next-follow-up session shown as finished, or a still-usable session shown as globally failed).
 
-**Fix:** tighten Scenario 1 to "presents a follow-up user input as a new **active** round" (matching the requirement body and D3), so the spec unambiguously expresses: the active/thinking presentation — not the mere rendering of the prompt — is what must agree with the active status.
-
-### P2 — Residual web field-name inconsistency for `model.resolved` (scope gap on symptom #2)
-
-The issue frames symptom #2 as a **three-layer field-naming** inconsistency ("字段在 runner、server、web 三层命名不一致"). The plan unifies the runner (Pi) and server to `resolvedModel` (D2), and the web *summary/read model* already reads `resolvedModel`. However the web's **live** `model.resolved` event type still declares the wrong field:
-
-- `packages/web/src/entities/agent/model/types.ts:105` → `'model.resolved': SessionRuntimeBase & { model: string }`
-
-The runner emits `resolvedModel` (`event-projection.ts:114,264`), so this web event type is inconsistent with what the runner sends and with the rest of the web. There is no active live consumer today (no `onAgentEvent('model.resolved')` handler), so it is latent rather than user-visible right now — but it is precisely the runner↔web naming inconsistency the issue calls out, and the proposal's capability statement promises "one consistent type and field across … web."
-
-The plan never mentions this type and even asserts "OpenCode path is unchanged," leaving the inconsistency in place.
-
-**Fix:** either align the web `model.resolved` event type to `resolvedModel` (recommended — it is the issue's stated concern and the runner already sends `resolvedModel`), or explicitly scope it out in `design.md`/`tasks.json` with rationale. As written, the capability under-delivers on its own end-to-end consistency claim.
+**Fix:** reword the "Web converges session state …" requirement and its two scenarios (and T-001's matching acceptance criterion) so that the in-flight follow-up **round/operation** converges to completed/failed, and the session's presented **status is refreshed from the server** (reflecting activity/inactivity, not a global completed/failed terminal). The session SHALL NOT become globally completed/failed from a follow-up terminal.
 
 ## Verdict
 
-P1 is a spec↔design contract defect with real implementation-misdirection risk; P2 is a scope gap on one of the issue's three named symptoms. Both are concrete and fixable before building.
+P3 is a correctness defect in the spec contract that is contradicted by the server's own behavior and would produce a visible UI bug if implemented as written. It must be fixed before building.
 
 <promise>FAIL</promise>
