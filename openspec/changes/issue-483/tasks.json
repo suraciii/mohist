@@ -12,9 +12,9 @@
         "Finished Turns leave the logical Session idle with its Runtime binding intact; missing bindings, unknown activity, Follow-up, Cancel, Compact, and Reset use the specified eligibility rules without changing TaskRun or AgentJob work results.",
         "Follow-up reservations persist stable operation and new-Turn identities, atomically record admitted input facts, retain ambiguous delivery for reconciliation, and never automatically resend uncertain Runtime input.",
         "The EF schema and startup migration group legacy Follow-up transcript facts by operation, atomically write admitted plus started for each persisted input, and project unprovable in-flight execution as `unknown` without an admitted fact.",
-        "A migration-only Server resolver consumes one Runner migration-resolution record per legacy Follow-up group, acknowledges an already migrated admitted pair idempotently, and otherwise records delivery-unconfirmed without accepting any legacy runtime event name.",
+        "A version-2-only Server migration resolver remains admissible across restart and after initial cutover, consumes one Runner migration-resolution record per legacy Follow-up group, acknowledges an already migrated admitted pair idempotently, and otherwise records delivery-unconfirmed without accepting any legacy runtime event name.",
         "Runner registration, heartbeat, runtime-event upload, poll, and Hub tracking require `sessionProtocolVersion: 2`; missing or mismatched versions return `runner_session_protocol_incompatible`, leave the runner unavailable, and cannot receive Session commands.",
-        "Server unit and spec coverage exercises Turn invariants, command gates, Follow-up state convergence, legacy-event rejection, migrated transcript state, and matching/mismatched Runner protocol admission; `npm test` passes."
+        "Server unit and spec coverage exercises Turn invariants, command gates, Follow-up state convergence, legacy-event rejection, migrated transcript state, matching/mismatched Runner protocol admission, and a late upgraded Runner resolving a record after Server restart; `npm test` passes."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -34,9 +34,9 @@
         "Runner Follow-up handling emits admitted, rejected, or delivery-unconfirmed facts with the original operation and Turn identities; it never emits legacy Follow-up terminal events or re-invokes an ambiguous Runtime operation.",
         "Cancel and failure paths report confirmed Turn outcomes only; inability to confirm Runtime stop leaves the Server able to project `unknown` rather than receiving a fabricated terminal event.",
         "The outbox replaces each v1 Follow-up group with one ordered, durable migration-resolution record before it becomes ready; it preserves group identity and acknowledgement semantics, never emits admitted itself, and invokes no duplicate Runtime input.",
-        "The Server migration resolver classifies each migration-resolution record against migrated transcript evidence, returns the existing admitted-plus-started pair only for a persisted input, and otherwise atomically records delivery-unconfirmed for absent-input, unusable-identity, and failed-only groups.",
+        "The indefinitely admissible version-2-only Server migration resolver classifies each migration-resolution record against migrated transcript evidence, returns the existing admitted-plus-started pair only for a persisted input, and otherwise atomically records delivery-unconfirmed for absent-input, unusable-identity, and failed-only groups.",
         "The host supplies `sessionProtocolVersion: 2` on registration, heartbeat, and Hub setup, and treats protocol incompatibility as a permanent unavailable state that prevents outbox drain, polling, and Session-command handling.",
-        "Runner unit/spec coverage covers both runtimes, workflow and AgentJob paths, active/idle Follow-up, ambiguity, cancellation, every legacy Follow-up group classification, v1 outbox crash recovery, matching/mismatched protocol admission, and legacy-event removal; `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass."
+        "Runner unit/spec coverage covers both runtimes, workflow and AgentJob paths, active/idle Follow-up, ambiguity, cancellation, every legacy Follow-up group classification, v1 outbox crash recovery, matching/mismatched protocol admission, late upgrade after Server restart, and legacy-event removal; `npm run typecheck -w packages/runner` and `npm test -w packages/runner` pass."
       ],
       "priority": 2,
       "mode": "AFK",

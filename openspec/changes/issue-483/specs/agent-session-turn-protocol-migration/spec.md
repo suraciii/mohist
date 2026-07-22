@@ -13,7 +13,7 @@ The upgrade SHALL convert pending Runner runtime-event outbox records to the Tur
 - **THEN** it is delivered or reconciled under its stable operation identity without creating a second Runtime input side effect
 
 ### Requirement: Legacy Follow-up conversion preserves paired facts
-The Server migration and Runner outbox converter SHALL group legacy Follow-up records by Session target and `operationId`, retaining their original sequence order. The Runner MUST replace each group with one durable `migration.followup.resolve` control record and MUST NOT classify a group as admitted itself. A persisted legacy Follow-up input MUST derive `turnId` from its `operationId` and atomically record `followup.admitted` followed by `turn.started` with placement `new-turn`. The Server migration resolver MUST convert a group with no persisted input, no usable operation identity, or only failed delivery evidence to `followup.delivery.unconfirmed` with a deterministic migration identity and `attemptedPlacement: new-turn`; it MUST NOT become admitted or rejected.
+The Server migration and Runner outbox converter SHALL group legacy Follow-up records by Session target and `operationId`, retaining their original sequence order. The Runner MUST replace each group with one durable `migration.followup.resolve` control record and MUST NOT classify a group as admitted itself. The Server SHALL accept that version-2-only, idempotent migration command indefinitely, including after restart and from a Runner upgraded after initial cutover, while continuing to reject all legacy event names. A persisted legacy Follow-up input MUST derive `turnId` from its `operationId` and atomically record `followup.admitted` followed by `turn.started` with placement `new-turn`. The Server migration resolver MUST convert a group with no persisted input, no usable operation identity, or only failed delivery evidence to `followup.delivery.unconfirmed` with a deterministic migration identity and `attemptedPlacement: new-turn`; it MUST NOT become admitted or rejected.
 
 #### Scenario: A persisted legacy Follow-up input is converted
 - **WHEN** the Server migration finds a legacy Follow-up input with `operationId` in an existing transcript
@@ -22,6 +22,10 @@ The Server migration and Runner outbox converter SHALL group legacy Follow-up re
 #### Scenario: A legacy Follow-up input was never persisted
 - **WHEN** a Runner sends a `migration.followup.resolve` record for a group with no matching persisted legacy Follow-up input
 - **THEN** the Server records delivery-unconfirmed with a deterministic operation and Turn identity, creates no admitted or input fact, and never resends the Runtime input
+
+#### Scenario: A Runner upgrades after the initial cutover
+- **WHEN** a Runner was offline during initial deployment, later upgrades to version 2, and loads a converted Follow-up migration record
+- **THEN** the Server accepts and idempotently resolves the record after restart without accepting any legacy runtime event name
 
 ### Requirement: Protocol-version admission gate
 Server and Runner SHALL use `sessionProtocolVersion: 2` on Runner registration, heartbeat, runtime-event upload, poll, and RunnerHub connection setup. The Server MUST reject a mismatched or missing version with `runner_session_protocol_incompatible`, must not track that Runner connection, and must not admit its execution traffic. A mismatched Runner MUST keep its outbox undrained and not accept Session commands until a matching registration succeeds.
