@@ -30,33 +30,33 @@ Mohist Agent。
 **Git Actions**:工作区准备、rebase、rebase 状态、merge readiness 和 push 的显式 `with`
 输入契约。
 
-- [`mohist/workspace-prepare`](git.md#mohist/workspace-prepare)
-- [`mohist/rebase`](git.md#mohist/rebase)
-- [`mohist/rebase-status`](git.md#mohist/rebase-status)
-- [`mohist/merge-ready`](git.md#mohist/merge-ready)
-- [`mohist/push`](git.md#mohist/push)
+- [`mohist/workspace-prepare`](git.md#mohistworkspace-prepare)
+- [`mohist/rebase`](git.md#mohistrebase)
+- [`mohist/rebase-status`](git.md#mohistrebase-status)
+- [`mohist/merge-ready`](git.md#mohistmerge-ready)
+- [`mohist/push`](git.md#mohistpush)
 
 **GitHub PR Actions**:PR 创建、ready、checks、状态校验和 squash merge 的显式 `with`
 输入契约。
 
-- [`mohist/create-github-pr`](github-pr.md#mohist/create-github-pr)
-- [`mohist/mark-github-pr-ready`](github-pr.md#mohist/mark-github-pr-ready)
-- [`mohist/merge-github-pr`](github-pr.md#mohist/merge-github-pr)
-- [`mohist/github-pr-checks`](github-pr.md#mohist/github-pr-checks)
-- [`mohist/github-pr-status`](github-pr.md#mohist/github-pr-status)
+- [`mohist/create-github-pr`](github-pr.md#mohistcreate-github-pr)
+- [`mohist/mark-github-pr-ready`](github-pr.md#mohistmark-github-pr-ready)
+- [`mohist/merge-github-pr`](github-pr.md#mohistmerge-github-pr)
+- [`mohist/github-pr-checks`](github-pr.md#mohistgithub-pr-checks)
+- [`mohist/github-pr-status`](github-pr.md#mohistgithub-pr-status)
 
 **Core Actions**:进程、内联脚本、文件存在性检查和标记检查。
 
-- [`core/process`](core.md#core/process)
-- [`core/script`](core.md#core/script)
-- [`core/artifact-exists`](core.md#core/artifact-exists)
-- [`core/marker`](core.md#core/marker)
+- [`core/process`](core.md#coreprocess)
+- [`core/script`](core.md#corescript)
+- [`core/artifact-exists`](core.md#coreartifact-exists)
+- [`core/marker`](core.md#coremarker)
 
 **OpenSpec Actions**:加载 `tasks.json`、核查 OpenSpec change 产物和归档 change。
 
-- [`mohist/openspec-tasks`](openspec.md#mohist/openspec-tasks)
-- [`mohist/openspec-artifacts`](openspec.md#mohist/openspec-artifacts)
-- [`mohist/archive-change`](openspec.md#mohist/archive-change)
+- [`mohist/openspec-tasks`](openspec.md#mohistopenspec-tasks)
+- [`mohist/openspec-artifacts`](openspec.md#mohistopenspec-artifacts)
+- [`mohist/archive-change`](openspec.md#mohistarchive-change)
 
 Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
 
