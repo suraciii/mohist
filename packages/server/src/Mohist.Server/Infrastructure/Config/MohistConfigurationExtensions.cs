@@ -51,13 +51,16 @@ public static class MohistConfigurationExtensions
         // natively without any preprocessing.
         builder.AddJsonFile(source =>
         {
-            source.Path = configPath;
             source.Optional = optional;
             source.ReloadOnChange = reloadOnChange;
-            source.FileProvider = fileProvider;
             if (fileProvider is null)
             {
-                source.ResolveFileProvider();
+                ConfigurePhysicalConfigSource(source, configPath, CreatePollingFileProvider);
+            }
+            else
+            {
+                source.Path = configPath;
+                source.FileProvider = fileProvider;
             }
             source.OnLoadException = ctx =>
             {
@@ -71,4 +74,24 @@ public static class MohistConfigurationExtensions
 
         return builder;
     }
+
+    internal static void ConfigurePhysicalConfigSource(
+        JsonConfigurationSource source,
+        string configPath,
+        Func<string, IFileProvider> createFileProvider)
+    {
+        var fullPath = Path.GetFullPath(configPath);
+        var directory = Path.GetDirectoryName(fullPath)!;
+
+        source.Path = Path.GetFileName(fullPath);
+        source.FileProvider = createFileProvider(directory);
+    }
+
+    private static IFileProvider CreatePollingFileProvider(string rootPath) =>
+        new PhysicalFileProvider(rootPath)
+        {
+            // Preserve hot reload without recursively registering every directory under ~/.mohist.
+            UsePollingFileWatcher = true,
+            UseActivePolling = true
+        };
 }
