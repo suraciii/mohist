@@ -1,0 +1,77 @@
+{
+  "project": "mohist-local",
+  "description": "Bound the cost of POST /otel/api/query: reject oversized request bodies before buffering, interrupt SQLite execution on budget exhaustion or client cancel, and cap responses to 1000 rows / 4 MiB with a structured truncation indicator.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "OTel HTTP query admission: body-size cap and stable error codes",
+      "spec": "specs/otel-http-query-admission/spec.md#oversized-request-bodies-are-rejected-before-full-buffering",
+      "description": "Add a small, explicit request body-size cap to POST /otel/api/query, enforced via a Content-Length pre-check plus a per-route Kestrel request size limit so an oversized body is rejected with a structured 413 (code query_request_too_large) before being buffered or parsed. The body-size limit is a public const on TraceQuerier (mirroring MaxListLimit), NOT an OtelOptions property, so it cannot be weakened via config. Tighten the existing admission rejections (non-SELECT, multi-statement, write, missing/malformed SQL) to assert their stable ApiResponse codes, preserving the existing SELECT/WITH-only keyword layer and the physically read-only connection backstop. Add an ApiResults.PayloadTooLarge helper for the 413 path. All admission tests are bundled here.",
+      "acceptanceCriteria": [
+        "POST /otel/api/query with a body larger than the configured maximum returns HTTP 413 with ApiResponse code query_request_too_large, and the body is not fully materialized into memory before the rejection.",
+        "Bodies at or below the limit proceed to JSON parsing and SELECT/WITH validation without a 413.",
+        "Non-SELECT, multi-statement (e.g. SELECT 1; DROP TABLE traces), and write attempts (DELETE/INSERT/DROP/ALTER/ATTACH/PRAGMA) return HTTP 400 with stable codes query_not_select or query_sqlite_error.",
+        "Missing SQL and malformed JSON return HTTP 400 with codes query_missing_sql and query_malformed respectively.",
+        "Admission tests assert on ApiResponse code fields (not human-readable body text) and use no wall-clock assertions.",
+        "The misnamed existing test PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode is renamed/clarified during test-hardening to reflect that ATTACH is rejected at the keyword layer with code query_not_select (matching the reframed admission scenario), not as a read-only-engine bypass.",
+        "dotnet build Mohist.sln succeeds (warnings-as-errors) and the server spec tests for the OTel query routes pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Api/OtelQueryRoutes.cs, packages/server/src/Mohist.Server/Api/ApiResponse.cs, a body-size public const on packages/server/src/Mohist.Server/Otel/TraceQuerier.cs, and updated admission tests in packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the body-size const small (~64 KiB) and place it on TraceQuerier alongside MaxListLimit, NOT on OtelOptions (OtelOptions properties are config-overridable via Mohist:Otel and would weaken the safety bound). Leave OtelDb.OpenReadOnlyConnection and TraceQuerier.ValidateSelectOnly unchanged; this task only adds the front-of-handler body gate and hardens admission error codes. The SELECT/WITH-only and read-only invariant is preserved behavior, verified by existing tests."
+    },
+    {
+      "id": "T-002",
+      "title": "OTel query execution budget: real SQLite interruption, the executor seam, and the QueryResult contract",
+      "spec": "specs/otel-query-execution-budget/spec.md#query-execution-is-bounded-by-a-mechanism-that-actually-interrupts-sqlite-work",
+      "description": "Bound query execution by a cancellation mechanism that actually interrupts SQLite, and introduce the testing seam that makes it verifiable without wall-clock. Add a server-side IOtelQueryExecutor seam (mirroring the CLI's IOtelQueryExecutor) with TraceQuerier as the production implementation; the /query route calls IOtelQueryExecutor.Execute(sql, linkedCt). The production executor injects TimeProvider, links the request-aborted token with timeProvider.CreateCancellationTokenSource(executionBudget), registers raw.sqlite3_interrupt(connection.Handle) (null-guarded) on the linked token, and keeps CommandTimeout only as SQLITE_BUSY defense-in-depth. Introduce the QueryResult { Rows, Truncated, TruncateReason } return type for the seam (Truncated stays false here; truncation logic is T-003) and switch the route handler plus existing integration tests to read data.rows. Map budget exhaustion to ApiResponse code query_execution_budget_exhausted; client disconnect produces no response. Add the execution-budget public const to TraceQuerier, update DI registration and doc comments (retire stale Decision 5/8 citations), and add a Handle-visibility guard test. All execution-budget tests are bundled here.",
+      "acceptanceCriteria": [
+        "A server-side IOtelQueryExecutor seam exists; TraceQuerier is its production implementation and the OtlpRoutesWebApplicationFactory test fixture registers a FakeOtelQueryExecutor that blocks on a TaskCompletionSource until its cancellation token fires.",
+        "A query that exceeds the execution budget has its running sqlite3_step interrupted via sqlite3_interrupt and the read-only connection is released (verifiable at the reader/connection level).",
+        "Client abort of the HTTP request cancels the in-flight reader via the request-aborted token and releases the connection; no rows are consumed after the abort and no response body is sent to the disconnecting caller.",
+        "CommandTimeout remains only as a SQLITE_BUSY lock-wait cap; the execution-budget mechanism is independent of it and is the primary long-query bound.",
+        "Budget exhaustion returns a structured error with code query_execution_budget_exhausted and never returns a partial row array presented as a complete result.",
+        "The real sqlite3_interrupt wiring is verified deterministically: a production-executor test seeds a large bounded recursive-CTE row set, advances FakeTimeProvider past the budget while the query is in-flight, and asserts the reader terminated early (did not consume all rows) and the connection was disposed — no Stopwatch, no Thread.Sleep, no wall-clock duration assertion. The route-level contract (budget -> query_execution_budget_exhausted, client cancel -> connection released) is verified through the FakeOtelQueryExecutor seam.",
+        "SQLitePCL.raw resolves at compile time (add a direct SQLitePCLRaw.core PackageReference using the central Directory.Packages.props version if the transitive does not surface), and a guard test asserts SqliteConnection.Handle is non-null on an open in-memory connection so a future library update that changes visibility fails loudly.",
+        "ExecuteBoundedQuery replaces (not overloads) ExecuteRawQuery; the three existing ExecuteRawQuery_* unit tests in TraceQuerierSpecs.cs (SelectAllRows, AggregateCount, NullCell) are migrated onto ExecuteBoundedQuery asserting QueryResult.Rows and a non-truncated result, and no ExecuteRawQuery method or ExecuteRawQuery_* test remains (no old/new coexistence).",
+        "dotnet build Mohist.sln succeeds (warnings-as-errors) and the server spec + unit tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Otel/TraceQuerier.cs (QueryResult, IOtelQueryExecutor seam, ExecuteBoundedQuery with interruption, execution-budget const), packages/server/src/Mohist.Server/Api/OtelQueryRoutes.cs (route switchover to IOtelQueryExecutor + linked token), DI registration, packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtlpRoutesWebApplicationFactory.cs (FakeOtelQueryExecutor), and execution-budget tests under packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "SqliteConnection.Handle is public in Microsoft.Data.Sqlite 11, so no reflection is needed; the guard test protects against a future visibility change. SqliteCommand.Cancel() is an explicit no-op and CommandTimeout only fires on SQLITE_BUSY lock contention, so sqlite3_interrupt is the only path that actually stops a running query. The banned-API rules forbid System.TimeProvider.System and new CancellationTokenSource(TimeSpan), so the budget timer must go through the injected TimeProvider. The IOtelQueryExecutor seam is required because real Microsoft.Data.Sqlite reads against the in-memory fixture complete before any fake-clock advance, leaving no in-flight reader to interrupt; the fake executor lets the route contract be tested deterministically, and the production executor against a large bounded recursive CTE verifies the real interrupt wiring by outcome (not duration)."
+    },
+    {
+      "id": "T-003",
+      "title": "OTel HTTP query response bound: row/byte caps and truncation indicator",
+      "spec": "specs/otel-http-query-response-bound/spec.md#http-query-responses-are-bounded-to-at-most-1000-rows",
+      "description": "Fill in the response bounds on the QueryResult-producing ExecuteBoundedQuery introduced in T-002: cap responses to 1000 rows and 4 MiB serialized JSON, applied during the read loop with per-row serialized-byte accounting and a column-bytes peek for pathological single cells, stopping before either limit is exceeded. Populate QueryResult.Truncated and TruncateReason ('row_limit' | 'byte_limit'). Add the row and byte public consts to TraceQuerier. Add truncation coverage (large row count, single large cell, many moderate rows, recursive CTE); confirm mo otel query CLI is unaffected. All response-bound tests are bundled here.",
+      "acceptanceCriteria": [
+        "A SELECT that would return more than 1000 rows returns exactly 1000 rows in data.rows with truncated=true and truncate_reason='row_limit'.",
+        "A single very large cell value, and many moderately-sized rows under the 1000-row cap, each stop before the serialized response exceeds 4 MiB and set truncate_reason='byte_limit'.",
+        "A recursive CTE that amplifies row production is bounded by whichever limit is hit first, with the corresponding truncate_reason.",
+        "Non-truncated responses carry no truncation indicator; truncated responses are complete well-formed JSON and are never presented as an empty array.",
+        "mo otel query is unaffected: no row/byte bounds and no truncation indicator on the CLI path, verified by a regression assertion that the CLI executor behavior is unchanged.",
+        "Truncation tests introduce no wall-clock assertions; dotnet build Mohist.sln succeeds (warnings-as-errors) and the server spec tests pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Otel/TraceQuerier.cs (row/byte caps + truncation logic + consts), and truncation tests in packages/server/tests/Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs and TraceQuerierSpecs.cs",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Builds on the QueryResult type and ExecuteBoundedQuery skeleton introduced in T-002 (Truncated is false until this task implements the caps). Per-row byte accounting must peek the column byte length before materializing oversized cells so a SELECT repeat('x', ...) cannot force an oversized allocation. The row (1000) and byte (4 MiB) caps are public consts on TraceQuerier, NOT OtelOptions properties, so they cannot be weakened via config."
+    }
+  ]
+}

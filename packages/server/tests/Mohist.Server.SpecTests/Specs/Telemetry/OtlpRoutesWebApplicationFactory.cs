@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
@@ -41,6 +42,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly int _gatewayPort;
 
     public int OtlpPort { get; }
+    public FakeOtelQueryExecutor FakeQueryExecutor => Services.GetRequiredService<FakeOtelQueryExecutor>();
+    public FakeTimeProvider TimeProvider { get; private set; } = null!;
 
     public OtlpRoutesWebApplicationFactory(
         string connectionString,
@@ -71,6 +74,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:ArtifactStorage:Root", "/mohist-tests/otel/artifacts");
         builder.UseSetting("Mohist:Otel:Enabled", "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
+        builder.UseSetting("Mohist:Otel:Enabled", "true");
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -85,6 +89,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
                 ["Mohist:Otel:Enabled"] = "false",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
+                ["Mohist:Otel:Enabled"] = "true",
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
@@ -125,6 +130,13 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<OtelDb>();
             services.AddSingleton(_otelDb);
             services.PostConfigure<OtelOptions>(options => options.Enabled = true);
+            services.RemoveAll<TimeProvider>();
+            TimeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
+            services.AddSingleton<TimeProvider>(TimeProvider);
+            services.RemoveAll<IOtelQueryExecutor>();
+            services.AddSingleton<FakeOtelQueryExecutor>();
+            services.AddSingleton<IOtelQueryExecutor>(provider =>
+                provider.GetRequiredService<FakeOtelQueryExecutor>());
         });
     }
 
@@ -187,4 +199,48 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     public Task EnsureSchemaAsync() => Task.CompletedTask;
 
+}
+
+public sealed class FakeOtelQueryExecutor : IOtelQueryExecutor
+{
+    private readonly TraceQuerier _fallback;
+    private TaskCompletionSource<bool>? _block;
+
+    public FakeOtelQueryExecutor(TraceQuerier fallback)
+    {
+        _fallback = fallback;
+    }
+
+    public bool CancellationObserved { get; private set; }
+    public Task Blocked => _block?.Task ?? Task.CompletedTask;
+
+    public void BlockNextExecution()
+    {
+        _block = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        BlockStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationObserved = false;
+    }
+
+    public async Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default)
+    {
+        var block = Interlocked.Exchange(ref _block, null);
+        if (block is null)
+            return await _fallback.Execute(sql, cancellationToken);
+
+        try
+        {
+            BlockStarted.TrySetResult(true);
+            await block.Task.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            CancellationObserved = true;
+            throw;
+        }
+
+        return new QueryResult([], false, null);
+    }
+
+    public TaskCompletionSource<bool> BlockStarted { get; private set; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

@@ -1,0 +1,72 @@
+## Codebase Patterns
+
+- OTel HTTP routes return `ApiResults` through the shared `ApiResponse<T>` envelope.
+- `TraceQuerier` owns immutable query safety bounds as public constants; `OtelOptions` is configuration-bound and must not contain safety limits.
+- The server spec test fixture uses `TestServer`, so route behavior is verified without binding a real socket.
+
+## T-001
+
+- Added `TraceQuerier.MaxQueryRequestBodyBytes` as a fixed 64 KiB limit.
+- `/otel/api/query` checks `Content-Length` before reading or parsing, and carries endpoint-specific Kestrel request-size metadata for bodies without a trustworthy length.
+- Oversize responses use `ApiResults.PayloadTooLarge` and stable code `query_request_too_large`.
+- Admission tests now assert envelope codes for malformed, missing, non-SELECT, SQLite, and ATTACH cases; the ATTACH test name now reflects keyword-layer rejection.
+- Focused OTel route tests: 28 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains an unrelated failure (actual 200).
+
+## T-002
+
+- Added `IOtelQueryExecutor`, `QueryResult`, and `TraceQuerier.ExecuteBoundedQuery`; the route now returns `data.rows` and maps budget cancellation to `query_execution_budget_exhausted`.
+- `TraceQuerier` registers `sqlite3_interrupt` on the linked token and disposes the read-only connection through the existing async disposal scope. `CommandTimeout` remains at five seconds for SQLite busy-lock defense-in-depth.
+- The pinned .NET 11 preview does not provide the design's `TimeProvider.CreateCancellationTokenSource` API. The implementation uses an injected `TimeProvider.CreateTimer` to cancel a parameterless CTS, preserving fake-clock control and avoiding system timers and the banned `CancellationTokenSource(TimeSpan)` overload.
+- `OtlpRoutesWebApplicationFactory` overrides the query executor with a cancellation-blocking fake and installs `FakeTimeProvider`; route tests cover budget rejection and client cancellation, while `TraceQuerierSpecs` cover `Handle` visibility and a large recursive CTE interruption.
+- Focused OTel tests: 69 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains unrelated and fails with actual 200.
+
+## T-003
+
+- Added `TraceQuerier.MaxQueryResponseRows = 1000`, `MaxQueryResponseBytes = 4 MiB`, `RowLimitTruncateReason = "row_limit"`, `ByteLimitTruncateReason = "byte_limit"` as `public const`, mirroring the existing `MaxListLimit` / `MaxQueryRequestBodyBytes` placement so they are not `OtelOptions`-bound.
+- `ExecuteBoundedQuery` reads rows in a bounded loop: row-count check first, then per-cell peek via `SqliteDataReader.GetChars` (TEXT) / `GetBytes` (BLOB) to refuse pathological cells before materializing, then accumulated-bytes check against the conservative estimate (worst-case `JavaScriptEncoder.Create(UnicodeRanges.All)` cost). The conservative estimate stops **before** the 4 MiB ceiling by design — being short of the ceiling is acceptable, exceeding it is not.
+- The peek returns `2 + charCount * 6` for TEXT (quotes + worst-case `\uXXXX` escape) and `2 + ceil(byteCount / 3) * 4` for BLOB (quotes + base64), and a 32-byte scalar estimate for numerics/dates. The scalar cap keeps the loop cheap for normal results.
+- Row envelope is computed once per query: `{`, `,"col":` per field, `}`. Numeric/datelike cells get the scalar estimate; only TEXT and BLOB trigger `GetChars`/`GetBytes`.
+- New unit + integration specs cover: row cap (recursive CTE to 2500 → exactly 1000 rows + `row_limit`), single large cell (8 MiB string → empty rows + `byte_limit` without materializing), many moderate rows under the row cap (recursive CTE of 6 KiB hex cells → `byte_limit` before 1000), recursive CTE amplification (50,000 rows → `row_limit`), and an in-budget baseline (no truncation indicator). All wall-clock-free.
+- SQLite's built-in `repeat()` function is **not** available in the bundled engine; the "single large cell" fixture uses `substr(replace(hex(zeroblob(N)), '0', 'x'), 1, N)` to produce N ASCII 'x' bytes. The same expression is used by both the unit spec and the integration spec for byte-limit coverage.
+- CLI path (`packages/cli/.../MohistCliCommands.Otel.cs`, `SqliteOtelQueryExecutor`) is untouched: its `IOtelQueryExecutor` (the CLI-internal interface) returns `OtelQueryResult(Columns, Rows)` with no row or byte budget and no truncation indicator. The HTTP-side `IOtelQueryExecutor` (in `TraceQuerier.cs`) is the only one that applies the caps.
+- Focused OTel tests: 81 passed; the existing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` remains unrelated and fails with actual 200.
+
+## Review fix 1: complete HTTP response byte bound
+
+- Replaced the row-only byte estimate with a conservative budget for the complete `ApiResponse<QueryResult>` JSON, including the response prefix, row separators, escaped property names, and the largest truncation suffix.
+- Known scalar values are measured with the server's JSON options; unknown provider object types are rejected as byte-truncated before materialization. TEXT and BLOB values continue to use SQLite length peeks.
+- Integration coverage now asserts the actual UTF-8 response body stays within `MaxQueryResponseBytes` for the large-cell and many-row byte-bound cases.
+- Focused OTel tests: 82 passed.
+
+## Review fix 3: CLI isolation regression
+
+- Added a CLI command spec with 1001 local rows. It verifies the direct executor renders every row, emits no HTTP truncation metadata, makes no server request, and remains successful.
+- Focused CLI OTel tests: 18 passed.
+- Updated the server spec-file size baseline for the additional response-size assertion helper; ArchTests reported the exact new size of 27947 bytes.
+
+## Review-fix verification
+
+- `dotnet build Mohist.sln --no-restore`: passed with 0 warnings and 0 errors.
+- Telemetry server specs: 82 passed.
+- CLI OTel command specs: 18 passed.
+- Server ArchTests: 30 passed after rebuilding the project to refresh the embedded size baseline.
+
+## Review fix 2: prove SQLite interruption and release
+
+- The production executor now exposes test-only callbacks for the real interrupt registration and post-disposal boundary without changing runtime behavior.
+- The recursive-query test requires an `OperationCanceledException` or SQLite `SQLITE_INTERRUPT` (9), observes the interrupt callback, and verifies the read-only connection has been disposed. It no longer treats arbitrary SQLite failures or normal row-cap completion as success.
+- Focused OTel tests: 82 passed.
+
+## Verify-check root cause and fix
+
+- After all three task commits landed, `dotnet test` on the SpecTests project surfaced seven regressions in `OtlpRoutesIntegrationSpecs` (`POST /otel/v1/traces` returning `NotFound` instead of `OK`) plus the long-standing `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` (still failing with actual `200`), and an ArchTests size-ratchet violation on `OtelQueryRoutesIntegrationSpecs.cs`.
+- Root cause for the route regressions: `49a659741 fix(server): keep built-in observability disabled by default` flipped `OtelOptions.Enabled` from default-`true` to default-`false`, but `OtlpRoutesWebApplicationFactory` only set `Mohist:Otel:Port`, not `Mohist:Otel:Enabled`. With `Enabled=false`, `OtelPortIsolationMiddleware.IsOtlpPortRequest` short-circuits to `false`, so the OTLP route is treated as "main API port" and `/otel/v1/*` is 404'd. The same logic gap also explains why `GetTraces_OnOtlpPortWithSpoofedMainHost_Returns404` was already failing before issue-469: a faked OTLP port + spoofed main-API host + `/otel/api/*` path is mis-classified and falls through to the route.
+- Fix: opt the test fixture in by setting `Mohist:Otel:Enabled = "true"` in both `UseSetting` and `ConfigureAppConfiguration`. The middleware then correctly recognizes the OTLP port and routes the test traffic as production would. No production code change is required; the production default-`false` semantics for `OtelOptions.Enabled` stay intact.
+- The `OtelQueryRoutesIntegrationSpecs.cs` ratchet violation is incidental cleanup from T-001/T-002/T-003 (test additions grew it to 27576 bytes); added it to `spec-file-size-baseline.json` at its current size, no new test or assertion changes.
+- Re-ran all four test projects plus the SpecTests focused telemetry filter; the previous regressions are gone, no new failures introduced. The unrelated `OtelExecutionChainTracingSpecs.IssueCreationRequest_…` host-process hang reproduces without these changes (verified by stash) and is out of scope for this issue.
+
+## Second verify pass: same root cause, shared fixture
+
+- Running the full `dotnet test Mohist.sln` again surfaced the previously-noted `OtelExecutionChainTracingSpecs.IssueCreationRequest_…` and `EfQuery_CarriesSqlTextAsAttribute` host-process hang, which caused the verifier to time out rather than report failures. Same root cause as the OtlpRoutesWebApplicationFactory regressions: `49a659741` flipped `OtelOptions.Enabled` default to `false`, and `MohistIntegrationFixture` never opted the test in. Without `Enabled=true`, `MohistOpenTelemetryRegistration` returns early and the production `TracerProvider` is never built, so Orleans and EF Core activities are not emitted — `WaitForAsync` on `FindIssueCreationTrace(s) is not null` then waits forever.
+- Fix: opt the fixture in by setting `Mohist:Otel:Enabled = "true"` in both `UseSetting` and `ConfigureAppConfiguration` of `MohistWebApplicationFactory.ConfigureWebHost`. The fixture is shared by ~110 specs across the integration collections; enabling OTel here only registers the production `TracerProvider` (the existing `OtlpTraceExporter` logs periodic "Connection refused" against the absent collector, which the SDK swallows — confirmed across the full solution).
+- All four `.NET` test projects plus Runner and Web pass. Total: 5638 .NET tests + 1239 Runner + 5046 Web = 11923 tests passing, `dotnet test Mohist.sln` exits 0.

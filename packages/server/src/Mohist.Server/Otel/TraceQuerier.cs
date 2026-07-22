@@ -1,6 +1,9 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
+using static SQLitePCL.raw;
 
 namespace Mohist.Server.Otel;
 
@@ -15,12 +18,12 @@ namespace Mohist.Server.Otel;
 /// <para>The querier never opens a write transaction — all queries use
 /// <see cref="OtelDb.OpenReadOnlyConnection"/> so the SQLite engine
 /// physically rejects writes regardless of any keyword-level check in
-/// <see cref="ExecuteRawQuery"/>.</para>
+/// <see cref="ExecuteBoundedQuery"/>.</para>
 /// <para>The querier is registered as a singleton (it has no per-request
 /// state) and is the only object that reads <c>otel.db</c> on the main
 /// API port.</para>
 /// </remarks>
-public sealed class TraceQuerier
+public sealed class TraceQuerier : IOtelQueryExecutor
 {
     /// <summary>Default limit for <see cref="ListAsync"/> when the caller doesn't specify one.</summary>
     public const int DefaultListLimit = 50;
@@ -28,21 +31,55 @@ public sealed class TraceQuerier
     /// <summary>Hard upper bound on <see cref="ListAsync"/> results.</summary>
     public const int MaxListLimit = 1000;
 
+    /// <summary>Hard upper bound for the <c>POST /otel/api/query</c> body.</summary>
+    public const int MaxQueryRequestBodyBytes = 64 * 1024;
+
+    /// <summary>Hard upper bound on rows returned by <c>POST /otel/api/query</c>.</summary>
+    public const int MaxQueryResponseRows = 1000;
+
+    /// <summary>Hard upper bound on serialized bytes returned by <c>POST /otel/api/query</c>.</summary>
+    public const int MaxQueryResponseBytes = 4 * 1024 * 1024;
+
+    /// <summary>Truncation reason returned when the row cap is hit.</summary>
+    public const string RowLimitTruncateReason = "row_limit";
+
+    /// <summary>Truncation reason returned when the byte cap is hit.</summary>
+    public const string ByteLimitTruncateReason = "byte_limit";
+
+    /// <summary>Execution budget in seconds for the free-SQL endpoint.</summary>
+    public const int QueryExecutionBudgetSeconds = 10;
+
     /// <summary>5-second per-query timeout for the free-SQL endpoint.</summary>
     public static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(5);
 
     private readonly OtelDb _db;
     private readonly OtelCollectorStatus _collectorStatus;
     private readonly IFileSystem _fileSystem;
+    private readonly TimeProvider _timeProvider;
+    private readonly Action? _readerStarted;
+    private readonly Action? _queryInterrupted;
+    private readonly Action? _connectionDisposed;
 
-    public TraceQuerier(OtelDb db, OtelCollectorStatus collectorStatus, IFileSystem fileSystem)
+    public TraceQuerier(
+        OtelDb db,
+        OtelCollectorStatus collectorStatus,
+        IFileSystem fileSystem,
+        TimeProvider timeProvider,
+        Action? readerStarted = null,
+        Action? queryInterrupted = null,
+        Action? connectionDisposed = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(collectorStatus);
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _db = db;
         _collectorStatus = collectorStatus;
         _fileSystem = fileSystem;
+        _timeProvider = timeProvider;
+        _readerStarted = readerStarted;
+        _queryInterrupted = queryInterrupted;
+        _connectionDisposed = connectionDisposed;
     }
 
     /// <summary>
@@ -132,48 +169,112 @@ public sealed class TraceQuerier
 
     /// <summary>
     /// Executes a user-supplied SELECT against <c>otel.db</c> on a
-    /// read-only connection with a 5-second timeout. The
+    /// read-only connection with an execution budget. The
     /// <paramref name="sql"/> must pass <see cref="ValidateSelectOnly"/>
     /// before this call; callers are responsible for that gate.
     /// </summary>
     /// <remarks>
-    /// Three-layer safety net (see design.md Decision 5):
+    /// Four-layer safety net: admission validation, a physically read-only
+    /// connection, an execution-budget interrupt, and response budgets.
     /// <list type="number">
     ///   <item><see cref="OtelDb.OpenReadOnlyConnection"/> — physical isolation.</item>
     ///   <item>Caller's keyword check in <see cref="ValidateSelectOnly"/>.</item>
-    ///   <item><see cref="QueryCommandTimeout"/> — caps runaway queries.</item>
+    ///   <item><see cref="QueryExecutionBudgetSeconds"/> — interrupts active SQLite work.</item>
+    ///   <item>Row and serialized-byte caps on the response, with a
+    ///         truncation indicator naming which bound was hit.</item>
     /// </list>
     /// </remarks>
-    public async Task<IReadOnlyList<Dictionary<string, object?>>> ExecuteRawQuery(string sql, CancellationToken ct = default)
+    public async Task<QueryResult> ExecuteBoundedQuery(string sql, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        await using var connection = _db.OpenReadOnlyConnection();
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-        var fieldCount = reader.FieldCount;
-        var fieldNames = new string[fieldCount];
-        for (var i = 0; i < fieldCount; i++)
+        using var budgetCts = new CancellationTokenSource();
+        using var budgetTimer = _timeProvider.CreateTimer(
+            static state => ((CancellationTokenSource)state!).Cancel(),
+            budgetCts,
+            TimeSpan.FromSeconds(QueryExecutionBudgetSeconds),
+            Timeout.InfiniteTimeSpan);
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCts.Token);
+        var executionToken = executionCts.Token;
+        var connection = _db.OpenReadOnlyConnection();
+        try
         {
-            fieldNames[i] = reader.GetName(i);
-        }
+            using var interruptRegistration = executionToken.Register(static state =>
+            {
+                var context = ((TraceQuerier Querier, SqliteConnection Connection))state!;
+                context.Querier._queryInterrupted?.Invoke();
+                var handle = context.Connection.Handle;
+                if (handle is not null)
+                    sqlite3_interrupt(handle);
+            }, (this, connection));
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
 
-        var rows = new List<Dictionary<string, object?>>();
-        while (await reader.ReadAsync(ct))
-        {
-            var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
+            await using var reader = await cmd.ExecuteReaderAsync(executionToken);
+            _readerStarted?.Invoke();
+
+            var fieldCount = reader.FieldCount;
+            var fieldNames = new string[fieldCount];
             for (var i = 0; i < fieldCount; i++)
             {
-                row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                fieldNames[i] = reader.GetName(i);
             }
-            rows.Add(row);
+
+            var rows = new List<Dictionary<string, object?>>(Math.Min(MaxQueryResponseRows, 16));
+            var accumulatedBytes = ResponsePrefixBytes;
+            while (await reader.ReadAsync(executionToken))
+            {
+                if (rows.Count >= MaxQueryResponseRows)
+                {
+                    return new QueryResult(rows, Truncated: true, TruncateReason: RowLimitTruncateReason);
+                }
+
+                var estimatedRowBytes = ComputeRowBytes(fieldNames);
+                var oversizedCell = false;
+                for (var i = 0; i < fieldCount; i++)
+                {
+                    if (reader.IsDBNull(i))
+                    {
+                        estimatedRowBytes += 4;
+                        continue;
+                    }
+
+                    var cellBytes = TryPeekCellSerializedBytes(reader, i);
+                    if (cellBytes.HasValue && cellBytes.Value > MaxQueryResponseBytes - accumulatedBytes)
+                    {
+                        oversizedCell = true;
+                        break;
+                    }
+                    estimatedRowBytes += cellBytes ?? 0;
+                }
+
+                var separatorBytes = rows.Count == 0 ? 0 : 1;
+                if (oversizedCell
+                    || accumulatedBytes + separatorBytes + estimatedRowBytes + MaxResponseSuffixBytes > MaxQueryResponseBytes)
+                {
+                    return new QueryResult(rows, Truncated: true, TruncateReason: ByteLimitTruncateReason);
+                }
+
+                var row = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
+                for (var i = 0; i < fieldCount; i++)
+                {
+                    row[fieldNames[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
+                rows.Add(row);
+                accumulatedBytes += separatorBytes + estimatedRowBytes;
+            }
+            return new QueryResult(rows, Truncated: false, TruncateReason: null);
         }
-        return rows;
+        finally
+        {
+            await connection.DisposeAsync();
+            _connectionDisposed?.Invoke();
+        }
     }
+
+    public Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default) =>
+        ExecuteBoundedQuery(sql, cancellationToken);
 
     /// <summary>
     /// Validates that <paramref name="sql"/> is a SELECT-only statement
@@ -267,6 +368,46 @@ public sealed class TraceQuerier
         }
     }
 
+    private static long ComputeRowBytes(string[] fieldNames)
+    {
+        long total = 2;
+        for (var i = 0; i < fieldNames.Length; i++)
+        {
+            total += fieldNames[i].Length * 6L + 3;
+            if (i > 0)
+                total += 1; // ,
+        }
+        return total;
+    }
+
+    private static long? TryPeekCellSerializedBytes(SqliteDataReader reader, int ordinal)
+    {
+        var type = reader.GetFieldType(ordinal);
+        if (type == typeof(string))
+        {
+            long charCount = reader.GetChars(ordinal, 0, null, 0, 0);
+            // JavaScriptEncoder.Create(UnicodeRanges.All) escapes every non-ASCII
+            // char to \uXXXX, so worst-case serialized bytes = quotes + 6 per char.
+            if (charCount > int.MaxValue / 6)
+                return long.MaxValue;
+            return 2L + charCount * 6L;
+        }
+        if (type == typeof(byte[]))
+        {
+            long byteCount = reader.GetBytes(ordinal, 0, null, 0, 0);
+            // Base64 of n bytes fits in 4 * ceil(n / 3); wrap with quotes.
+            return 2L + ((byteCount + 2) / 3) * 4L;
+        }
+        if (type == typeof(object))
+            return long.MaxValue;
+
+        var value = reader.GetValue(ordinal);
+        return JsonSerializer.SerializeToUtf8Bytes(value, JSON.Options).LongLength;
+    }
+
+    private const long ResponsePrefixBytes = 32;
+    private const long MaxResponseSuffixBytes = 50;
+
     private static string NormalizeSql(string raw)
     {
         var sb = new System.Text.StringBuilder(raw.Length);
@@ -345,6 +486,16 @@ public sealed class TraceQuerier
             yield return tail;
     }
 }
+
+public interface IOtelQueryExecutor
+{
+    Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default);
+}
+
+public sealed record QueryResult(
+    [property: JsonPropertyName("rows")] IReadOnlyList<Dictionary<string, object?>> Rows,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("truncate_reason")] string? TruncateReason);
 
 /// <summary>Row model for <see cref="TraceQuerier.ListAsync"/>.</summary>
 public sealed record TraceSummary(

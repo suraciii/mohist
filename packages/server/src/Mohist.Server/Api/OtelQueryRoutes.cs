@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,15 +21,16 @@ namespace Mohist.Server.Api;
 /// <remarks>
 /// <para>All three endpoints wrap their payload in the standard
 /// <see cref="ApiResponse{T}"/> envelope used by the rest of
-/// <c>/api/*</c>, per design.md Decision 8 — the OTLP ingest endpoint
-/// is the only OTel surface that bypasses the envelope.</para>
+/// <c>/api/*</c>; the OTLP ingest endpoint is the only OTel surface that
+/// bypasses the envelope.</para>
 /// <para>The free-SQL endpoint
 /// (<c>POST /otel/api/query</c>) sits behind a three-layer safety net
-/// (design.md Decision 5): a top-level keyword allow-list enforced by
+/// a top-level keyword allow-list enforced by
 /// <see cref="TraceQuerier.ValidateSelectOnly"/>, the
 /// <see cref="OtelDb.ReadOnlyConnectionString"/> opened by the querier
-/// (physically refuses writes), and a 5-second <c>CommandTimeout</c>
-/// baked into <see cref="TraceQuerier.QueryCommandTimeout"/>.</para>
+/// (physically refuses writes), an injected execution budget that interrupts
+/// active SQLite work, and <see cref="TraceQuerier.QueryCommandTimeout"/>
+/// as lock-wait defense-in-depth.</para>
 /// </remarks>
 public static class OtelQueryRoutes
 {
@@ -63,11 +65,19 @@ public static class OtelQueryRoutes
 
         group.MapPost("/query", async (
             HttpRequest request,
-            TraceQuerier querier,
+            IOtelQueryExecutor queryExecutor,
             ILoggerFactory loggerFactory,
+            TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("Mohist.Server.Api.OtelQueryRoutes");
+
+            if (request.ContentLength > TraceQuerier.MaxQueryRequestBodyBytes)
+            {
+                return ApiResults.PayloadTooLarge(
+                    "Query request body is too large.",
+                    "query_request_too_large");
+            }
 
             string body;
             using (var reader = new StreamReader(request.Body))
@@ -75,6 +85,13 @@ public static class OtelQueryRoutes
                 try
                 {
                     body = await reader.ReadToEndAsync(ct);
+                }
+                catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+                {
+                    logger.LogDebug(ex, "The /otel/api/query request body is too large.");
+                    return ApiResults.PayloadTooLarge(
+                        "Query request body is too large.",
+                        "query_request_too_large");
                 }
                 catch (IOException ex)
                 {
@@ -109,13 +126,41 @@ public static class OtelQueryRoutes
                 return ApiResults.BadRequest(rejection, "query_not_select");
             }
 
-            IReadOnlyList<Dictionary<string, object?>> rows;
+            using var budgetCts = new CancellationTokenSource();
+            using var budgetTimer = timeProvider.CreateTimer(
+                static state => ((CancellationTokenSource)state!).Cancel(),
+                budgetCts,
+                TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds),
+                Timeout.InfiniteTimeSpan);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCts.Token);
+
+            QueryResult result;
             try
             {
-                rows = await querier.ExecuteRawQuery(parsed.Sql, ct);
+                result = await queryExecutor.Execute(parsed.Sql, linkedCts.Token);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (budgetCts.IsCancellationRequested)
+            {
+                return ApiResults.BadRequest(
+                    "Query execution exceeded its budget.",
+                    "query_execution_budget_exhausted");
             }
             catch (SqliteException ex)
             {
+                if (ct.IsCancellationRequested)
+                    throw;
+
+                if (budgetCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                {
+                    return ApiResults.BadRequest(
+                        "Query execution exceeded its budget.",
+                        "query_execution_budget_exhausted");
+                }
+
                 // Includes "no such table" / "syntax error" /
                 // "attempt to write a readonly database" — the SQLite
                 // engine is the ultimate source of truth on these.
@@ -136,8 +181,8 @@ public static class OtelQueryRoutes
                     "query_failed");
             }
 
-            return ApiResults.Ok(rows);
-        });
+            return ApiResults.Ok(result);
+        }).WithMetadata(new RequestSizeLimitAttribute(TraceQuerier.MaxQueryRequestBodyBytes));
 
         return app;
     }

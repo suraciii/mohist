@@ -175,7 +175,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PostQuery_SelectCount_ReturnsArrayEnvelope()
+    public async Task PostQuery_SelectCount_ReturnsQueryResultEnvelope()
     {
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
         SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
@@ -192,12 +192,99 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.True(doc.RootElement.GetProperty("success").GetBoolean());
         var data = doc.RootElement.GetProperty("data");
-        Assert.Equal(1, data.GetArrayLength());
-        Assert.Equal(2L, data[0].GetProperty("total").GetInt64());
+        var rows = data.GetProperty("rows");
+        Assert.Equal(1, rows.GetArrayLength());
+        Assert.Equal(2L, rows[0].GetProperty("total").GetInt64());
+        Assert.False(data.GetProperty("truncated").GetBoolean());
+        Assert.False(data.TryGetProperty("truncate_reason", out _));
     }
 
     [Fact]
-    public async Task PostQuery_NonSelectStatement_Returns400()
+    public async Task PostQuery_ExecutionBudget_ReturnsStructuredErrorAndCancelsExecutor()
+    {
+        var executor = _factory.FakeQueryExecutor;
+        executor.BlockNextExecution();
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1\"}", Encoding.UTF8, "application/json");
+
+        var responseTask = client.PostAsync(QueryPath, content);
+        await executor.BlockStarted.Task;
+        _factory.TimeProvider.Advance(TimeSpan.FromSeconds(TraceQuerier.QueryExecutionBudgetSeconds));
+
+        using var response = await responseTask;
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_execution_budget_exhausted", await ReadCodeAsync(response));
+        Assert.True(executor.CancellationObserved);
+    }
+
+    [Fact]
+    public async Task PostQuery_ClientCancellationCancelsExecutorWithoutResponseBody()
+    {
+        var executor = _factory.FakeQueryExecutor;
+        executor.BlockNextExecution();
+        using var client = _factory.CreateMainApiClient();
+        using var requestCancellation = new CancellationTokenSource();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1\"}", Encoding.UTF8, "application/json");
+
+        var responseTask = client.PostAsync(QueryPath, content, requestCancellation.Token);
+        await executor.BlockStarted.Task;
+        requestCancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await responseTask);
+        Assert.True(executor.CancellationObserved);
+    }
+
+    [Fact]
+    public async Task PostQuery_BodyAtLimit_ProceedsToJsonAndAdmission()
+    {
+        using var client = _factory.CreateMainApiClient();
+        var prefix = "{\"sql\":\"SELECT 1\",\"padding\":\"";
+        var suffix = "\"}";
+        var paddingLength = TraceQuerier.MaxQueryRequestBodyBytes -
+            Encoding.UTF8.GetByteCount(prefix) - Encoding.UTF8.GetByteCount(suffix);
+        var body = prefix + new string('x', paddingLength) + suffix;
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.NotEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostQuery_OversizedBody_Returns413WithStableCodeBeforeParsing()
+    {
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            new string('x', TraceQuerier.MaxQueryRequestBodyBytes + 1),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal("query_request_too_large", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task PostQuery_MultiStatementWithNonSelectTail_Returns400WithStableCode()
+    {
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT 1; DROP TABLE traces\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task PostQuery_NonSelectStatement_Returns400WithStableCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -208,8 +295,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SELECT", body);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
     }
 
     [Theory]
@@ -219,7 +305,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     [InlineData("ALTER TABLE traces ADD COLUMN x TEXT")]
     [InlineData("ATTACH DATABASE 'x.db' AS x")]
     [InlineData("PRAGMA writable_schema = 1")]
-    public async Task PostQuery_VariousNonSelectStatements_Returns400(string sql)
+    public async Task PostQuery_VariousNonSelectStatements_Returns400WithStableCode(string sql)
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -230,8 +316,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SELECT", body);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -243,8 +328,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("sql", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_missing_sql", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -256,8 +340,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("sql", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_missing_sql", await ReadCodeAsync(response));
     }
 
     [Fact]
@@ -268,10 +351,11 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_malformed", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_SqlSyntaxError_Returns400WithSqliteMessage()
+    public async Task PostQuery_SqlSyntaxError_Returns400WithSqliteErrorCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -282,12 +366,11 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("SQLite error", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_sqlite_error", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_NoSuchTable_Returns400WithNoSuchTableMessage()
+    public async Task PostQuery_NoSuchTable_Returns400WithSqliteErrorCode()
     {
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
@@ -298,20 +381,12 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("no such table", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("query_sqlite_error", await ReadCodeAsync(response));
     }
 
     [Fact]
-    public async Task PostQuery_InsertBypassingKeywordCheck_RejectedByReadOnlyMode()
+    public async Task PostQuery_AttachStatement_RejectedByKeywordLayer()
     {
-        // The keyword check rejects "INSERT" at the HTTP layer (400),
-        // but the read-only mode is the physical backstop. This test
-        // proves the latter: even an artificial SELECT-statement that
-        // tries to write through ATTACH/INSERT inside a CTE-style
-        // construct fails because the connection itself refuses.
-        // SQLite rejects ATTACH on a read-only connection at the
-        // engine level before the keyword filter even fires.
         using var client = _factory.CreateMainApiClient();
         using var content = new StringContent(
             "{\"sql\":\"ATTACH DATABASE ':memory:' AS attached\"}",
@@ -320,6 +395,132 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         using var response = await client.PostAsync(QueryPath, content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("query_not_select", await ReadCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task PostQuery_MoreThanRowCap_ReturnsRowLimitTruncationIndicator()
+    {
+        const int target = TraceQuerier.MaxQueryResponseRows + 500;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + target + ") " +
+                  "SELECT x FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_SingleLargeCell_ReturnsByteLimitTruncationIndicator()
+    {
+        const int oversizedChars = 6 * 1024 * 1024;
+        var sql = "SELECT substr(replace(hex(zeroblob(" + oversizedChars + ")), '0', 'x'), 1, " + oversizedChars + ") AS big";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected OK but got {(int)response.StatusCode}: {responseBody}");
+        AssertResponseWithinByteCap(responseBody);
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal(0, data.GetProperty("rows").GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_ModerateRowsUnderRowCap_TruncatesByByteLimit()
+    {
+        const int rowCount = TraceQuerier.MaxQueryResponseRows;
+        const int cellBytes = 6 * 1024;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + rowCount + ") " +
+                  "SELECT hex(randomblob(" + (cellBytes / 2) + ")) AS payload FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+        AssertResponseWithinByteCap(responseBody);
+        using var doc = JsonDocument.Parse(responseBody);
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.True(rows.GetArrayLength() < TraceQuerier.MaxQueryResponseRows);
+        Assert.True(rows.GetArrayLength() > 0);
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("byte_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_RecursiveCteAmplification_BoundedByFirstLimitReached()
+    {
+        const int target = 50_000;
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < " + target + ") " +
+                  "SELECT x FROM cnt;";
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"" + sql + "\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        var rows = data.GetProperty("rows");
+        Assert.Equal(TraceQuerier.MaxQueryResponseRows, rows.GetArrayLength());
+        Assert.True(data.GetProperty("truncated").GetBoolean());
+        Assert.Equal("row_limit", data.GetProperty("truncate_reason").GetString());
+    }
+
+    [Fact]
+    public async Task PostQuery_WithinBothCaps_OmitsTruncationIndicator()
+    {
+        SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
+
+        using var client = _factory.CreateMainApiClient();
+        using var content = new StringContent(
+            "{\"sql\":\"SELECT service_name FROM traces\"}",
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await client.PostAsync(QueryPath, content);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.False(data.GetProperty("truncated").GetBoolean());
+        Assert.False(data.TryGetProperty("truncate_reason", out var reason) && reason.ValueKind != JsonValueKind.Null);
     }
 
     [Fact]
@@ -442,5 +643,19 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         cmd.Parameters.AddWithValue("$start_time", startTime);
         cmd.Parameters.AddWithValue("$end_time", endTime);
         cmd.ExecuteNonQuery();
+    }
+
+    private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
+    {
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("code").GetString();
+    }
+
+    private static void AssertResponseWithinByteCap(string responseBody)
+    {
+        Assert.InRange(
+            Encoding.UTF8.GetByteCount(responseBody),
+            0,
+            TraceQuerier.MaxQueryResponseBytes);
     }
 }
