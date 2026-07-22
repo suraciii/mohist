@@ -102,7 +102,7 @@ export class AgentJobExecutor {
   }
 
   private async executeOpenCode(
-    work: RenderedWorkItem,
+    work: DispatchWorkItem,
     signal: AbortSignal,
     payload: JsonObject | null,
     composed: string,
@@ -159,7 +159,7 @@ export class AgentJobExecutor {
   }
 
   private async executePi(
-    work: RenderedWorkItem,
+    work: DispatchWorkItem,
     signal: AbortSignal,
     payload: JsonObject | null,
     composed: string,
@@ -308,7 +308,7 @@ interface AgentSessionEventSink {
 
 function createAgentSessionEventSink(
   connection: ServerConnection,
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   signal: AbortSignal,
   agentSessionId: string | null,
 ): AgentSessionEventSink {
