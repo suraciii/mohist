@@ -226,3 +226,8 @@
 ### Out of scope (noted, not done)
 
 - No changes were made to the decision surface; its disabled behavior remains owned by the sibling decision-surface work.
+
+## Verification Repair
+
+- `npm run test:ci -w packages/web` initially failed in `check:test-boundaries`, not Vitest: `WorkflowSessionsPanel.test.tsx` had 553 lines, exceeding the 500-line test budget. The growth came from the T-003 shared-Select interaction coverage.
+- Split the filter/select interaction tests into `WorkflowSessionsPanel.filters.test.tsx`; the original suite is now below the enforced budget and all filter assertions remain covered in the new suite.
