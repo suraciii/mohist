@@ -62,6 +62,8 @@ describe('useEventsConnection subscription behavior', () => {
     const subscribed = subscribeCall!.args[0] as string[]
     expect(subscribed).toEqual([...EVENT_TYPES])
     expect(subscribed).toContain(TRANSCRIPT_EVENT_TYPES[0])
+    expect(subscribed).toContain('session.followup_completed')
+    expect(subscribed).toContain('session.followup_failed')
     expect(subscribed).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound)
     expect(subscribed.length).toBe(EVENT_TYPES.length)
   })

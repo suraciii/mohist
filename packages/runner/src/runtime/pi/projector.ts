@@ -33,7 +33,8 @@ export function createPiProjector(runtimeSessionId: string, workDir: string, mas
         case "compaction_end": return emit("compaction_event", id, { phase: "completed", error: event.errorMessage })
         case "auto_retry_start": return emit("provider.retry", id, { phase: "started", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: stringValue(event.errorMessage) })
         case "auto_retry_end": return emit("provider.retry", id, { phase: "ended", attempt: event.attempt, success: event.success, message: event.finalError })
-        case "model_change": case "thinking_level_changed": case "turn_start": case "turn_end": case "agent_end": return emit("status", id, { source: event.type, model: event.model, variant: event.level ?? event.thinkingLevel, stopReason: event.stopReason })
+        case "model_change": return emitResolvedModel(id, event, emit)
+        case "thinking_level_changed": case "turn_start": case "turn_end": case "agent_end": return emit("status", id, { source: event.type, variant: event.level ?? event.thinkingLevel, stopReason: event.stopReason })
         case "message": {
           const facts = emit(event.role === "assistant" ? "assistant.text" : "message", id, { role: event.role, content: event.content })
           const usage = recordValue(event.usage)
@@ -59,6 +60,39 @@ export function createPiProjector(runtimeSessionId: string, workDir: string, mas
 
 function stringValue(value: unknown): string | undefined { return typeof value === "string" ? value : undefined }
 function recordValue(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined }
+
+function emitResolvedModel(
+  id: string,
+  event: Record<string, unknown>,
+  emit: (type: string, key: string, payload: Record<string, unknown>) => PiRuntimeEvent[],
+): PiRuntimeEvent[] {
+  const model = event.model
+  const fromObject = recordValue(model)
+  let provider = stringValue(event.provider) ?? stringValue(fromObject?.["provider"])
+  let modelId = stringValue(event.modelId) ?? stringValue(fromObject?.["id"]) ?? stringValue(fromObject?.["modelId"])
+  let resolvedModel: string | undefined
+  if (provider && modelId) resolvedModel = `${provider}/${modelId}`
+  else if (typeof model === "string" && model.length > 0) {
+    const split = splitProviderModel(model)
+    if (split) {
+      provider ??= split.provider
+      modelId ??= split.id
+      resolvedModel = `${split.provider}/${split.id}`
+    } else {
+      resolvedModel = model
+    }
+  }
+  if (!resolvedModel) return []
+  const payload: Record<string, unknown> = { resolvedModel }
+  if (provider) payload["providerId"] = provider
+  if (modelId) payload["modelId"] = modelId
+  return emit("model.resolved", id, payload)
+}
+
+function splitProviderModel(value: string): { provider: string; id: string } | null {
+  const index = value.indexOf("/")
+  return index > 0 && index < value.length - 1 ? { provider: value.slice(0, index), id: value.slice(index + 1) } : null
+}
 function numberValue(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined }
 function normalizeUsage(usage: Record<string, unknown>): Record<string, unknown> {
   const cost = recordValue(usage.cost)

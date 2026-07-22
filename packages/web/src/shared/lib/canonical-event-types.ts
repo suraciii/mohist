@@ -60,6 +60,8 @@ export const TRANSCRIPT_EVENT_TYPES = [
   'usage.updated',
   'model.resolved',
   'session.closed',
+  'session.followup_completed',
+  'session.followup_failed',
   'compaction',
   'compaction_event',
   'context_health_update',

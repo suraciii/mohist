@@ -149,10 +149,15 @@ export function useSessionTranscript({
     setIsStreaming(false)
   }, [])
 
-  const bumpTranscriptVersion = useCallback(() => {
+  const bumpTranscriptVersion = useCallback((engageActivity = true) => {
     setTranscriptVersion((version) => version + 1)
     if (streamingTimerRef.current !== null) {
       clearTimeout(streamingTimerRef.current)
+    }
+    if (!engageActivity) {
+      isStreamingRef.current = false
+      setIsStreaming(false)
+      return
     }
     isStreamingRef.current = true
     setIsStreaming(true)
@@ -162,8 +167,8 @@ export function useSessionTranscript({
     }, 2000)
   }, [clearStreaming])
 
-  const markNewContent = useCallback(() => {
-    bumpTranscriptVersion()
+  const markNewContent = useCallback((engageActivity = true) => {
+    bumpTranscriptVersion(engageActivity)
     if (!isNearBottomRef.current) {
       setNewContentAvailable(true)
     }
@@ -176,14 +181,18 @@ export function useSessionTranscript({
     setNewContentAvailable(false)
   }, [])
 
-  const invalidateAndRefetch = useCallback(() => {
-    setIsFinalizing(true)
+  const invalidateSessionQueries = useCallback(() => {
     for (const queryKey of sessionQueryKeys ?? []) {
       queryClient.invalidateQueries({ queryKey })
     }
     const invKey = terminalInvalidationKey ?? ['issues', issueNumber, 'coder-sessions', sessionId]
     queryClient.invalidateQueries({ queryKey: invKey })
   }, [queryClient, issueNumber, sessionId, sessionQueryKeys, terminalInvalidationKey])
+
+  const invalidateAndRefetch = useCallback(() => {
+    setIsFinalizing(true)
+    invalidateSessionQueries()
+  }, [invalidateSessionQueries])
 
   useEffect(() => {
     if (hasLiveTailRef.current && isRunning) {
@@ -201,6 +210,11 @@ export function useSessionTranscript({
 
   useEffect(() => {
     if (!isRunning) {
+      setIsThinking(false)
+      return
+    }
+    const latestTurn = turns.at(-1)
+    if (latestTurn?.user.kind === 'followup' && latestTurn.assistant.length === 0) {
       setIsThinking(false)
       return
     }
@@ -379,8 +393,11 @@ export function useSessionTranscript({
           kind: detail.kind,
           sentAt: detail.sentAt,
         }))
-        setIsThinking(true)
-        markNewContentRef.current()
+        const isFollowup = detail.kind === 'followup'
+        if (!isFollowup) {
+          setIsThinking(true)
+        }
+        markNewContentRef.current(!isFollowup)
       }),
     )
 
@@ -491,6 +508,43 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
+      onAgentEvent('session.followup_completed', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        const now = new Date().toISOString()
+        setTurns((prev) => closeLatestTurn(prev, now))
+        setIsThinking(false)
+        clearStreaming()
+        invalidateSessionQueries()
+        markNewContentRef.current(false)
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('session.followup_failed', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        const now = new Date().toISOString()
+        const errorPart = createErrorPart(detail.failureReason ?? 'Follow-up failed', 'failed', now)
+        setTurns((prev) => {
+          const next = closeLatestTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, errorPart],
+          }
+          return next
+        })
+        setIsThinking(false)
+        clearStreaming()
+        invalidateSessionQueries()
+        markNewContentRef.current(false)
+      }),
+    )
+
+    unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
 
@@ -586,7 +640,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, isHistoricalRuntimeView])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch, invalidateSessionQueries, isHistoricalRuntimeView])
 
   return {
     turns,

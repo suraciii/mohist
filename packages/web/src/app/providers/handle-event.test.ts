@@ -22,6 +22,23 @@ describe('routeEvent', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['issues'] })
   })
 
+  it.each([
+    'session.followup_completed',
+    'session.followup_failed',
+  ])('invalidates agent activity for %s', (eventName) => {
+    const invalidateQueries = vi.fn()
+
+    routeEvent(eventName, {}, {
+      queryClient: { invalidateQueries } as never,
+      setRebaseConflict: vi.fn(),
+      viewedIssue: null,
+      projectId: 'project-1',
+      pathname: '/',
+    })
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+  })
+
   it('invalidates generic session queries when a runtime binding changes', () => {
     const invalidateQueries = vi.fn()
 
