@@ -1,0 +1,74 @@
+{
+  "project": "mohist-local",
+  "description": "Consume the Runner-reported Action catalog during Workflow Profile save to reject unknown uses, unknown with fields, missing required inputs, and constant-value type mismatches at save time, while keeping dispatch-time validation authoritative and degrading gracefully when no catalog is available.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Resolve the Runner Action catalog for save-time consumption",
+      "spec": "specs/profile-action-validation/spec.md#profile-save-judges-action-usage-against-the-runner-reported-catalog",
+      "description": "Add a scoped IActionCatalogSource service backed by the Runner registry grain that resolves the latest Action catalog reported by a Runner. Select the most recently registered runner that carries a non-null catalog (single-runner model) and return null when no runner has reported one. Register it in DI. This is the catalog-resolution layer the Profile save path will consume.",
+      "acceptanceCriteria": [
+        "IActionCatalogSource.GetCatalogAsync() returns the catalog of the most recently registered runner that reports a non-null ActionCatalog",
+        "When no runner has registered a catalog, GetCatalogAsync() returns null rather than throwing",
+        "When two or more runners carry divergent catalogs, selection is deterministic (latest RegisteredAt wins); divergence is documented as a known single-runner limitation",
+        "Unit tests inject a fake registry grain (no real grain, no HTTP) covering the single-runner, no-runner, and multi-runner selection cases",
+        "npm test passes for packages/server"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IActionCatalogSource + RunnerRegistryCatalogSource under packages/server (Workflow or Runner services), DI registration in MohistServiceRegistration, and unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follows the IGrainFactory injection pattern in RunnerStatusService (GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)). Selection logic per design D2/D3. Implement as IScopedService."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement the pure Action-contract validator",
+      "spec": "specs/profile-action-validation/spec.md#unknown-uses-are-rejected",
+      "description": "Implement a pure ActionContractValidator.Validate(WorkflowDefinition, ActionCatalog) -> IReadOnlyList<ValidationError> (every error Source=Action) that judges each task/check position: unknown vs tombstoned uses, unknown with fields (minus the engine-reserved working-directory key), missing required inputs, exact-JSON-kind constant-value type mismatches, and field-name-only validation for template-valued declared inputs. Expose a TemplateTokens.Contains(JsonElement?) helper from Mohist.Workflow.Definition so the token grammar has a single owner.",
+      "acceptanceCriteria": [
+        "An unknown uses is rejected naming the task/check id, the Action name, the YAML path, and labeled ValidationSource.Action",
+        "A tombstoned uses produces a distinct 'removed' message that includes the tombstone guidance text, distinguishable from an unknown uses",
+        "An unknown with field is rejected naming the field and the Action; the engine-reserved working-directory key is exempt",
+        "A missing required input (with no catalog default) is rejected naming the field; a required input that has a catalog default is accepted when omitted",
+        "A constant value whose JSON kind is not in the declared set is rejected naming the field, the accepted kinds in canonical order, and the actual kind, with no coercion; an explicit null on an optional input is treated as absent",
+        "A declared input whose value contains a ${{ }} template is accepted without a type assertion; a template value on an undeclared field is still rejected by name",
+        "The validator re-implements no Definition or template-namespace rule: a Definition-only error leaves the validator silent",
+        "Unit tests are pure (no grains, no HTTP) and cover every rule and every position (stage task, stage check, approval-feedback task, recovery-handler task)",
+        "npm test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ActionContractValidator under packages/server Workflow services; TemplateTokens.Contains under packages/server/src/Mohist.Workflow.Definition; pure unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Pure function over the #432 WorkflowDefinition model and the #444 ActionCatalog records. The exact-JSON-kind rule mirrors the Runner's validateActionInput (TypeScript) per design D6; the two are mirrored, not shared. TemplateTokens.Contains reuses the grammar already in WorkflowDefinitionRules.TemplateTokenRegex (design D5)."
+    },
+    {
+      "id": "T-003",
+      "title": "Wire catalog validation into the Profile save path",
+      "spec": "specs/profile-action-validation/spec.md#action-errors-compose-with-definition-errors-by-shared-path-and-distinct-source",
+      "description": "Integrate the catalog source (T-001) and validator (T-002) into Profile save: add an ActionCatalog? parameter to WorkflowProfileYamlParser.Parse that runs ActionContractValidator and merges Action errors with Definition errors (thrown together on any error); inject IActionCatalogSource into the save managers, resolve the catalog once per save, pass it to Parse, and surface the Action-validation status to the route handlers; add an additive actionValidation notice to the template create/update and issue-template update success responses; delete WorkflowActionGuards and convert its tests; close the design status gap.",
+      "acceptanceCriteria": [
+        "Saving a Profile whose uses/with violate the resolved catalog is rejected, and the response carries Definition and Action errors merged under one YAML-path rule and distinguishable by source",
+        "When no catalog is available the save succeeds and the success response explicitly states that Action-contract validation was not performed",
+        "Legacy with.agent/with.kind/with.type on mohist/opencode are rejected as unknown input fields; WorkflowActionGuards.cs is deleted and no separate transitional guard remains",
+        "Every task/check position is judged at save: stage tasks, stage checks, approval-feedback tasks, and tasks nested inside recovery handlers",
+        "Built-in profile loading (WorkflowProfileCatalog), runtime load (WorkflowProfilePersistence.Deserialize), and mo run validate remain Definition-only with no catalog dependency",
+        "Spec tests (packages/server SpecTests) cover the save path end to end: unknown uses, tombstoned uses, unknown field, missing required, type mismatch, template-name-only, engine-reserved working-directory, no-catalog skip with notice, merged error sources, and recovery/approval positions judged",
+        "Runner dispatch-time validation is unchanged and fail-closed: a Profile that passes save is still validated against the runner manifest at dispatch, and a rendered with mismatch still fails with invalid-input (regression assertion)",
+        "design/workflow/actions.md status gap is updated to reflect that Profile save-time Action-contract checking is now implemented",
+        "npm test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated WorkflowProfileYamlParser (ActionCatalog? param), ProjectWorkflowProfileManager and IssueWorkflowProfileManager (injected source + status), template/issue template API routes (actionValidation notice); deleted WorkflowActionGuards.cs; SpecTests; design doc update",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Keep the single error-merge point in WorkflowProfileYamlParser.Parse (design D1). The managers own the catalog fetch and the skip-notice propagation (design D2/D4); the additive actionValidation field is backward-compatible. The three existing WorkflowProfileYamlParser.Parse call sites are the only ones that gain the catalog parameter."
+    }
+  ]
+}
