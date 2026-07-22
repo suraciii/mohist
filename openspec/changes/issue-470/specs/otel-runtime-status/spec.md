@@ -1,6 +1,6 @@
 ### Requirement: OTel status has exactly three states
 
-The OTel status API and `mo otel status` SHALL report exactly one state: `off`, `healthy` or `degraded`. `off` SHALL mean observability is disabled and its collector and maintenance work are not running. `healthy` SHALL mean observability is enabled, ingestion and storage are usable, and no rejection or data-loss protection is active. `degraded` SHALL mean observability is enabled but ingestion or storage is unavailable, a write has failed, or telemetry is currently being rejected or dropped. The status read surface SHALL remain available while the Mohist Server is reachable, including when observability is `off`.
+The OTel status API and `mo otel status` SHALL report exactly one state: `off`, `healthy` or `degraded`. `off` SHALL mean observability is disabled and its collector and maintenance work are not running. `healthy` SHALL mean observability is enabled, ingestion and storage are usable, and no rejection or data-loss protection is active. `degraded` SHALL mean observability is enabled but ingestion or storage is unavailable, a write has failed, or a protection component has reported that telemetry is currently being rejected or dropped. The status read surface SHALL remain available while the Mohist Server is reachable, including when observability is `off`. This change defines the rejection/drop publication and read contract; it SHALL NOT introduce the storage/admission policy that decides to reject data.
 
 #### Scenario: Observability is disabled
 
@@ -19,9 +19,9 @@ The OTel status API and `mo otel status` SHALL report exactly one state: `off`, 
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose a reason identifying the read failure instead of substituting zero values that appear healthy
 
-#### Scenario: A write fails or telemetry is lost
+#### Scenario: A write fails or a protection component reports telemetry loss
 
-- **WHEN** an OTel write fails or telemetry is rejected or dropped
+- **WHEN** an OTel write fails or an ingestion/storage protection component publishes a rejected or dropped outcome
 - **THEN** the status API and `mo otel status` SHALL report `degraded`
 - **AND** SHALL expose the latest degradation reason
 
@@ -35,20 +35,20 @@ Each status snapshot SHALL expose the observability storage budget, current usag
 - **THEN** the response SHALL include storage budget, usage and growth, all four telemetry outcome counts, and current CPU, working set and GC heap pressure
 - **AND** `mo otel status` SHALL make the same categories directly visible
 
-#### Scenario: Rejection occurs after startup
+#### Scenario: A protection component publishes rejection after startup
 
-- **WHEN** telemetry has been received and part of it has been rejected during the current Server process lifetime
+- **WHEN** telemetry has been received and an ingestion/storage protection component publishes that part of it was rejected during the current Server process lifetime
 - **THEN** the received and rejected values SHALL reflect those outcomes
 - **AND** a Server restart SHALL begin new runtime outcome counters rather than reconstructing historical counts with full-table scans
 
-### Requirement: Status exposes a bounded anomalous-route summary
+### Requirement: Status exposes a bounded ranked-route summary
 
-Status SHALL expose at most 10 stable-route summaries from the five-minute local window at one-second resolution. The single boundary bucket MAY contribute for less than one additional second so a request is not discarded early. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. Entries SHALL be ordered so routes with greater work amplification and latency are presented first, and neither route identity nor response size SHALL grow with raw URL or request cardinality.
+Status SHALL expose at most 10 stable-route summaries from the five-minute local window at one-second resolution. The single boundary bucket MAY contribute for less than one additional second so a request is not discarded early. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. Entries SHALL be ordered by combined database-plus-downstream calls per request descending, average latency descending, and stable route name ordinal ascending; neither route identity nor response size SHALL grow with raw URL or request cardinality. This top-ranked view is the issue's "anomalous route" diagnostic and SHALL NOT imply a learned anomaly threshold.
 
 #### Scenario: Recent routes have different amplification
 
 - **WHEN** multiple routes have observations in the current five-minute window with different database calls, downstream calls and latency
-- **THEN** status SHALL return no more than 10 stable-route entries ordered by amplification and latency
+- **THEN** status SHALL return no more than 10 stable-route entries ordered by the complete amplification, latency, and route-name key
 - **AND** every entry SHALL expose request count, latency, database calls per request and downstream calls per request
 
 #### Scenario: No route observations exist in the retained window

@@ -1,6 +1,6 @@
 ### Requirement: Agent status exposes the work used to build its response
 
-`GET /api/projects/{projectRef}/agent/status` SHALL include a bounded amplification summary for that response. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope, so a caller can directly compare the work performed with the result produced. The existing agent status fields and project-scoped route semantics SHALL remain available.
+The issue's abbreviated `/api/agent/status` name SHALL refer to the canonical `GET /api/projects/{projectRef}/agent/status` product surface; this change MUST NOT restore the removed unscoped route. The canonical response SHALL include a bounded amplification summary. The summary SHALL expose candidate count, actually processed count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope, so a caller can directly compare the work performed with the result produced. The existing agent status fields and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Agent status considers more candidates than it returns
 
@@ -16,7 +16,7 @@
 
 ### Requirement: Agent activity exposes transcript and fan-out work
 
-`GET /api/projects/{projectRef}/agent/activity` SHALL include a bounded amplification summary for that response. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. These counts SHALL make visible when a small activity response requires disproportionate transcript, database or cross-component work. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available.
+The issue's abbreviated `/api/agent/activity` name SHALL refer to the canonical `GET /api/projects/{projectRef}/agent/activity` product surface; this change MUST NOT restore the removed unscoped route. The canonical response SHALL include a bounded amplification summary. The summary SHALL expose candidate session count, actually processed session count, transcript records read, database-call count and downstream-call count as non-negative integers measured over the same request scope. These counts SHALL make visible when a small activity response requires disproportionate transcript, database or cross-component work. The existing activity summary, cards, waiting items, limit behavior and project-scoped route semantics SHALL remain available. Response-local counting SHALL remain active when OTel collection is `off`; only Meter emission and cross-request route aggregation SHALL be disabled in that state.
 
 #### Scenario: Activity assembly reads transcript and workflow data
 
@@ -55,6 +55,12 @@ Agent-path amplification counts SHALL be runtime signals, not Workflow, AgentSes
 - **WHEN** two otherwise equivalent agent reads observe different operational call counts
 - **THEN** the differing counts SHALL affect only runtime diagnostics and metrics
 - **AND** SHALL NOT alter any Workflow, AgentSession, issue or scheduling decision
+
+#### Scenario: OTel collection is off
+
+- **WHEN** either canonical agent read runs while OTel collection is configured `off`
+- **THEN** its amplification object SHALL still contain the actual response-local candidate, processed, transcript, database and downstream counts
+- **AND** those counts SHALL NOT be emitted to the Meter or retained in the cross-request route summary
 
 #### Scenario: Agent metrics are exported
 

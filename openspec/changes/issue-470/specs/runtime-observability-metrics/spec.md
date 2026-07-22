@@ -35,15 +35,20 @@ Metric instrument names and the exact label-key set accepted by each instrument 
 - **WHEN** an implementation adds or renames an instrument or adds a label key outside the declared metric catalog
 - **THEN** the metric contract test SHALL fail
 
-### Requirement: Local route diagnostics are bounded and ephemeral
+### Requirement: Local ranked route diagnostics are bounded and ephemeral
 
-The local runtime summary SHALL retain observations from a five-minute window at one-second resolution and SHALL be bounded independently of request volume, route count and telemetry history. The single boundary bucket MAY retain observations for less than one additional second so an observation is never discarded before it is five minutes old. The summary SHALL produce at most 10 anomalous route entries, each containing the stable route name, request count, latency information, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
+The local runtime summary SHALL retain observations from a five-minute window at one-second resolution and SHALL be bounded independently of request volume, route count and telemetry history. The single boundary bucket MAY retain observations for less than one additional second so an observation is never discarded before it is five minutes old. The summary SHALL produce at most 10 route entries ranked without an anomaly threshold: first by `database calls per request + downstream calls per request` descending (one call of either kind has equal weight), then by average latency descending, then by stable route name using ordinal ascending order. Each entry SHALL contain the stable route name, request count, latency information, database calls per request and downstream calls per request. The retained summary SHALL reset when the Server process restarts and MUST NOT be written to the business database or treated as a Workflow or Session fact.
 
 #### Scenario: More than ten routes are active
 
 - **WHEN** more than 10 stable routes have observations within the current five-minute window
 - **THEN** the local diagnostic result SHALL contain no more than 10 route entries
 - **AND** its retained memory SHALL remain within a fixed bound
+
+#### Scenario: Routes tie on amplification and latency
+
+- **WHEN** two retained routes have equal combined calls per request and equal average latency
+- **THEN** the route with the ordinally smaller stable route name SHALL appear first
 
 #### Scenario: Observations age out
 
