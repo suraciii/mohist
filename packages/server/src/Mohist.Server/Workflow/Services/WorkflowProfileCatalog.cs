@@ -66,7 +66,7 @@ public static class WorkflowProfileCatalog
     {
         var path = ResolveDefinitionPath(fileName)
             ?? throw new FileNotFoundException($"Workflow definition not found: {fileName}");
-        return new WorkflowProfile(id, name, description, WorkflowYamlSerializer.FromYaml(File.ReadAllText(path), id));
+        return new WorkflowProfile(id, name, description, WorkflowYamlSerializer.FromYaml(File.ReadAllText(path)));
     }
 
     private static string? ResolveDefinitionPath(string fileName)
