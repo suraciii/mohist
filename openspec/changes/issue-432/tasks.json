@@ -109,7 +109,7 @@
       "id": "T-005",
       "title": "CI golden cases and docs/design gap closure",
       "spec": "specs/workflow-validation-golden-cases/spec.md#built-in-definitions-pass-validation-in-ci",
-      "description": "Add golden-case tests (in the server test project, run under npm test) that Parse every built-in .workflow.yaml and the complete fenced example extracted from docs/workflow-definition.md, asserting success. Add a negative test that injects an unknown field into a golden-case Definition and asserts Parse fails with the expected path/message. Exclude <...> placeholder skeletons and scattered documentation fragments from validation. Update the docs/workflow-definition.md implementation-gap section and the design/workflow/definition.md Status to remove the gaps this change resolves.",
+      "description": "Add golden-case tests (in the server test project, run under npm test) that Parse every built-in .workflow.yaml and the complete fenced example extracted from docs/workflow-definition.md, asserting success. Add a negative test that injects an unknown field into a golden-case Definition and asserts Parse fails with the expected path/message. Validate only the complete example block and exclude the smaller partial syntax snippets scattered through the docs. Update the docs/workflow-definition.md implementation-gap section and the design/workflow/definition.md Status to remove the gaps this change resolves.",
       "acceptanceCriteria": [
         "A test runs Parse over every built-in .workflow.yaml and fails the build if any is invalid",
         "A test runs Parse over the complete example extracted from docs/workflow-definition.md and fails the build if it is invalid",

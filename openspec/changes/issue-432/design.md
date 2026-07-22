@@ -20,7 +20,7 @@ The authoritative design contract is [`design/workflow/definition.md`](../../des
 - Export a JSON Schema.
 - Validate runtime-inserted recovery or control tasks; those are constructed from already-validated subtrees or by their constructors.
 - Prove a referenced task succeeds or produces a specific output field at runtime — runtime value presence is owned by template rendering (#431) and Action output.
-- Validate scattered documentation fragments or syntax skeletons carrying `<...>` placeholders.
+- Validate scattered documentation fragments or partial syntax snippets.
 - Migrate the whole `mo` command tree; only the `workflow validate` leaf command is in scope.
 - Re-do the Profile/Definition/Variables asset boundary (#474) or the template namespace closure (#431).
 
@@ -122,7 +122,7 @@ The existing legacy inline-agent input guards in `WorkflowYamlSerializer` (`with
 
 ### D10: CI golden cases are locked by tests, with a negative case and explicit exclusions
 
-**Decision:** Add tests (in the server test project, so they run under `npm test`) that run `Parse` over (1) every built-in `.workflow.yaml` and (2) the complete fenced example extracted from `docs/workflow-definition.md`, asserting success. A negative test injects an unknown field into a golden-case Definition and asserts `Parse` fails with the expected path/message. The docs-example extractor selects only the complete example block; syntax skeletons containing `<...>` placeholders and scattered fragments are explicitly excluded and never passed to `Parse`, so they cannot produce false positives.
+**Decision:** Add tests (in the server test project, so they run under `npm test`) that run `Parse` over (1) every built-in `.workflow.yaml` and (2) the complete fenced example extracted from `docs/workflow-definition.md`, asserting success. A negative test injects an unknown field into a golden-case Definition and asserts `Parse` fails with the expected path/message. The docs-example extractor selects only the complete example block; partial syntax snippets and scattered fragments are explicitly excluded and never passed to `Parse`, so they cannot produce false positives.
 
 **Rationale:** The acceptance criteria require built-ins and the docs example to pass, an injected unknown field to fail with the same error, and skeletons/fragments to be excluded. Tests lock the syntax↔validator contract and surface regressions in the default `npm test` run, which is preferable to a standalone CI script.
 
