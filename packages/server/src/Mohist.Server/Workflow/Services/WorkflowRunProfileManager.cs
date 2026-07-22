@@ -57,42 +57,49 @@ public class WorkflowRunProfileManager : IScopedService
     /// </summary>
     public async Task EnsureArchiveDefaultAsync(string workflowRunId)
     {
+        // Fast-path no-op from a detached snapshot. The authoritative
+        // decision is re-evaluated against the tracked row below so a
+        // concurrent explicit archive write that lands between this read and
+        // the save is honored, not overwritten by a restored default marker.
         var snapshot = await LoadRowAsync(workflowRunId);
-        var explicitVars = snapshot is null
-            ? VariableBundle.Empty
-            : VariableBundle.FromJson(snapshot.Variables);
-        if (HasArchiveKey(explicitVars.Vars))
+        if (snapshot is not null)
         {
-            return;
+            if (HasArchiveKey(VariableBundle.FromJson(snapshot.Variables).Vars)) return;
+            if (HasArchiveKey(VariableBundle.FromJson(snapshot.DefaultVariables).DefaultVars)) return;
         }
-
-        var defaults = snapshot is null
-            ? VariableBundle.Empty
-            : VariableBundle.FromJson(snapshot.DefaultVariables);
-        if (HasArchiveKey(defaults.DefaultVars))
-        {
-            return;
-        }
-
-        var seed = new VariableBundle(
-            DefaultVars: BuildArchiveDefaultElement());
-        var mergedDefaultsJson = VariableBundle.Patch(defaults, seed).ToJson();
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        // Tracked read so ETag becomes the OriginalValue EF writes into the
-        // UPDATE WHERE clause. Combined with only assigning DefaultVariables,
-        // an interleaved explicit Variables write is neither clobbered (this
-        // column is untouched) nor silently lost (its own save bumps ETag and
-        // makes this one raise DbUpdateConcurrencyException).
         var row = await db.WorkflowRunProfiles
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId);
+
+        var currentExplicit = row is null
+            ? VariableBundle.Empty
+            : VariableBundle.FromJson(row.Variables);
+        // An explicit archive write supersedes the initialization default; do
+        // not seed (or restore) the marker once it exists.
+        if (HasArchiveKey(currentExplicit.Vars))
+        {
+            return;
+        }
+
+        var currentDefaults = row is null
+            ? VariableBundle.Empty
+            : VariableBundle.FromJson(row.DefaultVariables);
+        if (HasArchiveKey(currentDefaults.DefaultVars))
+        {
+            return;
+        }
+
+        var mergedDefaultsJson = VariableBundle.Patch(
+            currentDefaults,
+            new VariableBundle(DefaultVars: BuildArchiveDefaultElement())).ToJson();
 
         if (row is null)
         {
             var inserted = new WorkflowRunProfileRow
             {
                 WorkflowRunId = workflowRunId,
-                Variables = explicitVars.ToJson(),
+                Variables = currentExplicit.ToJson(),
                 DefaultVariables = mergedDefaultsJson,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
@@ -102,6 +109,9 @@ public class WorkflowRunProfileManager : IScopedService
             return;
         }
 
+        // Only DefaultVariables is assigned, so an interleaved explicit
+        // Variables write is neither clobbered nor silently lost; its own
+        // ETag bump makes this save raise DbUpdateConcurrencyException.
         row.DefaultVariables = mergedDefaultsJson;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         BumpETag(db.Entry(row));
