@@ -114,7 +114,7 @@
         "A test runs Parse over every built-in .workflow.yaml and fails the build if any is invalid",
         "A test runs Parse over the complete example extracted from docs/workflow-definition.md and fails the build if it is invalid",
         "A negative test injects an unknown field into a golden-case Definition and asserts Parse fails with the same unknown-field path/message it produces elsewhere",
-        "The docs-example extraction selects only the complete example block; <...> placeholder skeletons and scattered fragments are never passed to Parse and produce no false positives",
+        "The docs-example extraction selects only the complete example block; partial syntax snippets and scattered fragments are never passed to Parse and produce no false positives",
         "Golden-case tests run as part of npm test (dotnet test Mohist.sln)",
         "docs/workflow-definition.md implementation-gap section and design/workflow/definition.md Status no longer list check-name, unknown-field/type validation, local validate command, or save-time pre-validation as open gaps",
         "npm run build and npm test pass"
