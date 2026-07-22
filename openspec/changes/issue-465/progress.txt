@@ -11,3 +11,10 @@
 - The existing worktree contained the main T-001 implementation across Server, Runner, tests, and synchronized design documentation. Preserved those edits and added explicit Server raw task/check wire assertions plus Runner check rendering and declaration immutability coverage.
 - The Server translator fixture's effective variable source is not the project profile row used by the simple seed helper, so the raw dispatch test asserts the carried `vars` snapshot field and literal declarations without coupling to an unrelated fixture-layer detail.
 - Verification passed: `npm run typecheck -w packages/runner`; `npm test -w packages/runner` (116 files, 1348 tests); focused `WorkflowItemTranslatorSpecs` (33 tests); focused check test (6 tests).
+
+## T-002
+
+- Recovery self-retry now deep-clones raw `with`, task-level `expect`, artifacts, `setVars`, and recovery configuration before creating the continuation; scalar identity fields and decremented `recoveryRemaining` are preserved.
+- Handler-created tasks still expand only `failure.*`; `${{ vars.* }}` remains in their declaration for the later dispatch snapshot.
+- Baseline verification passed before edits: `npm test -w packages/runner` (116 files, 1348 tests) and `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RunnerPollRecoveryStateApiSpecs` (3 tests).
+- Final verification passed: `npm run typecheck -w packages/runner`; `npm test -w packages/runner` (116 files, 1350 tests); `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RunnerPollRecoveryStateApiSpecs` (3 tests); and `dotnet test packages/server/tests/Mohist.Server.SpecTests --filter RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue` (1 test).

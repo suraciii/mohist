@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { JsonObject } from "../src/core/types.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { ServerConnection } from "../src/server/connection.js"
@@ -38,18 +39,24 @@ afterEach(async () => {
 })
 
 function executor(): WorkExecutor {
+  const invokedOptions: JsonObject[] = []
   const registry = defineTestActions({
     "test/matching": {
-      run: async () => ({ error: { code: "conflict", message: "conflict" } }),
+      run: async (inputs) => {
+        invokedOptions.push(inputs)
+        return { error: { code: "conflict", message: "conflict" } }
+      },
+      inputs: { options: { types: ["object"], required: true } },
       errors: [{ code: "conflict" }],
     },
   })
-  return new WorkExecutor(
+  const result = new WorkExecutor(
     registry,
     verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
     {} as never,
     workDir,
   )
+  return Object.assign(result, { invokedOptions })
 }
 
 const recovery = {
@@ -63,7 +70,7 @@ const recovery = {
   ],
 }
 
-function dispatch(workId: string, recoveryRemaining: number | null) {
+function dispatch(workId: string, recoveryRemaining: number | null, model: string) {
   // Wire shape: the server serializes object-typed fields (`with`, `variables`,
   // `recovery`) as JSON strings and keeps `recoveryRemaining` explicit (null or
   // numeric) so the runner can tell fresh from continuation and absent.
@@ -74,8 +81,8 @@ function dispatch(workId: string, recoveryRemaining: number | null) {
     stage: "check",
     title: "Review",
     uses: "test/matching",
-    with: JSON.stringify({}),
-    variables: JSON.stringify({ workspace: { path: workDir, branch: null, changeDir: null } }),
+    with: JSON.stringify({ options: "${{ vars.agent }}" }),
+    variables: JSON.stringify({ vars: { agent: { model } }, workspace: { path: workDir, branch: null, changeDir: null } }),
     recovery: JSON.stringify(recovery),
     recoveryRemaining,
   }
@@ -98,7 +105,7 @@ describe("recovery round across poll -> execute -> report", () => {
 
     fetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/poll") && !firstDispatch) {
-        firstDispatch = dispatch("review.1", null)
+        firstDispatch = dispatch("review.1", null, "model-a")
         return new Response(JSON.stringify({ dispatches: [firstDispatch] }), { status: 200, headers: { "content-type": "application/json" } })
       }
       if (url.endsWith("/report")) {
@@ -115,13 +122,16 @@ describe("recovery round across poll -> execute -> report", () => {
     expect(fresh.recoveryRemaining).toBeNull()
 
     // 2. Execute: the matching failure schedules a recovery round.
-    const result = await executor().execute(fresh, new AbortController().signal)
+    const firstExecutor = executor() as WorkExecutor & { invokedOptions: JsonObject[] }
+    const result = await firstExecutor.execute(fresh, new AbortController().signal)
     expect(result.addTasks).toBeDefined()
     const selfRetry = result.addTasks!.find((t) => t.id === "review")!
     // The declaration is immutable (budget 2); the consumed allowance is a
     // separate numeric continuation state (1), authored by the executor.
     expect(selfRetry.recovery?.budget).toBe(2)
     expect(selfRetry.recoveryRemaining).toBe(1)
+    expect(selfRetry.with).toEqual({ options: "${{ vars.agent }}" })
+    expect(firstExecutor.invokedOptions).toEqual([{ options: { model: "model-a" } }])
 
     // 3. Report carries the numeric continuation state to the server.
     const reportUrls: string[] = []
@@ -140,15 +150,18 @@ describe("recovery round across poll -> execute -> report", () => {
     // 4. The server redispatches the self-retry with the numeric state; the
     // next execution decrements again (0) while the declaration stays at 2.
     fetchMock.mockResolvedValueOnce(new Response(
-      JSON.stringify({ dispatches: [dispatch("review.2", 1)] }),
+      JSON.stringify({ dispatches: [dispatch("review.2", 1, "model-b")] }),
       { status: 200, headers: { "content-type": "application/json" } },
     ))
     const redispatched = (await connection.poll(new AbortController().signal))[0]!
     expect(redispatched.recoveryRemaining).toBe(1)
 
-    const next = await executor().execute(redispatched, new AbortController().signal)
+    const nextExecutor = executor() as WorkExecutor & { invokedOptions: JsonObject[] }
+    const next = await nextExecutor.execute(redispatched, new AbortController().signal)
     const nextRetry = next.addTasks!.find((t) => t.id === "review")!
     expect(nextRetry.recovery?.budget).toBe(2)
     expect(nextRetry.recoveryRemaining).toBe(0)
+    expect(nextRetry.with).toEqual({ options: "${{ vars.agent }}" })
+    expect(nextExecutor.invokedOptions).toEqual([{ options: { model: "model-b" } }])
   })
 })

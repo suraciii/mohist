@@ -40,6 +40,75 @@ describe("recovery action error protocol", () => {
     })
   })
 
+  it("copies the raw self-retry declaration and continuation metadata", () => {
+    const recovery = {
+      budget: 2,
+      handlers: [{ when: "error.code=conflict", tasks: [], retrySelf: true }],
+    }
+    const original = work(recovery)
+    original.with = { options: "${{ vars.agent }}", nested: { value: "${{ vars.mode }}" } }
+    original.expect = { markers: [{ path: "result", failIf: "${{ vars.marker }}" }] }
+    original.artifacts = { report: { path: "report.json" } }
+    original.setVars = { result: "${{ failure.error.code }}" }
+    original.recovery = recovery
+
+    const result = tryRecovery(original, {
+      status: "failed",
+      error: { code: "conflict", message: "conflict" },
+    })
+    const retry = result?.addTasks?.[0]
+
+    expect(retry).toEqual({
+      id: "integrate:rebase",
+      title: "Rebase branch",
+      uses: "mohist/rebase",
+      with: { options: "${{ vars.agent }}", nested: { value: "${{ vars.mode }}" } },
+      expect: { markers: [{ path: "result", failIf: "${{ vars.marker }}" }] },
+      artifacts: { report: { path: "report.json" } },
+      setVars: { result: "${{ failure.error.code }}" },
+      recovery,
+      recoveryRemaining: 0,
+    })
+    expect(retry?.with).not.toBe(original.with)
+    expect(retry?.expect).not.toBe(original.expect)
+    expect(retry?.artifacts).not.toBe(original.artifacts)
+    expect(retry?.setVars).not.toBe(original.setVars)
+    expect(retry?.recovery).not.toBe(original.recovery)
+  })
+
+  it("expands only triggering failure references in handler declarations", () => {
+    const result = tryRecovery(work({
+      budget: 1,
+      handlers: [{
+        when: "error.code=conflict",
+        tasks: [{
+          id: "recover:fix",
+          with: {
+            changeId: "${{ failure.output.changeId }}",
+            options: "${{ vars.agent }}",
+          },
+          expect: { marker: "${{ vars.marker }}" },
+        }],
+        retrySelf: false,
+      }],
+    }), {
+      status: "failed",
+      output: { changeId: "change-42" },
+      error: { code: "conflict", message: "conflict" },
+    })
+
+    expect(result?.addTasks?.[0]).toEqual({
+      id: "recover:fix",
+      title: "recover:fix",
+      uses: null,
+      with: { changeId: "change-42", options: "${{ vars.agent }}" },
+      expect: { marker: "${{ vars.marker }}" },
+      artifacts: null,
+      setVars: null,
+      recovery: null,
+    })
+  })
+
   it("uses a default handler only for failures", () => {
     const recovery = { budget: 1, handlers: [{ tasks: [{ id: "fix", title: "Fix" }], retrySelf: false }] }
     expect(tryRecovery(work(recovery), { status: "failed", error: { code: "timeout", message: "Timed out" } }))

@@ -73,12 +73,12 @@ export function tryRecovery(
       id: retryId,
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
-      with: work.with,
-      artifacts: work.artifacts,
-      setVars: work.setVars ?? null,
-      recovery: work.recovery,
+      with: cloneJsonObject(work.with),
+      artifacts: cloneJsonObject(work.artifacts),
+      setVars: work.setVars ? structuredClone(work.setVars) : null,
+      recovery: cloneJsonObject(work.recovery),
       recoveryRemaining: remaining - 1,
-      expect: work.expect ?? null,
+      expect: cloneJsonObject(work.expect),
     })
   }
 
@@ -364,6 +364,10 @@ function stringField(obj: JsonObject, key: string): string | null {
 function objectField(obj: JsonObject, key: string): JsonObject | null {
   const value = obj[key]
   return isObject(value) ? value : null
+}
+
+function cloneJsonObject(value: JsonObject | null | undefined): JsonObject | null {
+  return value ? structuredClone(value) : null
 }
 
 function recordField(obj: JsonObject, key: string): Record<string, string> | null {
