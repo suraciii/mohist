@@ -70,6 +70,18 @@ public class AgentConfigSchemaTests
         Assert.Contains("pi", error);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Validate_RuntimeBlank_ReturnsActionableError(string runtime)
+    {
+        var element = JsonDocument.Parse($$"""{"runtime":"{{runtime}}"}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.NotNull(error);
+        Assert.Contains("agentConfig.runtime", error);
+    }
+
     [Fact]
     public void Validate_RuntimeNotString_ReturnsActionableError()
     {

@@ -94,7 +94,10 @@ public static class AgentConfigSchema
             return "agentConfig.runtime must be one of opencode, pi.";
         }
         var raw = runtime.GetString();
-        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "agentConfig.runtime must be one of opencode, pi.";
+        }
         if (!AllowedRuntimes.Contains(raw))
         {
             return $"agentConfig.runtime '{raw}' is not supported; the agent runtime accepts only {string.Join(", ", AllowedRuntimes)}.";

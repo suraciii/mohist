@@ -114,11 +114,11 @@ export class AgentJobExecutor {
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.openCode)
     if (!runtime) {
-      return failureResult("runtime-unavailable", "AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
+      return failureResult("runtime-unavailable", "AgentJob requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding", "opencode")
     }
     if (!runtime.ready()) {
       const diagnostic = runtime.diagnostic()
-      return failureResult("runtime-unavailable", `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+      return failureResult("runtime-unavailable", `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`, "opencode")
     }
 
     const turnRequest: RuntimeTurnRequest = {
@@ -171,11 +171,11 @@ export class AgentJobExecutor {
   ): Promise<WorkItemResult> {
     const runtime = resolveAccessor(this.runtimes.pi)
     if (!runtime) {
-      return failureResult("runtime-unavailable", "AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding")
+      return failureResult("runtime-unavailable", "AgentJob requires the Pi runtime; the runner has not yet established the runtime or it is rebuilding", "pi")
     }
     if (!runtime.ready()) {
       const diagnostic = runtime.diagnostic()
-      return failureResult("runtime-unavailable", `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+      return failureResult("runtime-unavailable", `AgentJob requires the Pi runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`, "pi")
     }
 
     const eventSink = createAgentSessionEventSink(this.connection, work, signal, binding.agentSessionId)
@@ -184,7 +184,7 @@ export class AgentJobExecutor {
       const created = await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir } })
       if (!created.ok) {
         const code = mapPiErrorKind(created.error.kind)
-        return failureResult(code, created.error.message, created.error.diagnostics)
+        return failureResult(code, created.error.message, "pi", created.error.diagnostics)
       }
       runtimeSessionId = created.value.runtimeSessionId
     }
@@ -418,6 +418,7 @@ function createAgentSessionEventSink(
 function failureResult(
   code: string,
   message: string,
+  runtime: "opencode" | "pi" = "opencode",
   diagnostics?: readonly { code: string; message: string }[],
 ): WorkItemResult {
   return {
@@ -425,7 +426,7 @@ function failureResult(
     message,
     error: { code, message },
     output: diagnostics
-      ? buildAgentJobOutput(false, null, "opencode", null, null, null, message, diagnostics)
+      ? buildAgentJobOutput(false, null, runtime, null, null, null, message, diagnostics)
       : undefined,
     exitCode: 1,
   }

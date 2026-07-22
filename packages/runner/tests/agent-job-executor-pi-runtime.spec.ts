@@ -424,6 +424,38 @@ describe("AgentJobExecutor drives PiRuntime end-to-end", () => {
     expect(request.options?.variant).toBe("high")
   })
 
+  it("labels Pi session-creation failures with the Pi runtime", async () => {
+    const pi = makeFakePiRuntime()
+    pi.setCreateSessionResult({
+      ok: false,
+      error: {
+        kind: "turn-failed",
+        message: "Pi session creation failed",
+        diagnostics: [{
+          severity: "error",
+          code: "session-create-failed",
+          message: "provider credentials unavailable",
+        }],
+      },
+      diagnostics: [{
+        severity: "error",
+        code: "session-create-failed",
+        message: "provider credentials unavailable",
+      }],
+    })
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, "pi"))
+
+    const result = await executor.execute(
+      buildAgentJobWork({ with: { prompt: "create a Pi session", runtime: "pi" } }),
+      new AbortController().signal,
+    )
+
+    expect(result.status).toBe("failed")
+    expect(result.error?.code).toBe("turn-failed")
+    expect((result.output as Record<string, unknown>).kind).toBe("pi")
+  })
+
   it("reuses an existing pi binding on a follow-up dispatch", async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
