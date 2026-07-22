@@ -5,3 +5,7 @@
 - Each Action section uses the D1 order: purpose, inputs, outputs, platform-code note, business errors, then one explicit YAML example.
 - Platform-reserved codes are named only in attribution notes, never as business-error table rows.
 - `mohist/openspec-tasks` has one deferred object input (`task`) and the example identifies the referenced `defaultTask` Variable.
+- T-002 expanded both existing family pages in the same D1 shape and added `mohist/github-pr-checks` to `github-pr.md`.
+- Git delivery examples use `${{ repository.baseBranch }}` and `${{ workspace.branch }}` for branch identity; `origin` remains an explicit literal remote because the documented expression namespaces do not provide a standard remote field.
+- GitHub PR examples identify `${{ repository.gitUrl }}`, `${{ repository.baseBranch }}`, `${{ workspace.branch }}`, and `${{ vars.github.pr.number }}`; the PR number Variable is populated from `mohist/create-github-pr` output.
+- Manual table cross-check for all ten Git and GitHub PR Actions passed; no runner source files were changed.
