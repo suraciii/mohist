@@ -10,7 +10,7 @@ Three independent cross-layer inconsistencies break what users see during and af
 
 ## Capabilities
 
-- `agent-session-followup-terminal-visibility`: The web subscribes to and reacts to follow-up terminal events so session state converges to completed or failed when a follow-up finishes or fails, instead of those events being dropped by the server delivery filter.
+- `agent-session-followup-terminal-visibility`: The web subscribes to and reacts to follow-up terminal events so the in-flight follow-up round converges to completed or failed (and the session status is refreshed from the server) when a follow-up finishes or fails, instead of those events being dropped by the server delivery filter.
 - `agent-session-model-resolution-event`: The resolved-model event carries one consistent type and field (`resolvedModel`) across the OpenCode and Pi runtimes, server live state, transcript summary, and the web (read model and live-event contract), so the resolved model name is visible for every runtime.
 - `agent-session-followup-activity-state`: Follow-up user input has a single activity-state semantics shared by the server's active-time computation and the web's round rendering, so the page and the reported session status agree.
 

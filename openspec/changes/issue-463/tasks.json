@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "The web canonical transcript event set (canonical-event-types.ts) includes session.followup_completed and session.followup_failed, with the subscription/routing compile-time guard still typechecking.",
         "A follow-up completed/failed event is no longer dropped by the server per-connection delivery filter because the web now subscribes to both types.",
-        "On receiving session.followup_completed the session's presented state becomes completed; on session.followup_failed it becomes failed (web unit/DOM tests).",
+        "On receiving session.followup_completed the in-flight follow-up round converges to completed; on session.followup_failed it converges to failed; in both cases the session's presented status is refreshed from the server and is NOT set to a global completed/failed terminal (web unit/DOM tests).",
         "agent-session and agent-activity queries are invalidated on follow-up terminal receipt so the card/list converges (web test)."
       ],
       "priority": 1,

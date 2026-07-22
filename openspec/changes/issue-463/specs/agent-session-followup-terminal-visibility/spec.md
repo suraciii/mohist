@@ -26,16 +26,16 @@ The server SHALL deliver `session.followup_completed` and `session.followup_fail
 - **WHEN** a follow-up fails and the runner emits `session.followup_failed`
 - **THEN** the web SHALL receive that event
 
-### Requirement: Web converges session state on a follow-up terminal event
+### Requirement: Web converges the in-flight follow-up round and refreshes session status on a terminal event
 
-On receiving a follow-up terminal event for a session, the web SHALL update that session's presented state so it converges to the corresponding terminal state.
+A follow-up terminal event is operation-scoped: it ends the in-flight follow-up, not the session (the session does not become globally completed or failed, and remains usable for further follow-ups). On receiving a follow-up terminal event for a session, the web SHALL converge the in-flight follow-up round to the corresponding outcome (completed or failed) and SHALL refresh the session's presented status from the server. The web SHALL NOT mark the session itself as globally completed or failed solely from a follow-up terminal event.
 
-#### Scenario: Completed follow-up converges to completed state
+#### Scenario: A completed follow-up closes the in-flight round
 
 - **WHEN** the web receives `session.followup_completed` for a session
-- **THEN** the session's presented state SHALL become completed
+- **THEN** the in-flight follow-up round SHALL converge to completed, and the session's presented status SHALL be refreshed from the server rather than set to a global completed terminal
 
-#### Scenario: Failed follow-up converges to failed state
+#### Scenario: A failed follow-up marks the in-flight round failed
 
 - **WHEN** the web receives `session.followup_failed` for a session
-- **THEN** the session's presented state SHALL become failed
+- **THEN** the in-flight follow-up round SHALL converge to failed, and the session's presented status SHALL be refreshed from the server rather than set to a global failed terminal
