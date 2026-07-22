@@ -34,7 +34,7 @@ export function PrDeliveryIndicator({ metadata, className }: PrDeliveryIndicator
         />
       </svg>
       <span>
-        经由 PR <span className="font-mono">#{metadata.prNumber}</span> 合并
+        Merged via PR <span className="font-mono">#{metadata.prNumber}</span>
       </span>
       <svg
         className="h-3 w-3 flex-shrink-0 opacity-70"

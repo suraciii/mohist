@@ -86,21 +86,21 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
   if (rebase.isRebasing) {
     return (
       <div className="mb-8" data-testid="branch-bar-frame">
-        <div data-testid="branch-bar" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
+        <div data-testid="branch-bar" className="rounded-lg border border-info-border bg-info-subtle px-4 py-3 space-y-2">
           <div className="flex items-center gap-3">
             {!rebase.isQueued && (
-              <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
+              <svg className="h-4 w-4 animate-spin text-info" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             )}
-            <span className="text-sm font-medium text-blue-800">
+            <span className="text-sm font-medium text-info">
               {rebase.isQueued ? 'Rebase queued' : rebase.isConflictResolving ? 'Resolving conflicts...' : 'Rebasing...'}
             </span>
-            <span className="text-xs text-blue-600 font-mono">{workspace.branch}</span>
+            <span className="text-xs text-info font-mono">{workspace.branch}</span>
           </div>
           {rebase.hasConflicts && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <div className="rounded-md bg-danger-subtle px-3 py-2 text-xs text-danger">
               <span>Conflicting files:</span>
               <ul className="mt-1 ml-3 list-disc">
                 {rebase.hasConflicts.map((f) => (
@@ -109,7 +109,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               </ul>
             </div>
           )}
-          <RebaseReason reason={rebaseUnavailableReason} className="text-xs text-blue-600" />
+          <RebaseReason reason={rebaseUnavailableReason} className="text-xs text-info" />
         </div>
       </div>
     )
@@ -118,7 +118,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
   if (isUpstreamUnknown) {
     return (
       <div className="mb-8" data-testid="branch-bar-frame">
-        <div data-testid="branch-bar" className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <div data-testid="branch-bar" className="rounded-lg border border-border bg-muted px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <span className="text-sm font-mono font-medium text-foreground truncate">{workspace.branch}</span>
@@ -126,13 +126,13 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
             </div>
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:shrink-0">
-              <span className="text-xs font-medium text-muted-foreground">未能检查上游</span>
+              <span className="text-xs font-medium text-muted-foreground">Upstream check unavailable</span>
               {allowRebase && (
                 <RebaseAction
                   baseBranch={baseBranch}
                   rebase={rebase}
                   allowRebase={allowRebase}
-                  enabledClassName="border-gray-300 text-foreground hover:bg-gray-50"
+                  enabledClassName="border-border text-foreground hover:bg-muted"
                   reasonClassName="text-xs text-muted-foreground"
                 />
               )}
@@ -146,7 +146,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
   if (isBehind || allowRebase) {
     return (
       <div className="mb-8" data-testid="branch-bar-frame">
-        <div data-testid="branch-bar" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+        <div data-testid="branch-bar" className="rounded-lg border border-warning-border bg-warning-subtle px-4 py-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-[14rem] flex-1 items-center gap-3">
               <span className="text-sm font-mono font-medium text-foreground truncate">{workspace.branch}</span>
@@ -155,9 +155,9 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
             </div>
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:shrink-0">
               {workspace.isChecking || !workspace.hasAheadBehind ? (
-                <span className="text-xs font-medium text-amber-700">Checking upstream...</span>
+                <span className="text-xs font-medium text-warning">Checking upstream...</span>
               ) : (
-                <span className="text-xs font-medium text-amber-700">
+                <span className="text-xs font-medium text-warning">
                   {workspace.ahead > 0 && <span className="text-muted-foreground">↑{workspace.ahead} </span>}
                   {workspace.behind > 0 ? <span>↓{workspace.behind} behind</span> : <span>up to date</span>}
                 </span>
@@ -166,25 +166,25 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
                 baseBranch={baseBranch}
                 rebase={rebase}
                 allowRebase={allowRebase}
-                enabledClassName="border-amber-300 text-amber-800 hover:bg-amber-50"
-                reasonClassName="text-xs text-amber-700"
+                enabledClassName="border-warning-border text-warning hover:bg-warning-subtle"
+                reasonClassName="text-xs text-warning"
               />
             </div>
           </div>
           {isDone && (
-            <p className="text-xs text-amber-600">
+            <p className="text-xs text-warning">
               This Done workflow workspace is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained workspace.
             </p>
           )}
           {rebase.error && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <div className="rounded-md bg-danger-subtle px-3 py-2 text-xs text-danger">
               {rebase.error instanceof ApiError
                 ? rebase.error.message
                 : 'Rebase failed'}
             </div>
           )}
           {rebase.hasConflicts && !rebase.isConflictFailed && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <div className="rounded-md bg-danger-subtle px-3 py-2 text-xs text-danger">
               <span>Conflicting files:</span>
               <ul className="mt-1 ml-3 list-disc">
                 {rebase.hasConflicts.map((f) => (
@@ -194,7 +194,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
             </div>
           )}
           {rebase.isConflictFailed && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <div className="rounded-md bg-danger-subtle px-3 py-2 text-xs text-danger">
               <span>Conflict resolution failed{rebase.rebaseConflict?.error ? `: ${rebase.rebaseConflict.error}` : ''}</span>
             </div>
           )}
@@ -214,7 +214,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {workspace.ahead > 0 && <span className="text-xs text-muted-foreground">↑{workspace.ahead} ahead</span>}
-            <span className="text-xs font-medium text-green-600">up to date</span>
+            <span className="text-xs font-medium text-success">up to date</span>
           </div>
         </div>
         {isDone && (

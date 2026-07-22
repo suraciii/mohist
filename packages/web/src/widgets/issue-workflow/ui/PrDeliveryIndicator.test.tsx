@@ -28,9 +28,8 @@ describe('PrDeliveryIndicator', () => {
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
     expect(link.getAttribute('data-pr-number')).toBe('42')
     expect(link.getAttribute('data-pr-url')).toBe(sampleMetadata.prUrl)
-    expect(link.textContent).toContain('经由 PR')
+    expect(link.textContent).toContain('Merged via PR')
     expect(link.textContent).toContain('#42')
-    expect(link.textContent).toContain('合并')
   })
 })
 

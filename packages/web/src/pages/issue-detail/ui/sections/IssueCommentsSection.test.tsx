@@ -83,4 +83,31 @@ describe('IssueCommentsSection', () => {
     fireEvent.change(input, { target: { value: 'New author' } })
     expect(setCommentAuthor).toHaveBeenCalledWith('New author')
   })
+
+  it('renders the empty-comment submit button with an unmistakable disabled affordance', () => {
+    renderSection({ commentAuthor: '   ', commentText: 'A body' })
+
+    const submit = screen.getByRole('button', { name: 'Comment' })
+    expect(submit).toBeDisabled()
+    expect(submit.className).toMatch(/\bcursor-not-allowed\b/)
+    expect(submit.className).toMatch(/\bbg-muted\b/)
+    expect(submit.className).toMatch(/\btext-muted-foreground\b/)
+    expect(submit.className).not.toMatch(/\bopacity-50\b/)
+  })
+
+  it('renders the in-flight delete-comment button with an unmistakable disabled affordance', () => {
+    renderSection({
+      comments: [
+        { id: 'cmt-1', author: 'Ada', body: 'First body', createdAt: '2026-07-21T08:00:00Z' },
+      ],
+      deletingCommentId: 'cmt-1',
+    })
+
+    const deleteButton = screen.getByTestId('comment-delete-button')
+    expect(deleteButton).toBeDisabled()
+    expect(deleteButton.className).toMatch(/\bcursor-not-allowed\b/)
+    expect(deleteButton.className).toMatch(/\bbg-muted\b/)
+    expect(deleteButton.className).toMatch(/\btext-muted-foreground\b/)
+    expect(deleteButton.className).not.toMatch(/\bopacity-50\b/)
+  })
 })

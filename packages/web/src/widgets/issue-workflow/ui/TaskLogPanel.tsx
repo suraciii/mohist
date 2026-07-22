@@ -414,12 +414,12 @@ export function TaskLogPanel({
   }
 
   return (
-    <div className="rounded border border-slate-200 bg-white px-2 py-1.5 space-y-1" data-testid="task-log-panel">
-      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+    <div className="rounded border border-border bg-card px-2 py-1.5 space-y-1" data-testid="task-log-panel">
+      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
         <span className="shrink-0">Execution log</span>
         {truncated && (
           <span
-            className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-mono normal-case tracking-normal"
+            className="rounded bg-warning-subtle text-warning px-1.5 py-0.5 font-mono normal-case tracking-normal"
             data-testid="task-log-truncation-indicator"
           >
             Earlier lines truncated — showing retained tail
@@ -428,7 +428,7 @@ export function TaskLogPanel({
         <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 normal-case tracking-normal sm:flex-initial">
           <div className="relative min-w-0 flex-1 basis-44 sm:flex-initial sm:basis-auto">
             <svg
-              className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"
+              className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden="true"
@@ -446,7 +446,7 @@ export function TaskLogPanel({
               placeholder="Search log lines…"
               aria-label="Search log lines"
               data-testid="task-log-search-input"
-              className="w-full rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px] sm:w-48"
+              className="w-full rounded-md border border-input bg-background pl-7 pr-3 py-1 text-[11px] text-foreground placeholder:text-muted-foreground focus:border-info focus:ring-1 focus:ring-info focus:outline-none min-h-[28px] sm:w-48"
             />
           </div>
           <button
@@ -455,7 +455,7 @@ export function TaskLogPanel({
             disabled={visibleLines === 0}
             aria-label="Download execution log"
             data-testid="task-log-download-button"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[28px]"
+            className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[28px]"
           >
             <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
@@ -478,8 +478,8 @@ export function TaskLogPanel({
                 data-testid={`task-log-source-chip-${source}`}
                 className={
                   disabled
-                    ? 'inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-400 line-through transition-colors'
-                    : 'inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-200 transition-colors'
+                    ? 'inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground line-through transition-colors'
+                    : 'inline-flex items-center rounded-full border border-input bg-background px-2.5 py-0.5 text-[10px] font-semibold text-foreground hover:bg-muted transition-colors'
                 }
               >
                 {source}

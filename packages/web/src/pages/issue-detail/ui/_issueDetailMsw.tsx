@@ -114,6 +114,27 @@ export function mockIssue(issue: Record<string, unknown>) {
   server.use(http.get(ISSUES, () => HttpResponse.json({ success: true, data: issue })))
 }
 
+export function mockIssueError(status: number, message = 'Issue transport failed') {
+  currentIssue = null
+  server.use(
+    http.get(ISSUES, () =>
+      HttpResponse.json({ success: false, error: message, code: status === 404 ? 'not_found' : 'transport_error' }, { status }),
+    ),
+  )
+}
+
+export function mockIssuePending() {
+  let resolve: ((response: Response) => void) | undefined
+  server.use(
+    http.get(ISSUES, () => new Promise<Response>((done) => {
+      resolve = done
+    })),
+  )
+  return (issue: Record<string, unknown>) => {
+    resolve?.(HttpResponse.json({ success: true, data: issue }))
+  }
+}
+
 export function getCurrentIssueFixture() {
   return currentIssue
 }
