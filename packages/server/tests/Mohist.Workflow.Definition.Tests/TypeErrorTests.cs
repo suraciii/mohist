@@ -256,6 +256,10 @@ public class TypeErrorTests
             e.Path == "stages[0].stage" && e.Message == "'stage' must be a string");
         Assert.Contains(result.Errors, e =>
             e.Path == "stages[0].tasks[0].id" && e.Message == "'id' must be a string");
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Path == "stages[0].stage" && e.Message == "stage identifier is required");
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].id" && e.Message == "task identifier is required");
     }
 
     [Fact]

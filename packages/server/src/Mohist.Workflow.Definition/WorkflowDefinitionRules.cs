@@ -133,7 +133,8 @@ internal static class WorkflowDefinitionRules
     {
         var stagePath = $"stages[{stageIndex}]";
 
-        if (string.IsNullOrWhiteSpace(stage.Stage))
+        if (string.IsNullOrWhiteSpace(stage.Stage)
+            && !HasTypeError(errors, $"{stagePath}.stage"))
         {
             AddError(errors, emittedPaths, $"{stagePath}.stage", "stage identifier is required");
         }
@@ -191,14 +192,16 @@ internal static class WorkflowDefinitionRules
                 "lockBehavior must be 'sequential'");
         }
 
-        if (hasLockBehavior && !hasResources)
+        if (hasLockBehavior && !hasResources
+            && !HasTypeError(errors, $"{stagePath}.resources"))
         {
             AddError(errors, emittedPaths,
                 $"{stagePath}.lockBehavior",
                 "lockBehavior requires non-empty resources");
         }
 
-        if (!hasLockBehavior && hasResources)
+        if (!hasLockBehavior && hasResources
+            && !HasTypeError(errors, $"{stagePath}.lockBehavior"))
         {
             AddError(errors, emittedPaths,
                 $"{stagePath}.resources",
@@ -215,7 +218,8 @@ internal static class WorkflowDefinitionRules
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
-        if (string.IsNullOrWhiteSpace(task.Id))
+        if (string.IsNullOrWhiteSpace(task.Id)
+            && !HasTypeError(errors, $"{taskPath}.id"))
         {
             AddError(errors, emittedPaths, $"{taskPath}.id", "task identifier is required");
         }
@@ -229,7 +233,8 @@ internal static class WorkflowDefinitionRules
             }
         }
 
-        if (string.IsNullOrWhiteSpace(task.Uses))
+        if (string.IsNullOrWhiteSpace(task.Uses)
+            && !HasTypeError(errors, $"{taskPath}.uses"))
         {
             AddError(errors, emittedPaths, $"{taskPath}.uses", "uses is required");
         }
@@ -248,12 +253,14 @@ internal static class WorkflowDefinitionRules
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
-        if (string.IsNullOrWhiteSpace(task.Id))
+        if (string.IsNullOrWhiteSpace(task.Id)
+            && !HasTypeError(errors, $"{taskPath}.id"))
         {
             AddError(errors, emittedPaths, $"{taskPath}.id", "task identifier is required");
         }
 
-        if (string.IsNullOrWhiteSpace(task.Uses))
+        if (string.IsNullOrWhiteSpace(task.Uses)
+            && !HasTypeError(errors, $"{taskPath}.uses"))
         {
             AddError(errors, emittedPaths, $"{taskPath}.uses", "uses is required");
         }
@@ -270,7 +277,8 @@ internal static class WorkflowDefinitionRules
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
-        if (string.IsNullOrWhiteSpace(check.Id))
+        if (string.IsNullOrWhiteSpace(check.Id)
+            && !HasTypeError(errors, $"{checkPath}.id"))
         {
             AddError(errors, emittedPaths, $"{checkPath}.id", "check identifier is required");
         }
@@ -284,7 +292,8 @@ internal static class WorkflowDefinitionRules
             }
         }
 
-        if (string.IsNullOrWhiteSpace(check.Uses))
+        if (string.IsNullOrWhiteSpace(check.Uses)
+            && !HasTypeError(errors, $"{checkPath}.uses"))
         {
             AddError(errors, emittedPaths, $"{checkPath}.uses", "uses is required");
         }
@@ -459,7 +468,19 @@ internal static class WorkflowDefinitionRules
                 "recovery.budget must be a non-negative integer");
         }
 
-        if (recovery.Handlers is null || recovery.Handlers.Count == 0)
+        if (recovery.Handlers is null)
+        {
+            if (!HasTypeError(errors, $"{taskPath}.recovery.handlers"))
+            {
+                AddError(errors, emittedPaths,
+                    $"{taskPath}.recovery.handlers",
+                    "recovery.handlers must be non-empty");
+            }
+            return;
+        }
+
+        if (recovery.Handlers.Count == 0
+            && !HasTypeError(errors, $"{taskPath}.recovery.handlers"))
         {
             AddError(errors, emittedPaths,
                 $"{taskPath}.recovery.handlers",
@@ -476,7 +497,8 @@ internal static class WorkflowDefinitionRules
 
             ValidateWhen(handler, handlerPath, errors, emittedPaths);
 
-            var hasWhen = handler.When is not null;
+            var hasWhen = handler.When is not null
+                || HasTypeError(errors, $"{handlerPath}.when");
             if (!hasWhen)
             {
                 if (hasDefault)
@@ -495,8 +517,10 @@ internal static class WorkflowDefinitionRules
                 }
             }
 
-            var hasTasks = handler.Tasks is { Count: > 0 };
-            if (!hasTasks && !handler.RetrySelf)
+            var hasTasks = handler.Tasks is { Count: > 0 }
+                || HasTypeError(errors, $"{handlerPath}.tasks");
+            if (!hasTasks && !handler.RetrySelf
+                && !HasTypeError(errors, $"{handlerPath}.retrySelf"))
             {
                 AddError(errors, emittedPaths,
                     handlerPath,
@@ -812,4 +836,9 @@ internal static class WorkflowDefinitionRules
 
     private static bool HasErrorAtPath(HashSet<string> emittedErrors, string path) =>
         emittedErrors.Any(key => key.StartsWith($"{path}\u001f", StringComparison.Ordinal));
+
+    private static bool HasTypeError(List<ValidationError> errors, string path) =>
+        errors.Any(error =>
+            error.Path == path
+            && error.Message.Contains(" must be ", StringComparison.Ordinal));
 }
