@@ -57,11 +57,6 @@ public static class WorkflowProfileCatalog
         IdComparer.Equals(profileId, LocalId) ? Profile :
         IdComparer.Equals(profileId, GithubPrId) ? GithubPrProfileAsset : null;
 
-    public static string ResolveDescription(WorkflowDefinition definition) =>
-        ReferenceEquals(definition, Definition) ? Profile.Description :
-        ReferenceEquals(definition, GithubPrWorkflowDefinition) ? GithubPrProfileAsset.Description :
-        string.Empty;
-
     private static WorkflowProfile LoadProfile(string fileName, string id, string name, string description)
     {
         var path = ResolveDefinitionPath(fileName)

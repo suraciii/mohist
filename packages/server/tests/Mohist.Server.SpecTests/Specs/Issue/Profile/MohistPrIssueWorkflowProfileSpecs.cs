@@ -45,7 +45,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     {
         var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), profile.Description);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, profile.Description);
         Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
     }
 
@@ -140,8 +140,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         Assert.False(string.IsNullOrWhiteSpace(defaultEntry.Description));
         Assert.False(string.IsNullOrWhiteSpace(prEntry.Description));
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultEntry.Description);
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), prEntry.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, defaultEntry.Description);
+        Assert.Equal(WorkflowProfileCatalog.GithubPrProfileAsset.Description, prEntry.Description);
     }
 
     [Fact]

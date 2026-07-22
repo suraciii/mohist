@@ -1130,7 +1130,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         var defaultEntry = Assert.Single(list, info => info.Id == "mohist/local");
         Assert.True(defaultEntry.IsDefault);
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultEntry.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, defaultEntry.Description);
     }
 
     [Fact]
@@ -1142,7 +1142,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         var defaultTemplate = Assert.Single(templates, t => t.Id == "mohist/local");
         Assert.True(defaultTemplate.IsDefault);
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultTemplate.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, defaultTemplate.Description);
     }
 
     [Fact]

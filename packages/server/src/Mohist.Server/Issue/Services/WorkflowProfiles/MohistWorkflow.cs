@@ -17,6 +17,4 @@ public static class MohistWorkflow
         return Definition;
     }
 
-    public static string ResolveDescription(WorkflowDefinition definition) =>
-        WorkflowProfileCatalog.ResolveDescription(definition);
 }
