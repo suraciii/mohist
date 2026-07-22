@@ -8,7 +8,8 @@ import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSession
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
+import { findHistoricalRuntimeWithVisibleContent } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, StatusKind, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 export interface IssueSessionDataSourceDependencies {
@@ -241,8 +242,27 @@ export function useIssueSessionDataSource(
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
-  const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = detail == null && session == null
+    ? true
+    : (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const runtimeSessionId = detail?.runtimeSessionId ?? session?.runtimeSessionId ?? ''
+  const isHistoricalRuntimeView = !!searchParams.get('rt')
+
+  const shouldFetchUnfilteredTranscript = isHistoricalRuntimeView && transcriptResponse != null && transcriptResponse.turns.length === 0
+
+  const unfilteredTranscriptQueryKey = useMemo(
+    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey, null] as const,
+    [issueNumber, projectId, lookupKey],
+  )
+
+  const { data: unfilteredTranscriptResponse } = useQuery<AgentSessionTranscriptResponse | null, Error>({
+    queryKey: unfilteredTranscriptQueryKey,
+    queryFn: async () => {
+      if (!lookupKey) return null
+      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId, null)
+    },
+    enabled: hasRoute && shouldFetchUnfilteredTranscript,
+  })
 
   const statusKind: StatusKind = detail
     ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
@@ -259,9 +279,10 @@ export function useIssueSessionDataSource(
     isStreaming,
   } = useTranscript({
     issueNumber,
-    sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
+    sessionId: detail?.id ?? session?.id ?? decodedSessionId ?? '',
     runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
     runtime: detail?.runtime ?? null,
+    isHistoricalRuntimeView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -305,6 +326,31 @@ export function useIssueSessionDataSource(
         return `${base}?${params}`
       }
     : null
+
+  const emptyStateEvidence = useMemo(() => {
+    if (turns.length > 0) return { emptyStateKind: null as EmptyStateKind | null, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+
+    if (isHistoricalRuntimeView && unfilteredTranscriptResponse?.turns && unfilteredTranscriptResponse.turns.length > 0) {
+      const historicalRuntimeId = findHistoricalRuntimeWithVisibleContent(
+        unfilteredTranscriptResponse.turns,
+        searchParams.get('rt'),
+        runtimeLineage,
+      )
+      if (historicalRuntimeId) {
+        return {
+          emptyStateKind: 'runtime-filtered' as const,
+          historicalRuntimeTarget: buildLineageTargetPath?.(historicalRuntimeId) ?? null,
+          historicalRuntimeId,
+        }
+      }
+    }
+
+    if (isRunning) {
+      return { emptyStateKind: 'running-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+    }
+
+    return { emptyStateKind: 'terminal-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+  }, [turns.length, isHistoricalRuntimeView, unfilteredTranscriptResponse, searchParams, runtimeLineage, buildLineageTargetPath, isRunning])
 
   const hasRecoveryActions = !!recoverySessionName
   const recoverySessionNameStr = recoverySessionName
@@ -380,6 +426,9 @@ export function useIssueSessionDataSource(
     isThinking,
     isStreaming,
     displayTurns,
+    emptyStateKind: emptyStateEvidence.emptyStateKind,
+    historicalRuntimeTarget: emptyStateEvidence.historicalRuntimeTarget,
+    historicalRuntimeId: emptyStateEvidence.historicalRuntimeId,
     issueNumber,
   }
 }

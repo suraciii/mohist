@@ -1,12 +1,13 @@
 import { useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession } from '../../../entities/agent'
-import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
+import { useGenericSessionSummary, useGenericSessionTranscript, getGenericSessionTranscript, useGenericFollowup, useCancelGenericSession } from '../../../entities/agent'
+import type { AgentSessionTranscriptResponse, SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
-import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
+import { findHistoricalRuntimeWithVisibleContent } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, StatusKind, EmptyStateKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 export interface GenericSessionDataSourceDependencies {
@@ -14,6 +15,7 @@ export interface GenericSessionDataSourceDependencies {
   projectTurn: typeof projectTurn
   useGenericSessionSummary: typeof useGenericSessionSummary
   useGenericSessionTranscript: typeof useGenericSessionTranscript
+  getGenericSessionTranscript?: typeof getGenericSessionTranscript
   useGenericFollowup: typeof useGenericFollowup
   useCancelGenericSession: typeof useCancelGenericSession
 }
@@ -23,6 +25,7 @@ const defaultDependencies: GenericSessionDataSourceDependencies = {
   projectTurn,
   useGenericSessionSummary,
   useGenericSessionTranscript,
+  getGenericSessionTranscript,
   useGenericFollowup,
   useCancelGenericSession,
 }
@@ -54,6 +57,7 @@ export function useGenericSessionDataSource(
     projectTurn: projectTranscriptTurn,
     useGenericSessionSummary: useSummary,
     useGenericSessionTranscript: useTranscriptResponse,
+    getGenericSessionTranscript: fetchTranscript = getGenericSessionTranscript,
     useGenericFollowup: useFollowup,
     useCancelGenericSession: useCancel,
   } = dependencies
@@ -81,12 +85,23 @@ export function useGenericSessionDataSource(
 
   const rawStatus = summary?.status ?? ''
   const apiStatusKind = meta?.statusKind
-  const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = summary == null
+    ? true
+    : (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const terminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'stopped' || rawStatus === 'cancelled'
   const runtimeLineage = summary?.runtimeSessionLineage ?? null
   const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
   const isCurrentRuntimeView = viewedRuntimeSessionId === summary?.runtimeSessionId
   const canFollowup = !terminal && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
+  const isHistoricalRuntimeView = !!requestedRuntimeSessionId
+
+  const shouldFetchUnfilteredTranscript = isHistoricalRuntimeView && transcriptResponse != null && transcriptResponse.turns.length === 0
+
+  const { data: unfilteredTranscriptResponse } = useQuery<AgentSessionTranscriptResponse>({
+    queryKey: ['agent-session', projectId, sessionId, 'transcript', null],
+    queryFn: () => fetchTranscript(projectId!, sessionId, null),
+    enabled: !!projectId && !!sessionId && shouldFetchUnfilteredTranscript,
+  })
 
   const statusKind: StatusKind = meta
     ? (meta.statusKind ?? getSessionStatusKind(rawStatus, meta.lastActivityAt, isRunning))
@@ -121,6 +136,7 @@ export function useGenericSessionDataSource(
     sessionId,
     runtimeSessionId: requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? '',
     runtime: summary?.runtime ?? null,
+    isHistoricalRuntimeView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -145,6 +161,31 @@ export function useGenericSessionDataSource(
         return `${base}?${params}`
       }
     : null
+
+  const emptyStateEvidence = useMemo(() => {
+    if (turns.length > 0) return { emptyStateKind: null as EmptyStateKind | null, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+
+    if (isHistoricalRuntimeView && unfilteredTranscriptResponse?.turns && unfilteredTranscriptResponse.turns.length > 0) {
+      const historicalRuntimeId = findHistoricalRuntimeWithVisibleContent(
+        unfilteredTranscriptResponse.turns,
+        requestedRuntimeSessionId,
+        runtimeLineage,
+      )
+      if (historicalRuntimeId) {
+        return {
+          emptyStateKind: 'runtime-filtered' as const,
+          historicalRuntimeTarget: buildLineageTargetPath?.(historicalRuntimeId) ?? null,
+          historicalRuntimeId,
+        }
+      }
+    }
+
+    if (isRunning) {
+      return { emptyStateKind: 'running-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+    }
+
+    return { emptyStateKind: 'terminal-no-content' as const, historicalRuntimeTarget: null as string | null, historicalRuntimeId: null as string | null }
+  }, [turns.length, isHistoricalRuntimeView, unfilteredTranscriptResponse, requestedRuntimeSessionId, runtimeLineage, buildLineageTargetPath, isRunning])
   const hasIssueContextRef = summary?.contextRefs?.issueNumber != null
   const backPath = fromActivity
     ? toProjectPath('/activity')
@@ -232,6 +273,9 @@ export function useGenericSessionDataSource(
     isThinking,
     isStreaming,
     displayTurns,
+    emptyStateKind: emptyStateEvidence.emptyStateKind,
+    historicalRuntimeTarget: emptyStateEvidence.historicalRuntimeTarget,
+    historicalRuntimeId: emptyStateEvidence.historicalRuntimeId,
     issueNumber: 0,
   }
 }

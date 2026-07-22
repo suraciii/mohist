@@ -69,7 +69,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", "/mohist-tests/otel/artifacts");
-        builder.UseSetting("Mohist:Otel:Enabled", "true");
+        builder.UseSetting("Mohist:Otel:Enabled", "false");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -83,7 +83,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
-                ["Mohist:Otel:Enabled"] = "true",
+                ["Mohist:Otel:Enabled"] = "false",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -124,6 +124,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                     .UseSqlite(_connectionString));
             services.RemoveAll<OtelDb>();
             services.AddSingleton(_otelDb);
+            services.PostConfigure<OtelOptions>(options => options.Enabled = true);
         });
     }
 
