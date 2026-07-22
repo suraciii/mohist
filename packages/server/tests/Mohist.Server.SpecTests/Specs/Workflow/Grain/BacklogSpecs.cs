@@ -74,7 +74,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null)
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("build",
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
@@ -113,14 +113,15 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
+        var templateId = workflowId;
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId);
+        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (template is null)
         {
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
-                TemplateId = definition.Id,
+                TemplateId = templateId,
                 Template = templateJson,
             });
         }
@@ -136,12 +137,12 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = definition.Id,
+                DefaultTemplateId = templateId,
             });
         }
         else
         {
-            profile.DefaultTemplateId = definition.Id;
+            profile.DefaultTemplateId = templateId;
             profile.UpdatedAt = TestTime.UtcNow;
         }
 

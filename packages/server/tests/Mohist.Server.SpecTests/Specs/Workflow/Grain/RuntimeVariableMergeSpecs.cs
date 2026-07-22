@@ -102,7 +102,7 @@ public class RuntimeVariableMergeSpecs
 
     private static WorkflowDefinition SingleStage()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("proposal", "Proposal", "spec/propose")],

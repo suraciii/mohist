@@ -41,9 +41,10 @@ public sealed record StageDefinition(
     List<TaskDefinition> Tasks,
     List<CheckDefinition> Checks,
     bool RequiresApproval = false,
-    Dictionary<string, JsonElement?>? Variables = null,
     string? LockBehavior = null,
-    List<string>? Resources = null);
+    List<string>? Resources = null)
+{
+}
 
 public sealed record ApprovalFeedbackConfig(IReadOnlyList<TaskDefinition>? Tasks = null);
 
@@ -66,16 +67,13 @@ public sealed record StageStructure(
     bool RequiresApproval);
 
 public sealed record WorkflowDefinition(
-    string Id,
     List<StageDefinition> Stages,
-    string? Name = null,
-    string? Description = null,
-    Dictionary<string, JsonElement?>? Variables = null,
-    Dictionary<string, JsonElement?>? Defaults = null,
-    Dictionary<string, string>? Artifacts = null,
     ApprovalConfig? Approval = null)
 {
-    public WorkflowStructure ToStructure() => new(
-        Id,
-        Stages?.Select(s => new StageStructure(s.Stage, s.RequiresApproval)).ToList() ?? new List<StageStructure>());
 }
+
+public sealed record WorkflowProfile(
+    string Id,
+    string Name,
+    string Description,
+    WorkflowDefinition Definition);

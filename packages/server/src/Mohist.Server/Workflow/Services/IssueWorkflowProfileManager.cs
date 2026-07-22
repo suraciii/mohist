@@ -36,7 +36,7 @@ public class IssueWorkflowProfileManager : IScopedService
         var row = await FindProfileAsync(db, projectId, issueNumber);
         if (row is null) return null;
         if (!string.IsNullOrWhiteSpace(row.Template))
-            return DeserializeDefinition(row.Template);
+            return DeserializeProfile(row.Template)?.Definition;
         // SourceTemplateId case - caller should resolve via ProjectWorkflowProfileManager.GetTemplateAsync
         return null;
     }
@@ -53,7 +53,7 @@ public class IssueWorkflowProfileManager : IScopedService
                 row.IssueNumber,
                 row.SourceTemplateId,
                 !string.IsNullOrWhiteSpace(row.Template),
-                string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
+                 string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeProfile(row.Template),
                 VariableBundle.FromJson(row.Variables),
                 row.UpdatedAt);
     }
@@ -82,10 +82,10 @@ public class IssueWorkflowProfileManager : IScopedService
         if (!string.IsNullOrWhiteSpace(request.ProjectTemplateId) && !string.IsNullOrWhiteSpace(request.Template))
             throw new InvalidOperationException("Cannot set both ProjectTemplateId and custom Template at the same time");
 
-        WorkflowDefinition? parsed = null;
+        WorkflowProfile? parsedProfile = null;
         if (!string.IsNullOrWhiteSpace(request.Template))
         {
-            parsed = WorkflowYamlSerializer.FromYaml(request.Template);
+            parsedProfile = WorkflowYamlSerializer.FromProfileYaml(request.Template, CustomProfileId(projectId, issueNumber));
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -96,7 +96,7 @@ public class IssueWorkflowProfileManager : IScopedService
         {
             row = CreateProfile(projectId, issueNumber);
             row.SourceTemplateId = request.ProjectTemplateId;
-            row.Template = parsed is null ? null : SerializeDefinition(parsed);
+            row.Template = parsedProfile is null ? null : SerializeProfile(parsedProfile);
             row.Variables = VariableBundle.Empty.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
             db.IssueWorkflowProfiles.Add(row);
@@ -104,7 +104,7 @@ public class IssueWorkflowProfileManager : IScopedService
         else
         {
             row.SourceTemplateId = request.ProjectTemplateId;
-            row.Template = parsed is null ? null : SerializeDefinition(parsed);
+            row.Template = parsedProfile is null ? null : SerializeProfile(parsedProfile);
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -175,8 +175,11 @@ public class IssueWorkflowProfileManager : IScopedService
     // Helpers
     // =======================================================================
 
-    private static string SerializeDefinition(WorkflowDefinition def) =>
-        JsonSerializer.Serialize(def, WorkflowYamlSerializer.JsonOptions);
+    private static string SerializeProfile(WorkflowProfile profile) =>
+        JsonSerializer.Serialize(profile, WorkflowYamlSerializer.JsonOptions);
+
+    private static string CustomProfileId(string projectId, int issueNumber) =>
+        $"issue-custom:{projectId}#{issueNumber}";
 
     private static void ValidateAgentRuntimes(VariableBundle bundle)
     {
@@ -217,12 +220,12 @@ public class IssueWorkflowProfileManager : IScopedService
         };
     }
 
-    private static WorkflowDefinition? DeserializeDefinition(string json)
+    private static WorkflowProfile? DeserializeProfile(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return JsonSerializer.Deserialize<WorkflowDefinition>(json, WorkflowYamlSerializer.JsonOptions);
+            return WorkflowYamlSerializer.FromProfileJson(json);
         }
         catch
         {
@@ -236,7 +239,7 @@ public class IssueWorkflowProfileManager : IScopedService
             row.IssueNumber,
             row.SourceTemplateId,
             !string.IsNullOrWhiteSpace(row.Template),
-            string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
+            string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeProfile(row.Template),
             VariableBundle.FromJson(row.Variables),
             row.UpdatedAt);
 }
@@ -254,6 +257,6 @@ public sealed record IssueWorkflowProfileState(
     int IssueNumber,
     string? SourceTemplateId,
     bool HasCustomTemplate,
-    WorkflowDefinition? Template,
+    WorkflowProfile? Template,
     VariableBundle Variables,
     DateTimeOffset? UpdatedAt);

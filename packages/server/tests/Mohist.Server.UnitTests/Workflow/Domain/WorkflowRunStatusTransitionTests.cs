@@ -312,7 +312,7 @@ public class WorkflowRunStatusTransitionTests
     [Fact]
     public void HasInFlightWork_IgnoresStaleChecksWorkIdOnCompletedStages()
     {
-        var run = WorkflowRun.Create("wr_387", new WorkflowDefinition("spec/wf", [
+        var run = WorkflowRun.Create("wr_387", new WorkflowDefinition( [
             new StageDefinition("build",
                 [new("compile", "Compile", "spec/t")],
                 [new("verify", "Verify", "spec/check")]),
@@ -439,7 +439,7 @@ public class WorkflowRunStatusTransitionTests
 
     private static WorkflowRun BuildAwaitingApprovalRun()
     {
-        var run = WorkflowRun.Create("wr_approval", new WorkflowDefinition("spec/workflow", [
+        var run = WorkflowRun.Create("wr_approval", new WorkflowDefinition( [
             new StageDefinition("plan", [new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")], RequiresApproval: true),
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [])
         ]), DateTimeOffset.UnixEpoch);
@@ -480,7 +480,7 @@ public class WorkflowRunStatusTransitionTests
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null)
     {
-        return WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
+        return WorkflowRun.Create("wr_1", new WorkflowDefinition( [
             new StageDefinition("build",
                 tasks ?? [new("compile", "Compile", "spec/task")],
                 checks ?? [new("build-ok", "Build OK", "spec/check")])

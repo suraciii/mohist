@@ -61,7 +61,6 @@ public sealed class RunnerPollParentContextApiSpecs
     private async Task SeedIssuesAndWorkflowAsync(string projectId, string workflowRunId)
     {
         var definition = new WorkflowDefinition(
-            $"spec/parent-context-{Guid.NewGuid():N}",
             [new StageDefinition(
                 "plan",
                 [new TaskDefinition(
@@ -129,16 +128,17 @@ public sealed class RunnerPollParentContextApiSpecs
                 StoragePath = "/virtual/parent-only.txt",
                 CreatedAt = TestTime.UtcDateTime,
             });
+            var templateId = $"spec/parent-context-{Guid.NewGuid():N}";
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                DefaultTemplateId = definition.Id,
+                DefaultTemplateId = templateId,
             });
             db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
-                TemplateId = definition.Id,
-                Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions),
+                TemplateId = templateId,
+                Template = WorkflowGrainTestHelpers.SerializeProfile(definition, templateId),
             });
             await db.SaveChangesAsync();
         }

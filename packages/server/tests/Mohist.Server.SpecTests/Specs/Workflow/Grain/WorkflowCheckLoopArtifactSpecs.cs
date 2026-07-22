@@ -58,7 +58,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
         new([new TaskArtifactDeclaration("review.md")]);
 
     private static WorkflowDefinition RecoveryLoopDefinition() =>
-        new("spec/workflow", [
+        new([
             new StageDefinition("check",
                 [
                     new TaskDefinition(

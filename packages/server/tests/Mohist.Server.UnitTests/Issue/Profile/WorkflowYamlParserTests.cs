@@ -368,7 +368,7 @@ public class WorkflowYamlParserTests
     }
 
     [Fact]
-    public void WorkflowYamlParser_ProfileWithoutDescriptionYieldsNullDescription()
+    public void WorkflowYamlParser_DefinitionDoesNotCarryDescription()
     {
         var definition = MohistWorkflow.ParseYaml("""
         stages:
@@ -377,21 +377,21 @@ public class WorkflowYamlParserTests
             checks: []
         """);
 
-        Assert.Null(definition.Description);
+        Assert.DoesNotContain("description", WorkflowYamlSerializer.ToYaml(definition), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void WorkflowYamlParser_ProfileWithSingleLineDescription_ParsesItVerbatim()
+    public void WorkflowYamlParser_DefinitionDescriptionIsRejected()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         description: Simple description
         stages:
           - stage: build
             tasks: []
             checks: []
-        """);
+        """));
 
-        Assert.Equal("Simple description", definition.Description);
+        Assert.Contains("description", ex.Message);
     }
 
     [Fact]

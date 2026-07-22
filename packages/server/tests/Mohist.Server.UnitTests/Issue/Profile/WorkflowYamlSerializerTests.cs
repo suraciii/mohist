@@ -9,6 +9,44 @@ namespace Mohist.Server.UnitTests.Issue.Profile;
 
 public class WorkflowYamlSerializerTests
 {
+    [Theory]
+    [InlineData("id: old")]
+    [InlineData("name: old")]
+    [InlineData("description: old")]
+    [InlineData("variables: {}")]
+    [InlineData("defaults: {}")]
+    [InlineData("artifacts: {}")]
+    public void WorkflowYamlSerializer_RejectsRemovedTopLevelFields(string field)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml($"{field}\nstages:\n  - stage: build\n    tasks: []\n    checks: []"));
+
+        Assert.Contains(field.Split(':')[0], ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_RejectsStageVariables()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromYaml("""
+        stages:
+          - stage: build
+            variables: {}
+            tasks: []
+            checks: []
+        """));
+
+        Assert.Contains("stage field 'variables'", ex.Message);
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_JsonConversionRejectsRemovedFields()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => WorkflowYamlSerializer.FromJson("""
+        { "stages": [], "variables": {} }
+        """));
+
+        Assert.Contains("variables", ex.Message);
+    }
+
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsDomainDefinition()
     {
@@ -38,6 +76,22 @@ public class WorkflowYamlSerializerTests
         Assert.True(handler.RetrySelf);
         var fixReviewFindings = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_RoundTripsPersistedProfile()
+    {
+        var definition = new WorkflowDefinition(
+            [new StageDefinition("build", [], [])]);
+        var json = JsonSerializer.Serialize(
+            new WorkflowProfile("spec/workflow", "Spec", string.Empty, definition),
+            WorkflowYamlSerializer.JsonOptions);
+
+        var profile = WorkflowYamlSerializer.FromProfileJson(json);
+
+        Assert.Equal("spec/workflow", profile.Id);
+        Assert.Equal("Spec", profile.Name);
+        Assert.Equal("build", Assert.Single(profile.Definition.Stages).Stage);
     }
 
     [Fact]
@@ -90,14 +144,17 @@ public class WorkflowYamlSerializerTests
     }
 
     [Fact]
-    public void WorkflowYamlSerializer_RoundTripsDescriptionField()
+    public void WorkflowYamlSerializer_EmitsPureDefinitionWithoutProfileFields()
     {
         var definition = MohistWorkflow.Definition;
         var yaml = WorkflowYamlSerializer.ToYaml(definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal(definition.Description, reparsed.Description);
-        Assert.Contains("description:", yaml);
+        Assert.Equal(definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
+        Assert.DoesNotContain("description:", yaml);
+        Assert.DoesNotContain("variables:", yaml);
+        Assert.DoesNotContain("defaults:", yaml);
+        Assert.DoesNotContain("\nartifacts:", yaml);
     }
 
     [Fact]

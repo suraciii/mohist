@@ -70,9 +70,9 @@ public class WorkflowProfileManager : IScopedService
 
         if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.Template))
         {
-            var issueDef = DeserializeDefinition(issueProfile.Template);
-            if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
-                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.ProjectId}#{issueProfile.IssueNumber}", issueDef);
+            var issueProfileAsset = DeserializeProfile(issueProfile.Template);
+            if (issueProfileAsset is not null)
+                return ResolvedTemplate.FromProfile(issueProfileAsset);
         }
 
         if (issueProfile is not null
@@ -98,12 +98,10 @@ public class WorkflowProfileManager : IScopedService
         if (string.IsNullOrWhiteSpace(profileContext.EffectiveProfileId))
             throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
 
-        var effectiveDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(profileContext.EffectiveProfileId);
-        if (effectiveDefinition is not null)
+        var effectiveProfile = WorkflowProfileCatalog.GetProfile(profileContext.EffectiveProfileId);
+        if (effectiveProfile is not null)
         {
-            return ResolvedTemplate.FromDefinition(
-                $"system-template:{profileContext.EffectiveProfileId}",
-                effectiveDefinition);
+            return ResolvedTemplate.FromProfile(effectiveProfile);
         }
 
         throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
@@ -158,7 +156,9 @@ public class WorkflowProfileManager : IScopedService
         if (definition.Stages.Count == 0)
             throw new InvalidOperationException(
                 $"Workflow '{runId}' has no stages in its effective template");
-        return definition.ToStructure();
+        return new WorkflowStructure(
+            template.Id ?? throw new InvalidOperationException("Resolved Workflow Profile has no id"),
+            definition.Stages.Select(s => new StageStructure(s.Stage, s.RequiresApproval)).ToList());
     }
 
     /// <summary>
@@ -206,26 +206,100 @@ public class WorkflowProfileManager : IScopedService
 
     private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
-        // Resolution merges four live layers, lowest priority first:
-        //   1. global config.jsonc bundle (ConfigService.GetVariables)
-        //   2. project Variables (ProjectWorkflowProfile.Variables)
-        //   3. issue Variables (IssueWorkflowProfile.Variables)
-        //   4. run Variables (WorkflowRunProfile.Variables — written by setVars)
+        // Effective Variables are owned by Project, Issue, and WorkflowRun
+        // resources only. Initialization defaults seeded on the WorkflowRun
+        // (e.g. `archive`) resolve below explicit Project, Issue, and Run
+        // values; once an explicit write covers a default key the marker is
+        // cleared and the explicit value follows the standard precedence.
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
-        var global = await _configService.GetVariables();
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
         var run = await _runProfileManager.GetVariablesAsync(runId);
-        return VariableBundle.MergeAll(global, project, issue, run);
+        var runDefaults = await _runProfileManager.GetDefaultVariablesAsync(runId);
+
+        return MergeRunScopedVariables(runDefaults, project, issue, run);
+    }
+
+    private static VariableBundle MergeRunScopedVariables(
+        VariableBundle runDefaults,
+        VariableBundle project,
+        VariableBundle issue,
+        VariableBundle run)
+    {
+        if (!runDefaults.HasDefaultContent)
+        {
+            return VariableBundle.MergeAll(project, issue, run);
+        }
+
+        return new VariableBundle(
+            Vars: MergeRunScopedVars(runDefaults, project, issue, run),
+            Stages: MergeRunScopedStages(runDefaults, project, issue, run),
+            DefaultVars: runDefaults.DefaultVars,
+            DefaultStages: runDefaults.DefaultStages);
+    }
+
+    private static JsonElement? MergeRunScopedVars(
+        VariableBundle runDefaults,
+        VariableBundle project,
+        VariableBundle issue,
+        VariableBundle run)
+    {
+        var defaultVars = runDefaults.DefaultVars;
+        var hasAny = (defaultVars.HasValue && defaultVars.Value.ValueKind == JsonValueKind.Object)
+            || (project.Vars.HasValue && project.Vars.Value.ValueKind == JsonValueKind.Object)
+            || (issue.Vars.HasValue && issue.Vars.Value.ValueKind == JsonValueKind.Object)
+            || (run.Vars.HasValue && run.Vars.Value.ValueKind == JsonValueKind.Object);
+
+        if (!hasAny)
+        {
+            return null;
+        }
+
+        var current = defaultVars.HasValue && defaultVars.Value.ValueKind == JsonValueKind.Object
+            ? defaultVars.Value
+            : JSON.DeserializeElement("{}");
+        current = VariableJsonMerge.ApplyPatch(current, project.Vars) ?? current;
+        current = VariableJsonMerge.ApplyPatch(current, issue.Vars) ?? current;
+        current = VariableJsonMerge.ApplyPatch(current, run.Vars) ?? current;
+        return current;
+    }
+
+    private static Dictionary<string, StageVariables>? MergeRunScopedStages(
+        VariableBundle runDefaults,
+        VariableBundle project,
+        VariableBundle issue,
+        VariableBundle run)
+    {
+        var combined = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+        AddStages(combined, runDefaults.DefaultStages);
+        AddStages(combined, project.Stages);
+        AddStages(combined, issue.Stages);
+        AddStages(combined, run.Stages);
+        return combined.Count == 0 ? null : combined;
+    }
+
+    private static void AddStages(Dictionary<string, StageVariables> target, Dictionary<string, StageVariables>? layer)
+    {
+        if (layer is null) return;
+        foreach (var (stage, stageVars) in layer)
+        {
+            if (target.TryGetValue(stage, out var existing))
+            {
+                target[stage] = new StageVariables(
+                    VariableJsonMerge.ApplyPatch(existing.Vars, stageVars.Vars));
+            }
+            else
+            {
+                target[stage] = stageVars.Copy();
+            }
+        }
     }
 
     internal async Task<VariableBundle> ResolveLayeredVariablesAsync(string runId)
     {
-        var template = await LoadTemplateAsync(runId);
         var independent = await ResolveConfiguredVariablesAsync(runId);
-        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
-        return VariableBundle.Patch(embedded, independent);
+        return independent;
     }
 
     public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
@@ -237,7 +311,11 @@ public class WorkflowProfileManager : IScopedService
     internal async Task<VariableBundle> ResolveEffectiveVariableBundleAsync(string runId, string? stage)
     {
         var layered = await ResolveLayeredVariablesAsync(runId);
-        return new VariableBundle(layered.ResolveStageVars(stage), layered.Stages);
+        return new VariableBundle(
+            layered.ResolveStageVars(stage),
+            layered.Stages,
+            layered.DefaultVars,
+            layered.DefaultStages);
     }
 
     public async Task<WorkspaceIdentity?> LoadIssueWorkspaceAsync(string projectId, int issueNumber)
@@ -453,8 +531,8 @@ public class WorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        var def = DeserializeDefinition(row.Template);
-        return def is null ? null : ResolvedTemplate.FromDefinition($"project-template:{projectId}/{templateId}", def);
+        var profile = DeserializeProfile(row.Template);
+        return profile is null ? null : ResolvedTemplate.FromProfile(profile);
     }
 
     private static async Task<ResolvedTemplate?> LoadTemplateReferenceAsync(
@@ -464,18 +542,16 @@ public class WorkflowProfileManager : IScopedService
         if (projectTemplate is not null)
             return projectTemplate;
 
-        var systemDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(templateId);
-        return systemDefinition is null
-            ? null
-            : ResolvedTemplate.FromDefinition($"system-template:{templateId}", systemDefinition);
+        var systemProfile = WorkflowProfileCatalog.GetProfile(templateId);
+        return systemProfile is null ? null : ResolvedTemplate.FromProfile(systemProfile);
     }
 
-    private static WorkflowDefinition? DeserializeDefinition(string json)
+    private static WorkflowProfile? DeserializeProfile(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return JsonSerializer.Deserialize<WorkflowDefinition>(json, Mohist.Server.Infrastructure.JSON.Options);
+            return WorkflowYamlSerializer.FromProfileJson(json);
         }
         catch
         {

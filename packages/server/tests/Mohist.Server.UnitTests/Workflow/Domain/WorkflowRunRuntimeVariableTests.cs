@@ -90,7 +90,7 @@ public class WorkflowRunRuntimeVariableTests
 
     private static WorkflowDefinition SingleStage()
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],

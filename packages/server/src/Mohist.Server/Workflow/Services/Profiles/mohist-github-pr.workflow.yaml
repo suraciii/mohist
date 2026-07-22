@@ -1,15 +1,3 @@
-description: |
-  Default general-purpose Mohist pipeline that delivers through a GitHub PR: plan (proposal, specs, design, tasks, self-review, open draft PR) → build (load tasks, verify) → check (AI review, push, mark PR ready, verify PR checks) → integrate (archive, push, merge PR).
-  Requires human approval at the plan and check stages. The workflow opens a draft PR as the last plan task, marks it ready after the check stage approves it, and squash-merges it into the repository base branch on integrate completion.
-  Typical duration: 20-60 minutes for a focused change.
-  Choose this over mohist/local when you want each issue to ship as a reviewable, traceable GitHub PR.
-  Not suited for: trivial one-line fixes, throwaway spikes, or quick experiments — these don't warrant a full plan-check-integrate cycle.
-  Requires the `gh` CLI on the runner host and `gh auth login` against the target repository.
-
-variables:
-  agent: {}
-  archive: null
-
 approval:
   feedback:
     tasks:

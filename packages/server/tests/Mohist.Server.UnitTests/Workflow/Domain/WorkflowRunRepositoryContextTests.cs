@@ -46,7 +46,7 @@ public class WorkflowRunRepositoryContextTests
     {
         var run = WorkflowRun.Create(
             "wr_test",
-            new WorkflowDefinition("spec/workflow", [
+            new WorkflowDefinition( [
                 new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
             ]),
             FixedNow);

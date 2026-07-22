@@ -492,7 +492,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var yamlBody = await yamlResponse.Content.ReadFromJsonAsync<JsonElement>();
         var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
         Assert.NotNull(yaml);
-        Assert.Contains("advanced-override", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("advanced-override", yaml!, StringComparison.Ordinal);
         Assert.Contains("only-task", yaml!, StringComparison.Ordinal);
 
         // The displayed selection is still the PR profile — the override

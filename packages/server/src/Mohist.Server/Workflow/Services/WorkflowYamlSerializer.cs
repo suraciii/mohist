@@ -11,37 +11,102 @@ public static class WorkflowYamlSerializer
 {
     public static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 
-    public static WorkflowDefinition FromYaml(string yaml, string id = "workflow")
+    public static WorkflowDefinition FromJson(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Workflow Definition JSON must be an object");
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.Name is "id" or "name" or "description" or "variables" or "defaults" or "artifacts")
+                throw new InvalidOperationException($"Workflow Definition does not allow top-level field '{property.Name}'");
+        }
+
+        var stages = document.RootElement.TryGetProperty("stages", out var stagesElement)
+            ? stagesElement.EnumerateArray().Select(ParseJsonStage).ToList()
+            : null;
+        if (stages is null)
+            throw new InvalidOperationException("Workflow Definition JSON requires stages");
+
+        var approval = document.RootElement.TryGetProperty("approval", out var approvalElement)
+            ? approvalElement.Deserialize<ApprovalConfig>(JsonOptions)
+            : null;
+        return new WorkflowDefinition(stages, approval);
+    }
+
+    private static StageDefinition ParseJsonStage(JsonElement element)
+    {
+        if (element.TryGetProperty("variables", out _))
+            throw new InvalidOperationException("Workflow Definition does not allow stage field 'variables'");
+
+        return new StageDefinition(
+            element.GetProperty("stage").GetString() ?? throw new InvalidOperationException("Workflow stage requires stage"),
+            element.TryGetProperty("tasks", out var tasks)
+                ? tasks.Deserialize<List<TaskDefinition>>(JsonOptions) ?? []
+                : [],
+            element.TryGetProperty("checks", out var checks)
+                ? checks.Deserialize<List<CheckDefinition>>(JsonOptions) ?? []
+                : [],
+            element.TryGetProperty("requiresApproval", out var requiresApproval)
+                && requiresApproval.ValueKind == JsonValueKind.True,
+            LockBehavior: element.TryGetProperty("lockBehavior", out var lockBehavior)
+                ? lockBehavior.GetString()
+                : null,
+            Resources: element.TryGetProperty("resources", out var resources)
+                ? resources.Deserialize<List<string>>(JsonOptions)
+                : null);
+    }
+
+    public static string ToJson(WorkflowDefinition definition) =>
+        JsonSerializer.Serialize(definition, JsonOptions);
+
+    public static WorkflowProfile FromProfileJson(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var id = root.GetProperty("id").GetString() ?? throw new InvalidOperationException("Workflow Profile requires id");
+        var name = root.GetProperty("name").GetString() ?? throw new InvalidOperationException("Workflow Profile requires name");
+        var description = root.GetProperty("description").GetString() ?? string.Empty;
+        var definition = root.GetProperty("definition").GetRawText();
+        return new WorkflowProfile(id, name, description, FromJson(definition));
+    }
+
+    public static WorkflowDefinition FromYaml(string yaml)
     {
         var document = Normalize(CreateDeserializer().Deserialize<Dictionary<object, object?>>(yaml)) as Dictionary<string, object?>
             ?? throw new InvalidOperationException("Workflow YAML is empty");
 
-        var workflowId = String(document, "id");
+        RejectRemovedFields(document);
+        return FromDocument(document);
+    }
+
+    public static WorkflowProfile FromProfileYaml(string yaml, string fallbackId)
+    {
+        var document = Normalize(CreateDeserializer().Deserialize<Dictionary<object, object?>>(yaml)) as Dictionary<string, object?>
+            ?? throw new InvalidOperationException("Workflow Profile YAML is empty");
+        var id = NullIfEmpty(String(document, "id")) ?? fallbackId;
+        var name = NullIfEmpty(String(document, "name")) ?? id;
+        var description = NullIfEmpty(String(document, "description")) ?? string.Empty;
+        document.Remove("id");
+        document.Remove("name");
+        document.Remove("description");
+        RejectRemovedFields(document);
+        return new WorkflowProfile(id, name, description, FromDocument(document));
+    }
+
+    private static WorkflowDefinition FromDocument(Dictionary<string, object?> document)
+    {
         var stages = List(document, "stages").Select(ToStage).ToList();
         if (stages.Count == 0)
             throw new InvalidOperationException("Workflow YAML requires at least one stage");
 
-        return new WorkflowDefinition(
-            string.IsNullOrWhiteSpace(workflowId) ? id : workflowId,
-            stages,
-            Name: NullIfEmpty(String(document, "name")),
-            Description: NullIfEmpty(String(document, "description")),
-            Variables: JsonElementMap(OptionalMap(document, "variables")),
-            Defaults: JsonElementMap(OptionalMap(document, "defaults")),
-            Artifacts: OptionalMap(document, "artifacts")?.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString() ?? ""),
-            Approval: ToApproval(OptionalMap(document, "approval")));
+        return new WorkflowDefinition(stages, ToApproval(OptionalMap(document, "approval")));
     }
 
     public static string ToYaml(WorkflowDefinition definition)
     {
         var document = new Dictionary<string, object?>
         {
-            ["id"] = definition.Id,
-            ["name"] = definition.Name,
-            ["description"] = definition.Description,
-            ["variables"] = ObjectMap(definition.Variables),
-            ["defaults"] = ObjectMap(definition.Defaults),
-            ["artifacts"] = definition.Artifacts,
             ["stages"] = definition.Stages.Select(ToStageMap).ToList(),
         };
 
@@ -64,6 +129,8 @@ public static class WorkflowYamlSerializer
     private static StageDefinition ToStage(object? value)
     {
         var map = Map(value, "stage");
+        if (map.ContainsKey("variables"))
+            throw new InvalidOperationException("Workflow Definition does not allow stage field 'variables'");
         var stage = String(map, "stage");
         if (string.IsNullOrWhiteSpace(stage))
             throw new InvalidOperationException("Workflow stage requires stage");
@@ -73,7 +140,6 @@ public static class WorkflowYamlSerializer
             List(map, "tasks").Select(ToTask).ToList(),
             List(map, "checks").Select(ToCheck).ToList(),
             Bool(map, "requiresApproval"),
-            Variables: JsonElementMap(OptionalMap(map, "variables")),
             LockBehavior: NullIfEmpty(String(map, "lockBehavior")),
             Resources: StringList(map, "resources"));
     }
@@ -359,7 +425,6 @@ public static class WorkflowYamlSerializer
             ["checks"] = stage.Checks.Select(ToCheckMap).ToList(),
         };
         if (stage.RequiresApproval) map["requiresApproval"] = true;
-        if (stage.Variables is not null) map["variables"] = ObjectMap(stage.Variables);
         if (!string.IsNullOrWhiteSpace(stage.LockBehavior)) map["lockBehavior"] = stage.LockBehavior;
         if (stage.Resources is { Count: > 0 }) map["resources"] = stage.Resources;
         return map;
@@ -451,6 +516,15 @@ public static class WorkflowYamlSerializer
     {
         return Normalize(value) as Dictionary<string, object?>
             ?? throw new InvalidOperationException($"Workflow YAML {name} must be an object");
+    }
+
+    private static void RejectRemovedFields(IReadOnlyDictionary<string, object?> document)
+    {
+        foreach (var field in new[] { "id", "name", "description", "variables", "defaults", "artifacts" })
+        {
+            if (document.ContainsKey(field))
+                throw new InvalidOperationException($"Workflow Definition does not allow top-level field '{field}'");
+        }
     }
 
     private static Dictionary<string, object?>? OptionalMap(IReadOnlyDictionary<string, object?> map, string key)

@@ -17,7 +17,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         List<CheckDefinition>? checks = null,
         string stage = "build")
     {
-        return new WorkflowDefinition("spec/workflow",
+        return new WorkflowDefinition(
         [
             new StageDefinition(stage,
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
@@ -221,7 +221,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TwoStages_EachStageDispatchesOwnChecksBatch()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],

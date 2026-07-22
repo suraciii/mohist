@@ -14,14 +14,12 @@ public class DispatchVariableSnapshotSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RuntimeTaskWithPlaceholder_RetryAfterVariableChange_UsesNewValue()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
-            new StageDefinition("build", [new("load-tasks", "Load tasks", "spec/load")], [new("check-1", "Check 1", "spec/check")],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "model-a" })
-                })
+            new StageDefinition("build", [new("load-tasks", "Load tasks", "spec/load")], [new("check-1", "Check 1", "spec/check")])
         ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-a" } })));
 
         var (load, r1) = await PollWorkAnyAsync();
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
@@ -65,7 +63,7 @@ public class DispatchVariableSnapshotSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RuntimeTaskWithBakedLiteral_Retry_UsesBakedValue()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [new StageDefinition("build", [new("load-tasks", "Load tasks", "spec/load")], [new("check-1", "Check 1", "spec/check")]) ]));
 
         var (load, r1) = await PollWorkAnyAsync();

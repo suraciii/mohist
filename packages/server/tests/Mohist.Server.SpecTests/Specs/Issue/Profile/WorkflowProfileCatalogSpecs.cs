@@ -63,6 +63,25 @@ public class WorkflowProfileCatalogSpecs
         Assert.All(descriptions, d => Assert.False(string.IsNullOrWhiteSpace(d)));
     }
 
+    [Fact]
+    public void Catalog_ProfileOwnsMetadata_WhileDefinitionRemainsPure()
+    {
+        var local = WorkflowProfileCatalog.Profile;
+        var github = WorkflowProfileCatalog.GithubPrProfileAsset;
+
+        Assert.Equal("mohist/local", local.Id);
+        Assert.Equal("Mohist Local", local.Name);
+        Assert.Contains("plan", local.Description);
+        Assert.Equal("mohist/github-pr", github.Id);
+        Assert.Equal("Mohist GitHub PR", github.Name);
+        Assert.NotEmpty(local.Definition.Stages);
+        Assert.NotEmpty(github.Definition.Stages);
+
+        var yaml = WorkflowYamlSerializer.ToYaml(local.Definition);
+        Assert.DoesNotContain("description:", yaml);
+        Assert.DoesNotContain("variables:", yaml);
+    }
+
     // ===================== System templates =====================
 
     [Fact]
@@ -120,7 +139,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.NotNull(info);
         Assert.Equal("Mohist Local", info!.Name);
         Assert.True(info.IsDefault);
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), info.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, info.Description);
     }
 
     [Fact]

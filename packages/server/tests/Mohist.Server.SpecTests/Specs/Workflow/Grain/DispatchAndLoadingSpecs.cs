@@ -49,7 +49,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicTasks_LoadTaskCompletes_DynamicTasksRunBeforeChecks()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("load-tasks", "Load tasks", "spec/load")],
@@ -92,7 +92,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task DynamicTaskRegistration_DoesNotAbandonInFlightLoadTaskOnConcurrentPoll()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("load-tasks", "Load tasks", "spec/load")],
@@ -128,7 +128,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TaskDispatch_DoesNotInjectDisplayTitleIntoWith()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("integrate",
                 [new("integrate:open-pr", "Open or update GitHub PR", "mohist/create-pull-request", With("""
@@ -156,7 +156,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("load-tasks", "Load tasks", "spec/load")],
@@ -198,20 +198,19 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicAgentVariables_LoadedDynamicTasksInheritStageAgent()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "build",
                 [new("load-tasks", "Load tasks", "spec/load")],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } }))
+            }));
 
         var (load, r1) = await PollWorkAnyAsync();
 
@@ -239,7 +238,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithAgentVariables_TaskWithoutAgentInheritsStageAgentAtDispatch()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "build",
@@ -248,15 +247,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } }))
+            }));
 
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
@@ -274,7 +272,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithAgentVariables_TaskAgentTemplatePreservedAndSnapshotCarriesStageAgent()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "check",
@@ -284,15 +282,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.review }}"),
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.5" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["check"] = new(JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "openai/gpt-5.5" } }))
+            }));
 
         var (task, _) = await PollWorkAnyAsync();
 
@@ -316,7 +312,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         // and does not re-merge the project layer. A stage override that omits
         // `agent.model` inherits the issue's top-level `agent`, not the
         // project or the embedded variable.
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "build",
@@ -326,10 +322,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
                 [])
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "old-coding/legacy" })
-        }));
+        ]));
 
         await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
             Vars: JsonSerializer.SerializeToElement(new
@@ -363,7 +356,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         // After T-003 the runtime reads the issue layer directly. Patching
         // the issue layer (the T1 snapshot) is what surfaces in dispatch.
         var initialAgent = new { type = "opencode", model = "old-coding/legacy" };
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "build",
@@ -372,11 +365,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(initialAgent)
-                })
+                [])
         ]));
 
         var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
@@ -400,7 +389,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithStaticAndDynamicTasks_LoadTaskThenDynamicThenStaticBeforeChecks()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition(
                 "build",
@@ -563,7 +552,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LoadTaskFails_WorkflowFails()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("load-tasks", "Load tasks", "spec/load")],

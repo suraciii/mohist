@@ -14,7 +14,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyStage_NoTasksOrChecks_WorkflowCompletes()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build", [], [])
         ]));

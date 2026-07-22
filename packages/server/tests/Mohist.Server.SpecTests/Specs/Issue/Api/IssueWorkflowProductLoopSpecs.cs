@@ -377,8 +377,6 @@ var issue = await _client.PostDataAsync<ProductLoopIssueDto>($"/api/projects/{pr
 
     private const string NoArtifactTemplateYaml = """
         id: mohist-test-noartifacts
-        variables:
-          agent: {}
         stages:
           - stage: plan
             requiresApproval: true

@@ -18,7 +18,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Dispatch_AfterTaskOutputs_IncludesTaskOutputsInVariables()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
             [
@@ -52,7 +52,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Dispatch_AfterCoreProcessOutput_ExposesTypedTaskOutputFields()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
             [
@@ -79,27 +79,14 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Dispatch_RuntimeVariablesTakePrecedenceOverLowerPrecedenceSources()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
             [
                 new("proposal", "Generate proposal", "spec/task"),
                 new("specs", "Write specs", "spec/task")
             ],
-            [],
-            Variables: new Dictionary<string, JsonElement?>
-            {
-                ["tasks"] = JsonSerializer.SerializeToElement(new
-                {
-                    proposal = new
-                    {
-                        outputs = new
-                        {
-                            openspecName = "static-value"
-                        }
-                    }
-                })
-            })
+            [])
         ]));
 
         var (proposal, r1) = await PollWorkAnyAsync();
@@ -117,7 +104,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Dispatch_EmptyTaskOutput_DoesNotAlterVariables()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
             [

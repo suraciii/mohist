@@ -26,6 +26,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowRunProfileManager _runProfileManager;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -40,11 +41,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
+        WorkflowRunProfileManager runProfileManager,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _profileManager = profileManager;
+        _runProfileManager = runProfileManager;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -191,6 +194,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             : (int?)null;
         var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        await _runProfileManager.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = input?.Workspace;
     }
 
@@ -202,6 +206,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
         var structure = await _profileManager.LoadStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        await _runProfileManager.EnsureArchiveDefaultAsync(GrainKey);
         _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 

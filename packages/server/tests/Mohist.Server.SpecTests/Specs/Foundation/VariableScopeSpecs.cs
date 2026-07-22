@@ -18,7 +18,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task WorkflowDispatchKeepsTemplates()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task", With("""
@@ -41,7 +41,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         _runnerId = await RegisterRunnerAsync();
         var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
+        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition( [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],
                 [])
@@ -87,7 +87,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
+        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition( [
             new StageDefinition("release",
                 [new("publish", "Publish", "spec/task")],
                 [])
@@ -195,7 +195,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     }
 
     private static WorkflowDefinition MohistPlanDefinitionWithoutArtifacts() =>
-        new("spec/mohist-plan-test",
+        new(
         [
             new StageDefinition("plan",
                 [

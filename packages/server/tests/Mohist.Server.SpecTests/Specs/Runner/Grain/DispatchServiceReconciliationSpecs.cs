@@ -227,7 +227,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
 
         var run = WorkflowRun.Create(
             workflowRunId,
-            new WorkflowDefinition("spec/workflow",
+            new WorkflowDefinition(
             [new StageDefinition("build",
                 [new TaskDefinition("task-1", "Task 1", "spec/task")],
                 [])]),

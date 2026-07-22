@@ -18,7 +18,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync("unknown-run-id");
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/local", result.Id ?? "");
+        Assert.Equal("mohist/local", result.Id);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("project-template", result.Id ?? "");
+        Assert.Equal("my-tmpl", result.Id);
         Assert.Equal(4, result.Structure.Stages.Count);
     }
 
@@ -80,7 +80,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("project-template", result.Id ?? "");
+        Assert.Equal("default-tmpl", result.Id);
         Assert.Equal(5, result.Structure.Stages.Count);
     }
 
@@ -96,7 +96,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/local", result.Id ?? "");
+        Assert.Equal("mohist/local", result.Id);
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
@@ -113,7 +113,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId, "proj-disabled-default", 1);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
+        Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         Assert.Contains(integrate.Tasks, t => t.Id == "merge-pr");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
@@ -165,7 +165,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/local", result.Id ?? "");
+        Assert.Equal("mohist/local", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
@@ -184,7 +184,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
+        Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
         Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
@@ -204,7 +204,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/local", result.Id ?? "");
+        Assert.Equal("mohist/local", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:open-pr");
@@ -223,7 +223,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
+        Assert.Equal("mohist/github-pr", result.Id);
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
         Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
@@ -243,7 +243,7 @@ public class WorkflowTemplateSelectionSpecs : WorkflowProfileManagerTestFactory
         var result = await Manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("issue-custom", result.Id ?? "");
+        Assert.Equal("custom-override", result.Id);
         Assert.Single(result.Structure.Stages);
     }
 

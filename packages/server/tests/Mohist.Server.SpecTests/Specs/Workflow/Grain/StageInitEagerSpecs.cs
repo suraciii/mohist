@@ -66,7 +66,7 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyLeadingStage_SkippedAndInitialized_WithoutSurfacingStageInit()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan", [], []),
             new StageDefinition("build",
@@ -121,7 +121,7 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ProfileChange_DuringRunningStage_DoesNotMutateThatStage()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -133,7 +133,7 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
 
         var projectId = TestProjectId(_workflowId!);
 
-        await SeedWorkflowTemplateAsync(_workflowId!, new WorkflowDefinition("spec/workflow",
+        await SeedWorkflowTemplateAsync(_workflowId!, new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task"), new("extra", "Extra", "spec/task")],

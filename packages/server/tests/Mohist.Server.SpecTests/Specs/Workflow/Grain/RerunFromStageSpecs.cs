@@ -98,7 +98,7 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RerunFromStage_RuntimeVariablesPreservedAndReadableByNewAttempt()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -145,7 +145,7 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
     public async Task RerunFromStage_SequentialStageLockInRange_Released()
     {
         var resource = $"resource-{Guid.NewGuid():N}";
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -186,7 +186,7 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
     public async Task RerunFromStage_LockBeforeTarget_NotReleased()
     {
         var resource = $"resource-{Guid.NewGuid():N}";
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -236,7 +236,7 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
     public async Task RerunFromStage_ActiveTaskInLaterStage_LockNotReleasedStateUnchanged()
     {
         var resource = $"resource-{Guid.NewGuid():N}";
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],

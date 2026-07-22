@@ -174,7 +174,7 @@ public static partial class IssueRoutes
         var state = await issueProfileManager.GetStateAsync(projectId, number);
         var variables = state.Variables;
         var template = state.Template;
-        var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
+        var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template.Definition);
         // ProfileId is the unified effective profile id projected by the
         // read model; advanced overrides (custom YAML / project template
         // reference) remain visible via HasCustomTemplate / TemplateSource

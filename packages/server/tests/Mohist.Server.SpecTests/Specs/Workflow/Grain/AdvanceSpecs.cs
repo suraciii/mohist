@@ -14,7 +14,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ApprovalStage_CompletesWork_WaitsForApproval()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -40,7 +40,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task NonApprovalStage_CompletesWork_AutoAdvancesToNextStage()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
@@ -68,7 +68,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyStage_SkipsToNextStage()
     {
-        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan", [], []),
             new StageDefinition("build",
@@ -86,7 +86,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyApprovalStage_UserApproves_AdvancesToNextStage()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition(
         [
             new StageDefinition("plan", [], [], RequiresApproval: true),
             new StageDefinition("build",

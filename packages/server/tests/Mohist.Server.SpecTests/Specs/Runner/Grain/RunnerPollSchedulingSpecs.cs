@@ -114,7 +114,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         var run = WorkflowRun.Create(
             workflowRunId,
             new WorkflowDefinition(
-                "spec/workflow",
                 [new StageDefinition("build",
                     [new TaskDefinition("task-1", "Task 1", "spec/task")],
                     [])]),

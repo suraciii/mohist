@@ -57,7 +57,6 @@ public class WorkflowArtifactDomainTests
         // the source of truth for that information; the JSON is
         // for the run state machine only.
         var definition = new WorkflowDefinition(
-            Id: "wf-1",
             Stages: [
                 new StageDefinition(
                     Stage: "build",
@@ -73,14 +72,9 @@ public class WorkflowArtifactDomainTests
                     ],
                     Checks: [],
                     RequiresApproval: false,
-                    Variables: null,
                     LockBehavior: null,
                     Resources: null)
-            ],
-            Name: null,
-            Variables: null,
-            Defaults: null,
-            Artifacts: null);
+            ]);
 
         var run = WorkflowRun.Create("wr_1", definition, DateTimeOffset.UnixEpoch, new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch));
         run.Start(DateTimeOffset.UnixEpoch);

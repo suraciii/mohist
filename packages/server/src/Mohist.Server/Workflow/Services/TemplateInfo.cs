@@ -16,4 +16,6 @@ public sealed record ProjectTemplateInfo(
     string ProjectId,
     string TemplateId,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? Name = null,
+    string? Description = null);

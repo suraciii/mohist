@@ -443,7 +443,6 @@ public class WorkflowRunQuerierSchedulingSpecs
     private static Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition BuildMinimalDefinition()
     {
         return new Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition(
-            "spec/workflow",
             [new Mohist.Server.Workflow.Domain.Definition.StageDefinition(
                 "build",
                 [new Mohist.Server.Workflow.Domain.Definition.TaskDefinition("task-1", "Build task", "spec/task")],

@@ -309,14 +309,14 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RepeatedTaskRuns_EachRetainTheirOwnArtifactSummary()
     {
-        var definition = new WorkflowDefinition("spec/workflow", [
+        var definition = new WorkflowDefinition( [
             new StageDefinition("build",
                 [
                     new TaskDefinition("ai-review", "AI review", "spec/task",
                         Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]))
                 ],
                 [])
-        ], Name: null);
+        ]);
         await StartWorkflowAsync(definition);
 
         var (work1, runnerId) = await PollWorkAnyAsync();

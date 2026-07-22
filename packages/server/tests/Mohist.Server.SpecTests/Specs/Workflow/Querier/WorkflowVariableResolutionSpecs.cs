@@ -182,15 +182,11 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
     [Fact]
     public async Task ResolveLayeredVariables_MergesTemplateProjectIssueAndRuntimeLayers()
     {
+        // issue-474 T-002: Workflow Definitions no longer carry embedded
+        // variables. The template fixture is now a pure Definition shape;
+        // effective values come from Project, Issue, and Run VariableBundles.
         var runId = "wr_effective01";
-        var templateJson = SerializeDefinition(
-            "effective-template",
-            variables: new Dictionary<string, JsonElement?>
-            {
-                ["source"] = JsonSerializer.SerializeToElement("template"),
-                ["agent"] = JsonSerializer.SerializeToElement(new { model = "template-model", type = "template-agent" }),
-                ["github"] = JsonSerializer.SerializeToElement(new { pr = new { number = 1 } }),
-            });
+        var templateJson = SerializeDefinition("effective-template");
         var project = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             {
@@ -201,6 +197,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             {
                 source = "issue",
+                agent = new { type = "issue-agent" },
             })));
         var runtime = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -220,7 +217,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
         var root = doc.RootElement;
         Assert.Equal("runtime", root.GetProperty("source").GetString());
         Assert.Equal("project-model", root.GetProperty("agent").GetProperty("model").GetString());
-        Assert.Equal("template-agent", root.GetProperty("agent").GetProperty("type").GetString());
+        Assert.Equal("issue-agent", root.GetProperty("agent").GetProperty("type").GetString());
         var pr = root.GetProperty("github").GetProperty("pr");
         Assert.Equal(249, pr.GetProperty("number").GetInt32());
         Assert.Equal("https://example.test/pr/249", pr.GetProperty("url").GetString());
@@ -229,13 +226,11 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
     [Fact]
     public async Task ResolveEffectiveVariables_ReturnsRunnerVarsForStage()
     {
+        // issue-474 T-002: templates are now pure Definition assets and do
+        // not contribute variables. The selected-stage overlay is read from
+        // Project/Issue/Run VariableBundles only.
         var runId = "wr_effective_stage01";
-        var templateJson = SerializeDefinition(
-            "effective-stage-template",
-            variables: new Dictionary<string, JsonElement?>
-            {
-                ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "template-model" }),
-            });
+        var templateJson = SerializeDefinition("effective-stage-template");
         var project = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             {
@@ -245,7 +240,7 @@ public class WorkflowVariableResolutionSpecs : WorkflowProfileManagerTestFactory
             {
                 ["build"] = new(JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
                 {
-                    agent = new { model = "build-model" },
+                    agent = new { type = "opencode", model = "build-model" },
                     stageOnly = true,
                 })))
             });
