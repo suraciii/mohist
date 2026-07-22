@@ -430,6 +430,7 @@ describe('useSessionTranscript', () => {
 
     expect(screen.getByTestId('turn-outcome')).toHaveTextContent('completed')
     expect(screen.getByTestId('session-status')).toHaveTextContent('running')
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })
   })
 
@@ -451,6 +452,7 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('turn-outcome')).toHaveTextContent('failed')
     expect(screen.getByTestId('error-message')).toHaveTextContent('Follow-up rejected')
     expect(screen.getByTestId('session-status')).toHaveTextContent('running')
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })
   })
 

@@ -517,7 +517,7 @@ export function useSessionTranscript({
         setIsThinking(false)
         clearStreaming()
         invalidateSessionQueries()
-        markNewContentRef.current()
+        markNewContentRef.current(false)
       }),
     )
 
@@ -540,7 +540,7 @@ export function useSessionTranscript({
         setIsThinking(false)
         clearStreaming()
         invalidateSessionQueries()
-        markNewContentRef.current()
+        markNewContentRef.current(false)
       }),
     )
 

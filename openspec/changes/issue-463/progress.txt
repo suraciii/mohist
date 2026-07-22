@@ -24,3 +24,5 @@
 - Follow-up `session.input` still appends the prompt turn, but no longer engages thinking or streaming presentation. Transcript-only notifications can opt out of activity engagement; the existing running-without-content inference also stays idle for a follow-up-only turn until a runtime response event arrives.
 - Server activity semantics and recovery code were left unchanged.
 - Verification passed: focused transcript tests (19), full web suite (5,104 tests), web typecheck, and `Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent` server spec.
+- Review fix: follow-up terminal events record transcript content without re-enabling the streaming indicator after the operation has ended; completed and failed terminal tests assert the indicator remains idle.
+- Review-fix verification passed: web typecheck and focused transcript/provider/model contract tests (38 tests).
