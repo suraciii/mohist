@@ -2,28 +2,16 @@
 
 ## Findings
 
-### P1: Aborted workflow turns release the Pi prompt mutex too early
+### P1: Cached-session validation can abort the active physical session
 
-`packages/runner/src/runtime/pi/runtime.ts:141-144` wraps `session.prompt()` in a `Promise.race` with `fixedSignal`. When cancellation, the deadline, or provider-retry handling resolves `fixedSignal`, `runTurn` returns from `withSessionLock` even if the underlying `session.prompt()` is still pending. The mutex therefore becomes available while Pi still has an in-flight prompt, and a queued Follow-up or Compact can issue another prompt/compact concurrently. This violates the per-physical-session serialization requirement and can recreate the SDK collision that the mutex is intended to prevent. Keep the lock held until the SDK prompt settles, while still returning the terminal turn result promptly, and add a regression test that aborts a still-pending prompt before starting another prompt-initiating operation.
+`packages/runner/src/runtime/pi/runtime.ts:455-464` always calls `services.openSession()` to validate a binding, even when the runner already has a cached session. When the opened handle differs from the cached handle, the code immediately calls `opened.dispose()` at line 461. The Pi SDK's `dispose()` aborts in-flight operations and releases resources; opening the same session file while `runTurn` is streaming can therefore create a second handle and disposing it can interrupt or invalidate the active handle. Follow-up and Cancel both use this path, so a valid busy Pi turn can be disrupted merely by issuing a command. Validate file existence/corruption through a non-owning SDK boundary or otherwise serialize/reuse the active handle without opening and disposing a second live session; add a busy-session regression test that proves Follow-up/Cancel validation does not abort the existing turn.
 
-### P1: Cached sessions bypass the required missing-session Reset failure
+### P1: Compact event delivery is still best-effort and can be lost
 
-`packages/runner/src/runtime/pi/runtime.ts:446-452` returns a cached `PiSdkSession` without checking whether its bound session file still exists or can be opened. After a Pi session has been cached, deleting or invalidating its file leaves Follow-up, Compact, and Cancel operating on the stale in-memory object and potentially reporting success instead of returning `missing-session` with a Reset hint. The acceptance criterion applies when the bound file no longer exists regardless of cache state. The resolution path must validate/reopen the persisted binding (or otherwise detect stale cached files) before executing these commands, and a test must cover deletion after the session has been cached.
+`packages/runner/src/server/runner-signalr.ts:244-263` schedules `outbox.enqueueProducedFact(record)` inside the observer but does not await it or propagate failure. The SessionCommand handler can return success and journal the operation complete before the event has been durably persisted; a process crash or outbox write failure after native compaction then loses the projected Compact events, and the catch only logs the error without retrying that operation. The observer is also disabled when the outbox is not ready at line 246, while Compact still executes successfully. Because the acceptance criterion requires compaction events through the existing session event channel, Compact must either make event persistence part of the command's durable completion path or retain/retry the event through the existing recovery/outbox mechanism, with failure behavior covered by a test.
 
-### P1: Production Compact drops Pi compaction events
+### P1: Cancel treats non-settled lifecycle events as stop confirmation
 
-`packages/runner/src/server/runner-signalr.ts:223-239` routes `SessionCommand` through `callSessionCommand(..., null)`. `callSessionCommand` passes that null observer to `PiRuntime.compact` (`packages/runner/src/server/command-runtime.ts:221-231`), while `PiRuntime.compact` only forwards projected `compaction_start`/`compaction_end` events through the optional observer (`packages/runner/src/runtime/pi/runtime.ts:341-348`). As a result, the production compact path invokes native compaction but emits no events into the runtime-event outbox/session event channel; the existing test only proves projection when an observer is manually supplied. Wire the command path to the session event outbox (with the same target and acknowledgement semantics as Follow-up events) and add an end-to-end handler test asserting the events are persisted.
-
-### P1: Cancel declares confirmation without checking the Pi event sequence
-
-`packages/runner/src/runtime/pi/runtime.ts:275-288` determines `stopConfirmed` solely from the immediate post-`abort()` value of `session.isStreaming` (after one microtask). The issue design and channel specification require confirmation from streaming state and the event sequence, specifically so a stop whose outcome is not yet observable is reported as unconfirmed. A Pi session can clear the flag before its terminal event is observed, or otherwise leave the event sequence inconclusive, and this implementation will incorrectly return `stopConfirmed: true`. Track the relevant event sequence/terminal stop evidence before marking the interruption confirmed, and test the inconclusive-event case through the API-facing `interruptUnconfirmed` result.
-
-## Verification
-
-- `npm run typecheck -w packages/runner`
-- `npm test -w packages/runner`
-- `npm test`
-
-All commands passed, but the missing regression cases above are not covered by the current suite.
+`packages/runner/src/runtime/pi/runtime.ts:275-296` uses `isPiStopEvent` to accept `turn_end`, `agent_end`, or `agent_settled` as equivalent evidence. In the pinned Pi SDK, `agent_end` can occur before retries, auto-compaction, or queued continuations have settled, and `turn_end` only ends one turn; neither proves that the session is fully stopped. If `isStreaming` is temporarily false at the immediate check after `abort()`, this implementation can return `stopConfirmed: true` on one of those earlier events even though Pi can continue processing. Stop confirmation must require the SDK's fully settled event (or an equally authoritative event sequence/state observation), and the regression test should cover `agent_end`/`turn_end` followed by continued activity reaching the API's `interruptUnconfirmed` result.
 
 <promise>FAIL</promise>
