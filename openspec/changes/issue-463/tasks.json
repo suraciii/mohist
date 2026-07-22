@@ -25,21 +25,22 @@
       "id": "T-002",
       "title": "Unified resolved-model event across runtimes",
       "spec": "specs/agent-session-model-resolution-event/spec.md",
-      "description": "Make the Pi projector emit a model.resolved event carrying resolvedModel (normalized to <provider>/<model> where parts are available, else the raw model string) instead of collapsing model changes into the dropped status event; keep the remaining status concerns (variant/stopReason) unchanged. On the server, standardize on resolvedModel in both the grain and TranscriptEventSummaryProjector by removing the divergent model fallback so live state and summary agree. OpenCode path is unchanged.",
+      "description": "Make the Pi projector emit a model.resolved event carrying resolvedModel (normalized to <provider>/<model> where parts are available, else the raw model string) instead of collapsing model changes into the dropped status event; keep the remaining status concerns (variant/stopReason) unchanged. On the server, standardize on resolvedModel in both the grain and TranscriptEventSummaryProjector by removing the divergent model fallback so live state and summary agree. Align the web model.resolved live-event contract (entities/agent/model/types.ts) to read resolvedModel instead of model. OpenCode runner path is unchanged.",
       "acceptanceCriteria": [
         "The Pi projector emits a model.resolved event with resolvedModel on a model change (runner projector unit test, no real network/process/wall-clock).",
         "The remaining Pi status semantics (thinking level / stopReason / variant) are unchanged; model resolution is no longer carried only under status/model.",
         "The server grain and TranscriptEventSummaryProjector both read resolvedModel and produce equal resolved-model values for the same event (server spec/unit tests).",
         "The divergent model fallback is removed from the grain and no emitter relies on a model-only payload.",
+        "The web model.resolved live-event contract reads resolvedModel, not model (web type/test).",
         "A session under either runtime surfaces its resolved model name via the transcript summary read model."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Pi model.resolved emission + server resolvedModel field standardization, with runner and server tests",
+      "output": "Pi model.resolved emission + server resolvedModel field standardization + web event-type alignment, with runner, server, and web tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "OpenCode already emits model.resolved/resolvedModel and needs no change. Confirm the Pi model_change event model field shape (string vs object) at implementation and normalize defensively."
+      "notes": "The OpenCode runner already emits model.resolved/resolvedModel and needs no change; only the shared web model.resolved live-event type is aligned to resolvedModel. Confirm the Pi model_change event model field shape (string vs object) at implementation and normalize defensively."
     },
     {
       "id": "T-003",

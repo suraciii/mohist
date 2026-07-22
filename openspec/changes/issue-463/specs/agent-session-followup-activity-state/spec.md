@@ -1,10 +1,10 @@
 ### Requirement: Follow-up user input has consistent activity-state semantics
 
-A follow-up user input SHALL have a single activity-state semantics shared by the server's active-time computation and the web's round rendering. The web's presentation of a follow-up input as a new round and the session's reported active/inactive status SHALL be consistent: the web SHALL NOT present a follow-up input as a new active round while the session is reported inactive, and the session SHALL NOT be reported inactive while a follow-up input is presented as a new active round. (The mechanism — refreshing active time on the server, or not rendering the follow-up as a new round on the web — is a design decision; this requirement states the outcome that must hold regardless of mechanism.)
+A follow-up user input SHALL have a single activity-state semantics shared by the server's active-time computation and the web's round rendering. The web's active presentation of a follow-up input (its active/thinking round, not the mere rendering of the prompt) and the session's reported active/inactive status SHALL be consistent: the web SHALL NOT present a follow-up input as a new active round while the session is reported inactive, and the session SHALL NOT be reported inactive while a follow-up input is presented as a new active round. (The mechanism is a design decision; this requirement states the outcome that must hold regardless of mechanism.)
 
-#### Scenario: A presented follow-up round agrees with active status
+#### Scenario: An active follow-up round agrees with active status
 
-- **WHEN** the web presents a follow-up user input as a new round
+- **WHEN** the web presents a follow-up user input as a new active round
 - **THEN** the session's reported status SHALL be active
 
 #### Scenario: An inactive session does not present a fresh active follow-up round

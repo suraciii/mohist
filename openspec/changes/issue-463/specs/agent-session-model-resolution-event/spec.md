@@ -17,6 +17,15 @@ Every runtime SHALL emit model resolution as the `model.resolved` event type car
 - **WHEN** any runtime resolves a model
 - **THEN** the runner SHALL NOT carry that resolved model solely under a `status` event with a `model` field; the model resolution SHALL be expressible as `model.resolved` with `resolvedModel`
 
+### Requirement: Web model.resolved event carries resolvedModel
+
+The web's `model.resolved` live-event contract SHALL read the resolved model from the `resolvedModel` field, matching the field the runtimes emit and the rest of the web reads. The web SHALL NOT declare or read a `model` field for the `model.resolved` event.
+
+#### Scenario: Web model.resolved event type uses resolvedModel
+
+- **WHEN** the web defines its `model.resolved` live-event contract
+- **THEN** the resolved model SHALL be carried in the `resolvedModel` field, not `model`
+
 ### Requirement: Server reads the resolved model from one consistent field
 
 The server SHALL read the resolved model from the same payload field of the `model.resolved` event in both live-state application and transcript-summary projection, so the live session state and the transcript summary agree on the resolved model.
