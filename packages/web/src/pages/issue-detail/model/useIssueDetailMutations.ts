@@ -8,6 +8,8 @@ import {
   extractAttachmentIds,
   forceStopIssue,
   invalidateApprovalWait,
+  issueDetailKeys,
+  issueListKeys,
   markIssueDone,
   removePrerequisite,
   reopenIssue,
@@ -125,9 +127,17 @@ export function createIssueDetailMutationOptions(
     updateIssue,
   } = dependencies
 
+  const invalidateList = () => {
+    queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+  }
+
+  const invalidateDetail = () => {
+    queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+  }
+
   const invalidateRuntimeQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ['issues'] })
-    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+    invalidateList()
+    invalidateDetail()
     queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
   }
@@ -140,12 +150,12 @@ export function createIssueDetailMutationOptions(
   const startMutation = {
     mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
     onError: (err: Error) => {
       if (err.message.includes('waiting for')) {
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        invalidateList()
       }
     },
   }
@@ -163,46 +173,48 @@ export function createIssueDetailMutationOptions(
   const markReadyMutation = {
     mutationFn: () => updateIssue(issueNumber, { isDraft: false }, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const addPrerequisiteMutation = {
     mutationFn: (prerequisiteNumber: number) => addPrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const removePrerequisiteMutation = {
     mutationFn: (prerequisiteNumber: number) => removePrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const closeMutation = {
     mutationFn: () => closeIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const markDoneMutation = {
     mutationFn: () => markIssueDone(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const forceStopMutation = {
     mutationFn: () => forceStopIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onForceStopSuccess?.()
     },
@@ -211,7 +223,8 @@ export function createIssueDetailMutationOptions(
   const stopMutation = {
     mutationFn: () => stopIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onStopSuccess?.()
     },
@@ -220,14 +233,16 @@ export function createIssueDetailMutationOptions(
   const reopenMutation = {
     mutationFn: () => reopenIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
     },
   }
 
   const resumeMutation = {
     mutationFn: () => resumeIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   }
@@ -235,7 +250,8 @@ export function createIssueDetailMutationOptions(
   const retryMutation = {
     mutationFn: () => retryIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   }
@@ -243,7 +259,8 @@ export function createIssueDetailMutationOptions(
   const rerunMutation = {
     mutationFn: () => rerunIssue(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      invalidateList()
+      invalidateDetail()
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   }
@@ -252,7 +269,7 @@ export function createIssueDetailMutationOptions(
     mutationFn: ({ author, body }: { author: string; body: string }) =>
       addComment(issueNumber, author, body, projectId, extractAttachmentIds(body)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateDetail()
       onAddCommentSuccess?.()
     },
   }
@@ -260,7 +277,7 @@ export function createIssueDetailMutationOptions(
   const deleteCommentMutation = {
     mutationFn: (commentId: string) => deleteComment(issueNumber, commentId, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateDetail()
       onDeleteCommentSuccess?.()
     },
     onError: (err: unknown) => {

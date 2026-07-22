@@ -90,6 +90,34 @@ public class IssueQuerier : IScopedService
         return parent is null ? null : new ParentIssueContext(parent.Title, parent.Body);
     }
 
+    public async Task<IReadOnlyList<IssueParentCandidate>> ListParentCandidatesAsync(
+        string projectId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && row.Status == "backlog"
+                && row.IsArchived != true
+                && row.ParentIssueNumber == null)
+            .OrderBy(row => row.Number)
+            .Select(row => new { row.Number, row.Title, row.State })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Where(row => row.Number is not null)
+            .Select(row => string.IsNullOrWhiteSpace(row.State) ? null : IssueStore.Deserialize(row.State))
+            .Where(issue => issue is not null
+                && issue.Status == IssueStatus.Backlog
+                && !issue.HasWorkflowStarted
+                && issue.ParentIssueNumber is null)
+            .Select(issue => new IssueParentCandidate(issue!.Number, issue.Title))
+            .ToList();
+    }
+
     /// <summary>
     /// Reverse lookup: returns the project-scoped issue reference
     /// bound to <paramref name="workflowRunId"/>, or <c>null</c> when no
@@ -225,9 +253,47 @@ public class IssueQuerier : IScopedService
         bool? all = null,
         string? repositoryName = null,
         int? parentIssueNumber = null) =>
-        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
+        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
 
-    public async Task<List<IssueReadModel>> ListWithLabelFiltersAsync(
+    public async Task<List<IssueListItem>> ListWithLabelFiltersAsync(
+        string projectId,
+        ProjectInfo? project,
+        string? stage,
+        IReadOnlyList<string>? labels,
+        string? priority,
+        bool? archived,
+        bool? all,
+        string? repositoryName = null,
+        int? parentIssueNumber = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var list = await _loader.LoadListProjectedAsync(db, projectId, project);
+        list.Sort((a, b) => a.Number.CompareTo(b.Number));
+
+        var issues = FilterIssueModels(list, stage, labels, priority, archived, all, repositoryName)
+            .OrderBy(i => i.Number)
+            .ToList();
+        await ApplyRelationshipProjectionsAsync(db, issues);
+
+        if (parentIssueNumber is not null)
+            issues = issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
+
+        return issues.Select(IssueListItem.FromReadModel).ToList();
+    }
+
+    public Task<List<IssueReadModel>> ListReadModelsAsync(
+        string projectId,
+        ProjectInfo? project = null,
+        string? stage = null,
+        string? label = null,
+        string? priority = null,
+        bool? archived = null,
+        bool? all = null,
+        string? repositoryName = null,
+        int? parentIssueNumber = null) =>
+        ListReadModelsWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all, repositoryName, parentIssueNumber);
+
+    public async Task<List<IssueReadModel>> ListReadModelsWithLabelFiltersAsync(
         string projectId,
         ProjectInfo? project,
         string? stage,
@@ -242,7 +308,25 @@ public class IssueQuerier : IScopedService
         var list = await _loader.LoadProjectedAsync(db, projectId, project);
         list.Sort((a, b) => a.Number.CompareTo(b.Number));
 
-        var query = list.AsEnumerable();
+        var issues = FilterIssueModels(list, stage, labels, priority, archived, all, repositoryName)
+            .OrderBy(i => i.Number)
+            .ToList();
+        await EnrichAsync(db, issues);
+        return parentIssueNumber is null
+            ? issues
+            : issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
+    }
+
+    private static IEnumerable<IssueReadModel> FilterIssueModels(
+        IEnumerable<IssueReadModel> list,
+        string? stage,
+        IReadOnlyList<string>? labels,
+        string? priority,
+        bool? archived,
+        bool? all,
+        string? repositoryName)
+    {
+        var query = list;
 
         if (archived == true)
             query = query.Where(i => i.ArchivedAt != null);
@@ -276,10 +360,7 @@ public class IssueQuerier : IScopedService
                 && string.Equals(i.RepositoryName, requested, StringComparison.OrdinalIgnoreCase));
         }
 
-        var issues = await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
-        return parentIssueNumber is null
-            ? issues
-            : issues.Where(i => i.ParentIssueRef?.Number == parentIssueNumber).ToList();
+        return query;
     }
 
     public async Task<IReadOnlyList<IssueReadModel>> ListInProgressWithApprovalGateAsync(string projectId)
@@ -338,6 +419,107 @@ public class IssueQuerier : IScopedService
     {
         var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds);
         return IssueReadModelLoader.BuildInfo(issue, project, resolved);
+    }
+
+    private async Task ApplyRelationshipProjectionsAsync(MohistDbContext db, List<IssueReadModel> issues)
+    {
+        if (issues.Count == 0) return;
+
+        var projectId = issues[0].ProjectId;
+        var numbers = issues.Select(i => i.Number).ToArray();
+        var byNumber = issues.ToDictionary(i => i.Number);
+
+        var parentLinks = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && numbers.Contains(row.Number.Value)
+                && row.ParentIssueNumber != null)
+            .Join(
+                db.Issues.AsNoTracking().Where(row => row.ProjectId == projectId && row.Number != null),
+                child => new { child.ProjectId, Number = child.ParentIssueNumber!.Value },
+                parent => new { parent.ProjectId, Number = parent.Number!.Value },
+                (child, parent) => new { ChildNumber = child.Number!.Value, ParentNumber = parent.Number!.Value, ParentTitle = parent.Title })
+            .ToListAsync();
+        foreach (var link in parentLinks)
+        {
+            if (byNumber.TryGetValue(link.ChildNumber, out var issue))
+                issue.ParentIssueRef = new IssueParentRef { Number = link.ParentNumber, Title = link.ParentTitle ?? "" };
+        }
+
+        await ApplyCompositeChildProjectionAsync(db, issues);
+
+        var persistedRows = await db.IssuePrerequisites.AsNoTracking()
+            .Where(p => p.ProjectId == projectId && numbers.Contains(p.IssueNumber))
+            .ToListAsync();
+        var prereqRows = issues
+            .SelectMany(issue => issue.PrerequisiteNumbers.Select(prerequisiteNumber => new IssuePrerequisiteRow
+            {
+                ProjectId = projectId,
+                IssueNumber = issue.Number,
+                PrerequisiteNumber = prerequisiteNumber,
+            }))
+            .Concat(persistedRows)
+            .GroupBy(p => new { p.IssueNumber, p.PrerequisiteNumber })
+            .Select(group => group.First())
+            .ToList();
+        var prereqNumbers = prereqRows.Select(p => p.PrerequisiteNumber).Distinct().ToArray();
+        var prereqIssues = issues.Where(i => prereqNumbers.Contains(i.Number)).ToDictionary(i => i.Number);
+        var missingPrereqNumbers = prereqNumbers.Where(number => !prereqIssues.ContainsKey(number)).ToArray();
+        if (missingPrereqNumbers.Length > 0)
+        {
+            var rows = await db.Issues.AsNoTracking()
+                .Where(row => row.ProjectId == projectId && row.Number != null && missingPrereqNumbers.Contains(row.Number.Value))
+                .ToListAsync();
+            foreach (var issue in IssueRowMapper.ByNumber(rows, projectId, missingPrereqNumbers).Values)
+                prereqIssues[issue.Number] = IssueReadModelLoader.ToReadModel(IssueReadModelLoader.ToInfo(issue));
+        }
+
+        var prereqGroups = prereqRows.GroupBy(p => p.IssueNumber).ToDictionary(g => g.Key);
+        foreach (var issue in issues)
+        {
+            var summaries = prereqGroups.TryGetValue(issue.Number, out var group)
+                ? group
+                    .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? IssuePrerequisiteSummary.FromReadModel(prereq) : null)
+                    .Where(p => p is not null)
+                    .Cast<IssuePrerequisiteSummary>()
+                    .ToArray()
+                : [];
+            issue.Prerequisites = summaries;
+            var summariesByNumber = summaries.ToDictionary(s => s.Number);
+            var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
+            var hasChildren = issue.ChildIssuesSummary?.HasChildren == true;
+            var blocker = ComputeBlockerForReadModel(issue, undelivered, hasChildren);
+            issue.Blocker = IssueStartBlockerDto.FromDomain(blocker, summariesByNumber);
+            issue.CanStart = blocker is null;
+        }
+
+        var issueEpicNumbers = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && numbers.Contains(row.Number.Value)
+                && row.EpicNumber != null)
+            .Select(row => new { IssueNumber = row.Number!.Value, EpicNumber = row.EpicNumber!.Value })
+            .ToListAsync();
+        if (issueEpicNumbers.Count == 0) return;
+
+        var epicNumbers = issueEpicNumbers.Select(link => link.EpicNumber).Distinct().ToArray();
+        var epics = await db.Epics.AsNoTracking()
+            .Where(epic => epic.ProjectId == projectId && epicNumbers.Contains(epic.Number))
+            .ToDictionaryAsync(e => e.Number);
+        foreach (var link in issueEpicNumbers)
+        {
+            if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic)
+                && !EpicProgress.IsTerminal(epic.Status))
+            {
+                issue.PrimaryEpic = new IssuePrimaryEpic
+                {
+                    Number = epic.Number,
+                    Title = epic.Title,
+                    Status = epic.Status,
+                    Priority = epic.Priority,
+                };
+            }
+        }
     }
 
     private async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)

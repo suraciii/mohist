@@ -7,6 +7,8 @@ import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { LiveTaskProvider, __testing__, type EventsConnectionHook } from './LiveTaskProvider'
 import { dispatchTimelineEvent, onTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
 import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
+import { issueDetailKeys, issueListKeys, issueWorkflowKeys } from '../../entities/issue/api/query-keys'
+import { approvalWaitQueryKey } from '../../entities/issue/api/approval-wait'
 
 let eventsConnectionCalls: Parameters<EventsConnectionHook>[] = []
 const eventsConnectionHook: EventsConnectionHook = (...args) => {
@@ -252,12 +254,18 @@ describe('LiveTaskProvider timeline forwarding', () => {
     const handleEvent = eventsConnectionCalls[0][1]
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved, {
+        projectId: TEST_PROJECT.id,
         issueNumber: 42,
       })
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueDetailKeys.detail(TEST_PROJECT.id, 42),
+      exact: true,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project(TEST_PROJECT.id) })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.root(TEST_PROJECT.id, 42) })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: approvalWaitQueryKey() })
   })
 })

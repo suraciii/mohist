@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryFunctionContext } from '@tanstack/react-query'
 import { ApiError } from '../../../shared/api/client'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse, TaskLogPage } from '../model/types'
+import type { ApprovalFeedback, Issue, IssueListItem, IssueWorkflowProfileYamlResponse, TaskLogPage } from '../model/types'
+import { issueArtifactKeys, issueCandidateKeys, issueDetailKeys, issueListKeys, issueWorkflowKeys, type IssueListParams } from './query-keys'
 import type { CreateFeedbackRequest, IssueWorkflowArtifactContentOptions, IssueWorkflowArtifactListParams, IssueWorkflowTaskLogParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getParentIssueCandidates, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
 import { invalidateApprovalWait } from './approval-wait'
 
 const EMPTY_TASK_LOG_PAGE: TaskLogPage = { lines: [], nextCursor: null, truncated: false }
@@ -14,9 +16,10 @@ async function fetchIssueWorkflowTaskLogOrEmpty(
   taskId: string,
   params: IssueWorkflowTaskLogParams,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<TaskLogPage> {
   try {
-    return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId)
+    return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId, signal)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404 && isMissingTaskLogEndpoint(err)) {
       return EMPTY_TASK_LOG_PAGE
@@ -39,8 +42,8 @@ export function issueWorkflowTaskLogQueryOptions(
 ) {
   const safeTaskId = typeof taskId === 'string' && taskId.length > 0 ? taskId : null
   return {
-    queryKey: [issueNumber, safeTaskId, projectId, workflowRunId ?? null, 'workflow-task-log', params] as const,
-    queryFn: () => fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!),
+    queryKey: issueWorkflowKeys.taskLog(projectId, issueNumber, safeTaskId, workflowRunId, params),
+    queryFn: (context?: QueryFunctionContext) => fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!, context?.signal),
     enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId,
   } as const
 }
@@ -58,8 +61,8 @@ export function issueWorkflowArtifactsQueryOptions(
   workflowRunId?: string | null,
 ) {
   return {
-    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', workflowRunId ?? null, params] as const,
-    queryFn: () => getIssueWorkflowArtifacts(issueNumber, params, projectId),
+    queryKey: issueArtifactKeys.list(projectId, issueNumber, workflowRunId, params),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssueWorkflowArtifacts(issueNumber, params, projectId, signal),
     enabled: enabled && issueNumber > 0 && !!projectId,
   } as const
 }
@@ -77,16 +80,16 @@ export function useIssueWorkflowArtifacts(
 export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId: string | null, options: IssueWorkflowArtifactContentOptions = {}, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', artifactId, 'content', options],
-    queryFn: () => getIssueWorkflowArtifactContent(issueNumber, artifactId!, options, projectId),
+    queryKey: issueArtifactKeys.content(projectId, issueNumber, artifactId!, options),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssueWorkflowArtifactContent(issueNumber, artifactId!, options, projectId, signal),
     enabled: enabled && issueNumber > 0 && !!artifactId && !!projectId,
   })
 }
 
-export function useIssues(params?: { stage?: string; label?: string; projectId?: string; archived?: boolean; all?: boolean }) {
-  return useQuery({
-    queryKey: ['issues', params],
-    queryFn: () => getIssues(params),
+export function useIssues(params?: IssueListParams) {
+  return useQuery<IssueListItem[]>({
+    queryKey: issueListKeys.list(params),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssues(params, signal),
     enabled: !!params?.projectId,
   })
 }
@@ -94,9 +97,18 @@ export function useIssues(params?: { stage?: string; label?: string; projectId?:
 export function useIssue(number: number) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, projectId],
-    queryFn: () => getIssue(number, projectId),
+    queryKey: issueDetailKeys.detail(projectId, number),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssue(number, projectId, signal),
     enabled: number > 0 && !!projectId,
+  })
+}
+
+export function useParentIssueCandidates(enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: issueCandidateKeys.project(projectId),
+    queryFn: ({ signal }: QueryFunctionContext) => getParentIssueCandidates(projectId, signal),
+    enabled: enabled && !!projectId,
   })
 }
 
@@ -104,7 +116,7 @@ export function useLabels() {
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['labels', projectId],
-    queryFn: () => getLabels(projectId),
+    queryFn: ({ signal }: QueryFunctionContext) => getLabels(projectId, signal),
     enabled: !!projectId,
   })
 }
@@ -112,16 +124,16 @@ export function useLabels() {
 export function useIssueDiff(number: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, projectId, 'diff'],
-    queryFn: () => getIssueDiff(number, projectId),
+    queryKey: issueWorkflowKeys.diff(projectId, number),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssueDiff(number, projectId, signal),
     enabled: enabled && number > 0 && !!projectId,
   })
 }
 
 export function issueEventsQueryOptions(projectId: string | null | undefined, number: number, enabled: boolean = true) {
   return {
-    queryKey: ['issue-events', number, projectId] as const,
-    queryFn: () => getIssueEvents(number, projectId),
+    queryKey: issueWorkflowKeys.events(projectId, number),
+    queryFn: (context?: QueryFunctionContext) => getIssueEvents(number, projectId, context?.signal),
     enabled: enabled && number > 0 && !!projectId,
   } as const
 }
@@ -134,8 +146,8 @@ export function useIssueEvents(number: number, enabled: boolean = true) {
 export function useIssueCommits(number: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, projectId, 'commits'],
-    queryFn: () => getIssueCommits(number, projectId),
+    queryKey: issueWorkflowKeys.commits(projectId, number),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssueCommits(number, projectId, signal),
     enabled: enabled && number > 0 && !!projectId,
   })
 }
@@ -143,8 +155,8 @@ export function useIssueCommits(number: number, enabled: boolean = true) {
 export function useCommitDiff(number: number, hash: string, enabled: boolean = false) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, projectId, 'commits', hash, 'diff'],
-    queryFn: () => getCommitDiff(number, hash, projectId),
+    queryKey: issueWorkflowKeys.commits(projectId, number, hash),
+    queryFn: ({ signal }: QueryFunctionContext) => getCommitDiff(number, hash, projectId, signal),
     enabled: enabled && number > 0 && !!hash && !!projectId,
   })
 }
@@ -152,8 +164,8 @@ export function useCommitDiff(number: number, hash: string, enabled: boolean = f
 export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workflow-timeline'],
-    queryFn: () => getWorkflowTimeline(issueNumber, projectId),
+    queryKey: issueWorkflowKeys.timeline(projectId, issueNumber),
+    queryFn: ({ signal }: QueryFunctionContext) => getWorkflowTimeline(issueNumber, projectId, signal),
     enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: false,
   })
@@ -162,15 +174,15 @@ export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true
 export function useWorkflowYaml(workflowRunId: string | null | undefined, enabled: boolean = true) {
   return useQuery({
     queryKey: ['workflow-runs', workflowRunId, 'yaml'],
-    queryFn: () => getWorkflowYaml(workflowRunId!),
+    queryFn: ({ signal }: QueryFunctionContext) => getWorkflowYaml(workflowRunId!, signal),
     enabled: enabled && !!workflowRunId,
   })
 }
 
 export function workspaceStatusQueryOptions(projectId: string | null | undefined, issueNumber: number, enabled: boolean = true) {
   return {
-    queryKey: ['issues', issueNumber, projectId, 'workspace-status'] as const,
-    queryFn: () => getWorkspaceStatus(issueNumber, projectId),
+    queryKey: issueWorkflowKeys.workspace(projectId, issueNumber),
+    queryFn: ({ signal }: QueryFunctionContext) => getWorkspaceStatus(issueNumber, projectId, signal),
     enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: (query: { state: { data?: unknown } }) => {
       const data = query.state.data as { exists?: boolean; reason?: string; ahead?: number; behind?: number } | undefined
@@ -187,9 +199,9 @@ export function useWorkspaceStatus(issueNumber: number, enabled: boolean = true)
 
 export function useArchivedIssues(params?: { projectId?: string }) {
   return useQuery({
-    queryKey: ['archived-issues', params],
-    queryFn: async () => {
-      const issues = await getIssues({ ...params })
+    queryKey: issueListKeys.archived(params?.projectId),
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      const issues = await getIssues({ ...params, archived: true }, signal)
       return issues.filter(i => i.archivedAt != null)
     },
     enabled: !!params?.projectId,
@@ -202,8 +214,7 @@ export function useUnarchiveIssue() {
   return useMutation({
     mutationFn: (number: number) => unarchiveIssue(number, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issue unarchived')
     },
     onError: (err: Error) => {
@@ -215,8 +226,8 @@ export function useUnarchiveIssue() {
 export function useIssueWorkflowProfileYaml(issueNumber: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workflow-profile-yaml'],
-    queryFn: () => getIssueWorkflowProfileYaml(issueNumber, projectId!),
+    queryKey: issueWorkflowKeys.profileYaml(projectId, issueNumber),
+    queryFn: ({ signal }: QueryFunctionContext) => getIssueWorkflowProfileYaml(issueNumber, projectId!, signal),
     enabled: enabled && issueNumber > 0 && !!projectId,
   })
 }
@@ -228,7 +239,7 @@ export function useUpdateIssueWorkflowProfileYaml() {
     mutationFn: ({ issueNumber, yaml }: { issueNumber: number; yaml: string }) =>
       updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId!),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.profileYaml(projectId, data.issueNumber), exact: true })
     },
   })
 }
@@ -240,10 +251,9 @@ export function useUpdateIssueWorkflowProfile() {
     mutationFn: ({ issueNumber, workflowProfileId }) =>
       updateIssue(issueNumber, { workflowProfileId }, projectId),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId] })
-      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId, 'workflow-profile-yaml'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, variables.issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.profileYaml(projectId, variables.issueNumber), exact: true })
     },
   })
 }
@@ -254,7 +264,7 @@ export function useDeleteIssueWorkflowProfileTemplate() {
   return useMutation<IssueWorkflowProfileYamlResponse, Error, { issueNumber: number }>({
     mutationFn: ({ issueNumber }) => deleteIssueWorkflowProfileTemplate(issueNumber, projectId!),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.profileYaml(projectId, data.issueNumber), exact: true })
     },
   })
 }
@@ -265,11 +275,11 @@ export function useRequestChangesIssue() {
   return useMutation<ApprovalFeedback, Error, { issueNumber: number; data: CreateFeedbackRequest }>({
     mutationFn: ({ issueNumber, data }) => requestChangesIssue(issueNumber, data, projectId),
     onSuccess: (_feedback, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, variables.issueNumber), exact: true })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId, 'workflow-timeline'] })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.timeline(projectId, variables.issueNumber), exact: true })
       invalidateApprovalWait(queryClient)
     },
   })

@@ -9,6 +9,7 @@ import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { useMswServer } from '../../../../tests/support/msw'
 import { MobileBottomNav } from './MobileBottomNav'
 import type { InboxItem } from '../../../entities/inbox'
+import { inboxCountQueryKey } from '../../../entities/inbox'
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -21,6 +22,9 @@ const TEST_PROJECT = {
 useMswServer(
   http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () =>
     HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox/unread-count`, () =>
+    HttpResponse.json({ success: true, data: { unreadCount: 0 } }),
   ),
 )
 
@@ -137,7 +141,9 @@ describe('MobileBottomNav primary navigation', () => {
 describe('MobileBottomNav unread inbox count badge', () => {
   function renderWithCache(initialRoute: string, inboxData: InboxItem[]) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    queryClient.setQueryData(['inbox', TEST_PROJECT.id], inboxData)
+    queryClient.setQueryData(inboxCountQueryKey(TEST_PROJECT.id), {
+      unreadCount: inboxData.filter((item) => !item.isRead).length,
+    })
     return render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>

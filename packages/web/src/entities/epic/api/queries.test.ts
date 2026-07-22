@@ -10,6 +10,7 @@ import {
   startEpicMutationOptions,
   startIssueMutationOptions,
 } from './queries'
+import { issueListKeys } from '../../issue/api/query-keys'
 
 useMswServer()
 
@@ -52,13 +53,13 @@ describe('startIssueMutationOptions', () => {
     expect(() => options.mutationFn(1)).toThrow('Project is required')
   })
 
-  it('invalidates both ["epics"] and ["issues"] query keys on success', () => {
+  it('invalidates both epic and project issue-list query keys on success', () => {
     const qc = createInvalidationClient()
     startIssueMutationOptions('proj-1', qc).onSuccess()
 
     const invalidatedKeys = qc.invalidateQueries.mock.calls.map((call) => call[0].queryKey)
     expect(invalidatedKeys).toContainEqual(['epics'])
-    expect(invalidatedKeys).toContainEqual(['issues'])
+    expect(invalidatedKeys).toContainEqual(issueListKeys.project('proj-1'))
     expect(qc.invalidateQueries).toHaveBeenCalledTimes(2)
   })
 
@@ -77,12 +78,12 @@ describe('startIssueMutationOptions', () => {
     expect(toast.error).toHaveBeenCalledWith('Request failed')
   })
 
-  it('does NOT invalidate issue queries with a more specific key on success (only the prefix)', () => {
+  it('invalidates only the project issue-list namespace on success', () => {
     const qc = createInvalidationClient()
     startIssueMutationOptions('proj-1', qc).onSuccess()
 
     const keys = qc.invalidateQueries.mock.calls.map((call) => call[0].queryKey)
-    expect(keys).toEqual([['epics'], ['issues']])
+    expect(keys).toEqual([['epics'], issueListKeys.project('proj-1')])
   })
 })
 
@@ -207,7 +208,7 @@ describe('reopenEpicMutationOptions', () => {
     reopenEpicMutationOptions('proj-1', qc).onSuccess({ number: 1, status: 'idle' } as never, 1)
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 1] })
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: issueListKeys.project('proj-1') })
   })
 
   it('toasts "Epic reopened" on success', () => {

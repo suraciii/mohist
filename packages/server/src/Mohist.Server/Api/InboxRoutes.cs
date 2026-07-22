@@ -44,6 +44,14 @@ public static class InboxRoutes
             return ApiResults.Ok(dto);
         });
 
+        // GET /api/projects/{projectRef}/inbox/unread-count
+        group.MapGet("/unread-count", async (HttpContext context, InboxQuerier querier) =>
+        {
+            var pid = context.GetResolvedProject().Id;
+            var count = await querier.CountUnreadAsync(pid, context.RequestAborted);
+            return ApiResults.Ok(new InboxUnreadCount(count));
+        });
+
         // POST /api/projects/{projectRef}/inbox/{itemId}/read
         group.MapPost("/{itemId}/read", async (HttpContext context, string itemId, InboxStore store) =>
         {

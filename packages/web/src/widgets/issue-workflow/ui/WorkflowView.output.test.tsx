@@ -9,6 +9,7 @@ import type { ArtifactContentHook } from './ArtifactContentViewer'
 import type { StepListDependencies } from './InlineApproval'
 import { IssueHealth, IssueStatus, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline } from '../../../entities/issue'
 import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
+import { issueWorkflowKeys } from '../../../entities/issue/api/query-keys'
 
 let timeline: WorkflowTimeline
 
@@ -46,7 +47,7 @@ describe('WorkflowView structured output', () => {
 
   it('renders process and PR fields without fabricating null output', async () => {
     const queryClient = createQueryClient()
-    queryClient.setQueryData(['issues', 1, 'test-project', 'workflow-timeline'], timeline)
+    queryClient.setQueryData(issueWorkflowKeys.timeline('test-project', 1), timeline)
     const { container } = render(<WorkflowView issue={issue()} dependencies={dependencies} />, { queryClient: queryClient as QueryClient })
 
     for (const title of ['Run release command', 'Open release PR']) {

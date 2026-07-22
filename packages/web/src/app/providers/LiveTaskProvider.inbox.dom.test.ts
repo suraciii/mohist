@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
+import { inboxCountQueryKey, inboxListQueryKey } from '../../entities/inbox/api/queries'
 import { LiveTaskProvider, type EventsConnectionHook } from './LiveTaskProvider'
 import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 
@@ -52,7 +53,7 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
     return eventsConnectionCalls[0][1]
   }
 
-  it('invalidates ["inbox", projectId] when an inbox hint arrives for the current project', () => {
+  it('invalidates the inbox list and unread count when an inbox hint arrives for the current project', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     const handleEvent = mountWith(queryClient)
@@ -68,14 +69,15 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
       })
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['inbox', TEST_PROJECT.id] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: inboxListQueryKey(TEST_PROJECT.id) })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: inboxCountQueryKey(TEST_PROJECT.id) })
     // No browser navigation / full reload — the inbox page inserts/refreshes via the
     // shared query invalidation, not a `window.location` change.
     expect(window.location.href).toBe(originalHref)
     expect(window.location.pathname).toBe(originalPathname)
   })
 
-  it('does NOT invalidate ["inbox", projectId] when the hint targets a different project', () => {
+  it('does NOT invalidate inbox queries when the hint targets a different project', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     const handleEvent = mountWith(queryClient)

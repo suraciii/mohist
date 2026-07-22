@@ -1,5 +1,14 @@
 import type { ReactNode } from 'react'
 import {
+  SETTINGS_SECTION_KEYS,
+  isApplicationSection,
+  isProjectSection,
+  isSettingsSectionKey,
+  sectionScope,
+  type SettingsSectionKey,
+  type SettingsSectionScope,
+} from '../../../shared/config/settings-sections'
+import {
   BotIcon,
   ClockIcon,
   FileTextIcon,
@@ -11,19 +20,6 @@ import {
   TagIcon,
 } from 'lucide-react'
 
-export type SettingsSectionKey =
-  | 'ai'
-  | 'agent'
-  | 'repositories'
-  | 'workflows'
-  | 'templates'
-  | 'label-catalog'
-  | 'inbox'
-  | 'system'
-  | 'preferences'
-
-export type SettingsSectionScope = 'application' | 'project'
-
 export interface SettingsSectionMeta {
   key: SettingsSectionKey
   label: string
@@ -31,18 +27,6 @@ export interface SettingsSectionMeta {
   scope: SettingsSectionScope
   description?: string
 }
-
-export const SETTINGS_SECTION_KEYS: readonly SettingsSectionKey[] = [
-  'ai',
-  'agent',
-  'repositories',
-  'workflows',
-  'templates',
-  'label-catalog',
-  'inbox',
-  'system',
-  'preferences',
-]
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
   { key: 'ai', label: 'Coder Agent', icon: <BotIcon />, scope: 'application' },
@@ -92,23 +76,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
   },
 ]
 
-export function isSettingsSectionKey(value: string): value is SettingsSectionKey {
-  return (SETTINGS_SECTION_KEYS as readonly string[]).includes(value)
-}
-
-export function sectionScope(key: SettingsSectionKey): SettingsSectionScope {
-  const meta = SETTINGS_SECTIONS.find((entry) => entry.key === key)
-  return meta ? meta.scope : 'application'
-}
-
-export function isApplicationSection(key: SettingsSectionKey): boolean {
-  return sectionScope(key) === 'application'
-}
-
-export function isProjectSection(key: SettingsSectionKey): boolean {
-  return sectionScope(key) === 'project'
-}
-
 export function getSectionMeta(key: SettingsSectionKey): SettingsSectionMeta {
   const meta = SETTINGS_SECTIONS.find((entry) => entry.key === key)
   if (!meta) {
@@ -116,3 +83,12 @@ export function getSectionMeta(key: SettingsSectionKey): SettingsSectionMeta {
   }
   return meta
 }
+
+export {
+  SETTINGS_SECTION_KEYS,
+  isApplicationSection,
+  isProjectSection,
+  isSettingsSectionKey,
+  sectionScope,
+}
+export type { SettingsSectionKey, SettingsSectionScope }

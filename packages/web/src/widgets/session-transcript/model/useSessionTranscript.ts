@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
+import { issueWorkflowKeys } from '../../../entities/issue'
 import {
   appendInputTurn,
   appendReasoningToTurn,
@@ -28,6 +29,7 @@ import {
 
 interface UseSessionTranscriptOptions {
   issueNumber: number
+  projectId?: string | null
   sessionId: string
   runtimeSessionId: string
   runtime?: string | null
@@ -102,6 +104,7 @@ export interface UseSessionTranscriptResult {
 
 export function useSessionTranscript({
   issueNumber,
+  projectId,
   sessionId,
   runtimeSessionId,
   runtime,
@@ -185,9 +188,9 @@ export function useSessionTranscript({
     for (const queryKey of sessionQueryKeys ?? []) {
       queryClient.invalidateQueries({ queryKey })
     }
-    const invKey = terminalInvalidationKey ?? ['issues', issueNumber, 'coder-sessions', sessionId]
+    const invKey = terminalInvalidationKey ?? issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions', sessionId)
     queryClient.invalidateQueries({ queryKey: invKey })
-  }, [queryClient, issueNumber, sessionId, sessionQueryKeys, terminalInvalidationKey])
+  }, [queryClient, issueNumber, projectId, sessionId, sessionQueryKeys, terminalInvalidationKey])
 
   const invalidateAndRefetch = useCallback(() => {
     setIsFinalizing(true)

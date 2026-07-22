@@ -30,8 +30,14 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.IssueCompleted]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: { issueNumber: number; projectId: string; oldLabels?: Record<string, string>; labels?: Record<string, string> }
   [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: { issueNumber: number; projectId: string; priority: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueDraftChanged]: { issueNumber: number; projectId: string; oldIsDraft: boolean; newIsDraft: boolean }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: { issueNumber: number; projectId: string; prerequisiteNumber: number }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved]: { issueNumber: number; projectId: string; prerequisiteNumber: number }
+  [REVERSE_DNS_EVENT_TYPES.IssueWorkflowProfileChanged]: { issueNumber: number; projectId: string; workflowProfileId?: string | null }
+  [REVERSE_DNS_EVENT_TYPES.IssueParentChanged]: { issueNumber: number; projectId: string; previousParentIssueNumber?: number | null; parentIssueNumber?: number | null }
+  [REVERSE_DNS_EVENT_TYPES.IssueRepositoryChanged]: { issueNumber: number; projectId: string; oldRepositoryRef?: string | null; newRepositoryRef: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueCompositeStarted]: { issueNumber: number; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueCompositeStatusChanged]: { issueNumber: number; projectId: string; previousStatus: string; newStatus: string }
   [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: { issueNumber: number; projectId: string }

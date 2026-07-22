@@ -1,23 +1,30 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, StoredCloudEventDto, TaskLogPage, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, IssueListItem, IssueParentCandidate, StoredCloudEventDto, TaskLogPage, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { IssueListParams } from './query-keys'
 
 export interface IssueWorkflowVariables {
   vars?: Record<string, unknown> | null
   stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
 }
 
-export function getIssues(params?: { stage?: string; label?: string; projectId?: string; archived?: boolean; all?: boolean }) {
+export function getIssues(params?: IssueListParams, signal?: AbortSignal) {
   const search = new URLSearchParams()
   if (params?.stage) search.set('stage', params.stage)
   if (params?.label) search.set('label', params.label)
   if (params?.archived !== undefined) search.set('archived', String(params.archived))
   if (params?.all !== undefined) search.set('all', String(params.all))
+  if (params?.repository) search.set('repository', params.repository)
+  if (params?.parent !== undefined) search.set('parent', String(params.parent))
   const qs = search.toString()
-  return request<Issue[]>(projectApiPath(params?.projectId, `/issues${qs ? `?${qs}` : ''}`))
+  return request<IssueListItem[]>(projectApiPath(params?.projectId, `/issues${qs ? `?${qs}` : ''}`), { signal })
 }
 
-export function getIssue(number: number, projectId?: string | null) {
-  return request<Issue>(projectApiPath(projectId, `/issues/${number}`))
+export function getIssue(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<Issue>(projectApiPath(projectId, `/issues/${number}`), { signal })
+}
+
+export function getParentIssueCandidates(projectId?: string | null, signal?: AbortSignal) {
+  return request<IssueParentCandidate[]>(projectApiPath(projectId, '/issues/parent-candidates'), { signal })
 }
 
 export interface CreateIssueInput {
@@ -125,20 +132,20 @@ export function getIssueFeedback(number: number, feedbackId: string, projectId?:
   return request<ApprovalFeedback>(projectApiPath(projectId, `/issues/${number}/feedback/${encodeURIComponent(feedbackId)}`))
 }
 
-export function getIssueDiff(number: number, projectId?: string | null) {
-  return request<IssueDiffResponse>(projectApiPath(projectId, `/issues/${number}/diff`))
+export function getIssueDiff(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<IssueDiffResponse>(projectApiPath(projectId, `/issues/${number}/diff`), { signal })
 }
 
-export function getIssueEvents(number: number, projectId?: string | null) {
-  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/issues/${number}/events`))
+export function getIssueEvents(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/issues/${number}/events`), { signal })
 }
 
-export function getIssueCommits(number: number, projectId?: string | null) {
-  return request<IssueCommitsResponse>(projectApiPath(projectId, `/issues/${number}/commits`))
+export function getIssueCommits(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<IssueCommitsResponse>(projectApiPath(projectId, `/issues/${number}/commits`), { signal })
 }
 
-export function getCommitDiff(number: number, hash: string, projectId?: string | null) {
-  return request<CommitDiffResponse>(projectApiPath(projectId, `/issues/${number}/commits/${hash}/diff`))
+export function getCommitDiff(number: number, hash: string, projectId?: string | null, signal?: AbortSignal) {
+  return request<CommitDiffResponse>(projectApiPath(projectId, `/issues/${number}/commits/${hash}/diff`), { signal })
 }
 
 export function getFileContent(number: number, filePath: string, projectId?: string | null) {
@@ -170,16 +177,16 @@ export function deleteComment(issueNumber: number, commentId: string, projectId?
   })
 }
 
-export function getLabels(projectId?: string | null) {
-  return request<string[]>(projectApiPath(projectId, '/labels'))
+export function getLabels(projectId?: string | null, signal?: AbortSignal) {
+  return request<string[]>(projectApiPath(projectId, '/labels'), { signal })
 }
 
-export function getWorkflowYaml(workflowRunId: string) {
-  return request<{ workflowRunId: string; yaml: string }>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/yaml`)
+export function getWorkflowYaml(workflowRunId: string, signal?: AbortSignal) {
+  return request<{ workflowRunId: string; yaml: string }>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/yaml`, { signal })
 }
 
-export function getIssueWorkflowProfileYaml(number: number, projectId: string) {
-  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile`))
+export function getIssueWorkflowProfileYaml(number: number, projectId: string, signal?: AbortSignal) {
+  return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile`), { signal })
 }
 
 export interface IssueWorkflowArtifactListParams {
@@ -188,13 +195,13 @@ export interface IssueWorkflowArtifactListParams {
   taskRunId?: string
 }
 
-export function getIssueWorkflowArtifacts(number: number, params: IssueWorkflowArtifactListParams = {}, projectId?: string | null) {
+export function getIssueWorkflowArtifacts(number: number, params: IssueWorkflowArtifactListParams = {}, projectId?: string | null, signal?: AbortSignal) {
   const search = new URLSearchParams()
   if (params.path) search.set('path', params.path)
   if (params.history) search.set('history', 'true')
   if (params.taskRunId) search.set('taskRunId', params.taskRunId)
   const qs = search.toString()
-  return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`))
+  return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`), { signal })
 }
 
 export function issueWorkflowArtifactContentPath(number: number, artifactId: string, projectId?: string | null) {
@@ -215,12 +222,13 @@ export async function getIssueWorkflowArtifactContent(
   artifactId: string,
   options: IssueWorkflowArtifactContentOptions = {},
   projectId?: string | null,
+  signal?: AbortSignal,
 ): Promise<WorkflowArtifactContentResult> {
   const path = issueWorkflowArtifactContentPath(number, artifactId, projectId)
   const search = new URLSearchParams()
   if (options.file) search.set('file', options.file)
   const qs = search.toString()
-  const res = await fetch(`/api${path}${qs ? `?${qs}` : ''}`)
+  const res = await fetch(`/api${path}${qs ? `?${qs}` : ''}`, { signal })
   if (!res.ok) {
     const text = await res.text().catch(() => 'Unknown error')
     throw new ApiError(`Failed to fetch artifact content: ${text}`, res.status)
@@ -249,8 +257,8 @@ export function deleteIssueWorkflowProfileTemplate(number: number, projectId: st
   })
 }
 
-export function getWorkflowTimeline(number: number, projectId?: string | null) {
-  return request<{ workflow: WorkflowTimeline | null }>(projectApiPath(projectId, `/issues/${number}/workflow/status`))
+export function getWorkflowTimeline(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<{ workflow: WorkflowTimeline | null }>(projectApiPath(projectId, `/issues/${number}/workflow/status`), { signal })
     .then(response => response.workflow)
 }
 
@@ -299,7 +307,7 @@ export function stopIssue(number: number, projectId?: string | null) {
   return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/stop`), { method: 'POST' })
 }
 
-export function getWorkspaceStatus(number: number, projectId?: string | null) {
+export function getWorkspaceStatus(number: number, projectId?: string | null, signal?: AbortSignal) {
   return request<{
     exists: boolean
     reason?: string
@@ -309,7 +317,7 @@ export function getWorkspaceStatus(number: number, projectId?: string | null) {
     behind?: number
     rebaseInProgress?: boolean
     conflictingFiles?: string[]
-  }>(projectApiPath(projectId, `/issues/${number}/workspace-status`))
+  }>(projectApiPath(projectId, `/issues/${number}/workspace-status`), { signal })
 }
 
 export function cleanupIssueWorkspace(number: number, projectId?: string | null) {
@@ -350,10 +358,10 @@ export interface IssueWorkflowTaskLogParams {
   limit?: number | null
 }
 
-export function getIssueWorkflowTaskLog(number: number, taskId: string, params: IssueWorkflowTaskLogParams = {}, projectId?: string | null) {
+export function getIssueWorkflowTaskLog(number: number, taskId: string, params: IssueWorkflowTaskLogParams = {}, projectId?: string | null, signal?: AbortSignal) {
   const search = new URLSearchParams()
   if (params.cursor != null) search.set('cursor', String(params.cursor))
   if (params.limit != null) search.set('limit', String(params.limit))
   const qs = search.toString()
-  return request<TaskLogPage>(projectApiPath(projectId, `/issues/${number}/workflow/tasks/${encodeURIComponent(taskId)}/logs${qs ? `?${qs}` : ''}`))
+  return request<TaskLogPage>(projectApiPath(projectId, `/issues/${number}/workflow/tasks/${encodeURIComponent(taskId)}/logs${qs ? `?${qs}` : ''}`), { signal })
 }

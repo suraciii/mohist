@@ -7,8 +7,8 @@ import type {
   WorkflowRunSession,
 } from '../model/types'
 
-export function getCoderSessions(number: number, projectId?: string | null) {
-  return request<CoderSessionSummary[]>(projectApiPath(projectId, `/issues/${number}/coder-sessions`))
+export function getCoderSessions(number: number, projectId?: string | null, signal?: AbortSignal) {
+  return request<CoderSessionSummary[]>(projectApiPath(projectId, `/issues/${number}/coder-sessions`), { signal })
 }
 
 export function getWorkflowRunSessions(workflowRunId: string) {

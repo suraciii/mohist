@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
-import type { InboxItem } from '../model/types'
 import {
   archiveInboxItemMutationOptions,
   inboxQueryKey,
@@ -24,15 +23,15 @@ function createInvalidationClient() {
 
 describe('inboxQueryKey', () => {
   it('returns the project-scoped key when projectId is set', () => {
-    expect(inboxQueryKey('proj-1')).toEqual(['inbox', 'proj-1'])
+    expect(inboxQueryKey('proj-1')).toEqual(['inbox-list', 'proj-1'])
   })
 
   it('returns the shared key when projectId is null', () => {
-    expect(inboxQueryKey(null)).toEqual(['inbox'])
+    expect(inboxQueryKey(null)).toEqual(['inbox-list'])
   })
 
   it('returns the shared key when projectId is undefined', () => {
-    expect(inboxQueryKey(undefined)).toEqual(['inbox'])
+    expect(inboxQueryKey(undefined)).toEqual(['inbox-list'])
   })
 })
 
@@ -40,25 +39,27 @@ describe('invalidateInbox', () => {
   it('invalidates the project-scoped inbox query when projectId is set', () => {
     const qc = createInvalidationClient()
     invalidateInbox(qc, 'proj-1')
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('invalidates the shared ["inbox"] query prefix when projectId is absent', () => {
     const qc = createInvalidationClient()
     invalidateInbox(qc, null)
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count'] })
   })
 })
 
 describe('inboxQueryOptions', () => {
   it('uses the query key ["inbox", projectId] scoped to the project', () => {
-    expect(inboxQueryOptions('proj-1').queryKey).toEqual(['inbox', 'proj-1'])
+    expect(inboxQueryOptions('proj-1').queryKey).toEqual(['inbox-list', 'proj-1'])
   })
 
   it('forwards a null projectId and disables the query', () => {
     const opts = inboxQueryOptions(null)
     expect(opts.enabled).toBe(false)
-    expect(opts.queryKey).toEqual(['inbox'])
+    expect(opts.queryKey).toEqual(['inbox-list'])
   })
 
   it('calls getInbox(projectId) on the queryFn', async () => {
@@ -76,49 +77,40 @@ describe('inboxQueryOptions', () => {
   })
 
   it('does NOT prefix the query key with ["issues", ...]', () => {
-    expect(inboxQueryOptions('proj-1').queryKey[0]).toBe('inbox')
+    expect(inboxQueryOptions('proj-1').queryKey[0]).toBe('inbox-list')
     expect(inboxQueryOptions('proj-1').queryKey).not.toContain('issues')
   })
 })
 
 describe('unreadInboxCountQueryOptions', () => {
-  it('uses the same query key as inboxQueryOptions', () => {
-    expect(unreadInboxCountQueryOptions('proj-1').queryKey).toEqual(['inbox', 'proj-1'])
+  it('uses a distinct count query key', () => {
+    expect(unreadInboxCountQueryOptions('proj-1').queryKey).toEqual(['inbox-count', 'proj-1'])
   })
 
   it('disables the query when there is no project', () => {
     expect(unreadInboxCountQueryOptions(null).enabled).toBe(false)
   })
 
-  it('selects the count of unread items from the inbox list', () => {
-    const items: InboxItem[] = [
-      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
-      { itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
-      { itemId: 'inb-3', notificationKind: 'approval_requested', issueNumber: 3, issueTitle: 'C', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
-    ]
-    expect(unreadInboxCountQueryOptions('proj-1').select!(items)).toBe(2)
+  it('selects the count returned by the count endpoint', () => {
+    expect(unreadInboxCountQueryOptions('proj-1').select!({ unreadCount: 2 })).toBe(2)
   })
 
   it('returns 0 when all items are read', () => {
-    const items: InboxItem[] = [
-      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
-      { itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
-    ]
-    expect(unreadInboxCountQueryOptions('proj-1').select!(items)).toBe(0)
+    expect(unreadInboxCountQueryOptions('proj-1').select!({ unreadCount: 0 })).toBe(0)
   })
 
   it('forwards projectId to getInbox as queryFn', async () => {
     const urls: string[] = []
     server.use(
-      http.get('*/api/projects/:projectId/inbox', ({ request }) => {
+      http.get('*/api/projects/:projectId/inbox/unread-count', ({ request }) => {
         urls.push(new URL(request.url).pathname)
-        return HttpResponse.json({ success: true, data: [] })
+        return HttpResponse.json({ success: true, data: { unreadCount: 0 } })
       }),
     )
 
     await unreadInboxCountQueryOptions('proj-xyz').queryFn()
 
-    expect(urls).toEqual(['/api/projects/proj-xyz/inbox'])
+    expect(urls).toEqual(['/api/projects/proj-xyz/inbox/unread-count'])
   })
 })
 
@@ -181,7 +173,8 @@ describe('markInboxItemReadMutationOptions', () => {
   it('invalidates the project-scoped inbox query on success', () => {
     const qc = createInvalidationClient()
     markInboxItemReadMutationOptions('proj-1', qc).onSuccess()
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('toasts the error message on failure', () => {
@@ -213,7 +206,8 @@ describe('markAllInboxReadMutationOptions', () => {
   it('invalidates the project-scoped inbox query on success', () => {
     const qc = createInvalidationClient()
     markAllInboxReadMutationOptions('proj-1', qc).onSuccess({ projectId: 'proj-1', marked: 3 })
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('toasts "Marked N inbox items as read" when items were marked', () => {
@@ -250,7 +244,8 @@ describe('archiveInboxItemMutationOptions', () => {
   it('invalidates the project-scoped inbox query on success', () => {
     const qc = createInvalidationClient()
     archiveInboxItemMutationOptions('proj-1', qc).onSuccess()
-    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-count', 'proj-1'] })
   })
 
   it('toasts "Inbox item archived" on success', () => {
@@ -297,7 +292,7 @@ describe('updateInboxSubscriptionMutationOptions', () => {
     const qc = createInvalidationClient()
     updateInboxSubscriptionMutationOptions('proj-1', qc).onSuccess()
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['inbox-subscription', 'proj-1'] })
-    expect(qc.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+    expect(qc.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['inbox-list', 'proj-1'] })
   })
 
   it('toasts the error message on failure', () => {

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
 
-import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
+import { issueCandidateKeys, issueDetailKeys, issueListKeys, IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { ProjectProvider } from '../../../entities/project'
 import { CreateIssueDialog } from './CreateIssueDialog'
 import { useMswServer } from '../../../../tests/support/msw'
@@ -41,6 +41,10 @@ const issuesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _issues }),
 )
 
+const parentCandidatesHandler = vi.fn(() =>
+  HttpResponse.json({ success: true, data: _issues.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })) }),
+)
+
 const repositoriesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _repositories }),
 )
@@ -63,6 +67,7 @@ const issueTemplatesHandler = vi.fn(() =>
 
 useMswServer(
   http.post(`*/api/projects/:projectId/issues`, createIssueHandler),
+  http.get(`*/api/projects/:projectId/issues/parent-candidates`, parentCandidatesHandler),
   http.get(`*/api/projects/:projectId/issues`, issuesHandler),
   http.get(`*/api/projects/:projectId/repositories`, repositoriesHandler),
   http.get(`*/api/projects/:projectId/opencode/models`, modelsHandler),
@@ -97,7 +102,7 @@ function makeBaseIssue(overrides: Partial<Issue> = {}): Issue {
   }
 }
 
-function renderAssignmentDialog() {
+function renderAssignmentDialog(open = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -119,7 +124,7 @@ function renderAssignmentDialog() {
           repositories: [],
         }]}
       >
-        <CreateIssueDialog open onClose={vi.fn()} />
+        <CreateIssueDialog open={open} onClose={vi.fn()} />
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -139,6 +144,34 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+})
+
+describe('CreateIssueDialog request loading', () => {
+  it('does not mount or request issue candidates while closed', () => {
+    renderAssignmentDialog(false)
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(parentCandidatesHandler).not.toHaveBeenCalled()
+    expect(issuesHandler).not.toHaveBeenCalled()
+  })
+
+  it('requests parent candidates once when opened', async () => {
+    renderAssignmentDialog()
+
+    await waitFor(() => expect(parentCandidatesHandler).toHaveBeenCalledTimes(1))
+    expect(issuesHandler).not.toHaveBeenCalled()
+  })
+
+  it('defers the prerequisite issue summary until the picker opens', async () => {
+    const user = userEvent.setup()
+    renderAssignmentDialog()
+
+    await waitFor(() => expect(parentCandidatesHandler).toHaveBeenCalledTimes(1))
+    expect(issuesHandler).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('prerequisite-picker-trigger'))
+    await waitFor(() => expect(issuesHandler).toHaveBeenCalledTimes(1))
+  })
 })
 
 describe('CreateIssueDialog assignment validation', () => {
@@ -258,17 +291,12 @@ describe('CreateIssueDialog success invalidation', () => {
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled())
 
-    const broadKey = invalidatedQueryKeys.find((parts) => parts.length === 1 && parts[0] === 'issues')
-    expect(broadKey).toBeDefined()
-
-    const parentKey = invalidatedQueryKeys.find((parts) => parts.length >= 3 && parts[0] === 'issues' && parts[1] === '42')
-    expect(parentKey).toBeDefined()
-
-    const parentChildrenKey = invalidatedQueryKeys.find((parts) => parts.length >= 4 && parts[0] === 'issues' && parts[1] === '42' && parts[3] === 'children')
-    expect(parentChildrenKey).toBeDefined()
+    expect(invalidatedQueryKeys).toContainEqual(issueListKeys.project(_projectId).map(String))
+    expect(invalidatedQueryKeys).toContainEqual(issueDetailKeys.detail(_projectId, 42).map(String))
+    expect(invalidatedQueryKeys).toContainEqual(issueCandidateKeys.project(_projectId).map(String))
   })
 
-  it('still invalidates the broad issue list when no parent is set', async () => {
+  it('invalidates only the active project list when no parent is set', async () => {
     setRepositories([{ name: 'main', isDefault: true }])
     setIssues([])
     _createIssueResponse = { number: 1 }
@@ -282,15 +310,30 @@ describe('CreateIssueDialog success invalidation', () => {
     await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled())
 
-    const broadKey = invalidatedQueryKeys.find((parts) => parts.length === 1 && parts[0] === 'issues')
-    expect(broadKey).toBeDefined()
+    expect(invalidatedQueryKeys).toContainEqual(issueListKeys.project(_projectId).map(String))
 
-    const parentDetailKey = invalidatedQueryKeys.find((parts) => parts.length >= 3 && parts[0] === 'issues' && !Number.isNaN(Number(parts[1])))
-    expect(parentDetailKey).toBeUndefined()
+    expect(invalidatedQueryKeys).not.toContainEqual(issueDetailKeys.detail(_projectId, 1).map(String))
   })
 })
 
 describe('CreateIssueDialog non-assignment regression coverage', () => {
+  it('creates issue with attachment ids from the composer body', async () => {
+    _createIssueResponse = { number: 1 }
+    const user = userEvent.setup()
+    renderAssignmentDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'New issue' } })
+    fireEvent.change(screen.getByPlaceholderText('Optional description'), { target: { value: 'See ![screen](att:att_created)' } })
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    expect(createIssueRequests[0]).toMatchObject({
+      title: 'New issue',
+      body: 'See ![screen](att:att_created)',
+      attachmentIds: ['att_created'],
+    })
+  })
+
   it('still attaches prerequisites to the create payload alongside the new parent field', async () => {
     setRepositories([{ name: 'main', isDefault: true }])
     setIssues([
@@ -331,7 +374,7 @@ describe('CreateIssueDialog non-assignment regression coverage', () => {
     expect(parentSelect.value).toBe('5')
 
     setIssues([makeBaseIssue({ number: 5, title: 'Transitional parent', status: IssueStatus.Done, canBeParent: false })])
-    await queryClient.refetchQueries({ queryKey: ['issues'] })
+    await queryClient.refetchQueries({ queryKey: issueCandidateKeys.project(_projectId), exact: true })
 
     await waitFor(() => {
       const select = screen.getByTestId('create-issue-parent-select') as HTMLSelectElement

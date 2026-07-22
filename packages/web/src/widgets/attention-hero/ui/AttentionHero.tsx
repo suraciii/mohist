@@ -5,6 +5,7 @@ import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, ShieldOffIcon } from 'l
 import {
   approveIssue,
   invalidateApprovalWait,
+  issueListKeys,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
@@ -117,7 +118,7 @@ export function AttentionHero({
   const approveMutation = useMutation({
     mutationFn: (issueNumber: number) => approveIssueFn(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       invalidateApprovalWait(queryClient)
     },

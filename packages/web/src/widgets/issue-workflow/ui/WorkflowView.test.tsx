@@ -12,6 +12,7 @@ import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalFeedback, type Is
 import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 import type { TaskLogDataHook, WorkflowRunSessionsHook } from './TaskLogPanel'
+import { issueWorkflowKeys } from '../../../entities/issue/api/query-keys'
 
 let approveRequests: string[] = []
 let feedbackRequests: Array<{ issueNumber: number; stage: string; body: string }> = []
@@ -298,7 +299,7 @@ function setWorkflowTimeline(value: { data: WorkflowTimeline | null | undefined 
 
 function render(ui: ReactElement) {
   const queryClient = createQueryClient()
-  const queryKey = ['issues', 1, 'test-project', 'workflow-timeline']
+  const queryKey = issueWorkflowKeys.timeline('test-project', 1)
   queryClient.setQueryDefaults(queryKey, { staleTime: Number.POSITIVE_INFINITY })
   if (timelineData !== undefined) {
     queryClient.setQueryData(queryKey, timelineData)

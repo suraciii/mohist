@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { useProject } from '../../project/@x/project-context'
+import { issueWorkflowKeys } from '../../issue/@x/query-keys'
 import { cancelSession, type SessionCancelResult } from '../api/client'
 
 export interface CancelSessionMutationInput {
@@ -19,9 +20,9 @@ export function cancelSessionMutationOptions(projectId: string | null | undefine
       return cancelSession(issueNumber, sessionName, projectId)
     },
     onSuccess: (_result: SessionCancelResult, { issueNumber, sessionName }: CancelSessionMutationInput) => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'coder-sessions'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'agent-session-metadata', sessionName] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'agent-session-transcript', sessionName] })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions'), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'session-metadata', sessionName), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', sessionName) })
       queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
     },
   }

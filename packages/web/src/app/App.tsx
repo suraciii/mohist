@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams, Outlet } from 'react-router-dom'
 import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
@@ -6,28 +6,31 @@ import { ThemeProvider } from '../shared/lib/theme/ThemeProvider'
 import { ProjectProvider, useProject, projectPath } from '../entities/project'
 import { AppSidebar, Header } from '../widgets/app-shell'
 import { SidebarProvider, SidebarInset } from '@/shared/ui/components/sidebar'
-import { IssueDetailPage } from '../pages/issue-detail'
-import { IssueChangedFilesPage } from '../pages/issue-changed-files'
-import { GenericSessionPage, SessionPage } from '../pages/session'
-import { CreateIssueDialog } from '../features/create-issue'
-import { isApplicationSection, isProjectSection, isSettingsSectionKey, SettingsPage } from '../pages/settings'
-import { ActivityPage } from '../pages/activity'
-import { RunnersPage } from '../pages/runners'
-import { LogsPage } from '../pages/logs'
-import { ArchivedPage } from '../pages/archived'
+import { isApplicationSection, isProjectSection, isSettingsSectionKey } from '../shared/config/settings-sections'
 import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
 import { Toaster } from 'sonner'
 import { RuntimeToastHost } from '../shared/ui/toast'
-import { DashboardPage } from '../pages/dashboard'
-import { IssuesPage } from '../pages/issues'
-import { EpicListPage } from '../pages/epics'
-import { EpicDetailPage } from '../pages/epic-detail'
-import { RunnerDetailPage } from '../pages/runner-detail'
-import { InboxPage } from '../pages/inbox'
-import { InsightsPage } from '../pages/insights'
-import { AgentListPage } from '../pages/agent-list'
-import { AgentDetailPage } from '../pages/agent-detail'
-import { AgentSessionComposerPage } from '../pages/agent-session-composer'
+
+const IssueDetailPage = lazy(() => import('../pages/issue-detail').then(({ IssueDetailPage }) => ({ default: IssueDetailPage })))
+const IssueChangedFilesPage = lazy(() => import('../pages/issue-changed-files').then(({ IssueChangedFilesPage }) => ({ default: IssueChangedFilesPage })))
+const GenericSessionPage = lazy(() => import('../pages/session').then(({ GenericSessionPage }) => ({ default: GenericSessionPage })))
+const SessionPage = lazy(() => import('../pages/session').then(({ SessionPage }) => ({ default: SessionPage })))
+const CreateIssueDialog = lazy(() => import('../features/create-issue').then(({ CreateIssueDialog }) => ({ default: CreateIssueDialog })))
+const SettingsPage = lazy(() => import('../pages/settings').then(({ SettingsPage }) => ({ default: SettingsPage })))
+const ActivityPage = lazy(() => import('../pages/activity').then(({ ActivityPage }) => ({ default: ActivityPage })))
+const RunnersPage = lazy(() => import('../pages/runners').then(({ RunnersPage }) => ({ default: RunnersPage })))
+const LogsPage = lazy(() => import('../pages/logs').then(({ LogsPage }) => ({ default: LogsPage })))
+const ArchivedPage = lazy(() => import('../pages/archived').then(({ ArchivedPage }) => ({ default: ArchivedPage })))
+const DashboardPage = lazy(() => import('../pages/dashboard').then(({ DashboardPage }) => ({ default: DashboardPage })))
+const IssuesPage = lazy(() => import('../pages/issues').then(({ IssuesPage }) => ({ default: IssuesPage })))
+const EpicListPage = lazy(() => import('../pages/epics').then(({ EpicListPage }) => ({ default: EpicListPage })))
+const EpicDetailPage = lazy(() => import('../pages/epic-detail').then(({ EpicDetailPage }) => ({ default: EpicDetailPage })))
+const RunnerDetailPage = lazy(() => import('../pages/runner-detail').then(({ RunnerDetailPage }) => ({ default: RunnerDetailPage })))
+const InboxPage = lazy(() => import('../pages/inbox').then(({ InboxPage }) => ({ default: InboxPage })))
+const InsightsPage = lazy(() => import('../pages/insights').then(({ InsightsPage }) => ({ default: InsightsPage })))
+const AgentListPage = lazy(() => import('../pages/agent-list').then(({ AgentListPage }) => ({ default: AgentListPage })))
+const AgentDetailPage = lazy(() => import('../pages/agent-detail').then(({ AgentDetailPage }) => ({ default: AgentDetailPage })))
+const AgentSessionComposerPage = lazy(() => import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({ default: AgentSessionComposerPage })))
 
 export function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -54,41 +57,47 @@ export function AppContent() {
       <SidebarInset>
         <Header onCreateIssue={() => setCreateIssueOpen(true)} />
         <div className="flex-1 min-h-0 min-w-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-          <Routes>
-            <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
-            <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
-            <Route element={<ProjectGuard />}>
-              <Route path="/" element={<NavigateToCurrentProject />} />
-              <Route path="/:projectName" element={<ProjectRouteScope />}>
-                <Route index element={<DashboardPage />} />
-                <Route path="issues" element={<IssuesPage />} />
-                <Route path="issues/:number" element={<IssueDetailPage />} />
-                <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
-                <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
-                <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
-                <Route path="agents" element={<AgentListPage />} />
-                <Route path="agents/:agentId" element={<AgentDetailPage />} />
-                <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
-                <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
-                <Route path="activity" element={<ActivityPage />} />
-                <Route path="runners" element={<RunnersPage />} />
-                <Route path="settings" element={<LegacySettingsRedirect />} />
-                <Route path="settings/:section" element={<LegacyProjectSettingsSection />} />
-                <Route path="logs" element={<LogsPage />} />
-                <Route path="archived" element={<ArchivedPage />} />
-                <Route path="epics" element={<EpicListPage />} />
-                <Route path="epics/:number" element={<EpicDetailPage />} />
-                <Route path="inbox" element={<InboxPage />} />
-                <Route path="insights" element={<InsightsPage />} />
-                <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
+          <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+            <Routes>
+              <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
+              <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
+              <Route element={<ProjectGuard />}>
+                <Route path="/" element={<NavigateToCurrentProject />} />
+                <Route path="/:projectName" element={<ProjectRouteScope />}>
+                  <Route index element={<DashboardPage />} />
+                  <Route path="issues" element={<IssuesPage />} />
+                  <Route path="issues/:number" element={<IssueDetailPage />} />
+                  <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
+                  <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
+                  <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+                  <Route path="agents" element={<AgentListPage />} />
+                  <Route path="agents/:agentId" element={<AgentDetailPage />} />
+                  <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
+                  <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
+                  <Route path="activity" element={<ActivityPage />} />
+                  <Route path="runners" element={<RunnersPage />} />
+                  <Route path="settings" element={<LegacySettingsRedirect />} />
+                  <Route path="settings/:section" element={<LegacyProjectSettingsSection />} />
+                  <Route path="logs" element={<LogsPage />} />
+                  <Route path="archived" element={<ArchivedPage />} />
+                  <Route path="epics" element={<EpicListPage />} />
+                  <Route path="epics/:number" element={<EpicDetailPage />} />
+                  <Route path="inbox" element={<InboxPage />} />
+                  <Route path="insights" element={<InsightsPage />} />
+                  <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
+                </Route>
               </Route>
-            </Route>
-          </Routes>
+            </Routes>
+          </Suspense>
           {shouldShowCreateIssueFab(location.pathname) && <FAB onClick={() => setCreateIssueOpen(true)} />}
         </div>
         <MobileBottomNav />
       </SidebarInset>
-      <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
+      {createIssueOpen && (
+        <Suspense fallback={null}>
+          <CreateIssueDialog open onClose={() => setCreateIssueOpen(false)} />
+        </Suspense>
+      )}
       <Toaster />
     </SidebarProvider>
   )
