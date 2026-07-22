@@ -18,6 +18,13 @@ public static partial class IssueRoutes
 {
     internal static void MapIssueCrud(this RouteGroupBuilder group)
     {
+        group.MapGet("/parent-candidates", async (HttpContext ctx, IssueQuerier issuesQuery) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var candidates = await issuesQuery.ListParentCandidatesAsync(project.Id, ctx.RequestAborted);
+            return ApiResults.Ok(candidates);
+        });
+
         group.MapGet("/", async (
             HttpContext ctx,
             string projectRef,

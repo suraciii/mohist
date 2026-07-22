@@ -268,7 +268,7 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            var all = await issuesQuery.ListAsync(project.Id, null, all: true);
+            var all = await issuesQuery.ListReadModelsAsync(project.Id, null, all: true);
             var completed = all.Where(i => i.Status == "done" && i.ArchivedAt == null).ToList();
             var skipped = all.Where(i => i.Status != "done" && i.ArchivedAt == null).ToList();
 

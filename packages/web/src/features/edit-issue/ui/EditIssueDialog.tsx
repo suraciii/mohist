@@ -9,7 +9,7 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { extractAttachmentIds, LabelEditor, partitionIssueBody, recombineIssueBody, updateIssue } from '../../../entities/issue'
+import { extractAttachmentIds, issueDetailKeys, issueListKeys, LabelEditor, partitionIssueBody, recombineIssueBody, updateIssue } from '../../../entities/issue'
 import type { Issue, LabelMap } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
@@ -59,7 +59,8 @@ export function EditIssueDialog({
       }, issue.projectId)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(issue.projectId) })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(issue.projectId, issue.number), exact: true })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onClose()
     },

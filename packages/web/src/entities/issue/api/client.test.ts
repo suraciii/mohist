@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { addComment, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getLabels, updateIssue } from './client'
+import { addComment, createIssue, getIssueEvents, getIssueWorkflowArtifactContent, getIssues, getLabels, getParentIssueCandidates, updateIssue } from './client'
 
 useMswServer()
 
@@ -78,6 +78,39 @@ describe('getIssueEvents', () => {
     const events = await getIssueEvents(42, 'proj-1')
 
     expect(events).toEqual([])
+  })
+})
+
+describe('issue list and parent candidate clients', () => {
+  it('forwards the TanStack cancellation signal to the list request', async () => {
+    const controller = new AbortController()
+    let observedRequest: Request | undefined
+    server.use(
+      http.get('*/api/projects/:projectId/issues', ({ request }) => {
+        observedRequest = request
+        return successResponse([])
+      }),
+    )
+
+    await getIssues({ projectId: 'proj-1' }, controller.signal)
+
+    expect(observedRequest!.signal.aborted).toBe(false)
+    controller.abort()
+    expect(observedRequest!.signal.aborted).toBe(true)
+  })
+
+  it('requests the compact project-scoped parent candidate endpoint', async () => {
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/issues/parent-candidates', ({ request }) => {
+        requests.push(request)
+        return successResponse([{ number: 7, title: 'Parent' }])
+      }),
+    )
+
+    await expect(getParentIssueCandidates('proj-1')).resolves.toEqual([{ number: 7, title: 'Parent' }])
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/parent-candidates')
   })
 })
 

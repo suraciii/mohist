@@ -72,3 +72,7 @@ export interface InboxMarkAllReadResponse {
   projectId: string
   marked: number
 }
+
+export interface InboxUnreadCount {
+  unreadCount: number
+}

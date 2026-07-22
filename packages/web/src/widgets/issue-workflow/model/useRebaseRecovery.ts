@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
+import { issueDetailKeys, issueListKeys, issueWorkflowKeys, rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 
 export interface RebaseRecoveryWorkspaceStatus {
@@ -55,9 +55,9 @@ export function useRebaseRecovery(issueNumber: number, enabled: boolean = true):
       if (result.status === 'queued') setRebaseQueued(true)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.workspace(projectId, issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
     },
   })
 

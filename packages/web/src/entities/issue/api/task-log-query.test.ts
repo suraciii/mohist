@@ -22,20 +22,20 @@ function recordTaskLogRequests(
 useMswServer()
 
 describe('issueWorkflowTaskLogQueryOptions query key', () => {
-  it('starts with [issueNumber, taskId] so it refetches when a different task is expanded', () => {
+  it('uses the issue-workflow namespace and includes the task id', () => {
     const options = issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1')
 
-    expect(options.queryKey[0]).toBe(161)
-    expect(options.queryKey[1]).toBe('build.1')
-    expect(options.queryKey[2]).toBe('proj-1')
+    expect(options.queryKey[0]).toBe('issue-workflow')
+    expect(options.queryKey[2]).toBe(161)
+    expect(options.queryKey[4]).toBe('build.1')
   })
 
   it('changes the query key when taskId changes (refetch per expanded task)', () => {
     const first = issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1')
     const second = issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.2')
 
-    expect(first.queryKey[1]).toBe('build.1')
-    expect(second.queryKey[1]).toBe('build.2')
+    expect(first.queryKey[4]).toBe('build.1')
+    expect(second.queryKey[4]).toBe('build.2')
     expect(first.queryKey).not.toEqual(second.queryKey)
   })
 

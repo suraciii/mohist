@@ -15,6 +15,7 @@ const MODELS_PATH = '*/api/projects/:projectId/opencode/models'
 const REPOS_PATH = '*/api/projects/:projectId/repositories'
 const ISSUE_TEMPLATES_PATH = '*/api/issue-templates*'
 const ISSUES_PATH = '*/api/projects/:projectId/issues*'
+const PARENT_CANDIDATES_PATH = '*/api/projects/:projectId/issues/parent-candidates'
 
 let createRequests: Array<Record<string, unknown>> = []
 let createdIssue: Record<string, unknown>
@@ -30,6 +31,7 @@ const defaultHandlers = [
   http.get(MODELS_PATH, () => HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } })),
   http.get(REPOS_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.get(ISSUE_TEMPLATES_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.get(PARENT_CANDIDATES_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.post(ISSUES_PATH, async ({ request }) => {
     const body = await request.json() as Record<string, unknown>
     createRequests.push(body)

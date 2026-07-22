@@ -21,7 +21,7 @@ describe('useWorkflowTimeline', () => {
     })
 
     const query = queryClient.getQueryCache().find({
-      queryKey: ['issues', 14, 'project-1', 'workflow-timeline'],
+      queryKey: ['issue-workflow', 'project-1', 14, 'timeline'],
     })
     expect(query?.options.refetchInterval).toBe(false)
   })

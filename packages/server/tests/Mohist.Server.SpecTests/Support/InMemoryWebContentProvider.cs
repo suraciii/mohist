@@ -9,7 +9,8 @@ public sealed class InMemoryWebContentProvider : IWebContentProvider
     {
         Files = new InMemoryFileProvider()
             .AddText("index.html", "<html><body>Mohist Test Web</body></html>")
-            .AddText("assets/app.css", "body{color:red}");
+            .AddText("assets/app.css", "body{color:red}")
+            .AddText("assets/app-12345678.css", "body{color:red}");
     }
 
     public IFileProvider Files { get; }

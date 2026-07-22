@@ -13,6 +13,7 @@ import { onAgentEvent } from '../src/entities/agent'
 import { REVERSE_DNS_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
 import { SUBSCRIPTION_EVENT_TYPES } from '../src/shared/api/events-hub'
 import { useMswServer } from './support/msw'
+import { issueCandidateKeys, issueDetailKeys, issueListKeys, issueWorkflowKeys } from '../src/entities/issue/api/query-keys'
 
 useMswServer(
   http.get('*/api/projects/:projectId/agent/status', () =>
@@ -362,7 +363,12 @@ describe('LiveTaskProvider transcript routing', () => {
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
     })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueDetailKeys.detail('project-1', 82),
+      exact: true,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project('project-1') })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueWorkflowKeys.root('project-1', 82) })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
   })
 
@@ -432,9 +438,12 @@ describe('LiveTaskProvider transcript routing', () => {
     })
 
     await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 82, 'project-1'] })
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['epics'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: issueDetailKeys.detail('project-1', 82),
+        exact: true,
+      })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project('project-1') })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['epics', 'project-1'] })
     })
   })
 
@@ -468,7 +477,15 @@ describe('LiveTaskProvider transcript routing', () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Issue #82 merged successfully')
     })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueDetailKeys.detail('project-1', 82),
+      exact: true,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project('project-1') })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueCandidateKeys.project('project-1'),
+      exact: true,
+    })
   })
 
   it('shows merge failure toast for reverse-DNS workflow failed events', async () => {

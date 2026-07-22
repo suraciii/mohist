@@ -40,6 +40,10 @@ const issuesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _issues }),
 )
 
+const parentCandidatesHandler = vi.fn(() =>
+  HttpResponse.json({ success: true, data: _issues.filter((issue) => issue.canBeParent).map(({ number, title }) => ({ number, title })) }),
+)
+
 const repositoriesHandler = vi.fn(() =>
   HttpResponse.json({ success: true, data: _repositories }),
 )
@@ -62,6 +66,7 @@ const issueTemplatesHandler = vi.fn(() =>
 
 useMswServer(
   http.post(`*/api/projects/:projectId/issues`, createIssueHandler),
+  http.get(`*/api/projects/:projectId/issues/parent-candidates`, parentCandidatesHandler),
   http.get(`*/api/projects/:projectId/issues`, issuesHandler),
   http.get(`*/api/projects/:projectId/repositories`, repositoriesHandler),
   http.get(`*/api/projects/:projectId/opencode/models`, modelsHandler),

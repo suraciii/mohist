@@ -278,7 +278,7 @@ public static class EpicRoutes
         if (req.IssueNumbers is null || req.IssueNumbers.Count == 0)
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
-        var issues = await issuesQuery.ListAsync(pid, all: true);
+        var issues = await issuesQuery.ListReadModelsAsync(pid, all: true);
         var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
         var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
 
@@ -321,7 +321,7 @@ public static class EpicRoutes
         if (req.IssueNumbers is null || req.IssueNumbers.Count == 0)
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
-        var issues = await issuesQuery.ListAsync(pid, all: true);
+        var issues = await issuesQuery.ListReadModelsAsync(pid, all: true);
         var (resolvedItems, perIdentifier) = ResolveBatchItems(issues, req.IssueNumbers);
         var requestedIdentifiers = req.IssueNumbers.Select(n => n.ToString()).ToArray();
 

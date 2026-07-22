@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { onAgentEvent } from '../../agent/@x/events'
 import type { CoderSessionSummary } from './types'
 import { useProject } from '../../project/@x/project-context'
+import { issueWorkflowKeys } from '../../issue/@x/query-keys'
 import { getCoderSessions } from '../api/client'
 
 export type CoderSessionsFetcher = typeof getCoderSessions
@@ -15,8 +16,8 @@ export function useCoderSessions(
 ) {
   const { projectId } = useProject()
   const { data: sessions = EMPTY_SESSIONS, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
-    queryFn: () => fetcher(issueNumber, projectId),
+    queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions'),
+    queryFn: ({ signal }) => fetcher(issueNumber, projectId, signal),
     enabled: issueNumber > 0 && !!projectId,
     staleTime: 30 * 1000,
   })

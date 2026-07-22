@@ -333,7 +333,7 @@ public class EpicQuerier : IScopedService
             .ToListAsync();
         if (memberNumbers.Count == 0) return [];
 
-        var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
+        var allIssues = await _issuesQuery.ListReadModelsAsync(epic.ProjectId, all: true);
         var byNumber = allIssues.ToDictionary(i => i.Number);
         var memberNumberSet = memberNumbers.ToHashSet();
         return memberNumbers

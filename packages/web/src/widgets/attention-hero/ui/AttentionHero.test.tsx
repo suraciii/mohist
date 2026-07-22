@@ -18,6 +18,7 @@ import {
   type AttentionHeroDataHook,
   type AttentionHeroProps,
 } from './AttentionHero'
+import { issueListKeys } from '../../../entities/issue/api/query-keys'
 
 let _issues: Issue[] | undefined
 let _agentStatus: AgentStatus | undefined
@@ -339,7 +340,7 @@ describe('AttentionHero - per-item actions', () => {
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project('proj-1') })
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     })
   })
@@ -654,7 +655,7 @@ describe('AttentionHero - all-clear state', () => {
     })
 
     _issues = []
-    queryClient.invalidateQueries({ queryKey: ['issues'] })
+    queryClient.invalidateQueries({ queryKey: issueListKeys.project('proj-1') })
     rerender(renderHeroTree(queryClient))
 
     await waitFor(() => {
@@ -882,7 +883,7 @@ describe('AttentionHero - approval-wait metric', () => {
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueListKeys.project('proj-1') })
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: ['issues', 'metrics', 'approval-wait'],

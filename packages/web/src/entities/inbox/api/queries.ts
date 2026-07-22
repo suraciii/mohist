@@ -1,41 +1,50 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryFunctionContext } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { InboxItem, InboxMarkAllReadResponse, InboxSubscription, InboxSubscriptionUpdate } from '../model/types'
-import { archiveInboxItem, getInbox, getInboxSubscription, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
+import type { InboxItem, InboxMarkAllReadResponse, InboxSubscription, InboxSubscriptionUpdate, InboxUnreadCount } from '../model/types'
+import { archiveInboxItem, getInbox, getInboxSubscription, getUnreadInboxCount, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
-export const inboxQueryKey = (projectId?: string | null) =>
+export const inboxListQueryKey = (projectId?: string | null) =>
   projectId
-    ? ['inbox', projectId] as const
-    : ['inbox'] as const
+    ? ['inbox-list', projectId] as const
+    : ['inbox-list'] as const
+
+export const inboxCountQueryKey = (projectId?: string | null) =>
+  projectId
+    ? ['inbox-count', projectId] as const
+    : ['inbox-count'] as const
+
+export const inboxQueryKey = inboxListQueryKey
 
 export function invalidateInbox(queryClient: InvalidationClient, projectId?: string | null) {
-  queryClient.invalidateQueries({ queryKey: inboxQueryKey(projectId) })
+  queryClient.invalidateQueries({ queryKey: inboxListQueryKey(projectId) })
+  queryClient.invalidateQueries({ queryKey: inboxCountQueryKey(projectId) })
 }
 
 export function inboxQueryOptions(projectId?: string | null) {
   return {
-    queryKey: inboxQueryKey(projectId),
-    queryFn: () => getInbox(projectId ?? undefined),
+    queryKey: inboxListQueryKey(projectId),
+    queryFn: (context?: QueryFunctionContext) => getInbox(projectId ?? undefined, context?.signal),
     enabled: !!projectId,
   }
 }
 
 export function unreadInboxCountQueryOptions(projectId?: string | null) {
   return {
-    queryKey: inboxQueryKey(projectId),
-    queryFn: () => getInbox(projectId ?? undefined),
+    queryKey: inboxCountQueryKey(projectId),
+    queryFn: (context?: QueryFunctionContext) => getUnreadInboxCount(projectId ?? undefined, context?.signal),
     enabled: !!projectId,
-    select: (data: InboxItem[]) => data.filter((i) => !i.isRead).length,
+    select: (data: InboxUnreadCount) => data.unreadCount,
   }
 }
 
 export function useUnreadInboxCount() {
   const { projectId } = useProject()
-  return useQuery<InboxItem[], Error, number>(unreadInboxCountQueryOptions(projectId))
+  return useQuery<InboxUnreadCount, Error, number>(unreadInboxCountQueryOptions(projectId))
 }
 
 export function useInbox() {
@@ -109,7 +118,7 @@ export const subscriptionQueryKey = (projectId?: string | null) =>
 export function inboxSubscriptionQueryOptions(projectId?: string | null) {
   return {
     queryKey: subscriptionQueryKey(projectId),
-    queryFn: () => getInboxSubscription(projectId ?? undefined),
+    queryFn: (context?: QueryFunctionContext) => getInboxSubscription(projectId ?? undefined, context?.signal),
     enabled: !!projectId,
   }
 }

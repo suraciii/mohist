@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
+import { issueDetailKeys, issueListKeys, IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
@@ -56,9 +56,9 @@ export function InlineApprovalControls({
   const approveMutation = useMutation({
     mutationFn: () => approveIssueFn(issueNumber, projectId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: issueDetailKeys.detail(projectId, issueNumber), exact: true })
       invalidateApprovalWait(queryClient)
     },
   })

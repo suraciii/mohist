@@ -28,6 +28,9 @@ useMswServer(
     inboxRequests++
     return HttpResponse.json({ success: true, data: [] })
   }),
+  http.get('*/api/projects/:projectId/inbox/unread-count', () =>
+    HttpResponse.json({ success: true, data: { unreadCount: 0 } }),
+  ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
@@ -332,16 +335,16 @@ describe('App routing split for settings scopes', () => {
     expect(queryByText('No projects yet')).not.toBeInTheDocument()
   })
 
-  it('does not serve project settings from /settings/<project-section> when no project exists', () => {
+  it('does not serve project settings from /settings/<project-section> when no project exists', async () => {
     projectsData = []
     window.history.replaceState({}, '', '/settings/repositories')
 
-    const { queryByText, queryByTestId } = renderApp()
+    const { queryByText, findByTestId, queryByTestId } = renderApp()
 
     expect(window.location.pathname).toBe('/settings/repositories')
     expect(queryByTestId('repositories-section')).not.toBeInTheDocument()
     expect(queryByText('No project selected')).not.toBeInTheDocument()
-    expect(queryByTestId('no-project-select-button')).toBeInTheDocument()
+    expect(await findByTestId('no-project-select-button')).toBeInTheDocument()
     expect(queryByTestId('no-project-create-button')).toBeInTheDocument()
   })
 

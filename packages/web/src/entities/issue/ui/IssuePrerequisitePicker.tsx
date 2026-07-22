@@ -105,7 +105,13 @@ export function IssuePrerequisitePicker({
   selectedIssueSummaries = [],
   issuesHook = useIssues,
 }: IssuePrerequisitePickerProps) {
-  const issuesQuery = issuesHook({ projectId, all: true })
+  const [open, setOpen] = useState(false)
+  const selectedSummaryNumbers = useMemo(
+    () => new Set(selectedIssueSummaries.map((summary) => summary.number)),
+    [selectedIssueSummaries],
+  )
+  const needsSelectedIssueData = selected.some((number) => !selectedSummaryNumbers.has(number))
+  const issuesQuery = issuesHook(open || needsSelectedIssueData ? { projectId, all: true } : undefined)
   const allIssues: Issue[] = issuesQuery.data ?? []
 
   const excludeSet = useMemo(() => new Set(excludeNumbers), [excludeNumbers])
@@ -122,7 +128,6 @@ export function IssuePrerequisitePicker({
     return map
   }, [allIssues, selectedIssueSummaries])
 
-  const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [pendingError, setPendingError] = useState<string | null>(null)

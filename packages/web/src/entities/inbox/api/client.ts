@@ -1,8 +1,12 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse, InboxSubscription, InboxSubscriptionUpdate } from '../model/types'
+import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse, InboxSubscription, InboxSubscriptionUpdate, InboxUnreadCount } from '../model/types'
 
-export function getInbox(projectId: string | null | undefined) {
-  return request<InboxItem[]>(projectApiPath(projectId, '/inbox'))
+export function getInbox(projectId: string | null | undefined, signal?: AbortSignal) {
+  return request<InboxItem[]>(projectApiPath(projectId, '/inbox'), { signal })
+}
+
+export function getUnreadInboxCount(projectId: string | null | undefined, signal?: AbortSignal) {
+  return request<InboxUnreadCount>(projectApiPath(projectId, '/inbox/unread-count'), { signal })
 }
 
 export function markInboxItemRead(itemId: string, projectId: string | null | undefined) {
@@ -26,9 +30,10 @@ export function archiveInboxItem(itemId: string, projectId: string | null | unde
   )
 }
 
-export function getInboxSubscription(projectId: string | null | undefined) {
+export function getInboxSubscription(projectId: string | null | undefined, signal?: AbortSignal) {
   return request<InboxSubscription>(
     projectApiPath(projectId, '/inbox/subscription'),
+    { signal },
   )
 }
 

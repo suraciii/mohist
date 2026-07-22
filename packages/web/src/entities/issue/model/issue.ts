@@ -147,6 +147,35 @@ export interface Issue {
   feedback?: ApprovalFeedback[] | null
 }
 
+export interface IssueListItem extends Pick<Issue, 'number' | 'title' | 'status' | 'health' | 'projectId' | 'labels' | 'createdAt' | 'updatedAt' | 'isDraft' | 'canStart' | 'blocker'> {
+  projectName?: string
+  priority?: string | null
+  risk?: string | null
+  workflowRunId?: string | null
+  workflowProfileId?: string | null
+  workflowStage?: WorkflowStage | null
+  workflowStatus?: string | null
+  workflowStageProgress?: WorkflowStageProgress | null
+  approvalState?: ApprovalState
+  blockedReason?: string
+  completedAt?: string
+  archivedAt?: string
+  prerequisiteNumbers?: number[]
+  prerequisites?: IssuePrerequisiteSummary[]
+  canBeParent?: boolean
+  repository?: Issue['repository']
+  repositoryName?: string | null
+  primaryEpic?: Issue['primaryEpic']
+  parentIssueRef?: IssueParentRef | null
+  childIssuesSummary?: ChildIssuesSummary | null
+  children?: IssueChildRef[]
+}
+
+export interface IssueParentCandidate {
+  number: number
+  title: string
+}
+
 // === Issue-entity API response shapes ===
 
 export interface IssueWorkflowProfileYamlResponse {

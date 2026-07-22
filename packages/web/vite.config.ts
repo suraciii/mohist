@@ -30,8 +30,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    minify: false,
-    sourcemap: true,
+    minify: true,
+    sourcemap: false,
   },
   test: {
     environment: 'node',

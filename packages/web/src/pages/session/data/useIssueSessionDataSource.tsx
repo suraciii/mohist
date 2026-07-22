@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import { useIssue } from '../../../entities/issue'
+import { issueWorkflowKeys, useIssue } from '../../../entities/issue'
 import { useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSessionDetail, SessionTurn, WorkflowRunSession } from '../../../entities/coder-session'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -174,18 +174,18 @@ export function useIssueSessionDataSource(
   // never issue a detail request with the stable ID as though it were a name.
   const hasRoute = !!lookupKey && !!projectId && issueNumber > 0 && (!isLegacyIdRoute || resolvedSessionName != null)
   const metadataQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
+    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-metadata', lookupKey),
     [issueNumber, projectId, lookupKey],
   )
   const transcriptQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey, searchParams.get('rt') ?? null] as const,
+    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', lookupKey, searchParams.get('rt') ?? null),
     [issueNumber, projectId, lookupKey, searchParams],
   )
 
   const handleRecoverySuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
-    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'coder-sessions'] })
+    queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions'), exact: true })
     if (issue?.workflowRunId) {
       queryClient.invalidateQueries({ queryKey: ['workflow-runs', issue.workflowRunId, 'sessions'] })
     }
@@ -251,7 +251,7 @@ export function useIssueSessionDataSource(
   const shouldFetchUnfilteredTranscript = isHistoricalRuntimeView && transcriptResponse != null && transcriptResponse.turns.length === 0
 
   const unfilteredTranscriptQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey, null] as const,
+    () => issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', lookupKey, null),
     [issueNumber, projectId, lookupKey],
   )
 
@@ -279,6 +279,7 @@ export function useIssueSessionDataSource(
     isStreaming,
   } = useTranscript({
     issueNumber,
+    projectId,
     sessionId: detail?.id ?? session?.id ?? decodedSessionId ?? '',
     runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
     runtime: detail?.runtime ?? null,

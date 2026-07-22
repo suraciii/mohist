@@ -70,10 +70,10 @@ public class IssueModelVariantApiSpecs
     }
 
     [Fact]
-    public async Task ListIssues_IncludesModelAndVariantForIssueWithMetadata()
+    public async Task ListIssues_ExcludesDetailOnlyModelFields()
     {
         var projectId = await CreateProjectAsync("variant-list");
-        await _fixture.Client.PostDataAsync<JsonElement>(
+        var created = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues",
             new
             {
@@ -85,8 +85,20 @@ public class IssueModelVariantApiSpecs
         var list = await _fixture.Client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/issues");
 
         var issue = Assert.Single(list, i => i.GetProperty("title").GetString() == "Variant listed");
-        Assert.Equal("openai/gpt-5.5", issue.GetProperty("model").GetString());
-        Assert.Equal("low", issue.GetProperty("modelVariant").GetString());
+        Assert.False(issue.TryGetProperty("body", out _));
+        Assert.False(issue.TryGetProperty("comments", out _));
+        Assert.False(issue.TryGetProperty("attachments", out _));
+        Assert.False(issue.TryGetProperty("feedback", out _));
+        Assert.False(issue.TryGetProperty("model", out _));
+        Assert.False(issue.TryGetProperty("modelVariant", out _));
+        Assert.False(issue.TryGetProperty("agentConfig", out _));
+        Assert.False(issue.TryGetProperty("stageModels", out _));
+        Assert.False(issue.TryGetProperty("stageModelVariants", out _));
+
+        var detail = await _fixture.Client.GetDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/issues/{created.GetProperty("number").GetInt32()}");
+        Assert.Equal("openai/gpt-5.5", detail.GetProperty("model").GetString());
+        Assert.Equal("low", detail.GetProperty("modelVariant").GetString());
     }
 
     [Fact]

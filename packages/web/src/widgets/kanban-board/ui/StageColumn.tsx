@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, type Issue } from '../../../entities/issue'
+import { issueListKeys, IssueStatus, type Issue } from '../../../entities/issue'
 import { archiveAllCompleted } from '../../../entities/issue'
 import { IssueCard } from './IssueCard'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -47,8 +47,8 @@ export function StageColumn({
   const archiveAllMutation = useMutation({
     mutationFn: () => archiveAllCompleted(projectId),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.archived(projectId) })
       const parts: string[] = [`${data.archived} archived`]
       if (data.skipped > 0) {
         parts.push(`${data.skipped} skipped`)

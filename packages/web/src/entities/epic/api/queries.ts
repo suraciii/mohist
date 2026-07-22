@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
+import { issueListKeys } from '../../issue/@x/query-keys'
 import { startIssue } from '../../issue/@x/actions'
 import { addEpicIssue, batchAddEpicIssues, batchRemoveEpicIssues, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type BatchMembershipResponse, type UpdateEpicInput } from './client'
 
@@ -55,7 +56,7 @@ export function useAddEpicIssue() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.epicNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issue added to Epic')
     },
     onError: (err: Error) => {
@@ -72,7 +73,7 @@ export function useRemoveEpicIssue() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.epicNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issue removed from Epic')
     },
     onError: (err: Error) => {
@@ -89,7 +90,7 @@ export function useBatchAddEpicIssues() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.epicNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issues added to Epic')
     },
     onError: (err: Error) => {
@@ -106,7 +107,7 @@ export function useBatchRemoveEpicIssues() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.epicNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issues removed from Epic')
     },
     onError: (err: Error) => {
@@ -120,7 +121,7 @@ export function startIssueMutationOptions(projectId: string | null | undefined, 
     mutationFn: (number: number) => startIssue(number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Issue started')
     },
     onError: (err: Error) => {
@@ -233,7 +234,7 @@ export function reopenEpicMutationOptions(projectId: string | null | undefined, 
     onSuccess: (_data: Epic, number: number) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, number] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Epic reopened')
     },
     onError: (err: Error) => {
@@ -256,7 +257,7 @@ export function useUpdateEpic() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.number] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: issueListKeys.project(projectId) })
       toast.success('Epic updated')
     },
     onError: (err: Error) => {

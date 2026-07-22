@@ -21,6 +21,12 @@ public static class MohistWebRegistration
         {
             FileProvider = files,
             ContentTypeProvider = new FileExtensionContentTypeProvider(),
+            OnPrepareResponse = context =>
+            {
+                context.Context.Response.Headers.CacheControl = context.Context.Request.Path.StartsWithSegments("/assets")
+                    ? "public,max-age=31536000,immutable"
+                    : "no-cache";
+            },
         });
 
         app.MapFallback("{*path:notstaticfile}", async context =>
@@ -33,6 +39,7 @@ public static class MohistWebRegistration
                 return;
             }
 
+            context.Response.Headers.CacheControl = "no-cache";
             await SendIndexAsync(context, files);
         });
 
@@ -49,6 +56,7 @@ public static class MohistWebRegistration
         }
 
         context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-cache";
         context.Response.ContentLength = index.Length;
         await using var content = index.CreateReadStream();
         await content.CopyToAsync(context.Response.Body, context.RequestAborted);

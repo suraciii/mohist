@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { EpicDetail, LinkedIssue } from '../../../entities/epic'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
+import { issueListKeys } from '../../../entities/issue/api/query-keys'
 import { EpicDetailPage, type EpicDetailPageComponents, type EpicDetailPageDependencies } from './EpicDetailPage'
 import {
   DependencyGraphErrorBoundary,
@@ -156,7 +157,7 @@ export function renderPage(options: EpicDetailRenderOptions = {}): RenderResult 
     queryClient.setQueryData(['epics', 'proj-1', options.epic.number], options.epic)
   }
   if (options.issues) {
-    const issuesQueryKey = ['issues', { projectId: 'proj-1' }]
+    const issuesQueryKey = issueListKeys.list({ projectId: 'proj-1' })
     queryClient.setQueryDefaults(issuesQueryKey, { staleTime: Infinity })
     queryClient.setQueryData(issuesQueryKey, options.issues)
   }
