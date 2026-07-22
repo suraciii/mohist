@@ -251,6 +251,10 @@ abort，最坏情况退化为无警告的直接终止。警告与终止都投影
 
 ## 事件与状态核对
 
+共同的 Turn 生命周期、transcript 事件名称与结束规则以
+[`agent-execution.md`](../agent-execution.md#turn-生命周期与-transcript-dsl) 为准；本节只定义
+OpenCode 信号如何成为这些规范事实。
+
 Runner 为共享 OpenCode Server 维护一个 `client.global.event()` 订阅。`OpenCodeRuntime`
 按 Session ID 与 directory 路由事件。已知 typed event 被规范化为 Mohist 稳定的
 transcript、tool、usage、model、status 与 compaction 事实；未知 OpenCode event 只进入

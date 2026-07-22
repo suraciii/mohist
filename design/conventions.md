@@ -13,6 +13,7 @@
 | WorkflowRun | `WorkflowRunId` | `wr_123` |
 | Runner | `RunnerId` | `runner_123` |
 | AgentSession | `SessionId` | `session_123` |
+| Turn | (`SessionId`, `TurnId`) | (`session_123`, `turn_123`) |
 | Event | `EventId` | `evt_123` |
 
 - Issue 与 Epic 的 number 是 Project 内永久身份的一部分，不是展示别名；不再为它们
@@ -60,6 +61,7 @@ Leading slash. Plural nouns. URL path segments. No trailing slash.
 | WorkflowBacklog | — | projectId | /projects/{projectId}/workflow-backlog |
 | StageLock | — | internal id | /projects/{projectId}/workflow-stage-locks/{resource} |
 | AgentSession | sessionId | sessionId | /projects/{projectId}/agent-sessions/{sessionId} |
+| Turn | sessionId + turnId | — | — |
 | Event | eventId | — | /events/{eventId} |
 
 ## AgentSession runtime identity
@@ -81,6 +83,8 @@ Concept ownership and origin rules are defined in
   `coderSessionId` as aliases.
 - `workflowRunId + sessionName` and `agentId` are origin/lookup references, not AgentSession
   identity. Workflow- and Agent-scoped routes resolve to the canonical `sessionId` resource.
+- `turnId` is stable and unique within its `sessionId`. Turn is a nested transcript entity, not an
+  independently routed aggregate or HTTP resource.
 - `runtime` names the execution backend. Do not add a second `kind` field.
 - Current runtime binding also retains `runnerId` and immutable `workDir` so Session commands
   survive Runner process restart. A Workflow adapter rejects a request whose authoritative

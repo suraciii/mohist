@@ -217,6 +217,10 @@ in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明�
 
 ## 事件与状态核对
 
+共同的 Turn 生命周期、transcript 事件名称与结束规则以
+[`agent-execution.md`](../agent-execution.md#turn-生命周期与-transcript-dsl) 为准；本节只定义
+Pi 信号如何成为这些规范事实。
+
 `PiRuntime` 对每个活跃 `AgentSession` 实例维护一个 `session.subscribe()` 订阅。
 已知事件被规范化为 Mohist 稳定的 transcript、tool、usage、model、status 与
 compaction 事实：
