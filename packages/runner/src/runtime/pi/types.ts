@@ -91,7 +91,7 @@ export interface PiTurnResult {
 }
 
 export interface PiTurnObserver {
-  readonly onEvent?: (event: PiRuntimeEvent) => void
+  readonly onEvent?: (event: PiRuntimeEvent) => void | Promise<void>
 }
 
 export interface PiProviderErrorPolicy {

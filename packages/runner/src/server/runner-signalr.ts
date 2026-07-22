@@ -235,6 +235,9 @@ export class RunnerSignalRClient {
       return { ok: false, error: "unavailable" }
     }
     const observer = this.buildSessionCommandObserver(request)
+    if (handle.kind === "pi" && request.command === "compact" && !observer) {
+      return { ok: false, error: "unavailable" }
+    }
     return await callSessionCommand(handle, request.command, {
       runtimeSessionId,
       workDir,
@@ -245,7 +248,7 @@ export class RunnerSignalRClient {
     const outbox = this.agentSessionRuntimeEventOutbox
     if (!outbox || !outbox.ready() || !request.projectId) return null
     return {
-      onEvent: (event) => {
+      onEvent: async (event) => {
         const record: RuntimeEventRecord = {
           id: `session-command-event:${request.operationId}:${event.id}`,
           producerFamily: "generic-followup",
@@ -258,9 +261,7 @@ export class RunnerSignalRClient {
           },
           acknowledgementPolicy: "successful-response",
         }
-        outbox.enqueueProducedFact(record).catch((error) => {
-          console.error("failed to persist session command runtime event:", error)
-        })
+        await outbox.enqueueProducedFact(record)
       },
     }
   }

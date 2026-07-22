@@ -347,12 +347,17 @@ export class PiRuntime {
       }
       const diagnostics: PiDiagnostic[] = []
       diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), "info")))
-      const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+      const pendingReports: Promise<void>[] = []
+      const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => {
+        const result = observer?.onEvent?.(event)
+        if (result) pendingReports.push(Promise.resolve(result))
+      })
       let unsubscribe: () => void = () => {}
       try {
         unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
         await session.value.compact()
         report(projector.reconcile(session.value.messages))
+        await Promise.all(pendingReports)
         const facts: PiCompactFacts = { runtimeSessionId: path, workDir: request.target.workDir }
         return { ok: true, value: facts, diagnostics }
       } catch (cause) {

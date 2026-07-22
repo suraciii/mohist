@@ -76,7 +76,7 @@ function newClient(opts: { openCodeRuntime: unknown; piRuntime: unknown; journal
       openCodeRuntime: opts.openCodeRuntime as never,
       piRuntime: opts.piRuntime as never,
       ...(opts.journal !== undefined ? { sessionCommandJournal: opts.journal as never } : {}),
-      ...(opts.outbox !== undefined ? { agentSessionRuntimeEventOutbox: opts.outbox as never } : {}),
+      agentSessionRuntimeEventOutbox: (opts.outbox ?? { ready: () => true, enqueueProducedFact: async () => {} }) as never,
     },
   )
 }
@@ -188,6 +188,17 @@ describe("RunnerSignalRClient routes SessionCommand by persisted binding runtime
       target: { kind: "generic", projectId: "project-1", sessionId: "session-1" },
       event: { type: "compaction_event", payload: { source: "session-command", command: "compact" } },
     })
+  })
+
+  it("PiBinding_Compact_DoesNotStartWithoutADurableEventTarget", async () => {
+    const { builder, pi } = setup()
+    newClient({ openCodeRuntime: makeFakeRuntime().runtime, piRuntime: pi.runtime, journal: makeMemoryJournal(), outbox: { ready: () => false, enqueueProducedFact: async () => {} } })
+    const handler = lastBuilder().handlers.get("SessionCommand")
+    if (!handler) throw new Error("SessionCommand handler not registered")
+
+    const result = await handler(makeCompactRequest("pi"))
+    expect(result).toEqual({ ok: false, error: "unavailable" })
+    expect(pi.compactCalls).toHaveLength(0)
   })
 
   it("PiBinding_Reset_DispatchesToPiRuntime_AndReturnsReplacementId", async () => {
