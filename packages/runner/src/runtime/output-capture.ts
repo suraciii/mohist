@@ -1,9 +1,9 @@
-import type { ActionResult, JsonObject, JsonValue, RenderedWorkItem } from "../core/types.js"
+import type { ActionResult, JsonObject, JsonValue, DispatchWorkItem } from "../core/types.js"
 import { isActionFailure } from "../actions/action-result.js"
 import { isObject } from "../core/json.js"
 
 export function captureOutputs(
-  outputs: RenderedWorkItem["outputs"],
+  outputs: DispatchWorkItem["outputs"],
   actionResult: ActionResult,
 ): JsonObject | undefined {
   if (isActionFailure(actionResult)) return undefined

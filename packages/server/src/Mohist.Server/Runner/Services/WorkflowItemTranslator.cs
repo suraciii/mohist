@@ -4,8 +4,6 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
@@ -21,12 +19,13 @@ namespace Mohist.Server.Runner.Services;
 /// runner process and converts the runner's raw <see cref="WorkResult"/> into
 /// domain reports the grain consumes.
 ///
-/// Moving the translation out of <c>WorkflowGrain</c> removes the rendering
-/// and parsing responsibilities from the control-plane grain (variables,
-/// prompts, with-template expansion, payload assembly on the way out;
-/// runner-format check parsing + artifact binding on the way in). The
-/// inputs are sourced from <c>WorkflowProfileManager</c> / persisted
-/// projections, not from grain-exclusive memory.
+/// Moving the translation out of <c>WorkflowGrain</c> removes the
+/// payload-assembly responsibilities from the control-plane grain
+/// (variables, prompts, snapshot construction on the way out; runner-format
+/// check parsing + artifact binding on the way in). Template expansion is
+/// owned exclusively by the Runner execution pipeline. The inputs are
+/// sourced from <c>WorkflowProfileManager</c> / persisted projections, not
+/// from grain-exclusive memory.
 /// </summary>
 public sealed class WorkflowItemTranslator : IScopedService
 {
@@ -47,9 +46,11 @@ public sealed class WorkflowItemTranslator : IScopedService
     /// <summary>
     /// Renders a domain <see cref="WorkItem"/> into the runner-process
     /// <see cref="WorkDispatch"/> envelope. Resolves layered variables,
-    /// loads prompts, expands <c>with</c> templates, and assembles the
-    /// payload the action will consume. The work id is supplied by the
-    /// grain (<see cref="WorkItem.Id"/> for tasks or
+    /// loads prompts, and assembles the snapshot payload that the
+    /// runner will render against. The persisted <c>with</c> and
+    /// <c>expect</c> declarations are serialized verbatim — the Runner
+    /// is the single execution-boundary renderer. The work id is supplied
+    /// by the grain (<see cref="WorkItem.Id"/> for tasks or
     /// <see cref="WorkItem.Items"/> for checks); this translator never
     /// invents a dispatch id of its own.
     /// </summary>
@@ -77,8 +78,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             $"Task work item for workflow '{workflowRunId}' is missing work id");
         var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
 
-        var (payload, effectiveVarsJson, resolved) =
-            await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
+        var payload = await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
 
         var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
         if (prompts.Count > 0)
@@ -90,9 +90,8 @@ public sealed class WorkflowItemTranslator : IScopedService
         }
 
         var variables = JSON.Serialize(payload);
-        var bundle = BuildVariableBundle(effectiveVarsJson);
-        var withStr = ExpandToJson(bundle, item.With);
-        var expectStr = ExpandToJson(bundle, item.Expect);
+        var withStr = SerializeRaw(item.With);
+        var expectStr = SerializeRaw(item.Expect);
         ValidateLegacyAgentTaskInput(item, workId, item.With, item.Expect);
 
         return new WorkDispatch(
@@ -137,8 +136,7 @@ EpicNumber: ReadEpicNumber(run),
             ["checks"] = JSON.SerializeToElement(checksPayload),
         };
 
-        var (payload, effectiveVarsJson, resolved) =
-            await BuildPayloadAsync(item.Stage, workId, "checks", "Stage checks", 1, workflowRunId, run);
+        var payload = await BuildPayloadAsync(item.Stage, workId, "checks", "Stage checks", 1, workflowRunId, run);
 
         var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
         if (prompts.Count > 0)
@@ -150,8 +148,7 @@ EpicNumber: ReadEpicNumber(run),
         }
 
         var variables = JSON.Serialize(payload);
-        var bundle = BuildVariableBundle(effectiveVarsJson);
-        var withStr = ExpandToJson(bundle, with);
+        var withStr = SerializeRaw(with);
 
         return new WorkDispatch(
             WorkflowRunId: workflowRunId,
@@ -168,7 +165,7 @@ EpicNumber: ReadEpicNumber(run),
             EpicNumber: ReadEpicNumber(run));
     }
 
-    private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
+    private async Task<Dictionary<string, JsonElement?>>
         BuildPayloadAsync(string stage, string workId, string workType, string title, int attempt,
             string workflowRunId, WorkflowRun run)
     {
@@ -226,19 +223,11 @@ EpicNumber: ReadEpicNumber(run),
             }
         }
 
-        return (payload, effectiveVarsJson, resolved);
+        return payload;
     }
 
-    private string? ExpandToJson(VariableBundle? effectiveBundle, Dictionary<string, JsonElement?>? values)
-    {
-        var expanded = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, values);
-        return expanded is not null && expanded.Count > 0 ? JSON.Serialize(expanded) : null;
-    }
-
-    private static VariableBundle BuildVariableBundle(JsonElement effectiveVarsJson) =>
-        effectiveVarsJson.ValueKind == JsonValueKind.Object
-            ? new VariableBundle(effectiveVarsJson)
-            : VariableBundle.Empty;
+    private static string? SerializeRaw(Dictionary<string, JsonElement?>? values) =>
+        values is not null && values.Count > 0 ? JSON.Serialize(values) : null;
 
     private static void ValidateLegacyAgentTaskInput(
         WorkItem item,

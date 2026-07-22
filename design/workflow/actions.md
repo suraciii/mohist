@@ -39,8 +39,7 @@ export const rebaseAction = defineAction({
 
 - `name` 是 `uses` 匹配键,小写,`<namespace>/<action>` 形式,无版本段。
 - `inputs` 每项声明 `type`(`string | number | boolean | object | array`)、
-  `required` 或 `default`(二者互斥)、`description`。默认 `render: immediate`；只有需要把
-  内部模板传播为后续 task declaration 的 input 才能声明 `render: deferred`。
+  `required` 或 `default`(二者互斥)、`description`。
 - `outputs` 声明成功 output 的字段,是文档与投影契约(`setVars`、
   `tasks.<id>.outputs.*` 的可用路径来源)。
 - `errors` 声明该 Action 全部业务 error code(kebab-case)及含义,供 recovery
@@ -93,9 +92,9 @@ Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` �
 
 ### 输入
 
-输入单通道:Action 的全部输入来自 `with`。Runner 按
-[`task-dispatch.md`](task-dispatch.md) 使用本次 attempt context 生成局部 rendered input，
-再按 manifest 校验并调用 `run`。Action 看不到原始 task、Variables 或 dispatch context。
+输入单通道:Action 的全部输入来自渲染并校验后的 `with`,Runner 在调用 Action 前完成
+渲染和 manifest 校验,Action 不接触 raw `with`、Variables resource 或 dispatch context。
+渲染时机与 attempt 快照语义以 [`task-dispatch.md`](task-dispatch.md) 为权威。
 
 ```yaml
 - id: integrate:rebase
@@ -105,17 +104,21 @@ Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` �
     remote: origin
 ```
 
-校验顺序与失败行为由 Runner Action executor 执行，Action 不做重复校验：
+Runner 执行入口的处理顺序与失败行为(每一步失败都使 Action 不被调用):
 
-1. 普通 input 递归展开模板；`render: deferred` input 保留内部表达式。
-2. 未知输入键 → `invalid-input` 失败,不静默忽略。
-3. 缺失 `required` 输入 → `invalid-input` 失败。
-4. 类型不匹配 → `invalid-input` 失败。
-5. 应用 `default`,交给 `run` 的是完整、强类型的 inputs。
+1. 在 attempt 快照上克隆原始 `with`,识别 manifest 声明 `render: deferred` 的字段并保留
+   原值;其余字段递归展开 `${{ ... }}`(未解析引用按 dispatch 契约失败,见
+   [`task-dispatch.md`](task-dispatch.md))。
+2. `expect` 同样在 attempt 快照上渲染;渲染结果只作为 Workflow 拥有的完成契约,不进入
+   Action 输入通道。
+3. 按 manifest 校验渲染后的 inputs:未知输入键 → `invalid-input` 失败,不静默忽略。
+4. 缺失 `required` 输入 → `invalid-input` 失败。
+5. 类型不匹配 → `invalid-input` 失败。
+6. 应用 `default`,交给 `run` 的是完整、强类型的 inputs。
 
-`render: deferred` 只改变该 input 内部表达式的展开时机，不创建第二条输入通道。它仍接受
-manifest 的 required、type 与未知键校验；Action 只能把这份声明性数据按自己的契约传播，
-不能借此读取 Variables 或要求完整 attempt context。
+manifest 声明 `render: deferred` 的字段不参与第 1 步递归展开,原样进入第 3–6 步校验,
+保留内部 `${{ ... }}` 供确实要生成后续 task 的 Action 传播。其余对象/数组字段按普通规则
+递归展开。
 
 输入之间的一致性约束(例如 merge 前置条件)属于 Action 语义,写在 `run` 开头,
 失败返回 manifest 声明的 error code 或 `invalid-input`。
@@ -157,10 +160,11 @@ engine 对结果的通用处理不解释任何 Action 的业务语义。唯一�
 
 - **Profile 保存/更新时**:server 用最近上报的 catalog 做全量校验——未知 `uses`、
   未知输入键、缺 `required`、常量输入的类型错,都是可操作错误。含模板表达式的输入
-  只校验键名,类型留到 dispatch。catalog 尚未上报时跳过此层并记录,不阻塞保存。
-- **Dispatch 时(权威,fail-closed)**:Runner 展开模板后按本地 manifest 强制校验,
-  失败即 task 失败(`invalid-input`),不会以未校验输入调用 `run`。
-- **退役 Action**:dispatch 命中 tombstone → 以 tombstone 指引文案失败;profile
+  只校验键名,类型留到 Runner 执行入口。catalog 尚未上报时跳过此层并记录,不阻塞保存。
+- **Runner 执行入口(权威,fail-closed)**:Runner 在 attempt 快照上渲染原始 `with` 后,
+  按本地 manifest 强制校验,失败即 task 失败(`invalid-input`),不会以未校验输入调用
+  `run`。Server 不再做 dispatch 前展开。
+- **退役 Action**:Runner 渲染时命中 tombstone → 以 tombstone 指引文案失败;profile
   保存命中 → 拒绝保存。
 
 Profile 保存先由 Workflow Definition 校验器产生语义模型，再使用 catalog 判断 `uses` 与
@@ -200,9 +204,9 @@ artifacts:
 `expect` 是由 Workflow 拥有的 task 完成契约,与 Action 输入分离。作者可见语义
 (失败规则、与 `artifacts` 的搭配)见
 [docs 的 expect 节](../../docs/workflow-definition.md#expect--完成要求)。Runner 的
-task executor 同时接收展开后的 Action 输入和 `expect`,只在 Action 成功后应用完成
-判断;Action 失败、取消或超时时直接保留原始失败,不读取文件或 marker。Action 与
-能力实现层都不解释它。
+task executor 在 attempt 快照上渲染 `expect`,只在 Action 成功后应用完成判断;Action
+失败、取消或超时时直接保留原始失败,不读取文件或 marker。Action 与能力实现层都不
+解释它,渲染后的 `expect` 也不进入 Action 输入通道。
 
 marker 的 `path` 可以是特殊值 `_output`,表示对回合最终 assistant 文本匹配,而不是
 文件内容。task executor 从 `agent-turn` 能力记录的 turn fact 中取得该文本;它不进入
@@ -246,7 +250,7 @@ Runtime 已由 `uses` 选择,输入不需要 `kind` 或 `type` discriminator。
 
 ```ts
 type OpenCodeActionInput = {
-  prompt: string                    // 已展开的非空字符串
+  prompt: string                    // Runner 渲染后的非空字符串
   session?: string                  // 逻辑 Session 名称
   options?: {
     model?: string                  // provider/model;model 自身可包含 '/'
@@ -255,10 +259,10 @@ type OpenCodeActionInput = {
 }
 ```
 
-`options` 通常由 `${{ vars.agent }}` 整值展开而来,模板展开语义与示例见
-[`profile.md`](profile.md)。`options` 中除 `model` 与 `variant` 之外的键被忽略并
-记入诊断,不使回合失败。Workflow 把 `expect` 作为 task 完成契约单独提供;旧结构
-`with.expect`、`with.agent` 在 profile 加载阶段就被可操作错误拒绝。
+`options` 通常由 `${{ vars.agent }}` 整值展开而来,模板求值时机以
+[`task-dispatch.md`](task-dispatch.md) 为权威。`options` 中除 `model` 与 `variant`
+之外的键被忽略并记入诊断,不使回合失败。Workflow 把 `expect` 作为 task 完成契约单独
+提供;旧结构 `with.expect`、`with.agent` 在 profile 加载阶段就被可操作错误拒绝。
 
 输出契约:
 
@@ -317,6 +321,3 @@ checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自�
    `ActionContext` 全量暴露 server 连接与 runtime 句柄;目标收敛为默认 host + 声明式
    能力注入。
 5. **文档缺口**:已闭合——`docs/actions/` 中的契约页已按 manifest 编齐并保持一致（issue #448）。
-6. **task input 展开边界**:当前 Server 先展开 `with` / `expect`,Runner recovery 又从
-   rendered input 构造 continuation。issue #465 改为持久化原始 declaration、Runner 执行前
-   统一展开，并补齐 `render: deferred`。

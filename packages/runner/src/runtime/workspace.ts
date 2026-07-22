@@ -2,7 +2,7 @@ import { constants } from "node:fs"
 import { lstat, mkdir, open, readdir, rename } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { JsonObject, RenderedWorkItem } from "../core/types.js"
+import type { JsonObject, DispatchWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
@@ -94,7 +94,7 @@ export class WorkspaceManager {
   // run branch. Idempotent — a workspace already on this run's branch is
   // left alone (cheap re-entry); anything else is (re)created from the
   // latest base.
-  async prepare(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
+  async prepare(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const gitUrl = stringAt(variables, ["repository", "gitUrl"])
     const baseBranch = stringAt(variables, ["repository", "baseBranch"])
@@ -135,7 +135,7 @@ export class WorkspaceManager {
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
   }
 
-  async verify(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
+  async verify(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ["issue", "number"])
     const runId = work.workflowRunId
@@ -335,7 +335,7 @@ export interface IssueWorkspaceMarker {
   runBranch: string
 }
 
-function workspaceIdentity(work: RenderedWorkItem, variables: JsonObject, workflowRunId: string): IssueWorkspaceMarker {
+function workspaceIdentity(work: DispatchWorkItem, variables: JsonObject, workflowRunId: string): IssueWorkspaceMarker {
   const variableRunId = stringAt(variables, ["mohist", "runId"])
   if (variableRunId && variableRunId !== workflowRunId) throw new WorkspaceIdentityMismatchError("Dispatch workflowRunId does not match the authoritative run identity")
   return {

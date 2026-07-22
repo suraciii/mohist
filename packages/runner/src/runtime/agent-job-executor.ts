@@ -1,7 +1,7 @@
 import { errorMessage } from "../core/errors.js"
 import type {
   JsonObject,
-  RenderedWorkItem,
+  DispatchWorkItem,
   WorkItemResult,
 } from "../core/types.js"
 import { isObject } from "../core/json.js"
@@ -36,7 +36,7 @@ export class AgentJobExecutor {
     private readonly runtime: OpenCodeRuntime | null,
   ) {}
 
-  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     if (work.ownerKind !== "agent-job") {
       return failureResult("invalid-dispatch", `AgentJobExecutor received non-agent-job work (ownerKind=${work.ownerKind ?? "null"})`)
     }
@@ -163,7 +163,7 @@ export class AgentJobExecutor {
 type BindingResolution = { agentSessionId: string | null; runtimeSessionId: string | null }
 
 async function resolveBinding(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   connection: ServerConnection,
   signal: AbortSignal,
 ): Promise<BindingResolution> {
@@ -178,7 +178,7 @@ async function resolveBinding(
   }
 }
 
-function resolveWorkDir(work: RenderedWorkItem): string | null {
+function resolveWorkDir(work: DispatchWorkItem): string | null {
   const ws = work.variables?.["workspace"]
   if (!isObject(ws)) return null
   const path = ws["path"]

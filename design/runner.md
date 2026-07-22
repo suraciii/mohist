@@ -11,7 +11,7 @@ Level-triggered reconciliation：调度器不保存记忆，每个决策都是�
 runner 是否存活           → RunnerGrain.lastSeen
 ```
 
-没有第三份副本。dispatch 永远可以从持久化的 run 重新渲染。
+没有第三份副本。dispatch 永远可以从持久化的 run 重建。
 
 不变量：
 
@@ -125,22 +125,22 @@ runner 进程                     DispatchService                      store/gra
     |                               | ⓪ BeginPoll：捕获 slots + gate     |
     |                               | ① TouchPresence（poll=heartbeat）  |
     |                               | ② desired ← Running WHERE assigned=me
-    |                               | ③ redelivery = desired − reported  |
-    |                               |    每项从持久化 run 重新渲染        |
-    |                               | ④ spare = slots − |desired|        |
-    |                               |    while spare > 0:                |
-    |                               |      assigned 给我的 Ready runs    |
-    |                               |      ORDER BY ReadySince ASC       |
-    |                               |      ClaimNextAsync ---------------->| Pending→Running
-    |                               |        ok → 渲染, spare--          |   + stage lock
-    |                               |        null → 下一个候选           |
-    |                               |    仍有 spare：可 claim 的 Pending |
-    |                               |      → AssignWorker → ClaimNext    |
-    | { dispatches[] }              |                                    |
-    |<------------------------------|                                    |
-    |                               | EndPoll：释放 gate                 |
-    | inFlight.add(dispatches)      |                                    |
-    | 并发执行                       |                                    |
+     |                               | ③ redelivery = desired − reported  |
+     |                               |    每项从持久化 run 重建 dispatch   |
+     |                               | ④ spare = slots − |desired|        |
+     |                               |    while spare > 0:                |
+     |                               |      assigned 给我的 Ready runs    |
+     |                               |      ORDER BY ReadySince ASC       |
+     |                               |      ClaimNextAsync ---------------->| Pending→Running
+     |                               |        ok → 构造 dispatch, spare--  |   + stage lock
+     |                               |        null → 下一个候选           |
+     |                               |    仍有 spare：可 claim 的 Pending |
+     |                               |      → AssignWorker → ClaimNext    |
+     | { dispatches[] }              |                                    |
+     |<------------------------------|                                    |
+     |                               | EndPoll：释放 gate                 |
+     | inFlight.add(dispatches)      |                                    |
+     | 并发执行                       |                                    |
 ```
 
 顺序：redelivery 优先（先还欠账）→ assigned 的 Ready runs → claim 新工作。
@@ -164,10 +164,13 @@ PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
 claim 失败（stage lock 竞争、状态已变）→ null → 本次 poll 的下一个候选。
 claim 成功但 dispatch 丢失 → 工作处于 Running 且未上报 → 下一次 poll 重投。
 
-渲染失败分两类。外部依赖或可变配置导致的普通失败保留 Running，由下一次 poll 重试；
-持久 WorkItem 自身违反 Action input 契约时，translator 返回明确的不可重试拒绝，
-DispatchService 用 `workerId + workId` 命令 WorkflowRun 将该工作记为 Failed。该命令必须
-核对当前 active work，不能用“失败当前任务”误伤已经推进后的新工作。
+dispatch 构造失败分两类。外部依赖或可变配置导致的普通失败保留 Running，由下一次
+poll 重试；持久 WorkItem 的 `uses` 命中退役 Action 时，translator 返回明确的不可重试
+拒绝，DispatchService 用 `workerId + workId` 命令 WorkflowRun 将该工作记为 Failed。该命令
+必须核对当前 active work，不能用“失败当前任务”误伤已经推进后的新工作。Action 输入契约
+（未知键、缺 required、类型错）由 Runner 在渲染后 manifest 校验阶段判定，按
+[`actions.md`](workflow/actions.md) 与 [`task-dispatch.md`](workflow/task-dispatch.md)
+执行，不归 dispatcher 处理。
 
 ### 公平性
 
@@ -229,8 +232,9 @@ WorkflowRun 状态。
 | poll 传输失败 | 同一 runner 进程重试；reported set 存续 |
 | dispatch 响应丢失 | 下一次 poll：desired − reported → 重投 |
 | 进程重启 | 空 report → 全量重投 |
-| claim 后渲染发生普通失败 | 保持 Running；每次 poll 重试 |
-| 持久 WorkItem 违反 Action input 契约 | 按 `workerId + workId` 拒绝该工作；owner 记为 FAILED |
+| claim 后构造 dispatch 发生普通失败 | 保持 Running；每次 poll 重试 |
+| 持久 WorkItem 命中退役 Action | 按 `workerId + workId` 拒绝该工作；owner 记为 FAILED |
+| Runner 渲染或 manifest 校验失败 | attempt 失败 `invalid-input`，不重投 |
 | report 传输失败 | awaitingAck 重试；仍在上报中，绝不重投 |
 | 重复/迟到 report | owner 幂等 → Stale |
 | 工作卡死 | 进程 timeout → FAILED |

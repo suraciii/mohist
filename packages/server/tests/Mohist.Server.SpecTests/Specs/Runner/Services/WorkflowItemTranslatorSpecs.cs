@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -134,32 +133,6 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // =========================================================================
     // Out-direction: WorkItem → WorkDispatch
     // =========================================================================
-
-    [Fact]
-    public async Task TranslateToDispatch_TaskItem_ProducesDispatchWithResolvedVariablesAndPrompts()
-    {
-        var runId = $"wr-{Guid.NewGuid():N}";
-        var projectId = "proj-translate-1";
-        var run = await SeedRunningWorkflowAsync(runId, projectId);
-        var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
-            With(@"{ ""agent"": { ""type"": ""opencode"" } }"),
-            artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]),
-            setVars: new Dictionary<string, string> { ["out"] = "answer" });
-
-        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
-
-        Assert.Equal(runId, dispatch.WorkflowRunId);
-        Assert.Equal("task-1.1", dispatch.WorkId);
-        Assert.Equal("task", dispatch.WorkType);
-        Assert.Equal("build", dispatch.Stage);
-        Assert.Equal("spec/task", dispatch.Uses);
-        Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
-        Assert.NotNull(dispatch.With);
-        Assert.NotNull(dispatch.Variables);
-        Assert.NotNull(dispatch.Artifacts);
-        Assert.NotNull(dispatch.SetVars);
-        Assert.Equal(7, dispatch.EpicNumber);
-    }
 
     [Fact]
     public async Task TranslateToDispatch_PreservesExplicitNullAndNumericRecoveryState()

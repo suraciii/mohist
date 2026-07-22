@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { RenderedWorkItem } from "../src/core/types.js"
+import type { DispatchWorkItem } from "../src/core/types.js"
 import { branchInvariantViolationFailure } from "../src/runtime/branch-stability.js"
 
 describe("branch stability failure", () => {
   it("reports the invariant through error without placing evidence in output", () => {
-    const work: RenderedWorkItem = {
+    const work: DispatchWorkItem = {
       workflowRunId: "wf", workId: "task", workType: "task", stage: "build", title: "Build", uses: "core/script", with: {},
     }
     const result = branchInvariantViolationFailure(work, {

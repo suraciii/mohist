@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -67,7 +67,7 @@ describe("WorkExecutor result variable effects", () => {
   })
 })
 
-function buildWork(): RenderedWorkItem {
+function buildWork(): DispatchWorkItem {
   return {
     workflowRunId: "wf-write-vars",
     workId: "work-write-vars",

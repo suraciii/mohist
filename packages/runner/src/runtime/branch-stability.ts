@@ -1,4 +1,4 @@
-import type { JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
 import { git } from "./git-probe.js"
 import type { TaskLogger } from "./task-log.js"
 
@@ -65,7 +65,7 @@ export async function readCurrentBranch(workDir: string, signal: AbortSignal, lo
 }
 
 export function branchInvariantViolationFailure(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   evidence: BranchInvariantViolationEvidence,
 ): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
@@ -92,7 +92,7 @@ export function branchInvariantViolationFailure(
  * integration's contract; we only assert the boundary.
  */
 export async function checkBranchStability(
-  work: RenderedWorkItem,
+  work: DispatchWorkItem,
   workDir: string,
   expectedBranch: string | null,
   boundary: "start" | "end",

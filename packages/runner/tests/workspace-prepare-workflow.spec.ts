@@ -6,7 +6,7 @@ import { workspacePrepareAction, setWorkspacePrepareExistsCheckerForTest, setWor
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -92,7 +92,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function work(workId: string, uses: string, overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
+function work(workId: string, uses: string, overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: WORKFLOW_RUN_ID,
     workId,
@@ -108,7 +108,7 @@ function work(workId: string, uses: string, overrides: Partial<RenderedWorkItem>
   }
 }
 
-function actionContext(item: RenderedWorkItem): ActionContext {
+function actionContext(item: DispatchWorkItem): ActionContext {
   return {
     ...item,
     variables: item.variables ?? {},

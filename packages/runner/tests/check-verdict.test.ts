@@ -3,7 +3,7 @@ import type { WorkExecutor } from "../src/runtime/executor.js"
 import type { ActionRegistry, ActionDefinition } from "../src/actions/registry.js"
 import { defineAction } from "../src/actions/define-action.js"
 import type { ServerConnection } from "../src/server/connection.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionHost } from "../src/actions/host.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
@@ -52,7 +52,7 @@ describe("Check verdict validation", () => {
     capturedHandler = async () => result
   }
 
-  const makeCheckWork = (checks: JsonObject[]): RenderedWorkItem => ({
+  const makeCheckWork = (checks: JsonObject[], variables: JsonObject = {}): DispatchWorkItem => ({
     workflowRunId: "wf-1",
     workId: "work-checks-1",
     workType: "checks",
@@ -60,7 +60,7 @@ describe("Check verdict validation", () => {
     title: "Run checks",
     uses: "mohist/opencode",
     with: { checks },
-    variables: {},
+    variables,
     projectId: "project-1",
     issueNumber: 1,
   })
@@ -121,5 +121,33 @@ describe("Check verdict validation", () => {
 
     expect(result.status).toBe("pass")
     expect(workDir).toBe("/tmp/test-work/subdir")
+  })
+
+  it("renders a check declaration from its dispatch snapshot before validation", async () => {
+    let capturedInputs: JsonObject | null = null
+    capturedHandler = async (inputs) => {
+      capturedInputs = inputs as JsonObject
+      return { output: null }
+    }
+    const work = makeCheckWork([{
+      name: "rendered-check",
+      uses: "core/marker",
+      with: {
+        path: "${{ vars.reviewPath }}",
+        expect: "${{ vars.marker }}",
+      },
+    }], {
+      vars: { reviewPath: "review.md", marker: "<promise>PASS</promise>" },
+    })
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("pass")
+    expect(capturedInputs).toEqual({ path: "review.md", expect: "<promise>PASS</promise>" })
+    expect((work.with!.checks as JsonObject[])[0]).toEqual({
+      name: "rendered-check",
+      uses: "core/marker",
+      with: { path: "${{ vars.reviewPath }}", expect: "${{ vars.marker }}" },
+    })
   })
 })

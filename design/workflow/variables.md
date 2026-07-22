@@ -157,17 +157,20 @@ Variables resource 本身仍支持其他调用方显式修改 `stages`。
 
 ### Changes
 
-- 建立每个 attempt 的 context snapshot 时，重新解析当前 Stage 的 Effective Stage
-  Variables。Variables resolution 只产生 context，不展开 task declaration；展开边界见
+- 每次派发 task 时由 Server 按当前 Stage 解析 Effective Stage Variables，并把结果作为
+  该 attempt 不可变快照的一部分随 dispatch 一起发送。attempt 快照的语义与求值时机见
   [`task-dispatch.md`](task-dispatch.md)。
-- attempt 被接受后，其 context snapshot 和 rendered input 固定，不受后续变量调整影响。
-- 尚未派发的 task 使用最新变量；人工 retry 与 recovery continuation 都是新 attempt，也使用
-  各自开始时的最新变量。
+- attempt 一经 dispatch，其快照在该 attempt 生命周期内保持不变；后续对 Variables 的
+  修改只影响尚未 dispatch 的 task 与后续 attempt（retry、recovery continuation、
+  rerun-from-stage），已派发 attempt 不再读取最新变量。
+- 尚未派发的 task 使用最新变量；retry 是新派发，dispatch 携带的也是 retry 时刻的
+  Effective Stage Variables。
 - task `setVars` 在 Action 成功返回后、task 报告完成前执行。任一 output 投影失败时，
   Run Variables 不变，task 失败。
 
 Effective Variables 只通过 `${{ vars.* }}` 显式进入 task `with`、task-level `expect` 或
-其他支持模板的声明。Action 只能看到展开后的 input，不能再次读取 Variables resource。
+其他支持模板的声明；模板求值发生在 Runner 调用 Action 前的执行入口，不发生在 dispatch
+阶段。Action 只能看到 Runner 渲染并校验后的输入，不能再次读取 Variables resource。
 
 `workflow.*`、`stage.*`、`issue.*`、`repository.*` 等 runtime context，
 `tasks.<id>.outputs.*` 和 `prompts.*` 都是独立命名空间，不参与 Variables merge。
@@ -239,8 +242,8 @@ Variables 的 `medium`，随后 Issue 的同名值再将其覆盖为 `xhigh`。
 
 ## Status
 
-仍需确定 TaskRun 保存 resolved input 是否已经足够审计，还是 Variables resource 还需要
-revision。
+仍需确定是否需要把 attempt 快照单独持久化以支持审计，还是 attempt 不可变快照只随
+dispatch 流转就足够。
 
 与当前实现的差距：
 
@@ -251,10 +254,8 @@ revision。
 - 当前 merge 可以用持久化 `null` 屏蔽前一个 scope 的值；目标模型暂不提供这一额外状态，
   `null` 只用于清除当前 scope 的声明并恢复继承。
 - 当前没有在所有写入边界统一拒绝非 object 根；目标 validator 必须在写入前拒绝。
-- 当前普通 dispatch 已实时解析 Variables，但 Server 会先把 task declaration 展开，
-  recovery self retry 因而可能把旧值固化进后续 attempt。issue #465 分离 declaration、
-  attempt context 与 rendered input；该 issue 不给 Variables resource 增加 revision，审计是否
-  需要额外 revision 仍是上面的开放问题。
+- 当前 Server 在 dispatch 前展开 `with` / `expect`，目标改为 dispatch 仅携带原始声明
+  与 attempt 不可变快照，模板求值统一在 Runner 调用 Action 前的执行入口执行。
 
 本 WIP spec 固定目标语义，不把当前 `VariableBundle`、API DTO 或数据库 JSON 当作领域
 对象。实现可以使用 resolver 或 provider 隐藏读取与合并；这些是内部实现细节，不进入

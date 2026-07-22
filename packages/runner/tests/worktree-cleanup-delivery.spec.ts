@@ -5,7 +5,7 @@ import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
-import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -103,7 +103,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
+function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: "wf-worktree-cleanup",
     workId: "build:agent.1",

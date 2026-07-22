@@ -122,9 +122,9 @@ describe("ServerConnection.poll recovery state", () => {
     expect(Object.prototype.hasOwnProperty.call(works[2], "parentIssueContext")).toBe(false)
   })
 
-  it("parses expect from the dispatch response into RenderedWorkItem.expect", async () => {
-    // T-003 acceptance: "RenderedWorkItem and AddTaskInput carry
-    // expect; connection.ts toWorkItem parses expect from the dispatch
+  it("parses expect from the dispatch response into DispatchWorkItem.expect", async () => {
+    // T-003 acceptance: "DispatchWorkItem and AddTaskInput carry
+    // expect; connection.ts parseDispatchWorkItem parses expect from the dispatch
     // response".
     fetchMock.mockResolvedValueOnce(mockResponse({
       status: 200,
@@ -168,6 +168,37 @@ describe("ServerConnection.poll recovery state", () => {
     // was empty".
     expect(works[1]?.expect).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(works[1] ?? {}, "expect")).toBe(true)
+  })
+
+  it("parseDispatchWorkItem keeps raw with/expect declarations intact", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify({
+        dispatches: [
+          {
+            workflowRunId: "wf-raw-decl",
+            workId: "opencode-raw",
+            workType: "task",
+            uses: "mohist/opencode",
+            with: JSON.stringify({ prompt: "child prompt: ${{ vars.agent }}", mode: "${{ vars.mode }}" }),
+            expect: JSON.stringify({ markers: [{ path: "_output", contains: "${{ vars.marker }}" }] }),
+            variables: JSON.stringify({
+              vars: { agent: { model: "model-a" }, mode: "fast", marker: "PASS" },
+            }),
+          },
+        ],
+      }),
+    }))
+
+    const connection = new ServerConnection(options())
+    const works = await connection.poll(new AbortController().signal)
+    const work = works[0]!
+
+    expect(work.with).toEqual({ prompt: "child prompt: ${{ vars.agent }}", mode: "${{ vars.mode }}" })
+    expect(work.expect).toEqual({ markers: [{ path: "_output", contains: "${{ vars.marker }}" }] })
+    expect(work.variables).toEqual({ vars: { agent: { model: "model-a" }, mode: "fast", marker: "PASS" } })
+    expect(JSON.stringify(work.with)).toContain("${{ vars.agent }}")
+    expect(JSON.stringify(work.expect)).toContain("${{ vars.marker }}")
   })
 })
 

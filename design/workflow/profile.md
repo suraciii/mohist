@@ -92,9 +92,13 @@ selectedProfileId =
 WorkflowRun 不保存完整的 Workflow Definition snapshot。创建 Run 时只物化推进生命周期
 所需的 StageRun 和审批事实；每个 Stage 初始化时，按 `workflowProfileId` 重新读取该
 Profile 当前 Definition 中的 Stage 结构。已经初始化的 Stage 不被 Profile 编辑追溯改写。
-运行时 task 的产生与插入见 [`definition.md`](definition.md)。每个新 attempt 建立 context
-时重新解析 Variables 和 Prompt；已经接受的 attempt 保持自己的 context snapshot。
-declaration 与 rendered input 的边界见 [`task-dispatch.md`](task-dispatch.md)。
+运行时 task 的产生与插入见 [`definition.md`](definition.md)。
+
+Variables 与 Prompt 的求值时机以 [`task-dispatch.md`](task-dispatch.md) 为权威：Server
+在 dispatch 时按当前 Stage 解析 Effective Stage Variables 并按 key 加载 Prompt body，
+随原始 `with` / `expect` 一起作为 attempt 不可变快照发送到 Runner；Runner 在调用 Action
+前的执行入口按 attempt 快照渲染原始 `with` / `expect`。已经派发的 attempt 不再读取
+最新变量或 Prompt，其快照在该 attempt 生命周期内保持不变。
 
 ## Ownership
 

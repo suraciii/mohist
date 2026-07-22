@@ -1,5 +1,5 @@
 import { hostname } from "node:os"
-import type { CleanupPolicy, JsonObject, RenderedWorkItem, RunnerConfigResponse, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, DispatchWorkItem, JsonObject, RunnerConfigResponse, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 import type { TaskLogBatch } from "../runtime/task-log.js"
@@ -34,7 +34,7 @@ export class ServerConnection {
   async poll(
     signal: AbortSignal,
     report: { inFlight: string[]; awaitingAck: string[] } = { inFlight: [], awaitingAck: [] },
-  ): Promise<RenderedWorkItem[]> {
+  ): Promise<DispatchWorkItem[]> {
     const response = await fetch(this.url("poll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -49,7 +49,7 @@ export class ServerConnection {
     const list = Array.isArray(payload) ? payload
       : "dispatches" in payload && Array.isArray(payload.dispatches) ? payload.dispatches
       : [payload as WorkDispatchResponse]
-    return list.map(toWorkItem)
+    return list.map(parseDispatchWorkItem)
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
@@ -78,7 +78,7 @@ export class ServerConnection {
     return result
   }
 
-  async report(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
+  async report(work: DispatchWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {
       workId: work.workId,
@@ -367,8 +367,8 @@ export interface AgentSessionRuntimeEventAcceptance {
 
 export type AgentSession = WorkflowAgentSession
 
-function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
-  const work: RenderedWorkItem = {
+function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
+  const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
     workType: dispatch.workType,
