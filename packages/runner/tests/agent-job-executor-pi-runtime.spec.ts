@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentJobExecutor } from "../src/runtime/agent-job-executor.js"
 import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
 import type { ServerConnection } from "../src/server/connection.js"
-import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import type { DispatchWorkItem, JsonObject } from "../src/core/types.js"
 import type {
   OpenCodeRuntime,
   RuntimeResult,
@@ -236,7 +236,7 @@ function makeFakeConnection(): FakeConnectionHandles {
   }
 }
 
-function buildAgentJobWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
+function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
   return {
     workflowRunId: "",
     workId: "aj-1",
