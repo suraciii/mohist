@@ -254,3 +254,17 @@ T-003 (Server consumes the validator, migrates built-ins, separates error source
 - `ProjectWorkflowProfileManager`, `IssueWorkflowProfileManager`, and `WorkflowProfileCatalog` use the authoritative parser for YAML and library JSON persistence for stored Profiles.
 - Tampered stored Definition, action-source guard, and legacy check-name migration regressions are covered in `ProjectWorkflowProfileManagerSpecs`.
 - Both built-in Profiles use `id` for every check; the catalog loads them through `Parse`.
+
+T-004 (Offline mo workflow validate --file <path|-> command)
+
+## Implementation Discoveries
+
+- `WorkflowCommands.Build` is the single registration point for the existing `workflow` group; the offline leaf can use `MohistCliApi.FileSystem` and `StandardInput` directly without project resolution or HTTP services.
+- `Mohist.Workflow.Definition` depends on YamlDotNet at runtime. The CLI declares the existing central YamlDotNet package directly so the parser assembly is copied into the CLI and CLI test outputs.
+
+## Acceptance Criteria Mapping
+
+- `workflow validate --file <path>` reads through the CLI file-system abstraction and `--file -` reads `StandardInput`; both paths call `WorkflowDefinitionParser.Parse` directly.
+- Valid input prints `Workflow Definition is valid.` and returns zero; invalid input prints every `ValidationError` as `<path>: <message>` and returns one.
+- The command never resolves a Project, invokes HTTP, checks action existence, or interprets `with` contracts. `CliWorkflowValidateSpecs` covers file input, stdin input, multi-error path/message output, the open `with` boundary, and zero recorded requests.
+- Focused CLI validation tests pass (4), full CLI tests pass (1403), and `npm run build` plus `npm test` pass.

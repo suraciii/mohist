@@ -14,9 +14,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\server\src\Mohist.Workflow.Definition\Mohist.Workflow.Definition.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="YamlDotNet" />
     <PackageReference Include="EnvironmentAbstractions" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <None Include="..\..\..\docs\README.md" Pack="true" PackagePath="\" />
