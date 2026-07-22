@@ -125,7 +125,7 @@ mo issue sessions <number>   # AgentSession 记录
 |---|---|---|
 | 看板显示 "No runner is connected" | Runner 没起 | `npm run dev:runner` |
 | Issue 启动后一直等待 | 没有可用 Runner | 启动 Runner；Workflow 会自动继续 |
-| Task 长时间无输出 | opencode 卡了 | `mo issue force-stop`，查 logs |
+| Task 长时间无输出 | opencode 卡了 | `mo run pause --issue <number>`，查 logs |
 | Workspace identity 错误 | marker、branch 或 origin 被手工修改 | 保留需要的提交后移除该 workspace，再 retry |
 | Git push 失败 | 远程仓库权限 | 配 SSH key 或 token |
 
