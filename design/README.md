@@ -92,6 +92,7 @@
 
 ## 全局基础
 
+- [../CONTEXT.md](../CONTEXT.md) — 跨上下文统一语言；术语定义的单一入口。
 - [architecture.md](architecture.md) — 运行时边界、控制平面/执行平面职责、放置规则。
 - [domain-analysis.md](domain-analysis.md) — 领域分析与上下文映射：子域划分、限界上下文关系、依赖不变量。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
@@ -103,7 +104,7 @@
 
 ## Agent 与执行
 
-- [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层和生命周期所有权。
+- [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession、Turn 与 Runtime Session 的分层、生命周期所有权和 transcript DSL；Turn DSL 为 **WIP**。
 - [event-routing.md](event-routing.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 
 ## Runtime 集成

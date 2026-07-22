@@ -13,6 +13,7 @@ Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
 | 工作 | AgentJob | Agent context | 一次 Mohist Agent 执行的生命周期与结果 |
 | 执行契约 | Action | Workflow context | 一次工作 dispatch 的 `uses` / `with` 输入输出契约 |
 | 对话 | AgentSession | Session context | transcript、context、usage、Runtime binding、lineage |
+| 对话 | Turn | Session context | 一次对话执行的输入、活动状态与结束结果 |
 | Runtime | Runtime Session | 外部 Runtime | 物理对话与 provider 执行状态 |
 | Adapter | OpenCodeRuntime、PiRuntime | Runner 进程 | protocol、进程、事件、状态核对、错误 |
 
@@ -21,11 +22,8 @@ TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist
 
 ## 规范术语
 
-- **Mohist Agent（Named Agent）**：Project 范围内可复用的预定义资源，有稳定 Agent ID。
-- **Inline Agent**：Workflow task 直接配置并调用 Action，没有 Agent ID。
-- **AgentJob**：Mohist Agent 的一次执行，使用启动时固定的 Agent snapshot。
-- **AgentSession**：稳定的逻辑对话与审计记录；不是 Agent 身份，也不拥有工作生命周期。
-- **Runtime Session**：OpenCode、Pi 或其他执行后端拥有的物理对话。
+跨上下文统一定义见 [`../CONTEXT.md`](../CONTEXT.md)。本文只定义这些概念的生命周期、
+所有权、事件契约和模块边界，不建立第二套术语。
 
 ## 调用路径
 
@@ -71,7 +69,7 @@ TaskRun 与 AgentJob 拥有以下决策：
 
 AgentSession 拥有以下事实：
 
-- 用户 / agent 消息和 tool calls；
+- Turn、用户 / agent 消息和 tool calls；
 - context 与 usage；
 - model / Runtime observations；
 - 当前 Runtime Session 绑定与会话沿革（lineage）。
@@ -86,6 +84,165 @@ Follow-up 会启动一个用户发起的对话回合，只记录命令和 Runtim
 或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则，且都只在逻辑
 Session 空闲时执行；两者都不轮换 AgentSession ID，命令响应返回同一稳定
 `sessionId`，只有 Reset 替换 Runtime 绑定。
+
+## Turn 生命周期与 transcript DSL
+
+Turn 是 AgentSession 内唯一拥有对话执行终态的实体。AgentSession 可以先后包含多个
+Turn；一个 Turn 的完成、失败或停止只结束本次对话执行，不关闭逻辑 Session，也不改变
+TaskRun 或 AgentJob 的工作裁决。
+
+### 状态投影
+
+AgentSession 的查询模型把互不替代的状态轴分开呈现：
+
+| 轴 | 值 | 含义 |
+|---|---|---|
+| `activity` | `idle` / `active` / `unknown` | 当前是否有可确认的执行中 Turn |
+| `binding` | `unbound` / `bound` / `missing` | 当前 Runtime Session 绑定是否存在且可解析 |
+| `currentTurn` | 无，或当前 Turn 摘要 | `active` / `unknown` 时命令和状态核对的稳定目标 |
+| `latestTurn` | 无，或最近 Turn 摘要 | 最近 Turn 的身份、时间与结果，不是 Session 终态 |
+
+Turn 在输入被受理时直接进入 `active`，结束后进入 `finished`。`finished` 必须且只能带一个
+`outcome`：`completed`、`failed` 或 `stopped`。AgentSession 没有与普通 Turn 对应的
+`completed`、`failed` 或 `closed` 状态，也没有 `closedAt`；需要展示最近结束时间时读取
+`latestTurn.finishedAt`。未来若产品引入显式归档，应使用独立的 `archivedAt` 语义。
+
+`activity: unknown` 表示 Mohist 知道当前 Turn 可能仍在 Runtime 执行，但无法确认是否已经
+停止，或空闲 Follow-up 可能已经启动新 Turn，但受理结果未知。此时 Follow-up、Compact 与
+Reset 都不能假装 Session 已空闲；Cancel 可以继续针对 `currentTurn` 尝试停止或触发状态
+核对。只有新的 Runtime 证据完成核对后，activity 才能转为 `active`，或由
+`turn.finished` 转为 `idle`。如果最终确认输入从未被受理，则清除候选 `currentTurn` 并
+恢复 `idle`。
+
+### 事件契约
+
+以下名称是 transcript DSL 的唯一规范名称。所有 `turn.*` 事实和属于某个 Turn 的
+message、tool、usage、model、status、compaction 事实都必须携带稳定的 `turnId`；
+`turnId` 在所属 AgentSession 内唯一且在重投时不变。
+
+`turn.started` 记录一次 Turn 以及它的首个输入：
+
+```json
+{
+  "turnId": "turn_...",
+  "startedAt": "2026-07-22T10:00:00Z",
+  "originKind": "task-run | agent-job | followup",
+  "originId": "...",
+  "input": {
+    "inputId": "input_...",
+    "text": "..."
+  }
+}
+```
+
+`turn.input.added` 记录执行中 Turn 受理的追加输入：
+
+```json
+{
+  "turnId": "turn_...",
+  "inputId": "input_...",
+  "addedAt": "2026-07-22T10:01:00Z",
+  "source": "followup | system",
+  "text": "..."
+}
+```
+
+`turn.finished` 是 Turn 唯一的结束事实：
+
+```json
+{
+  "turnId": "turn_...",
+  "finishedAt": "2026-07-22T10:02:00Z",
+  "outcome": "completed | failed | stopped",
+  "failure": {
+    "code": "...",
+    "message": "...",
+    "category": "..."
+  }
+}
+```
+
+`failure` 只允许在 `outcome: failed` 时出现，`category` 可省略。进程退出码、Action
+结果和工作裁决属于 TaskRun 或 AgentJob，不进入 Turn 结束事实。
+
+Follow-up 的命令结果与 Turn 事实分开记录：
+
+| 事件 | 必需字段 | 语义 |
+|---|---|---|
+| `followup.admitted` | `operationId`、`turnId`、`placement`、`admittedAt` | Runtime 已确认受理；`placement` 是 `current-turn` 或 `new-turn` |
+| `followup.rejected` | `operationId`、`rejectedAt`、`error.code`、`error.message` | 已确认输入没有被受理，可以向用户确定失败 |
+| `followup.delivery.unconfirmed` | `operationId`、`turnId`、`observedAt`、`attemptedPlacement`、`error.code`、`error.message` | 无法确认输入是否已被受理，不能自动重试 |
+
+三个事件的 payload 形状分别为：
+
+```json
+{
+  "operationId": "followup_...",
+  "turnId": "turn_...",
+  "placement": "current-turn | new-turn",
+  "admittedAt": "2026-07-22T10:03:00Z"
+}
+```
+
+```json
+{
+  "operationId": "followup_...",
+  "rejectedAt": "2026-07-22T10:03:00Z",
+  "error": {
+    "code": "...",
+    "message": "..."
+  }
+}
+```
+
+```json
+{
+  "operationId": "followup_...",
+  "turnId": "turn_...",
+  "attemptedPlacement": "current-turn | new-turn",
+  "observedAt": "2026-07-22T10:03:00Z",
+  "error": {
+    "code": "...",
+    "message": "..."
+  }
+}
+```
+
+所有 `*At` 字段都是 UTC ISO 8601 时间。`error.code` 是稳定机器码，`error.message` 是
+保留原始原因的用户可读诊断。
+
+Mohist 在投递前为 Follow-up 分配 `operationId`，并为 `new-turn` placement 预分配
+`turnId`；同一 operation 的状态核对和重投查询复用这些身份。Runtime 确认空闲 Follow-up
+后，按 `followup.admitted`、`turn.started` 的顺序在同一次持久化提交中记录；确认执行中
+Follow-up 后，按 `followup.admitted`、`turn.input.added` 的顺序同次记录。Rejected 或
+delivery-unconfirmed 不生成 Turn 输入事实。
+
+`followup.admitted` 与 `followup.rejected` 是互斥的最终受理结果；同一 operation 的最终
+结果只能出现其中一个。`followup.delivery.unconfirmed` 是可被后续核对收敛的中间事实，
+不授权重新发送输入；调用方用原 `operationId` 查询结果，不能创建一次新的副作用。对
+`new-turn` 投递，未确认事实中的预分配 `turnId` 成为候选 `currentTurn`，并把 activity
+投影为 `unknown`；后续证据确认受理后才补记 admitted 与 started，确认未受理后则记
+rejected 并恢复 `idle`。对
+`current-turn` 投递，原 Turn 保持 `active`，直到其执行事实另有变化。
+
+`followup.admitted` 表示输入已进入 Runtime，不表示 agent 已经完成，因此不得使用
+`followup_completed` 命名。
+
+### 顺序与结束规则
+
+- 每个 `turnId` 恰好有一个 `turn.started`，最多有一个 `turn.finished`；重复投递只能重放
+  同一事实，冲突的终态必须拒绝。
+- 同一 Turn 内，输入先于由其产生的输出，`turn.finished` 最后；结束后不能再追加输入或
+  Runtime 事实。Transcript part 的 `sequence` 只在同一 Turn 内比较，不得跨 Turn 排序。
+- Runtime 正常完成、确认失败或确认停止后才能记录 `turn.finished`。停止请求或超时若未
+  确认，必须把 activity 投影为 `unknown`，不得伪造 `stopped` 或 `failed` 结束事实。
+- `turn.finished` 把 AgentSession activity 投影回 `idle`，但不清除 Runtime binding，
+  不妨碍后续 Follow-up 开始新 Turn。
+- `canFollowup` 由 activity、binding 与 Runner 可用性推导；`canCancel` 只由当前 Turn
+  推导。历史 Turn 的结果不能禁用未来命令。
+
+Runtime Session 的内存缓存、进程资源释放、持久化文件保留与淘汰策略属于 Runtime
+adapter。它们不能通过 transcript 事件表达，也不能用来推导 AgentSession 已关闭。
 
 ## AgentSession 来源
 
@@ -158,6 +315,9 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 
 - Action 不是 Agent。
 - AgentSession 不是 Agent，也不是工作所有者。
+- Turn 结果不终结 AgentSession；工作结果、Turn 结果、Session activity 与 Runtime
+  资源生命周期是四个独立维度。
+- 所有 Turn 范围内的 transcript 事实都携带稳定 `turnId`，不得跨 Turn 解释局部顺序。
 - Inline Agent 没有 Agent ID 或可复用定义。
 - Mohist Agent 有稳定身份，可以拥有多次执行和多个 Session。
 - 一次 dispatch 的工作所有者只能是 TaskRun 或 AgentJob 之一。
@@ -166,3 +326,13 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 - `mohist/opencode` 不暴露 OpenCode 原生 agent 选择。
 - AgentJob 执行不依赖 Workflow Action 名称或 Action Input 契约。
 - 共享 `OpenCodeRuntime` 不制造 Workflow -> Agent context 依赖。
+
+## Status
+
+本文以上内容是目标设计。当前实现仍写入或消费 `session.input`、`session.closed`、
+`session.followup_completed` 与 `session.followup_failed`，并有消费者从历史 close 事实
+推导整个 AgentSession 的状态和命令能力；部分 transcript part 的局部序列也尚未以
+`turnId` 分区。对应实施 issue 待从本 spec 创建。
+
+迁移不保留 `session.closed` 别名或新旧事件双写。实施必须一次处理当前读写路径、已持久化
+transcript 与待投递 outbox，使同一 AgentSession 不会同时存在两套相互冲突的终态语义。

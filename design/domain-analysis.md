@@ -17,7 +17,7 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 | Issue | what work is, how organized, what progress | issue, epic, sub-issue, parent issue, status, prerequisite, priority, risk, draft, done |
 | Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), variable, prompt |
 | Agent | reusable named intelligence and its execution jobs | Mohist Agent, AgentJob, AgentJobInput, WorkResult |
-| Session | logical execution conversation, compression, query, audit | AgentSession, Runtime Binding, Transcript, Context, Usage, Lineage |
+| Session | logical execution conversation, compression, query, audit | AgentSession, Turn, Runtime Binding, Transcript, Context, Usage, Lineage |
 | Runner | execution resource availability and capacity | resource, presence, registration, capacity |
 | Skill·Explore | refine vague needs into bounded issues | — |
 
@@ -36,9 +36,9 @@ See [`repositories.md`](repositories.md).
 
 ### Agent and Session terms
 
-Action, Inline Agent, Mohist Agent, AgentJob, AgentSession, and Runtime Session — canonical
-definitions, lifecycle ownership, invocation paths, and the full invariant list live in
-[`agent-execution.md`](agent-execution.md).
+Action、Inline Agent、Mohist Agent、AgentJob、AgentSession、Turn 与 Runtime Session 的
+统一定义见 [`../CONTEXT.md`](../CONTEXT.md)；生命周期所有权、调用路径和完整不变量见
+[`agent-execution.md`](agent-execution.md)。
 
 ### Read-side: AgentOps
 
@@ -68,7 +68,7 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 | 9 | Server | CLI | OHS+PL | API DTO |
 | 10 | Generic | Issue etc. | SK/PL | labels, user identity |
 | 11 | Session | Issue/Workflow/API/AgentOps | OHS+PL | session DTO |
-| 12 | Runner/Agent | Session | PL | runtime events, close events |
+| 12 | Runner/Agent | Session | PL | Turn facts, Runtime observations |
 | 13 | Session/Issue/Workflow/Runner | AgentOps | OHS | cross-domain report assembly |
 | 14 | Issue | IssueRepositoryCoordinator | C | narrow participant commands (create / reassign / reopen) |
 | 15 | Project Space | IssueRepositoryCoordinator | C | narrow participant commands (repository removal) |

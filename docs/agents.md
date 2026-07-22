@@ -12,6 +12,7 @@ Session 分属不同层次。
 | Mohist Agent | Project 内预先定义、按名称复用的 Agent 资源 | 有稳定 Agent ID、名称、指令、配置、Skills 和状态 |
 | AgentJob | Mohist Agent 的一次执行 | 独立记录等待、执行、完成或失败，以及本次结果 |
 | AgentSession | 一段持续对话的逻辑记录 | 有稳定 Session ID；保存消息、上下文、用量和会话沿革 |
+| Turn | AgentSession 内的一次对话执行 | 接受一个或多个输入，最终完成、失败或停止 |
 | Runtime Session | OpenCode、Pi 等执行后端实际维护的对话 | 由执行后端标识；Reset 或更换后端时可以更换 |
 
 Action 不在 Agent 资源层：`mohist/opencode` 描述一次工作如何交给 OpenCode，
@@ -73,6 +74,22 @@ AgentJob 和 AgentSession 经常同时创建，但职责不同：
 
 Workflow 的对应工作所有者是 TaskRun，而不是 AgentJob。TaskRun 或 AgentJob 负责
 裁定工作结果；AgentSession 只记录执行事实，不推进 Workflow，也不裁定 AgentJob。
+
+## Turn 与 Session 状态
+
+AgentSession 可以包含多个 Turn。一个 Turn 完成、失败或停止，只说明这一次对话执行已经
+结束；AgentSession 随后回到空闲，可以继续 Follow-up。它不会因为最近一个 Turn 的结果
+被标记为完成、失败或关闭。
+
+Session 的活动状态与最近 Turn 的结果分别呈现：
+
+- **执行中**：当前 Turn 正在执行；Follow-up 进入当前 Turn，可以取消当前 Turn。
+- **空闲**：没有执行中的 Turn；Follow-up 开始新 Turn，可以 Compact 或 Reset。
+- **未知**：Mohist 暂时无法确认当前 Turn 是否已经停止；在核对完成前不会把 Session
+  当作安全空闲，也不会自动重复投递 Follow-up。
+
+执行后端持有的 Runtime Session 可以在内存中缓存，也可以被恢复或回收。这是执行资源
+管理，不等同于 AgentSession 关闭，也不改变已记录的对话。
 
 ## AgentSession 来源
 
