@@ -138,10 +138,11 @@ export class PiRuntime {
     const cancel = () => { if (!fixed) fixAndAbort(this.finishFailure("interrupted", "Pi turn was interrupted", diagnostics)) }
     signal.addEventListener("abort", cancel, { once: true })
     try {
-      const promptOutcome = await this.withSessionLock(path, () => Promise.race([
-        session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => "completed" as const),
+      const promptOperation = this.withSessionLock(path, () => session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => "completed" as const))
+      const promptOutcome = await Promise.race([
+        promptOperation,
         fixedSignal.then(() => "fixed" as const),
-      ]))
+      ])
       if (fixed) return fixed
       if (lastMessageFailed(session.messages)) return this.failure("turn-failed", "Pi turn failed", [diagnostic("turn-failed", this.mask(lastMessageError(session.messages) ?? "Pi reported an error"))])
       report(projector.reconcile(session.messages))
@@ -272,17 +273,24 @@ export class PiRuntime {
     if (!session.ok) return session.failure
 
     const diagnostics: PiDiagnostic[] = []
-    let stopConfirmed = true
+    let stopConfirmed = !session.value.isStreaming
+    let stopEventObserved = false
+    const unsubscribe = session.value.subscribe((event) => {
+      if (isPiStopEvent(event)) stopEventObserved = true
+    })
     try {
       await session.value.abort()
       await Promise.resolve()
-      if (session.value.isStreaming) {
+      stopConfirmed = !session.value.isStreaming && stopEventObserved
+      if (!stopConfirmed) {
         stopConfirmed = false
-        diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped")))
+        diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped through its event sequence")))
       }
     } catch (cause) {
       stopConfirmed = false
       diagnostics.push(diagnostic("abort-unconfirmed", this.mask(message(cause))))
+    } finally {
+      unsubscribe()
     }
     const facts: PiCancelFacts = { runtimeSessionId: path, workDir: request.target.workDir, cancelled: true, stopConfirmed }
     return { ok: true, value: facts, diagnostics }
@@ -447,7 +455,10 @@ export class PiRuntime {
     if (!this.state.services) return { ok: false, failure: this.unavailable() }
     let session: PiSdkSession
     try {
-      session = this.sessions.get(path) ?? await this.state.services.openSession(path, workDir)
+      const cached = this.sessions.get(path)
+      const opened = await this.state.services.openSession(path, workDir)
+      if (cached && opened !== cached) opened.dispose()
+      session = cached ?? opened
       this.sessions.set(path, session)
       return { ok: true, value: session }
     } catch (cause) {
@@ -500,4 +511,5 @@ function contentText(content: unknown): string | null { if (typeof content === "
 function lastMessageFailed(messages: readonly { role?: string; stopReason?: string }[]): boolean { const item = [...messages].reverse().find((entry) => entry.role === "assistant"); return item?.stopReason === "error" }
 function lastMessageError(messages: readonly { role?: string; errorMessage?: string }[]): string | undefined { return [...messages].reverse().find((entry) => entry.role === "assistant")?.errorMessage }
 function isRetryFailure(event: unknown, policy: PiProviderErrorPolicy): boolean { if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "auto_retry_start") return false; const value = event as { errorMessage?: unknown; attempt?: unknown }; const text = typeof value.errorMessage === "string" ? value.errorMessage : ""; return isProviderFailure(text, policy) || (typeof value.attempt === "number" && value.attempt >= policy.consecutiveRetryThreshold) }
+function isPiStopEvent(event: unknown): boolean { if (!event || typeof event !== "object") return false; const type = (event as { type?: unknown }).type; return type === "turn_end" || type === "agent_end" || type === "agent_settled" }
 async function abortAndDiagnose(session: PiSdkSession, diagnostics: PiDiagnostic[], mask: (text: string) => string): Promise<void> { try { await session.abort(); await Promise.resolve(); if (session.isStreaming) diagnostics.push(diagnostic("abort-unconfirmed", mask("Pi did not confirm that the turn stopped"))) } catch (cause) { diagnostics.push(diagnostic("abort-unconfirmed", mask(message(cause)))) } }

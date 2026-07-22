@@ -35,7 +35,7 @@ class FakeSession implements PiSdkSession {
     return new Promise<void>((resolve) => { this.completions.push({ resolve, text }) })
   }
   steer(text: string): Promise<void> { this.steerCalls.push(text); return Promise.resolve() }
-  abort(): Promise<void> { this.abortCalls++; this.isStreaming = false; return Promise.resolve() }
+  abort(): Promise<void> { this.abortCalls++; this.isStreaming = false; this.emit({ type: "agent_settled", id: `settled-${this.abortCalls}` }); return Promise.resolve() }
   compact(): Promise<void> { this.compactCalls++; return Promise.resolve() }
   setModel(model: unknown): Promise<void> { this.modelCalls.push(model); this.currentModel = model; return Promise.resolve() }
   setThinkingLevel(level: string): void { this.thinkingCalls.push(level); this.currentThinkingLevel = level }
@@ -327,6 +327,70 @@ describe("PiRuntime", () => {
     expect(result.error.kind).toBe("missing-session")
     expect(result.error.message.toLowerCase()).toContain("reset")
     expect(session.abortCalls).toBe(0)
+  })
+
+  it("keeps the prompt mutex held until an aborted workflow prompt settles", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+    const controller = new AbortController()
+    const workflow = runtime.runTurn(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "workflow" },
+      controller.signal,
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    controller.abort()
+    await workflow
+
+    const followup = runtime.followup(
+      { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "followup" },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["workflow"])
+    session.complete("workflow stopped")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(session.promptCalls).toEqual(["workflow", "followup"])
+    await followup
+    session.complete("followup done")
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  })
+
+  it("reports a cached session as missing when reopening its bound file fails", async () => {
+    const session = new FakeSession()
+    let missing = false
+    const services = {
+      catalog: async () => [{ provider: "fake", id: "model", thinkingLevels: ["high"] }],
+      createSession: async () => session,
+      openSession: async (path: string) => {
+        expect(path).toBe(session.sessionFile)
+        if (missing) throw new Error("session file is gone")
+        return session
+      },
+      model: (provider: string, id: string) => ({ provider, id }),
+      close: async () => {},
+    }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: { create: async () => services } })
+    await runtime.start()
+    await runtime.followup({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "prime cache" })
+    session.complete()
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    missing = true
+
+    const result = await runtime.followup({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "must reset" })
+    expect(result).toMatchObject({ ok: false, error: { kind: "missing-session" } })
+    if (result.ok) throw new Error("expected missing-session")
+    expect(result.error.message.toLowerCase()).toContain("reset")
+  })
+
+  it("requires a stop event as well as idle state before confirming cancel", async () => {
+    const session = new FakeSession()
+    session.isStreaming = true
+    session.abort = async () => { session.abortCalls++; session.isStreaming = false }
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
+    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
   })
 
   it("serializes a concurrent idle follow-up with an in-flight workflow turn on the same session", async () => {
