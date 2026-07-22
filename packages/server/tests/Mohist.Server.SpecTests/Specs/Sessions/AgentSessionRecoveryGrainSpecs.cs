@@ -97,6 +97,34 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
+    public async Task MissingRecovery_RebindsWithFullCasAndWritesContextReset()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-missing");
+
+        var recovered = await grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+            "runner-1", "opencode", "runtime-missing", "runtime-replacement"));
+
+        Assert.Equal("runtime-replacement", recovered.AgentSessionId);
+        var transcript = Assert.Single(_fixture.TranscriptStore.Flushes);
+        using var payload = JsonDocument.Parse(transcript.Parts.Single().PayloadJson);
+        Assert.Equal("missing-recovery", payload.RootElement.GetProperty("reason").GetString());
+        Assert.DoesNotContain("runtime-missing", transcript.Parts.Single().PayloadJson);
+        Assert.DoesNotContain("runtime-replacement", transcript.Parts.Single().PayloadJson);
+    }
+
+    [Fact]
+    public async Task MissingRecovery_StaleExpectedBindingRejectsCandidate()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-current");
+
+        await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() =>
+            grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+                "runner-1", "opencode", "runtime-stale", "runtime-candidate")));
+
+        Assert.Equal("runtime-current", (await grain.GetAsync())?.AgentSessionId);
+    }
+
+    [Fact]
     public async Task Reset_ConcurrentBeginsReuseOneReservationAndReturnOneCompletion()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");

@@ -26,6 +26,15 @@ export type RuntimeSessionTarget = {
   readonly workDir: string
 }
 
+export interface RuntimeSessionResolveRequest {
+  readonly target: RuntimeSessionTarget
+}
+
+export interface RuntimeSessionResolveResult {
+  readonly runtimeSessionId: string
+  readonly workDir: string
+}
+
 export interface RuntimeSessionCreateRequest {
   readonly target: RuntimeSessionTarget
   readonly model?: { providerID: string; modelID: string } | null

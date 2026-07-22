@@ -44,12 +44,16 @@ import {
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
 import type { PiTurnObserver } from "../runtime/pi/index.js"
+import { resolveOrRecoverBinding } from "../runtime/binding-recovery.js"
+import type { ServerConnection } from "./connection.js"
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   openCodeRuntime?: CommandRuntimeAccessors["openCode"]
   piRuntime?: CommandRuntimeAccessors["pi"]
+  connection?: ServerConnection | null
+  runnerId?: string | null
   randomId?: () => string
 }
 
@@ -103,39 +107,77 @@ async function handleFollowup(
   if (!handle) return unavailable()
   if (!handle.runtime.ready()) return unavailable()
 
+  let selectedTarget = target
+  const connection = deps.connection ?? null
+  const runnerId = deps.runnerId ?? null
+  if (connection && runnerId) {
+    const expected = {
+      runnerId: binding.runnerId,
+      runtime: handle.kind,
+      runtimeSessionId: target.runtimeSessionId,
+      workDir: target.workDir,
+    } as const
+    const recovery = await resolveOrRecoverBinding({
+      runnerId,
+      expected,
+      runtime: handle,
+      probe: async (candidate) => {
+        const result = handle.kind === "opencode"
+          ? await handle.runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+          : await handle.runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+        return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+      },
+      replace: async (current, replacement) => {
+        const body = {
+          expectedRunnerId: current.runnerId,
+          expectedRuntime: current.runtime,
+          expectedRuntimeSessionId: current.runtimeSessionId,
+          replacementRuntimeSessionId: replacement.runtimeSessionId,
+        }
+        if (sessionTarget.kind === "workflow") {
+          await connection.recoverMissingWorkflowAgentSession(sessionTarget.projectId, sessionTarget.workflowRunId, sessionTarget.sessionName, body, new AbortController().signal)
+        } else {
+          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, new AbortController().signal)
+        }
+      },
+    })
+    if (!recovery.ok) return unavailable()
+    selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId! }
+  }
+
   try {
-    await enqueueFollowupInput(outbox, sessionTarget, target, payload, deps.randomId ?? defaultFollowupRecordId)
+    await enqueueFollowupInput(outbox, sessionTarget, selectedTarget, payload, deps.randomId ?? defaultFollowupRecordId)
   } catch (error) {
     console.error("followup durable input enqueue failed:", error instanceof Error ? error.message : String(error))
     return unavailable()
   }
 
   const followupRequest = {
-    target: { runtime: binding.runtime, runtimeSessionId: target.runtimeSessionId, workDir: target.workDir },
+    target: { runtime: binding.runtime, runtimeSessionId: selectedTarget.runtimeSessionId, workDir: selectedTarget.workDir },
     prompt: payload.text,
   }
-  const observer = buildFollowupObserver(outbox, sessionTarget, target, payload.operationId)
+  const observer = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
   try {
     void callFollowup(handle, followupRequest, observer).then(
       (result) => {
         if (!result.ok) {
           const message = readErrorMessage(result)
-          recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", message)
+          recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", message)
           if (readErrorKind(result) === "unavailable-runtime") {
             console.error("followup runtime unavailable:", message)
           }
           return
         }
-        recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "idle")
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "idle")
       },
       (error) => {
         console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
-        recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", error)
+        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
       },
     )
   } catch (error) {
     console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
-    recordFollowupActivity(outbox, sessionTarget, target, payload.operationId, "unknown", error)
+    recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, "unknown", error)
     return unavailable()
   }
   return { accepted: true }

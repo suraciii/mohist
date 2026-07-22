@@ -218,7 +218,7 @@ public static class AgentSessionRecoveryRoutes
         ApiResults.Conflict(
             ex.Message,
             "runtime_session_missing",
-            new { sessionId = ex.SessionId, hint = "reset" });
+            new { sessionId = ex.SessionId });
 
     private static IResult InvalidRunnerResult(string sessionId) =>
         ApiResults.Fail(

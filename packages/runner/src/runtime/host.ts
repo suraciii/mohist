@@ -198,6 +198,7 @@ export class RunnerHost {
         registry: this.workspaceRegistry,
         openCodeRuntime: () => this.openCodeRuntime,
         piRuntime: () => this.piRuntime,
+        serverConnection: this.connection,
         sessionCommandJournal: this.sessionCommandJournal,
       },
     )

@@ -138,6 +138,7 @@ export class WorkflowAgentSessionReporter {
       payload: event.payload,
     }))
     const promise = Promise.all(records.map((record) => this.outbox.enqueueProducedFact(record)))
+      .then(() => undefined)
       .catch((error) => {
         console.error(
           `workflow agent-session delta batch enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName} count=${records.length}: ${errorMessage(error)}`,

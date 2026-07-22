@@ -23,6 +23,7 @@ import type {
 } from "./pi/index.js"
 import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime.js"
 import type { ServerConnection } from "../server/connection.js"
+import { resolveOrRecoverBinding, type RuntimeBinding } from "./binding-recovery.js"
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -121,10 +122,40 @@ export class AgentJobExecutor {
       return failureResult("runtime-unavailable", `AgentJob requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`, "opencode")
     }
 
+    let selected = binding.runtimeSessionId
+    if (binding.agentSessionId && work.projectId && selected && typeof runtime.resolveSession === "function") {
+      const expected: RuntimeBinding = {
+        runnerId: binding.runnerId,
+        runtime: "opencode",
+        runtimeSessionId: selected,
+        workDir,
+      }
+      const recovery = await resolveOrRecoverBinding({
+        runnerId: this.connection.runnerId,
+        expected,
+        runtime: { kind: "opencode", runtime },
+        probe: async (candidate) => {
+          const result = await runtime.resolveSession({ target: { runtime: "opencode", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+        },
+        replace: async (current, replacement) => {
+          await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
+            expectedRunnerId: current.runnerId,
+            expectedRuntime: current.runtime,
+            expectedRuntimeSessionId: current.runtimeSessionId,
+            replacementRuntimeSessionId: replacement.runtimeSessionId,
+          }, signal)
+        },
+        model: model.kind === "ok" ? { providerID: model.value.providerID, modelID: model.value.modelID } : null,
+      })
+      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "opencode")
+      selected = recovery.binding.runtimeSessionId
+    }
+
     const turnRequest: RuntimeTurnRequest = {
       target: {
         runtime: "opencode",
-        runtimeSessionId: binding.runtimeSessionId,
+        runtimeSessionId: selected,
         workDir,
       },
       prompt: composed,
@@ -180,6 +211,28 @@ export class AgentJobExecutor {
 
     const eventSink = createAgentSessionEventSink(this.connection, work, signal, binding.agentSessionId)
     let runtimeSessionId = binding.runtimeSessionId
+    if (binding.agentSessionId && work.projectId && runtimeSessionId && typeof runtime.resolveSession === "function") {
+      const expected: RuntimeBinding = { runnerId: binding.runnerId, runtime: "pi", runtimeSessionId, workDir }
+      const recovery = await resolveOrRecoverBinding({
+        runnerId: this.connection.runnerId,
+        expected,
+        runtime: { kind: "pi", runtime },
+        probe: async (candidate) => {
+          const result = await runtime.resolveSession({ target: { runtime: "pi", runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+          return result.ok ? { ok: true } : { ok: false, kind: result.error.kind, message: result.error.message }
+        },
+        replace: async (current, replacement) => {
+          await this.connection.recoverMissingAgentSession(work.projectId!, binding.agentSessionId!, {
+            expectedRunnerId: current.runnerId,
+            expectedRuntime: current.runtime,
+            expectedRuntimeSessionId: current.runtimeSessionId,
+            replacementRuntimeSessionId: replacement.runtimeSessionId,
+          }, signal)
+        },
+      })
+      if (!recovery.ok) return failureResult(recovery.kind, recovery.message, "pi")
+      runtimeSessionId = recovery.binding.runtimeSessionId
+    }
     if (!runtimeSessionId) {
       const created = await runtime.createSession({ target: { runtime: "pi", runtimeSessionId: null, workDir } })
       if (!created.ok) {
@@ -219,7 +272,7 @@ export class AgentJobExecutor {
   }
 }
 
-type BindingResolution = { agentSessionId: string | null; runtimeSessionId: string | null }
+type BindingResolution = { agentSessionId: string | null; runnerId: string; runtime: string | null; runtimeSessionId: string | null }
 
 async function resolveBinding(
   work: DispatchWorkItem,
@@ -228,11 +281,13 @@ async function resolveBinding(
 ): Promise<BindingResolution> {
   const agentSessionId = work.agentSessionId ?? null
   if (!agentSessionId || !work.projectId) {
-    return { agentSessionId: null, runtimeSessionId: null }
+    return { agentSessionId: null, runnerId: connection.runnerId, runtime: null, runtimeSessionId: null }
   }
   const opened = await connection.getAgentSession(work.projectId, agentSessionId, signal)
   return {
     agentSessionId,
+    runnerId: connection.runnerId,
+    runtime: opened?.runtime ?? null,
     runtimeSessionId: opened?.runtimeSessionId ?? null,
   }
 }

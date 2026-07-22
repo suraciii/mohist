@@ -84,19 +84,15 @@ public static class AgentSessionCancelRoutes
         {
             await grains.GetGrain<IAgentSessionGrain>(target.SessionId).EnsureRuntimeSessionPresentAsync();
         }
-        catch (RuntimeSessionMissingException ex)
+        catch (RuntimeSessionMissingException)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "runtime_session_missing",
-                new { sessionId = ex.SessionId, hint = "reset" });
+            return ApiResults.Ok(new { state = "not-cancellable" });
         }
 
         if (string.IsNullOrWhiteSpace(target.Runtime)
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
         {
-            var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
-            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId, hint = "reset" });
+            return ApiResults.Ok(new { state = "not-cancellable" });
         }
 
         object binding = new

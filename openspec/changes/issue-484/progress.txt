@@ -19,3 +19,11 @@
 - Reset, CompleteReset, and runtime-changing attach use the shared replacement transition; reset markers are persisted as session.context_reset transcript evidence with reason/observedAt only and no physical session IDs.
 - Removed RuntimeSessionLineage, RuntimeSessionLineageEntry, PreviousAgentRuntimeSessionId, and lineage DTO projection. Orleans JSON deserialization ignores the removed legacy field.
 - Updated unit and focused grain coverage for full-binding CAS, stale/active rejection, context clearing, attach replacement, legacy state deserialization, and context-reset payload shape. The remaining full spec failures are the pre-existing T-001 terminal/status contract assertions.
+
+## T-003
+
+- Added shared runner `resolveOrRecoverBinding`: only deterministic `missing-session` creates one empty candidate; all other resolve failures preserve the binding, and failed CAS returns a candidate-unbound diagnostic without submission.
+- Added explicit OpenCode/Pi runtime resolve operations and wired recovery before Workflow task, AgentJob, and idle Follow-up input recording; the server confirms full-binding CAS through dedicated recover-missing runner routes before input submission.
+- Added the server missing-recovery grain command using the T-002 idle-only rebind transition and `session.context_reset` reason, without Workflow recovery or work-attempt changes.
+- OpenCode Reset now creates an empty session through `OpenCodeRuntime.createSession`; Compact and Cancel remain non-recovering. Recovery-related runtime_session_missing responses no longer carry hint:reset, and missing Cancel returns not-cancellable.
+- Runner typecheck and all 1,379 runner tests pass; `npm run build` passes. Focused missing-recovery server specs pass. Full `npm test` still has the pre-existing T-001 legacy terminal/status failures noted above; route tests expecting old reset hints also need migration to the new T-003 contract.
