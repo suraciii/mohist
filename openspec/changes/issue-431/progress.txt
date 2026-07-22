@@ -1,0 +1,11 @@
+## Codebase Patterns
+
+- Workflow dispatch variables are assembled by `WorkflowItemTranslator`; persisted profile/run variables must remain separate from runtime roots.
+- Workflow run annotations provide `projectId` and `issueNumber`; repository and workspace facts are available from `WorkflowRun.Repository` and `WorkflowRun.Workspace`.
+- Inline-agent legacy-input validation is duplicated in `WorkflowItemTranslator` and `WorkflowYamlSerializer`, so both sites must recognize the same uses values.
+
+## T-001
+
+- Removed runtime context and top-level variable-key hoisting from the server variable bundle and dispatch payload.
+- Dispatch now uses `issue.projectId`, conditionally populated repository/workspace roots, and `work.approvalFeedback` with only `id`, `stage`, `createdAt`, and `summary`.
+- Failure recovery payloads now include a structured `error` object with `code` and `message`; the pre-rendered feedback command helper was removed.

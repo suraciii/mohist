@@ -60,8 +60,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.NotNull(feedbackTask.Variables);
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
         Assert.True(
-            doc.RootElement.TryGetProperty("approvalFeedback", out var feedbackEl),
-            "approvalFeedback object must be present in dispatch variables for feedback tasks");
+            doc.RootElement.GetProperty("work").TryGetProperty("approvalFeedback", out var feedbackEl),
+            "work.approvalFeedback object must be present in dispatch variables for feedback tasks");
 
         Assert.Equal(feedbackId, feedbackEl.GetProperty("id").GetString());
         Assert.Equal("plan", feedbackEl.GetProperty("stage").GetString());
@@ -77,13 +77,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.True(summary.Length < longBody.Length, "summary must be a short preview, not the full body");
         Assert.EndsWith("…", summary);
 
-        var command = feedbackEl.GetProperty("command").GetString();
-        Assert.NotNull(command);
-        Assert.Equal(
-            $"mo issue feedback show {TestIssueNumber(_workflowId!)} --feedback {feedbackId} --project-id {TestProjectId(_workflowId!)} --output json",
-            command);
-
         Assert.DoesNotContain("body", feedbackEl.EnumerateObject().Select(p => p.Name));
+        Assert.DoesNotContain("command", feedbackEl.EnumerateObject().Select(p => p.Name));
         Assert.False(feedbackEl.TryGetProperty("body", out _), "full feedback body must not be inlined into dispatch variables");
     }
 
@@ -102,7 +97,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
 
         var (feedbackTask, _) = await PollWorkAnyAsync();
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
-        var summary = doc.RootElement.GetProperty("approvalFeedback").GetProperty("summary").GetString();
+        var summary = doc.RootElement.GetProperty("work").GetProperty("approvalFeedback").GetProperty("summary").GetString();
 
         Assert.Equal("please add a quick start section", summary);
     }
@@ -140,11 +135,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
 
         var (feedbackTask, _) = await PollWorkAnyAsync();
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
-        var command = doc.RootElement.GetProperty("approvalFeedback").GetProperty("command").GetString();
-
-        Assert.Equal(
-            $"mo issue feedback show 109 --feedback {feedbackId} --project-id {projectId} --output json",
-            command);
+        var feedback = doc.RootElement.GetProperty("work").GetProperty("approvalFeedback");
+        Assert.Equal(feedbackId, feedback.GetProperty("id").GetString());
     }
 
     [Fact]
@@ -315,8 +307,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
 
         using var doc = JsonDocument.Parse(feedbackTask.Variables!);
         Assert.True(
-            doc.RootElement.TryGetProperty("approvalFeedback", out var feedbackEl),
-            "approvalFeedback object must still be present after workflow reactivation");
+            doc.RootElement.GetProperty("work").TryGetProperty("approvalFeedback", out var feedbackEl),
+            "work.approvalFeedback object must still be present after workflow reactivation");
         Assert.Equal(feedbackId, feedbackEl.GetProperty("id").GetString());
     }
 
@@ -324,7 +316,8 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
     {
         if (string.IsNullOrWhiteSpace(variablesJson)) return false;
         using var doc = JsonDocument.Parse(variablesJson);
-        return doc.RootElement.TryGetProperty("approvalFeedback", out _);
+        return doc.RootElement.TryGetProperty("work", out var work)
+            && work.TryGetProperty("approvalFeedback", out _);
     }
 
     private async Task<WorkflowRun> LoadRunAsync()

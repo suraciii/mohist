@@ -20,22 +20,6 @@ public static partial class WorkflowRunExtensions
         return body[..(FeedbackSummaryMaxLength - 1)] + Ellipsis;
     }
 
-    public static string BuildFeedbackShowCommand(
-        string? issueNumber,
-        string feedbackId,
-        string? projectId)
-    {
-        var number = string.IsNullOrWhiteSpace(issueNumber) ? "<number>" : issueNumber;
-        var proj = string.IsNullOrWhiteSpace(projectId) ? "<project-id>" : projectId;
-        return $"mo issue feedback show {number} --feedback {feedbackId} --project-id {proj} --output json";
-    }
-
-    public static string BuildFeedbackShowCommand(
-        int? issueNumber,
-        string feedbackId,
-        string? projectId)
-        => BuildFeedbackShowCommand(issueNumber?.ToString(), feedbackId, projectId);
-
     /// <summary>
     /// Extracts the agent-written resolution summary from task output.
     /// Strips the "## Feedback Resolution" header and the trailing
