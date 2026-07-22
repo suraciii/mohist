@@ -33,4 +33,8 @@
 
 ## T-003
 
-- T-003 (Remove legacy config variable flags and align docs) is downstream of T-002. The current T-002 implementation removes `--var` / `--stage-var` / `--vars-file` only in the sense that the new `variable` verbs replace them; the actual flag removal from `MohistCliCommands.ProjectWorkflow.cs` and `Issue.WorkflowConfigSet.cs` lands in T-003 per the change plan.
+- Removed the legacy config variable options and their flat `<stage>.k` parsing from Project and Issue workflow config mutations. Project config set/clear still compose default-template and prompt requests; Issue config set/clear still set or clear the YAML template override.
+- Preserved explicit option-presence checks (`ParseResult.GetResult` / `IsOptionProvided`) so no-option diagnostics and bool-option behavior are unchanged. Project prompt entries are still all validated and expanded before the first mutation, then default-template writes precede prompt writes.
+- Deleted config-variable CLI specs; Variables behavior remains covered by `VariableCommandsSpecs`. Added Project and Issue set/clear leaf-help tests that advertise only the remaining config resources and make no HTTP requests.
+- Updated `docs/cli-reference.md` with Project, Issue, and Run variable examples and removed the stale Run-write gap. `design/cli.md` now records positional string vs `--value-json` as delivered; `design/workflow/variables.md` no longer lists the old resource path as a gap.
+- Verification requires `DOTNET_ROOT=/home/szf/.dotnet` in this environment. The exact `dotnet build Mohist.sln` initially reached the Web target but lacked `tsc`; after the repository-required `npm ci`, it succeeded with 0 warnings / 0 errors. Full CLI suite: 1379 / 1379 pass.
