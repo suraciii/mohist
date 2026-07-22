@@ -38,6 +38,13 @@ public static class WorkflowDefinitionParser
                 new[] { new ValidationError("", "yaml document is empty") });
         }
 
+        if (stream.Documents.Count > 1)
+        {
+            return new WorkflowDefinitionParseResult(
+                null,
+                new[] { new ValidationError("", "yaml must contain exactly one document") });
+        }
+
         var root = stream.Documents[0].RootNode;
         if (root is null)
         {
@@ -341,7 +348,11 @@ public static class WorkflowDefinitionParser
                 if (child is YamlScalarNode scalar)
                 {
                     var text = scalar.Value;
-                    if (string.IsNullOrWhiteSpace(text))
+                    if (!IsStringScalar(scalar))
+                    {
+                        AddError(errors, emittedPaths, entryPath, "artifacts.files[] entry must be a string");
+                    }
+                    else if (string.IsNullOrWhiteSpace(text))
                     {
                         AddError(errors, emittedPaths, entryPath, "artifacts.files[] entry must be a non-empty string");
                     }
@@ -460,7 +471,7 @@ public static class WorkflowDefinitionParser
             {
                 var key = ScalarKey(entry.Key);
                 var valueNode = entry.Value;
-                if (valueNode is YamlScalarNode valueScalar)
+                if (valueNode is YamlScalarNode valueScalar && IsStringScalar(valueScalar))
                 {
                     result[key] = valueScalar.Value ?? string.Empty;
                 }
@@ -678,6 +689,12 @@ public static class WorkflowDefinitionParser
                 return null;
             }
 
+            if (!IsStringScalar(scalar))
+            {
+                AddError(errors, emittedPaths, path, $"'{key}' must be a string");
+                return null;
+            }
+
             var value = scalar.Value ?? string.Empty;
             if (string.IsNullOrWhiteSpace(value))
             {
@@ -701,6 +718,13 @@ public static class WorkflowDefinitionParser
                 AddError(errors, emittedPaths, path, $"'{key}' must be a string");
                 return null;
             }
+
+            if (!IsStringScalar(scalar))
+            {
+                AddError(errors, emittedPaths, path, $"'{key}' must be a string");
+                return null;
+            }
+
             return scalar.Value ?? string.Empty;
         }
 
@@ -714,6 +738,12 @@ public static class WorkflowDefinitionParser
             var node = GetValue(map, key);
             if (node is null) return false;
             if (node is not YamlScalarNode scalar)
+            {
+                AddError(errors, emittedPaths, path, $"'{key}' must be a boolean");
+                return false;
+            }
+
+            if (scalar.Style != ScalarStyle.Plain)
             {
                 AddError(errors, emittedPaths, path, $"'{key}' must be a boolean");
                 return false;
@@ -741,6 +771,12 @@ public static class WorkflowDefinitionParser
             var node = GetValue(map, key);
             if (node is null) return 0;
             if (node is not YamlScalarNode scalar)
+            {
+                AddError(errors, emittedPaths, path, $"'{key}' must be a non-negative integer");
+                return 0;
+            }
+
+            if (scalar.Style is not ScalarStyle.Plain)
             {
                 AddError(errors, emittedPaths, path, $"'{key}' must be a non-negative integer");
                 return 0;
@@ -790,6 +826,14 @@ public static class WorkflowDefinitionParser
                     continue;
                 }
 
+                if (!IsStringScalar(scalar))
+                {
+                    AddError(errors, emittedPaths,
+                        $"{path}[{i}]",
+                        $"'{key}' entries must be strings");
+                    continue;
+                }
+
                 var text = scalar.Value ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -802,6 +846,12 @@ public static class WorkflowDefinitionParser
             }
 
             return values.Count == 0 ? null : values;
+        }
+
+        private static bool IsStringScalar(YamlScalarNode scalar)
+        {
+            var value = YamlScalarToJsonElement(scalar, "");
+            return value.ValueKind == JsonValueKind.String;
         }
 
         private static void AddError(

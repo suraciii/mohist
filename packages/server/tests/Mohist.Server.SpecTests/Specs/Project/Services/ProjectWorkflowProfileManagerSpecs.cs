@@ -128,6 +128,29 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetTemplateProfile_NullStoredDefinitionSurfacesDefinitionError()
+    {
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = "proj-null-definition",
+                TemplateId = "null-definition",
+                Template = "{\"id\":\"null-definition\",\"name\":\"Null\",\"description\":\"\",\"definition\":null}",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
+            _manager.GetTemplateProfileAsync("proj-null-definition", "null-definition"));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal("", error.Path);
+        Assert.Equal("definition is required", error.Message);
+        Assert.Equal(ValidationSource.Definition, error.Source);
+    }
+
+    [Fact]
     public async Task CreateTemplate_InlineAgentGuardReturnsActionError()
     {
         var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>

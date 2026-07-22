@@ -182,6 +182,71 @@ public class TypeErrorTests
     }
 
     [Fact]
+    public void Parse_NonStringScalarInStringFields_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: 123
+                tasks:
+                  - id: 1
+                    uses: true
+                    title: false
+                    setVars:
+                      output: 1
+                    artifacts:
+                      files: [false]
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].stage" && e.Message == "'stage' must be a string");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].id" && e.Message == "'id' must be a string");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].uses" && e.Message == "'uses' must be a string");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].title" && e.Message == "'title' must be a string");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].setVars.output" && e.Message == "setVars value for 'output' must be a string");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].artifacts.files[0]" && e.Message == "artifacts.files[] entry must be a string");
+    }
+
+    [Fact]
+    public void Parse_QuotedScalarForTypedFields_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                requiresApproval: "true"
+                tasks:
+                  - id: t1
+                    uses: action
+                    recovery:
+                      budget: "1"
+                      handlers:
+                        - retrySelf: true
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].requiresApproval");
+        Assert.Contains(result.Errors, e => e.Path == "stages[0].tasks[0].recovery.budget");
+    }
+
+    [Fact]
+    public void Parse_MultipleDocuments_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks: []
+                checks: []
+            ---
+            unknown: true
+            """);
+
+        Assert.False(result.IsValid);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("yaml must contain exactly one document", error.Message);
+    }
+
+    [Fact]
     public void Parse_UnknownFieldAtHandlerLevel_Rejected()
     {
         var result = WorkflowDefinitionParser.Parse("""

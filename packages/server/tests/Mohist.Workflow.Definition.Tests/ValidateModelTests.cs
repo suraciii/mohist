@@ -5,10 +5,12 @@ namespace Mohist.Workflow.Definition.Tests;
 public class ValidateModelTests
 {
     [Fact]
-    public void Validate_NullDefinition_Throws()
+    public void Validate_NullDefinition_ReturnsError()
     {
-        Assert.Throws<ArgumentNullException>(() =>
-            WorkflowDefinitionValidator.Validate(null!));
+        var errors = WorkflowDefinitionValidator.Validate(null);
+
+        var error = Assert.Single(errors);
+        Assert.Equal("definition is required", error.Message);
     }
 
     [Fact]

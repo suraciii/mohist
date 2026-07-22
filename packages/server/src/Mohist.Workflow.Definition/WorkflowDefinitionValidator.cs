@@ -2,10 +2,8 @@ namespace Mohist.Workflow.Definition;
 
 public static class WorkflowDefinitionValidator
 {
-    public static IReadOnlyList<ValidationError> Validate(WorkflowDefinition definition)
+    public static IReadOnlyList<ValidationError> Validate(WorkflowDefinition? definition)
     {
-        ArgumentNullException.ThrowIfNull(definition);
-
         var errors = new List<ValidationError>();
         if (definition is null)
         {
