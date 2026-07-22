@@ -1027,7 +1027,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionIsParsedFromYamlBlockScalar()
     {
-        var description = MohistWorkflow.Definition.Description;
+        var description = WorkflowProfileCatalog.Profile.Description;
 
         Assert.NotNull(description);
         Assert.Contains("plan (proposal, specs, design, tasks, self-review)", description!);
@@ -1041,7 +1041,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionPreservesMultilineLineBreaks()
     {
-        var description = MohistWorkflow.Definition.Description;
+        var description = WorkflowProfileCatalog.Profile.Description;
 
         Assert.NotNull(description);
         Assert.Contains("→", description!);
@@ -1055,8 +1055,8 @@ public class MohistLocalWorkflowProfileSpecs
         var yaml = WorkflowYamlSerializer.ToYaml(definition);
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
 
-        Assert.Equal(definition.Description, reparsed.Description);
-        Assert.Contains("description:", yaml);
+        Assert.Null(reparsed.Description);
+        Assert.DoesNotContain("description:", yaml);
     }
 
     [Fact]
@@ -1075,15 +1075,15 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void WorkflowYamlParser_ProfileWithSingleLineDescription_ParsesItVerbatim()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         description: Simple description
         stages:
           - stage: build
             tasks: []
             checks: []
-        """);
+        """));
 
-        Assert.Equal("Simple description", definition.Description);
+        Assert.Contains("description", ex.Message);
     }
 
     [Fact]
@@ -1091,8 +1091,8 @@ public class MohistLocalWorkflowProfileSpecs
     {
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), profile.Description);
-        Assert.Equal(MohistWorkflow.Definition.Description!.TrimEnd(), profile.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description, profile.Description);
+        Assert.Equal(WorkflowProfileCatalog.Profile.Description.TrimEnd(), profile.Description);
     }
 
     [Fact]
@@ -1172,16 +1172,8 @@ public class MohistLocalWorkflowProfileSpecs
                 checks: []
             """;
 
-        var parsed = MohistWorkflow.ParseYaml(descriptionOnlyYaml);
-
-        Assert.Equal("build", parsed.Stages[0].Stage);
-        Assert.Empty(parsed.Stages[0].Tasks);
-        Assert.Empty(parsed.Stages[0].Checks);
-        Assert.Contains("user-facing description", parsed.Description);
-
-        var yaml = WorkflowYamlSerializer.ToYaml(parsed);
-        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
-        Assert.Equal(parsed.Description, reparsed.Description);
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(descriptionOnlyYaml));
+        Assert.Contains("id", ex.Message);
     }
 
     [Fact]

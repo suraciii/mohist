@@ -203,15 +203,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             new StageDefinition(
                 "build",
                 [new("load-tasks", "Load tasks", "spec/load")],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } }))
+            }));
 
         var (load, r1) = await PollWorkAnyAsync();
 
@@ -248,15 +247,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.4" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { model = "kimi-for-coding/k2p6" } }),
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new { agent = new { model = "openai/gpt-5.4" } }))
+            }));
 
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
@@ -284,15 +282,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
                     ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.review }}"),
                     ["options"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
                 })],
-                [],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.5" })
-                })
-        ], Variables: new Dictionary<string, JsonElement?>
-        {
-            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
-        }));
+                [])
+        ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["check"] = new(JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "openai/gpt-5.5" } }))
+            }));
 
         var (task, _) = await PollWorkAnyAsync();
 

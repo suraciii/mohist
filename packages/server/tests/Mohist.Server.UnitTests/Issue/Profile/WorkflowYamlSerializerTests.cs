@@ -79,6 +79,23 @@ public class WorkflowYamlSerializerTests
     }
 
     [Fact]
+    public void WorkflowYamlSerializer_RoundTripsPersistedProfile()
+    {
+        var definition = new WorkflowDefinition(
+            "spec/workflow",
+            [new StageDefinition("build", [], [])]);
+        var json = JsonSerializer.Serialize(
+            new WorkflowProfile("spec/workflow", "Spec", string.Empty, definition),
+            WorkflowYamlSerializer.JsonOptions);
+
+        var profile = WorkflowYamlSerializer.FromProfileJson(json);
+
+        Assert.Equal("spec/workflow", profile.Id);
+        Assert.Equal("Spec", profile.Name);
+        Assert.Equal("build", Assert.Single(profile.Definition.Stages).Stage);
+    }
+
+    [Fact]
     public void WorkflowYamlSerializer_RoundTripsTaskArtifactCapture()
     {
         var definition = MohistWorkflow.ParseYaml("""

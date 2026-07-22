@@ -22,8 +22,39 @@ public static class WorkflowYamlSerializer
                 throw new InvalidOperationException($"Workflow Definition does not allow top-level field '{property.Name}'");
         }
 
-        return JsonSerializer.Deserialize<WorkflowDefinition>(json, JsonOptions)
-            ?? throw new InvalidOperationException("Workflow Definition JSON is empty");
+        var stages = document.RootElement.TryGetProperty("stages", out var stagesElement)
+            ? stagesElement.EnumerateArray().Select(ParseJsonStage).ToList()
+            : null;
+        if (stages is null)
+            throw new InvalidOperationException("Workflow Definition JSON requires stages");
+
+        var approval = document.RootElement.TryGetProperty("approval", out var approvalElement)
+            ? approvalElement.Deserialize<ApprovalConfig>(JsonOptions)
+            : null;
+        return new WorkflowDefinition(stages, approval);
+    }
+
+    private static StageDefinition ParseJsonStage(JsonElement element)
+    {
+        if (element.TryGetProperty("variables", out _))
+            throw new InvalidOperationException("Workflow Definition does not allow stage field 'variables'");
+
+        return new StageDefinition(
+            element.GetProperty("stage").GetString() ?? throw new InvalidOperationException("Workflow stage requires stage"),
+            element.TryGetProperty("tasks", out var tasks)
+                ? tasks.Deserialize<List<TaskDefinition>>(JsonOptions) ?? []
+                : [],
+            element.TryGetProperty("checks", out var checks)
+                ? checks.Deserialize<List<CheckDefinition>>(JsonOptions) ?? []
+                : [],
+            element.TryGetProperty("requiresApproval", out var requiresApproval)
+                && requiresApproval.ValueKind == JsonValueKind.True,
+            LockBehavior: element.TryGetProperty("lockBehavior", out var lockBehavior)
+                ? lockBehavior.GetString()
+                : null,
+            Resources: element.TryGetProperty("resources", out var resources)
+                ? resources.Deserialize<List<string>>(JsonOptions)
+                : null);
     }
 
     public static string ToJson(WorkflowDefinition definition) =>

@@ -33,3 +33,10 @@
 - New `WorkflowVariableResolutionDefaultsSpecs` passes: 12 tests covering embedded-variable absence, scope and stage precedence, archive default seed/idempotency/default-does-not-overwrite-explicit, marker resolves below explicit Project/Issue/stage, marker wins when nothing else supplies, PATCH/PUT clear the marker, archive visibility across re-reads, global config ignored, repeated start idempotency, and Issue agent seed.
 - New `VariableBundleInitializationDefaultTests` passes: 4 tests covering the VariableBundle merge and marker-clear mechanics.
 - The pre-existing full spec suite still contains failures based on embedded Definition Variables and old definition-shaped fixtures; those scenarios are explicitly migrated by issue-474 T-002 / fixture updates rather than restored with a dual-read path.
+
+## CI Repair
+
+- The failed verify reproduced as 196 SpecTests failing because test persistence serialized bare Definitions while the migrated loader requires Profile envelopes; old YAML fixtures also retained forbidden Definition metadata and Variables.
+- The production root cause was an additional serializer defect: `WorkflowDefinition` has a legacy in-process constructor, so `System.Text.Json` could not deserialize the pure Definition from a Profile envelope. `WorkflowYamlSerializer.FromJson` now parses the allowed `stages` and `approval` fields explicitly and rejects stage Variables in JSON as well.
+- Spec persistence helpers now write Profile envelopes, metadata assertions use Profile assets, and stage-agent scenarios seed Issue Variables with stage overlays.
+- `npm run verify` passes: build succeeded; CLI 1374, Server unit 1303, Arch 30, Server spec 3021, Web 5156, Runner 1370 tests passed.

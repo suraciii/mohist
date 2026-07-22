@@ -323,12 +323,12 @@ public class WorkflowRerunFromStageApiSpecs
             {
                 ProjectId = projectId,
                 TemplateId = definition.Id,
-                Template = JsonSerializer.Serialize(definition, Mohist.Server.Workflow.Services.WorkflowYamlSerializer.JsonOptions),
+                Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
             });
         }
         else
         {
-            existingTemplate.Template = JsonSerializer.Serialize(definition, Mohist.Server.Workflow.Services.WorkflowYamlSerializer.JsonOptions);
+            existingTemplate.Template = WorkflowGrainTestHelpers.SerializeProfile(definition);
             existingTemplate.UpdatedAt = TestTime.UtcNow;
         }
 

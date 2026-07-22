@@ -533,12 +533,12 @@ public class WorkflowRunControlApiSpecs
             {
                 ProjectId = projectId,
                 TemplateId = definition.Id,
-                Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions),
+                Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
             });
         }
         else
         {
-            existingTemplate.Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+            existingTemplate.Template = WorkflowGrainTestHelpers.SerializeProfile(definition);
             existingTemplate.UpdatedAt = TestTime.UtcNow;
         }
 

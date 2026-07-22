@@ -49,10 +49,7 @@ public class WorkflowApprovalConfigSpecs : WorkflowProfileManagerTestFactory
                     RequiresApproval: true),
             },
             Approval: approval);
-        var templateJson = JsonSerializer.Serialize(def, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(def);
 
         await SeedProjectTemplateAsync("approval_proj", runId, "approval-template", templateJson);
 

@@ -201,7 +201,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             {
                 ProjectId = projectId,
                 TemplateId = definition.Id,
-                Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions),
+                Template = WorkflowGrainTestHelpers.SerializeProfile(definition),
             });
             await db.SaveChangesAsync();
         }

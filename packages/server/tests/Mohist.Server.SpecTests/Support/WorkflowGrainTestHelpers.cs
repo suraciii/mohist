@@ -205,6 +205,11 @@ public static class WorkflowGrainTestHelpers
     public static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 
+    public static string SerializeProfile(WorkflowDefinition definition) =>
+        JsonSerializer.Serialize(
+            new WorkflowProfile(definition.Id, definition.Id, string.Empty, definition),
+            WorkflowYamlSerializer.JsonOptions);
+
     public static async Task SeedWorkflowTemplateAsync(string connectionString, string workflowId, WorkflowDefinition definition, string? projectId = null)
     {
         projectId ??= TestProjectId(workflowId);
@@ -214,7 +219,7 @@ public static class WorkflowGrainTestHelpers
 
         await using var db = new MohistDbContext(options);
         var templateId = definition.Id;
-        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var templateJson = SerializeProfile(definition);
 
         var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)

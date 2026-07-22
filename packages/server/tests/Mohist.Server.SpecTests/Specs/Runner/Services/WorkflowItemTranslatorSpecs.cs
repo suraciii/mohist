@@ -100,14 +100,12 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
     private async Task SeedProfileAsync(string projectId, string workflowRunId, WorkflowRun run)
     {
         await using var db = new MohistDbContext(_database.Options);
-        var definitionJson = JsonSerializer.Serialize(
-            new WorkflowDefinition("spec/workflow",
+        var definitionJson = WorkflowGrainTestHelpers.SerializeProfile(new WorkflowDefinition("spec/workflow",
             [
                 new StageDefinition("build",
                     [new("task-1", "Task 1", "spec/task")],
                     [new("check-1", "Check 1", "spec/check")]),
-            ]),
-            WorkflowYamlSerializer.JsonOptions);
+            ]));
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {

@@ -41,10 +41,9 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
         for (var i = 0; i < stageCount; i++)
             stages.Add(new StageDefinition($"stage-{i}", [], []));
         var def = new WorkflowDefinition(id, stages);
-        return JsonSerializer.Serialize(def, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
+        return JsonSerializer.Serialize(
+            new WorkflowProfile(id, id, string.Empty, def),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     }
 
     protected static string SerializeDefinitionWithStages(
@@ -64,10 +63,9 @@ public abstract class WorkflowProfileManagerTestFactory : IDisposable
         }
 
         var def = new WorkflowDefinition(id, stages);
-        return JsonSerializer.Serialize(def, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
+        return JsonSerializer.Serialize(
+            new WorkflowProfile(id, id, string.Empty, def),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     }
 
     protected async Task SeedProjectTemplateAsync(string projectId, string runId, string templateId, string templateJson)

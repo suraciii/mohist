@@ -16,12 +16,10 @@ public class DispatchVariableSnapshotSpecs : WorkflowGrainSpecs
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinition("build", [new("load-tasks", "Load tasks", "spec/load")], [new("check-1", "Check 1", "spec/check")],
-                Variables: new Dictionary<string, JsonElement?>
-                {
-                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "model-a" })
-                })
+            new StageDefinition("build", [new("load-tasks", "Load tasks", "spec/load")], [new("check-1", "Check 1", "spec/check")])
         ]));
+        await PatchIssueVariablesAsync(TestIssueNumber(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new { agent = new { type = "opencode", model = "model-a" } })));
 
         var (load, r1) = await PollWorkAnyAsync();
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(

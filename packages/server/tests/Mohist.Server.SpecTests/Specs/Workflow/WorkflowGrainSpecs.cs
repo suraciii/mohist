@@ -348,7 +348,7 @@ public abstract class WorkflowGrainSpecs
 
         await using var db = new MohistDbContext(options);
         var templateId = definition.Id;
-        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
 
         var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)

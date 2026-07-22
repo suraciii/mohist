@@ -81,7 +81,7 @@ public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
                     ["projectId"] = projectId,
                     ["issueNumber"] = "42",
                 }));
-        var definitionJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var definitionJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
 
         await using var db = new MohistDbContext(_database.Options);
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile

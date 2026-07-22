@@ -113,7 +113,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var templateJson = WorkflowGrainTestHelpers.SerializeProfile(definition);
         var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
         if (template is null)
         {
