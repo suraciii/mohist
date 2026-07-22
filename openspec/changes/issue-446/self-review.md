@@ -1,44 +1,39 @@
-# Self-Review — issue-446
+# Self-Review (re-run) — issue-446
 
-Reviewing the plan artifacts (`proposal.md`, `design.md`, `tasks.json`, `specs/profile-action-validation/spec.md`) against issue #446's acceptance criteria and non-goals.
+Re-reviewing the plan artifacts (`proposal.md`, `design.md`, `tasks.json`, `specs/profile-action-validation/spec.md`) against issue #446 after the fix round. The prior review raised one must-fix (F1: a spec scenario describing an impossible required-and-defaulted catalog state that contradicted dispatch) plus three non-blocking observations; this run verifies those were resolved and scans for new issues.
+
+## Prior findings — resolution status
+
+- **F1 (was must-fix) — RESOLVED.** `specs/.../spec.md` Requirement "Missing required inputs are rejected" now mirrors dispatch: the requirement text states a required input that `with` omits is rejected considering only presence (defaults are a dispatch-time concern; a catalog input is never both required and defaulted). The impossible scenario was replaced by "an optional input may be omitted". The same defect was fixed consistently in `tasks.json` T-002 (acceptance criterion rewritten) and `design.md` D6 (null/required parenthetical corrected). A residue scan (`required input with a catalog default`, `for which the catalog declares no default`, `with no catalog default`) returns no matches in any plan artifact.
+- **O2 — RESOLVED.** Design D3 now specifies that a runner with a null `RegisteredAt` is ordered after valued runners, so the "most recent" comparison is total and deterministic.
+- **O3 — RESOLVED.** Spec R6 gained "an explicit null on a required input is rejected", mirroring dispatch where a present-but-null required value fails the kind check. The null matrix is now complete: required/omitted→reject, required/null→reject, optional/omitted→accept, optional/null→absent.
+- **O1 — ADDRESSED.** The design risk wording was softened from "already valid" to "expected to be valid … not yet covered by a test", cross-referencing the existing Open Question on built-in catalog-coverage CI. This remains an acknowledged open question, not a defect.
 
 ## Acceptance-criteria coverage
 
-| AC | Where covered | Status |
-|---|---|---|
-| AC1 — unknown `uses` rejected (task/check, action name, YAML path, Action source) | spec R2; design D1; tasks T-002 + T-003 | Covered |
-| AC2 — unknown `with` / missing required / constant type rejected with field + reason | spec R4/R5/R6; design D6; task T-002 | Covered |
-| AC3 — tombstone "removed" distinct from "unknown" | spec R3; design D1; task T-002 | Covered |
-| AC4 — template inputs: field-name only at save; value type at dispatch | spec R7; design D5; task T-002; R10 boundary | Covered |
-| AC5 — Definition/template rules only from #432; no second parser | spec R1 (scenario) + R9; design D1/D8; task T-002/T-003 | Covered |
-| AC6 — no catalog ⇒ no false reject + outcome states skipped | spec R8; design D4; task T-003 | Covered |
-| AC7 — dispatch fail-closed preserved | spec R10; design D8 + risk; task T-003 (regression AC) | Covered |
+All seven criteria are covered and trace to artifacts:
 
-Non-goals (CLI stays catalog-free; no multi-runner merge; no manifest changes) are consistently reflected across proposal, design Non-Goals, and task scope. The `tasks.json` dependency graph is a valid DAG (T-001, T-002 independent; T-003 depends on both), every dependency points to a strictly-lower-priority task, and each task carries its own test coverage with no standalone test task. Spec format is compliant (10 requirements, 25 scenarios, all `####`, SHALL/MUST, no delta headers).
+| AC | Coverage |
+|---|---|
+| AC1 unknown `uses` (task/check, action name, path, source) | spec R2; design D1; tasks T-002 + T-003 |
+| AC2 unknown `with` / missing required / constant type | spec R4/R5/R6; design D6; task T-002 |
+| AC3 tombstone "removed" vs "unknown" | spec R3; design D1; task T-002 |
+| AC4 template inputs: name-only at save, type at dispatch | spec R7; design D5; tasks T-002; boundary R10 |
+| AC5 Definition/template rules only from #432; no second parser | spec R1 + R9; design D1/D8; tasks T-002/T-003 |
+| AC6 no catalog ⇒ no false reject + outcome states skipped | spec R8; design D4; task T-003 |
+| AC7 dispatch fail-closed preserved | spec R10; design D8 + risk; task T-003 regression AC |
 
-## Findings
+Non-goals (CLI stays catalog-free; no multi-runner merge; no manifest changes) are consistently reflected across proposal, design Non-Goals, and task scope.
 
-### F1 (must-fix) — Spec R5 describes an impossible catalog state and contradicts dispatch semantics
+## Mechanical verification
 
-**Where:** `specs/profile-action-validation/spec.md`, Requirement "Missing required inputs are rejected" — both the requirement text ("…a required input that `with` omits **and for which the catalog declares no default**…") and its scenario "required input with a catalog default is accepted when omitted".
-
-**What is wrong:**
-
-1. A catalog entry is **never** both required and defaulted. #444's manifest validation rejects this combination at definition time: `packages/runner/src/actions/define-action.ts:140-142` throws `"must not be both required and defaulted"`. Since the catalog is the projection of validated manifests, no real catalog contains a required-and-defaulted input. The "for which the catalog declares no default" qualifier is therefore meaningless, and the scenario cannot be constructed from a real catalog.
-2. The scenario's expectation ("accepted when omitted") contradicts the dispatch behavior this change is explicitly built to mirror. At dispatch, the missing-required check runs *before* defaults are ever applied (`packages/runner/src/actions/input-validation.ts:52-61`), so an omitted required field is rejected regardless of any default. A faithful save-time validator (per design D6) would reject, not accept.
-
-**Impact:** The implementer of T-002 codes tests against this spec. Read literally, the spec demands a test asserting "accepted" for a state the system forbids and that dispatch would reject — directly opposing design D6's mirror-the-Runner rule. This is a contradiction *within* the plan (spec vs design D6 vs #444 invariant).
-
-**Suggested fix (for the fixer task):** Rewrite R5 so save mirrors dispatch — an omitted required input is rejected; defaults are a dispatch-time concern and not a save-time acceptance factor. Concretely: drop the "for which the catalog declares no default" qualifier from the requirement text, and replace the "required input with a catalog default" scenario with one that asserts an *optional* input (defaulted or not) may be omitted at save without error, plus the existing "omitted required input is rejected" scenario.
-
-### Observations (non-blocking, no fix required to proceed)
-
-- **O1 — Built-in-vs-catalog validity is asserted, not verified.** Design D8/risk states built-in profiles are "already valid against the catalog (migrated by #432/#444)", but there is no test asserting a built-in profile passes the new catalog check against a fixture catalog. A latent mismatch (e.g. a built-in `with` field not in the shipped manifest) would only surface at the first runner-assisted save. This is already listed as an Open Question ("Catalog-check coverage for built-ins in CI"); flagging only so it is not forgotten.
-- **O2 — `null`-`RegisteredAt` selection edge.** Design D3 selects "max `RegisteredAt`", but `RunnerInfo.RegisteredAt` is nullable. The selection rule does not state how a null `RegisteredAt` participates in the max. Minor implementation detail for T-001; not plan-blocking.
-- **O3 — required-but-explicitly-`null` has no dedicated scenario.** R6's general "null matches no kind" rule covers it implicitly (a required field present-but-null fails the kind check, mirroring dispatch `input-validation.ts:71-76`), so behavior is correct; an explicit scenario would just remove ambiguity. Not a blocker.
+- `tasks.json` is valid JSON; 3 tasks; dependency graph is a valid DAG (T-001, T-002 independent; T-003 depends on both); every dependency points to a strictly-lower-priority task.
+- Spec is format-compliant: 10 `### Requirement:` blocks, 26 `#### Scenario:` blocks, no malformed 3-hashtag scenarios, no `## ADDED/MODIFIED/REMOVED` headers, normative SHALL/MUST throughout.
+- Each task carries its own test coverage; there is no standalone test task.
+- Save-time and dispatch-time semantics are consistent across every rule (unknown/tombstoned `uses`, unknown field, missing required, type mismatch, optional-null, required-null, template-name-only) — verified against `packages/runner/src/actions/input-validation.ts` and `define-action.ts`.
 
 ## Verdict
 
-The plan is coherent across proposal/specs/design/tasks and covers all seven acceptance criteria with a sound task split. However, finding F1 is a concrete contradiction in the spec contract that T-002 builds against — it must be corrected before implementation so the save-time and dispatch-time required/default semantics agree.
+The prior must-fix is fully resolved across spec, tasks, and design with no residue; the non-blocking observations are addressed; all acceptance criteria are covered; and the artifacts are mechanically sound. The plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
