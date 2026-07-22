@@ -273,7 +273,8 @@ export class PiRuntime {
     if (!session.ok) return session.failure
 
     const diagnostics: PiDiagnostic[] = []
-    let stopConfirmed = !session.value.isStreaming
+    const wasStreaming = session.value.isStreaming
+    let stopConfirmed = !wasStreaming
     let stopEventObserved = false
     const unsubscribe = session.value.subscribe((event) => {
       if (isPiStopEvent(event)) stopEventObserved = true
@@ -281,7 +282,7 @@ export class PiRuntime {
     try {
       await session.value.abort()
       await Promise.resolve()
-      stopConfirmed = !session.value.isStreaming && stopEventObserved
+      stopConfirmed = !session.value.isStreaming && (!wasStreaming || stopEventObserved)
       if (!stopConfirmed) {
         stopConfirmed = false
         diagnostics.push(diagnostic("abort-unconfirmed", this.mask("Pi did not confirm that the turn stopped through its event sequence")))

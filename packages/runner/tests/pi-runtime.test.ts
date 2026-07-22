@@ -393,6 +393,15 @@ describe("PiRuntime", () => {
     expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: false } })
   })
 
+  it("does not require a stop event when cancelling an already-idle session", async () => {
+    const session = new FakeSession()
+    const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
+    await runtime.start()
+
+    const result = await runtime.cancel({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } })
+    expect(result).toMatchObject({ ok: true, value: { cancelled: true, stopConfirmed: true } })
+  })
+
   it("serializes a concurrent idle follow-up with an in-flight workflow turn on the same session", async () => {
     const session = new FakeSession()
     const runtime = new PiRuntime({ agentDir: "/global", sdkFactory: factory(session) })
