@@ -117,7 +117,7 @@ Remove `RuntimeSessionLineage`/`RuntimeSessionLineageEntry` from `AgentSessionSt
 - **[Double input submission during recovery under network partition] →** The runner journals the submit by `operationId` and submits only after the server confirms the binding (D3); `session.input` + `idle→active` is atomic on the server, so a second attempt sees `active`/stale-expected and is rejected. Residual risk is a partition after server-ack but before runtime-submit — the journal makes the retry idempotent.
 - **[Breaking API/Web contract] →** Coordinated server+web change in one deployment; no external API consumers exist today (single self-hosted deployment). The CLI does not derive session status from history, so it is unaffected.
 - **[Removing legacy transcript rows loses audit history] →** Trade-off vs. a clean model. Mitigation: old `session.closed`/`followup_*` rows can remain as inert transcript parts (no consumer reads them post-change); a destructive cleanup migration is optional and only drops `Type IN (session.closed, session.followup_completed, session.followup_failed)` parts if audit retention is not required.
-- **[OpenCode Reset is not implemented (`command-runtime.ts:163-176` returns `unavailable`)] →** Out of scope to *add* OpenCode Compact, but Reset-via-create for OpenCode is implied by D4 if OpenCode sessions are to support Reset/recovery. Recovery's OpenCode create reuses `OpenCodeRuntime.createSession` (`runtime.ts:120-154`); the Reset command path can route through the same rebind operation without needing a new OpenCode `reset()`.
+- **[OpenCode Reset was not implemented (`command-runtime.ts:169-171` returned `unavailable`)] →** This change wires the OpenCode `SessionCommand` reset through `OpenCodeRuntime.createSession` (`runtime.ts:120-154`) + the unified rebind (D4), mirroring the Pi reset path. T-003 covers this; no new OpenCode `reset()` method is needed. OpenCode Compact remains out of scope.
 
 ## Migration Plan
 
@@ -128,8 +128,10 @@ Active development, single deployment, no version-compatibility constraint — s
 3. **Activity backfill.** Existing sessions have no `Activity` field; default to `Idle` on deserialization (the snapshot default). A session mid-execution at cutover will appear `idle`, which is safe (recovery/input re-establishes state).
 4. **Rollback.** Revert the code. Lineage is already gone from old state (acceptable — it is being removed). No forward-only data format is introduced. Re-adding the field repopulates from `null`/empty.
 
-## Open Questions
+## Resolved Questions
 
-- **`active → idle` signal granularity.** Does the runner emit one `session.activity:{idle}` per turn end, or should intermediate runtime events (e.g. a long idle gap between tool calls) also be classified? Proposal: one transition per accepted input's turn end, matching the `session.input` boundary; long inter-tool gaps stay `active`.
-- **OpenCode Reset enablement.** Whether to wire OpenCode Reset through the unified rebind operation (D4) in this change, or leave OpenCode Reset unsupported and only implement OpenCode *recovery* (create-on-missing). Recovery needs OpenCode create regardless; Reset is a separate user action. Decide whether #484 covers both or only recovery.
-- **`unknown` watchdog scope.** Whether the runner-disconnect → `unknown` server watchdog (D2) is in this change or a follow-up. Without it, a runner crash mid-turn leaves a session `active` until the next input. Recommend including a minimal disconnect watcher given the high-risk label.
+- **`active → idle` signal granularity.** The runner emits one `session.activity:{idle}` per accepted input's turn end, matching the `session.input` boundary. Long inter-tool gaps within a turn stay `active`; only turn completion transitions to `idle`.
+- **OpenCode Reset enablement.** OpenCode Reset is included in this change. The spec requires uniform Reset semantics (AC10) and the runner-side `SessionCommand` reset for OpenCode currently returns `unavailable` (`command-runtime.ts:169-171`). T-003 wires the OpenCode reset command through `OpenCodeRuntime.createSession` + the unified rebind (D4), mirroring the Pi reset path (`dispatchPiReset`), so an OpenCode session that is `idle` and receives a Reset creates a new empty session instead of failing.
+- **`unknown` watchdog scope.** The runner-disconnect → `unknown` server watchdog is included in this change (T-001). Without it, a runner crash mid-turn leaves a session `active` until the next input. A minimal disconnect watcher via `RunnerConnectionTracker` transitions active sessions to `unknown` when their runner disconnects.
+
+No open questions remain.

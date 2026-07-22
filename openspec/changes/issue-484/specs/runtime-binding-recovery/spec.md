@@ -54,6 +54,12 @@ Before submitting a new independent input (a Workflow task, an AgentJob, or an i
 - **THEN** the owning TaskRun or AgentJob SHALL continue on the same work attempt
 - **AND** SHALL NOT consume a Workflow recovery budget or start a new attempt
 
+#### Scenario: A healthy binding is reused across normal operations
+
+- **WHEN** a normal task, retry, Follow-up, Compact, model change, or Runner restart occurs and the current Runtime Session is healthy
+- **THEN** the current binding SHALL be reused without creating a new physical Runtime Session
+- **AND** the resolve step SHALL return ready and the binding SHALL remain unchanged
+
 ### Requirement: Non-recovery conditions preserve the binding and refuse replay
 
 Recovery SHALL NOT trigger, and the current binding SHALL be preserved, when any of the following hold: the activity is `active` or `unknown`; the input may already have been submitted or its acceptance is unknown; the runtime is temporarily unavailable; a request times out; a permission failure occurs; a server-side error occurs; data is corrupt; the response cannot be classified as present or missing; or the request lands on a Runner other than the binding's owning Runner. In every non-recovery case the operation SHALL fail explicitly and SHALL NOT automatically replay the input.
