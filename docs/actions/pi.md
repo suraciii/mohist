@@ -83,12 +83,15 @@ AgentSession 当前绑定的同一个物理 Pi Session。task 变化、task 重�
 | `options.model` 或 `options.variant` 变化 | 保持不变 |
 | Compact | 保持不变 |
 | Reset | 建立新的空 Session，并记录会话沿革 |
+| 开始新 Turn 前明确确认当前 Session 文件已不存在 | 自动建立新的空 Session，并把缺失恢复记录到会话沿革 |
 | 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
 | 执行后端变化 | 建立新物理 Session，并记录会话沿革 |
 
-如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
-新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而
-合并。
+自动恢复只处理负责当前绑定的 Runner 上，Pi 明确确认旧 Session 文件已不存在、且本次
+输入尚未被接受的情况。请求落到其它 Runner、Session 文件损坏、执行后端暂时不可用、
+响应无法判断，或 Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。
+新 Session 没有旧上下文，替换原因会显示在同一 AgentSession 的会话沿革中。不同
+`session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而合并。
 
 如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
 物理 Pi Session 中继续这个收尾回合。这个收尾不会替换会话，也不要求用户先 Reset；
@@ -115,8 +118,9 @@ Compact 是用户在 Session 中发起的操作，不是 Workflow Action。Mohis
 摘要来模拟压缩，也不会在 Pi 压缩失败时静默降级。
 
 Runner 重启后，Mohist 仍使用 AgentSession 保存的 Pi Session 绑定继续这些操作。如果
-对应的 Runtime Session 已不存在，操作明确失败，并提示用户 Reset；不会悄悄创建一段
-看似连续的新对话。
+开始新 Turn 前确认对应的 Session 文件已不存在，Workflow task、AgentJob 或空闲
+Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中回合的操作不会这样
+恢复；Reset 即使在旧 Session 已不存在时仍可建立新的空 Session。
 
 ## 完成与失败
 
@@ -136,8 +140,8 @@ timeout，也不会替换当前 Session 绑定或自动 Reset。
 
 provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 Pi 回合并让
 本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理 Pi Session 的绑定
-保持不变；Session 回到空闲后，可以选择其他模型继续，无需 Reset。只有当前物理
-Session 已不存在，或用户明确要求清空上下文时才使用 Reset。
+保持不变；Session 回到空闲后，可以选择其他模型继续，无需 Reset。Reset 只表达用户
+明确要求清空上下文；物理 Session 缺失由下一个安全的新 Turn 自动恢复。
 
 如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的回合
 显示为已经安全停止。
@@ -173,7 +177,7 @@ AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型�
 | `runtime-unavailable` | Pi 执行能力尚未就绪或不可用 |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `runtime-session-missing` | 绑定的 Pi Session 已不存在，需要 Reset |
+| `runtime-session-missing` | Pi Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
 | `unavailable-runtime` | Pi 报告不可用 |
 | `turn-failed` | 回合执行失败（含 provider 额度、余额或计费耗尽） |
 
@@ -185,3 +189,5 @@ Workflow AgentSession，并在现有 Session 页面展示 transcript、工具、
 
 - Mohist Agent 的 AgentJob 执行后端选择仍未实装，当前 Mohist Agent 固定使用 OpenCode。
 - 面向 runtime 的模型 catalog 与 Web 模型选择 UI 仍未实装。
+- 缺失的 Pi Session 文件目前仍会让部分新 Turn 失败，自动重建与重新绑定尚未落地；
+  对应实施 issue 待从本 spec 创建。

@@ -89,9 +89,14 @@ Concept ownership and origin rules are defined in
 - Current runtime binding also retains `runnerId` and immutable `workDir` so Session commands
   survive Runner process restart. A Workflow adapter rejects a request whose authoritative
   workspace differs from that immutable binding; it never silently reuses the old directory.
-- Runtime Session lineage records `runtime`, `runtimeSessionId`, and `boundAt`.
-- Compact does not change `runtimeSessionId`. Reset or runtime change appends a new lineage entry
-  while preserving `sessionId`. A work directory change requires a new logical Session identity.
+- Binding replacement compares the complete expected binding: `runnerId`, `runtime`,
+  `runtimeSessionId`, and `workDir`. Confirmed-missing recovery stays on the bound Runner and only
+  replaces `runtimeSessionId`; Runner handoff is not missing recovery.
+- Runtime Session lineage records `runtime`, `runtimeSessionId`, `boundAt`, and `reason`. `reason`
+  is one of `initial`, `reset`, `runtime-change`, or `missing-recovery`; it is not free text.
+- Compact does not change `runtimeSessionId`. Reset, runtime change, or confirmed missing recovery
+  appends a new lineage entry while preserving `sessionId`. A work directory change requires a new
+  logical Session identity.
 
 ## WorkflowRun metadata
 
