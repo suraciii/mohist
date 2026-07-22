@@ -178,6 +178,13 @@
   110 tests.
 - A later full `npm test` run reached the server spec suite but timed out in
   `RunnerGrainConcurrencySpecs.ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate`.
-  The test passes alone in 420 ms. The shared host had unrelated long-running
-  server test processes from other workspaces, so this remaining timeout is
-  external to issue-476 and was not changed here.
+- The timeout was reproduced as a verification side effect: the prior timed-out
+  `dotnet test Mohist.sln` left its test host alive in this workspace. After
+  terminating only that process tree, the isolated test passed in 421 ms and
+  the full server suite passed all 3008 tests.
+- A subsequent full Web run passed all 388 files / 5156 tests, and the full
+  Runner suite passed all 1370 tests. The original full verification is now
+  complete after removing the stale verifier process.
+- Final verification: `npm test` passed the full .NET solution (1358 CLI,
+  1290 server unit, 30 architecture, 3008 server spec tests), Web CI (5156),
+  and Runner CI (1370). The focused issue-476 CLI selection passed 110 tests.
