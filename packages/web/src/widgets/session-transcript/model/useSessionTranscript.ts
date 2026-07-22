@@ -149,10 +149,15 @@ export function useSessionTranscript({
     setIsStreaming(false)
   }, [])
 
-  const bumpTranscriptVersion = useCallback(() => {
+  const bumpTranscriptVersion = useCallback((engageActivity = true) => {
     setTranscriptVersion((version) => version + 1)
     if (streamingTimerRef.current !== null) {
       clearTimeout(streamingTimerRef.current)
+    }
+    if (!engageActivity) {
+      isStreamingRef.current = false
+      setIsStreaming(false)
+      return
     }
     isStreamingRef.current = true
     setIsStreaming(true)
@@ -162,8 +167,8 @@ export function useSessionTranscript({
     }, 2000)
   }, [clearStreaming])
 
-  const markNewContent = useCallback(() => {
-    bumpTranscriptVersion()
+  const markNewContent = useCallback((engageActivity = true) => {
+    bumpTranscriptVersion(engageActivity)
     if (!isNearBottomRef.current) {
       setNewContentAvailable(true)
     }
@@ -205,6 +210,11 @@ export function useSessionTranscript({
 
   useEffect(() => {
     if (!isRunning) {
+      setIsThinking(false)
+      return
+    }
+    const latestTurn = turns.at(-1)
+    if (latestTurn?.user.kind === 'followup' && latestTurn.assistant.length === 0) {
       setIsThinking(false)
       return
     }
@@ -383,8 +393,11 @@ export function useSessionTranscript({
           kind: detail.kind,
           sentAt: detail.sentAt,
         }))
-        setIsThinking(true)
-        markNewContentRef.current()
+        const isFollowup = detail.kind === 'followup'
+        if (!isFollowup) {
+          setIsThinking(true)
+        }
+        markNewContentRef.current(!isFollowup)
       }),
     )
 

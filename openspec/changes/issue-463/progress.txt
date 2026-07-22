@@ -18,3 +18,9 @@
 - Server live-state application and transcript summary projection both read only `resolvedModel`; model-only `model.resolved` payloads are intentionally ignored.
 - Web `model.resolved` live-event typing now exposes only `resolvedModel`.
 - Verification passed: runner typecheck, runner projector tests, runner test-boundary/typecheck checks, server summary unit tests, server runtime-event specs, and web typecheck/contract test.
+
+## T-003
+
+- Follow-up `session.input` still appends the prompt turn, but no longer engages thinking or streaming presentation. Transcript-only notifications can opt out of activity engagement; the existing running-without-content inference also stays idle for a follow-up-only turn until a runtime response event arrives.
+- Server activity semantics and recovery code were left unchanged.
+- Verification passed: focused transcript tests (19), full web suite (5,104 tests), web typecheck, and `Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent` server spec.

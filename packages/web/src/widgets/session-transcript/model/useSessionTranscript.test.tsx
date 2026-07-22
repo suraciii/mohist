@@ -39,6 +39,10 @@ function Wrapper({
       <div data-testid="turn-outcome">{outcome}</div>
       <div data-testid="error-message">{error?.type === 'error' ? error.message : ''}</div>
       <div data-testid="session-status">{result.isFinalizing ? 'finalizing' : 'running'}</div>
+      <div data-testid="thinking-state">{result.isThinking ? 'thinking' : 'idle'}</div>
+      <div data-testid="streaming-state">{result.isStreaming ? 'streaming' : 'idle'}</div>
+      <div data-testid="turn-count">{result.turns.length}</div>
+      <div data-testid="latest-user">{result.turns.at(-1)?.user.text ?? ''}</div>
     </div>
   )
 }
@@ -448,6 +452,49 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('error-message')).toHaveTextContent('Follow-up rejected')
     expect(screen.getByTestId('session-status')).toHaveTextContent('running')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', 'project-1', 'session-84'] })
+  })
+
+  it('renders follow-up input without engaging activity until a runtime response arrives', () => {
+    renderSessionTranscript([persistedEvent('Earlier response')])
+
+    act(() => {
+      dispatchAgentEvent('session.input', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: 'Continue',
+        kind: 'followup',
+        sentAt: '2026-06-12T00:01:00.000Z',
+      })
+    })
+
+    expect(screen.getByTestId('transcript')).toHaveTextContent('Earlier response')
+    expect(screen.getByTestId('turn-count')).toHaveTextContent('2')
+    expect(screen.getByTestId('latest-user')).toHaveTextContent('Continue')
+    expect(screen.getByTestId('thinking-state')).toHaveTextContent('idle')
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'runtime-84',
+        runtime: 'opencode',
+        text: 'Response',
+      })
+    })
+
+    expect(screen.getByTestId('transcript')).toHaveTextContent('Response')
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('streaming')
+  })
+
+  it('does not infer thinking for a follow-up-only turn while the session is running', () => {
+    renderSessionTranscript([{
+      ...followupTurn(),
+      assistant: [],
+    }])
+
+    expect(screen.getByTestId('thinking-state')).toHaveTextContent('idle')
+    expect(screen.getByTestId('streaming-state')).toHaveTextContent('idle')
   })
 
   it('reasoning.delta interrupt closes the open text part and a later text delta opens a new part (distinct blocks)', () => {
