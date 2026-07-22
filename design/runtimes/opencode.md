@@ -145,7 +145,9 @@ CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 rea
 
 AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)，Runtime 身份
 字段命名见 [`conventions.md`](../conventions.md)。`OpenCodeRuntime` 接收已经解析好的逻辑
-Session 目标，不能创建或改变其来源。
+Session 目标，不能创建或改变其来源。首次绑定与缺失恢复的通用顺序、expected binding
+裁决和操作矩阵以 [`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复)
+为唯一权威。
 
 由 Workflow 拥有的工作从 WorkflowRun 与 session name 解析目标；省略 name 时使用
 Work ID。由 AgentJob 拥有的工作直接接收 dispatch 时创建的 AgentSession ID。
@@ -155,7 +157,7 @@ Work ID。由 AgentJob 拥有的工作直接接收 dispatch 时创建的 AgentSe
 提交 Prompt；否则一次已执行但未绑定的回合会让后续 task 无法证明应复用哪个上下文。
 重复持久化同一个 Session ID 必须幂等，不得形成新的 lineage。
 
-物理 Session 的复用只由逻辑 AgentSession 的当前绑定、Runtime 和工作目录决定。同一
+物理 Session 的复用只由逻辑 AgentSession 的当前绑定、Runner、Runtime 和工作目录决定。同一
 WorkflowRun 中的同名 session 跨 task、retry 和 Runner 重启都必须解析到当前绑定，且
 工作目录必须相同。调用者请求了不同工作目录时，adapter 在提交 Prompt 前以可操作错误
 拒绝；不得静默采用旧目录，也不得在一次 open 中自动迁移或替换绑定。需要新目录的工作
@@ -166,9 +168,21 @@ variant 变化必须保持同一物理 Session ID。
 
 Model 与 variant 是回合执行参数，不能进入 Session cache key，不能作为是否调用
 `resumeSession` 的门槛，也不能触发 attach replacement 或追加 lineage。复用已有 Session
-时，Runtime 在原物理 Session 上应用本次 model / variant 后执行 Prompt。持久绑定存在但
-Runtime 无法恢复该物理 Session 时，本次工作失败并提示 Reset；不得隐式调用 create
-伪造连续上下文。
+时，Runtime 在原物理 Session 上应用本次 model / variant 后执行 Prompt。
+
+开始新 Turn 前，只有绑定的 `runnerId` 对应的 `OpenCodeRuntime` 可以用
+`client.session.get()` 核对持久绑定。请求落在其它 Runner 时必须先路由回绑定所属 Runner
+或明确失败，其本地 404 不构成该 binding 的 missing 证据。只有绑定所属 Runner 上的
+OpenCode 返回结构化 Session-not-found / HTTP 404，才产生 `definitely-missing` 事实。
+网络失败、超时、认证或权限失败、5xx，以及成功响应缺少预期 ID 都不能归类为 missing；
+缺少 ID 是 SDK / Server 不兼容证据，必须失败，不能创建 replacement。
+
+收到 `definitely-missing` 后，Runtime 在同一 directory 调用 `client.session.create()`。
+创建时使用本次 Turn 已解析的 model；本次没有显式 model 时使用 OpenCode 默认值，variant
+仍在 Prompt 上应用。Runner 必须把 expected 完整 binding、新 ID 和 `missing-recovery`
+原因交给 Session；replacement 保持原 `runnerId`、Runtime 与 directory。等待 binding
+持久化成功后才能记录输入或提交 Prompt。新 Session 立即再次 missing、创建失败或 binding
+被并发改变时，本次 Turn 失败，不做第二轮 create。
 
 worktree cleanup follow-up 是原 task 的后续回合。executor 必须再次调用原 task 已解析的
 Action，并保留相同 WorkflowRun、session name、Work ID 与工作目录，让它走同一 Runtime
@@ -183,13 +197,16 @@ Reset，也不能以 housekeeping 为理由替换绑定。
 
 Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执行：
 
-1. 通过 `client.session.create()` 解析或创建当前物理 Session；
-2. 解析可选 model string，并在 Runtime 内构造 SDK model DTO；
-3. 调用并等待 `client.session.prompt()`，传入 Session ID、directory、prompt parts、
+1. 解析可选 model string，并在 Runtime 内构造 SDK model DTO；
+2. 无 binding 时创建物理 Session；有 binding 时用 `client.session.get()` 核对，并按
+   通用缺失恢复规则选择原 ID 或一个已重新绑定的新 ID；
+3. 等待 Session 确认当前 binding 已持久化；
+4. 以确认后的 Runtime Session ID 记录并持久化本次输入；
+5. 调用并等待 `client.session.prompt()`，传入 Session ID、directory、prompt parts、
    可选 model 与可选 variant；
-4. 把返回的 assistant message 和收到的 events 投影到 AgentSession；
-5. 需要确认最终 transcript snapshot 时，读取 `client.session.messages()` 核对；
-6. 向调用者返回规范化完成事实。
+6. 把返回的 assistant message 和收到的 events 投影到 AgentSession；
+7. 需要确认最终 transcript snapshot 时，读取 `client.session.messages()` 核对；
+8. 向调用者返回规范化完成事实。
 
 `client.session.prompt()` 本身就是携带完成结果的请求，不存在第二次 `wait()`。
 `OpenCodeRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。Workflow task
@@ -245,7 +262,8 @@ abort，最坏情况退化为无警告的直接终止。警告与终止都投影
 - 不把期限值暴露给 prompt：agent 没有可靠时钟，静态数字不可执行；可执行的
   「即将终止」信号由警告在需要时送达。
 - 不在终止后自动提交或回滚残留现场；现场处理维持现状。
-- 不在终止后替换、清除或重建 Runtime Session 绑定；Reset 只能由用户显式执行。
+- 不在终止后替换、清除或重建 Runtime Session 绑定；此时只有用户显式 Reset 可以主动
+  换绑。后续独立的新 Turn 仍在输入提交前按缺失恢复规则准备 binding。
 - 不为 housekeeping prompt（如 worktree cleanup follow-up）引入「回合角色」
   概念：警告文案与其指令（提交或还原）语义相容，统一适用。
 
@@ -321,6 +339,9 @@ Runner 连接、Runner 尚未取得 Runtime connection，或命令在进入 Runt
 
 - 对当前物理 Session 调用 `client.session.promptAsync()`，传入 prompt 和可选的当前
   model / variant 选择。
+- AgentSession idle 时，Follow-up 在受理输入前走通用 binding 准备；当前物理 Session
+  明确缺失时先创建并持久化 replacement。AgentSession active 或 unknown 时不得替换，
+  因为 Follow-up 的目标仍是原 current Turn。
 - Endpoint 接收请求后立即返回；完成过程继续通过 Session events 呈现。
 - Session active 时接收的 Follow-up 加入当前 OpenCode execution；Session idle 时立即
   开始处理。
@@ -341,9 +362,11 @@ Session，也没有 Mohist 侧的 synthetic summary fallback。Session 没有当
 绑定追加到 lineage。旧 Session 保留查询和审计能力，但其上下文不进入新
 Session。
 
-每个命令携带 expected current binding。Server 只在该绑定仍是 current 时应用返回的
-replacement，防止过期 Reset result 覆盖更新的绑定。OpenCode Session 缺失时明确报错，
-并提示 Reset；不能隐式创建 replacement。
+每个命令携带完整的 expected current binding。Server 只在该绑定仍是 current 时应用返回的
+replacement，防止过期 Reset result 覆盖更新的绑定。读取旧 Session 时收到结构化 missing
+不阻止 Reset：Runtime 跳过 model / variant 继承并用 OpenCode 默认值创建新 Session；
+其它读取失败仍明确失败。Reset 的 lineage reason 是 `reset`，不能记成
+`missing-recovery`。
 
 Compact 与 Reset 都不轮换 AgentSession ID：命令响应返回同一稳定 `sessionId`，只有
 Reset 替换 Runtime 绑定。API 响应形状与 CLI 文案不得再表述为"返回新 session id"。
@@ -405,9 +428,14 @@ error。
 - Workflow 与 AgentJob 拥有的回合共享 Runtime code，但不共享工作 / Session 身份；
 - 物理 Session reuse 与 rotation 不变量；
 - model / variant 变化不触发 rotation；
+- `session.get()` 的结构化 404 触发一次 create，且 binding 持久化与 input 都先于 Prompt；
+- timeout、5xx、权限失败和畸形成功响应不触发 create，stale binding 不提交 Prompt；
+- 非绑定 Runner 不探测或替换 Session，其本地 404 不触发 create；
+- Prompt 调用开始后的 missing 或 transport failure 不 create、不 replay；
 - 全局 event routing、duplicate suppression 与 snapshot reconciliation；
 - Prompt completion、interruption、uncertain admission 与 no-replay 行为；
-- async Follow-up、原生 summarize、Reset、restart routing 与 stale-binding rejection；
+- async Follow-up（含 idle missing recovery）、原生 summarize、Reset（含旧 Session
+  missing）、restart routing 与 stale-binding rejection；
 - permission 一次性回应、重复 suppression、回应失败、missing Session、compatibility 与 process-loss failure；
 - 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
 - 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时回合
@@ -438,7 +466,8 @@ compatibility alias 或 ACP fallback。
 
 - 已持久化的 AgentSession（含 `acpSessionId`、历史 Compact / Reset 轮换出的旧
   Session 记录）保持可查询与可审计；ACP 时代的 Runtime 绑定在替换后视为
-  "当前 Runtime Session 不存在"，Session 操作明确失败并提示 Reset。
+  "当前 Runtime Session 不存在"。开始新 Turn 时按 missing recovery 建立 OpenCode
+  binding；Compact / Cancel 仍明确失败，Reset 可以直接建立新绑定。
 - 旧结构 Workflow Profile 不被静默忽略，也不自动改写：`uses: mohist/acp-agent` 的任务
   在 dispatch 时以可操作错误失败——该 Action 已移除。`with.expect`、`with.agent` 等旧
   输入键归 Action 契约处理，definition 校验不检查 `with` 内部。
@@ -472,6 +501,12 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 
 「回合期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止回合，agent 没有收尾机会。
+
+缺失恢复尚未落地：当前 `client.session.get()` 的 missing 直接结束 Turn，Workflow 与
+AgentJob 尚未共用“创建 candidate → expected binding 替换 → 记录输入”的准备流程；
+OpenCode 的 `SessionCommand` dispatch 当前对 Compact 和 Reset 都返回 `unavailable`。
+缺失恢复的实施 issue 必须同时让 Reset 复用同一 expected-binding replacement；Compact
+保持独立实装差距，不进入该 issue。对应实施 issue 待从本 spec 创建。
 
 T-001 完成时实际锁定的 SDK 版本是 `@opencode-ai/sdk@1.18.3`（与安装在 PATH 上的
 `opencode` CLI 版本一致），不是 1.17.18。决策文本保留 1.17.18 作为该节撰写时点的

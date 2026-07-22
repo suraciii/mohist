@@ -85,10 +85,15 @@ AgentSession 当前绑定的同一个物理 OpenCode Session。task 变化、tas
 | `options.model` 或 `options.variant` 变化 | 保持不变 |
 | Compact | 保持不变 |
 | Reset | 建立新的空 Session，并记录会话沿革 |
-| 工作目录或执行后端变化 | 建立新 Session，并记录会话沿革 |
+| 开始新 Turn 前明确确认当前 Session 已不存在 | 自动建立新的空 Session，并把缺失恢复记录到会话沿革 |
+| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
+| 执行后端变化 | 建立新物理 Session，并记录会话沿革 |
 
-如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
-新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而合并。
+自动恢复只处理负责当前绑定的 Runner 上，OpenCode 明确确认旧 Session 已不存在、且本次
+输入尚未被接受的情况。请求落到其它 Runner、OpenCode 暂时不可用、响应无法判断，或
+Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。新 Session 没有旧
+上下文，替换原因会显示在同一 AgentSession 的会话沿革中。不同 `session` 名称仍相互
+隔离，不能因为 prompt、模型或配置相同而合并。
 
 如果 task 已完成工作但还有改动需要提交或还原，Mohist 会在同一个 AgentSession 和
 物理 OpenCode Session 中继续这个收尾回合。这个收尾不会替换会话，也不要求用户先
@@ -112,8 +117,9 @@ Compact 是用户在 Session 中发起的操作，不是 Workflow Action。Mohis
 假的摘要来模拟压缩，也不会在 OpenCode 压缩失败时静默降级。
 
 Runner 重启后，Mohist 仍使用 AgentSession 保存的 OpenCode Session 绑定继续这些
-操作。如果对应的 Runtime Session 已不存在，操作明确失败，并提示用户 Reset；
-不会悄悄创建一段看似连续的新对话。
+操作。如果开始新 Turn 前确认该 Session 已不存在，Workflow task、AgentJob 或空闲
+Follow-up 会先自动建立并绑定新的空 Session。Compact 和针对执行中回合的操作不会这样
+恢复；Reset 即使在旧 Session 已不存在时仍可建立新的空 Session。
 
 ## 完成与失败
 
@@ -140,7 +146,8 @@ OpenCode 的权限配置仍是最终判断。它已经允许的操作直接执�
 provider 明确报告周、月、套餐额度，余额或计费耗尽时，Mohist 中断当前 OpenCode
 回合并让本次 task 失败，不等待 provider 继续重试。AgentSession 与当前物理
 OpenCode Session 的绑定保持不变；Session 回到空闲后，可以选择其他模型继续，无需
-Reset。只有当前物理 Session 已不存在，或用户明确要求清空上下文时才使用 Reset。
+Reset。Reset 只表达用户明确要求清空上下文；物理 Session 缺失由下一个安全的新 Turn
+自动恢复。
 
 如果 Mohist 无法确认当前回合已经停止，则明确报告中断未确认；不会把仍可能执行的
 回合显示为已经安全停止。
@@ -170,7 +177,7 @@ OpenCode 判断。
 | `runtime-unavailable` | OpenCode 执行能力尚未就绪或不可用 |
 | `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
 | `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `runtime-session-missing` | 绑定的 OpenCode Session 已不存在，需要 Reset |
+| `runtime-session-missing` | OpenCode Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
 | `unavailable-runtime` | OpenCode 报告不可用 |
 | `incompatible-runtime` | OpenCode 版本或数据与 Mohist 不兼容 |
 | `permission-required` | 需要权限才能继续 |
@@ -183,5 +190,9 @@ OpenCode 判断。
 驱动，内置 Profile 已切换到该 Action；Workflow 与 Agent 来源的配置、Session、
 命令结果与诊断不再包含历史 ACP 身份字段。
 
-issue-407 已交付稳定的 Session 身份、来源解析和 Compact、Reset、Follow-up、
-Cancel 的命令语义；Session 在这些操作后仍保持同一身份。
+稳定的 Session 身份、来源解析、Follow-up 与 Cancel 已经落地。Compact 和 Reset 的
+产品入口已经存在，但 OpenCode 当前还不能执行这两个命令。
+
+缺失的 OpenCode Session 目前仍会让部分新 Turn 失败，自动重建、重新绑定和可用的
+OpenCode Reset 尚未落地；对应实施 issue 待从本 spec 创建。Compact 是另一项已有实装
+差距，不属于缺失恢复的实施范围。

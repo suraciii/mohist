@@ -83,7 +83,8 @@ Session 命令不是工作 dispatch。执行中提交的 Follow-up 成为当前�
 Follow-up 会启动一个用户发起的对话回合，只记录命令和 Runtime 事实，不创建 TaskRun
 或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则，且都只在逻辑
 Session 空闲时执行；两者都不轮换 AgentSession ID，命令响应返回同一稳定
-`sessionId`，只有 Reset 替换 Runtime 绑定。
+`sessionId`。在用户显式 Session 命令中只有 Reset 替换 Runtime 绑定；新 Turn 提交前的
+缺失恢复属于下文独立的 binding 准备，不是另一个 Session 命令。
 
 ## Turn 生命周期与 transcript DSL
 
@@ -279,13 +280,127 @@ AgentSession ID 是逻辑对话的稳定身份。Runtime Session 身份是外部
 }
 ```
 
-Runtime 变化和 Reset 可以替换物理绑定并追加 lineage，但不能改变 AgentSession 身份或
-来源。工作目录是逻辑 AgentSession 的不可变属性；变化时必须使用新的逻辑 Session 身份，
-不能替换原 Session 的物理绑定。Compact 和 model / variant 选择变化不会替换物理绑定。
+Runtime 变化、Reset 和已确认的 Runtime Session 缺失恢复可以替换物理绑定并追加
+lineage，但不能改变 AgentSession 身份或来源。工作目录是逻辑 AgentSession 的不可变
+属性；变化时必须使用新的逻辑 Session 身份，不能替换原 Session 的物理绑定。Compact
+和 model / variant 选择变化不会替换物理绑定。
 
 持久化的当前绑定只保留 Runner 重启后继续控制所需的最小数据：`runtime`、
 `runtimeSessionId`、`runnerId` 与 `workDir`。Lineage 记录 `runtime`、
-`runtimeSessionId` 与 `boundAt`。
+`runtimeSessionId`、`boundAt` 与 `reason`。`reason` 只有 `initial`、`reset`、
+`runtime-change` 和 `missing-recovery`；它让查询与 UI 明确区分主动清空上下文、后端切换
+和物理资源丢失，不能用自由文本代替。
+
+## Runtime Session 缺失恢复
+
+缺失恢复是 Session 对 Runtime binding 的修复，不是 Prompt retry，也不是 Workflow
+recovery。它只在一个新 Turn 的输入尚未被 Runtime 接受时发生。成功修复后，同一个工作
+attempt 继续执行，不消耗 Workflow recovery budget。
+
+### 触发条件
+
+以下条件必须同时成立：
+
+1. AgentSession 可以受理新 Turn，`activity` 为 `idle`；
+2. 本次执行位于当前绑定的 `runnerId`，绑定的 Runtime 与本次执行要求一致，`workDir` 与
+   AgentSession 的不可变工作目录一致；
+3. 绑定所属 Runner 上的 Runtime adapter 用确定性证据确认当前 `runtimeSessionId` 已不存在；
+4. 本次输入尚未写入 transcript，也尚未向 Runtime 提交；
+5. binding 替换与输入记录各自提交时，Server 看到的 expected binding 仍是 current。
+
+Runtime 不可用、超时、权限失败、响应形状不兼容、数据损坏或任何无法区分“暂时无法
+读取”和“确定不存在”的结果都不满足条件。执行请求落在另一个 Runner 也不是 missing：
+它必须路由回绑定所属 Runner 或明确失败，不能借缺失恢复迁移物理 Session。上述情况都
+保留原 binding 并形成可行动失败。
+
+`ready`、`definitely-missing` 与失败是 Mohist 共享的语义结果，不是一个泄漏 SDK 类型的
+通用 Runtime 接口。OpenCodeRuntime 与 PiRuntime 各自在自己的深模块中产生这些结果；
+Runner 的 binding 准备只编排共同顺序，不能把 provider 判定上移到 Session 或 Workflow。
+
+### 解析与替换顺序
+
+新 Turn 的 binding 准备只有一条权威流程：
+
+```text
+expected = AgentSession.currentRuntimeBinding
+
+if expected is absent:
+    candidate = Runtime.create(requiredRuntime, immutableWorkDir, current turn options)
+    selected = Session.replaceRuntimeBinding(
+        expected = absent,
+        candidate = candidate on currentRunnerId,
+        reason = initial)
+else:
+    require currentRunnerId == expected.runnerId
+    resolved = Runtime.resolve(expected)
+
+    if resolved is ready:
+        selected = expected
+    else if resolved is definitely-missing:
+        candidate = Runtime.create(expected.runtime, expected.workDir, current turn options)
+        selected = Session.replaceRuntimeBinding(
+            expected,
+            candidate,
+            reason = missing-recovery)
+    else:
+        fail without changing the binding
+
+Session.recordInput(expectedBinding = selected, input)
+submit the input exactly once
+```
+
+自动恢复最多创建一个 candidate；新 candidate 创建或 binding 持久化失败时，不提交输入。
+已经创建但未能绑定的 candidate 不得用于执行；它只形成诊断，不要求在本流程内同步删除，
+也不引入影响 binding 裁决的补偿协议。
+
+`Session.replaceRuntimeBinding` 是 Server 中的状态裁决。命令必须携带 expected
+binding 的 `runnerId`、`runtime`、`runtimeSessionId` 与 `workDir`；Session 只在 expected
+仍完整等于 current、activity 仍允许新 Turn 时原子替换 binding 并追加 lineage。
+`missing-recovery` 建立的 replacement 保持同一 `runnerId`、Runtime 与工作目录，只替换
+`runtimeSessionId`。过期结果必须拒绝，不能覆盖 Reset、Runtime 切换或另一轮恢复已经建立
+的 binding。Runner 只报告 Runtime 的 missing/create 事实，不能自行宣称 Server binding
+已经改变。
+
+`Session.recordInput` 再次携带 selected 完整 binding。Server 只在它仍是 current 且
+AgentSession 仍可受理新 Turn 时，原子记录输入并建立 Turn；Reset、Runtime change 或另一
+轮恢复若已先改变 binding，本次记录必须失败。Runner 只有收到输入持久化确认后才能提交
+Prompt，因此换绑与输入之间不需要跨网络锁或新的持久化恢复 Job。
+
+### 操作边界
+
+| 操作 | 确认缺失时自动替换 | 原因 |
+|---|---:|---|
+| TaskRun 或 AgentJob 开始新 Turn | 是 | 输入尚未提交，工作可以在空上下文继续 |
+| AgentSession 空闲时的 Follow-up | 是 | 它将开始新 Turn，使用同一 admission 与提交顺序 |
+| 执行中 Turn 的 Follow-up | 否 | 输入目标是当前 Turn，替换后语义不再相同 |
+| Compact | 否 | 缺失的上下文无法压缩 |
+| Cancel | 否 | 新 Session 不是原执行中的 Turn |
+| Reset | 不属于自动恢复 | 用户主动创建空 Session；旧 Session 缺失也不能阻止 Reset |
+
+自动恢复建立空上下文，不从 Mohist transcript 重放消息、Prompt 或 tool call。重放会把只读
+审计记录变成新的执行输入，并可能重复外部副作用。Lineage 的 `missing-recovery` 是上下文
+中断的持久事实；产品查询和 UI 必须展示它，不能把替换后的物理对话表示为无缝连续。
+
+一旦 Prompt 提交已经开始，任何 missing、transport failure 或响应不确定都不得进入上述
+流程。当前 Turn 按原错误结束或进入 `unknown`，工作所有者决定后续 retry；Runner 不能
+创建新 physical Session 后自动重放 Prompt。
+
+本能力不增加 Workflow DSL、Action Input、Agent 配置开关、恢复 Stage 或持久化恢复 Job。
+一次 binding 准备内的单次 candidate 创建与 expected-binding 裁决已经完整表达恢复过程。
+
+### 验证责任
+
+- Session domain spec 覆盖 initial、missing-recovery、Reset 与 Runtime change 四种
+  lineage reason，以及 expected binding 不匹配、activity 非 idle、Runner / Runtime /
+  workDir 不匹配时的拒绝。
+- Runner spec 从 Workflow、AgentJob 与 idle Follow-up 三个产品入口证明：binding 先于
+  input、input 先于 Prompt；恢复成功只提交一次，重新绑定或 input CAS 失败不提交。
+- 路由 spec 证明新 Turn 只交给 binding 的 `runnerId`；其它 Runner 不能把本地 404 或文件
+  不存在报告成该 binding 的 `definitely-missing`。
+- Runtime unit test 只验证本后端的 `ready` / `definitely-missing` / ambiguous 分类和
+  candidate 创建；Server 状态矩阵不通过 Runtime test 重复。
+- 所有测试使用 fake Runtime、fake Server connection 与可控信号，不访问真实进程、网络、
+  文件系统或墙钟。
 
 ## Mohist Agent 启动
 
@@ -323,6 +438,8 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 - 一次 dispatch 的工作所有者只能是 TaskRun 或 AgentJob 之一。
 - 每个 AgentSession 只有一个不可变来源。
 - 替换 Runtime Session 不改变 AgentSession 来源或逻辑身份。
+- 明确缺失的 Runtime Session 只可在新 Turn 输入提交前，以 expected binding 原子替换。
+- Runtime Session 缺失恢复不重放 Prompt，不消耗 Workflow recovery budget。
 - `mohist/opencode` 不暴露 OpenCode 原生 agent 选择。
 - AgentJob 执行不依赖 Workflow Action 名称或 Action Input 契约。
 - 共享 `OpenCodeRuntime` 不制造 Workflow -> Agent context 依赖。
@@ -333,6 +450,10 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 `session.followup_completed` 与 `session.followup_failed`，并有消费者从历史 close 事实
 推导整个 AgentSession 的状态和命令能力；部分 transcript part 的局部序列也尚未以
 `turnId` 分区。对应实施 issue 待从本 spec 创建。
+
+Runtime Session 缺失恢复也尚未完整实现。当前部分 Runtime 路径仍把确定 missing 直接
+返回给工作所有者，并要求用户 Reset；lineage 尚未记录 replacement reason。对应实施
+issue 待从本 spec 创建。
 
 迁移不保留 `session.closed` 别名或新旧事件双写。实施必须一次处理当前读写路径、已持久化
 transcript 与待投递 outbox，使同一 AgentSession 不会同时存在两套相互冲突的终态语义。

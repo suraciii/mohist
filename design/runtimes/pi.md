@@ -147,22 +147,28 @@ AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)
 字段命名见 [`conventions.md`](../conventions.md)。逻辑 Session 目标解析、绑定创建时序
 （先创建物理 Session，持久化绑定成功后才提交首个 Prompt；持久化幂等）、复用不变量
 （跨 task、retry 与 Runner 重启解析到当前绑定；工作目录不同则在提交 Prompt 前以可
-操作错误拒绝）与 `OpenCodeRuntime` 完全一致，本节只定义 Pi 特有部分。
+操作错误拒绝）以及缺失恢复的 expected binding 裁决与操作矩阵以
+[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 为唯一权威，本节
+只定义 Pi 特有部分。
 
 物理绑定的 `runtimeSessionId` 持久化 **Pi session 文件的绝对路径**
 （`session.sessionFile`；`SessionManager.create()` 路径下必有值，取不到文件路径视为
 `incompatible-runtime`）。SDK 的恢复入口 `SessionManager.open()` 以文件路径为键，
 没有按 uuid 打开的调用面；session uuid（`session.sessionId`）只进入诊断信息。
 
-物理 Session 实例的恢复是 lazy 的：进程内缓存命中直接使用；未命中时用绑定中的
-session 文件路径 `SessionManager.open()` 恢复，messages、model 与 thinking level 由
-SDK 自动还原。绑定存在但 session 文件缺失或损坏时，本次工作失败并提示 Reset；不得
-隐式调用 create 伪造连续上下文。
+物理 Session 实例的恢复是 lazy 的：只有绑定的 `runnerId` 对应的 PiRuntime 可以从进程内
+缓存或绑定中的 session 文件路径恢复；请求落在其它 Runner 时必须先路由回绑定所属 Runner
+或明确失败，其本地文件不存在不构成 missing 证据。绑定所属 Runner 缓存未命中时用
+`SessionManager.open()` 恢复，messages、model 与 thinking level 由 SDK 自动还原。只有
+绑定路径明确不存在，才产生 `definitely-missing` 事实并允许在新 Turn 前自动创建
+replacement。文件存在但无法打开、JSONL 损坏、权限失败或 SDK 返回无法分类的错误时，
+本次工作失败，不能用空 Session 掩盖数据或兼容性问题。
 
 Pi 在 session 出现第一条 assistant 消息之前不落盘 session 文件。首个 Prompt 执行中
 Runner 崩溃会留下「绑定存在、文件从未生成」的状态，重启后的恢复因此按上段的文件
-缺失规则失败并提示 Reset。这是已接受限制：丢失的至多是一个提交状态本就不确定的
-未完成回合，Reset 没有任何上下文损失；与 redelivery 可能重复回合的限制同属一类。
+缺失规则处理。原 Prompt 的提交状态仍由原 Turn 与工作所有者裁决，Runtime 不自动重放；
+只有后续独立的新 Turn 才能建立 replacement。丢失的至多是一个提交状态本就不确定的
+未完成回合，与 redelivery 可能重复回合的限制同属一类。
 
 Runtime 变化与 Reset 会创建新物理绑定并追加 lineage，不迁移上下文；Compact 与
 model / variant 变化必须保持同一 session 文件。model 与 thinking level 是回合执行
@@ -177,12 +183,16 @@ task 已解析的 Action，走同一 Runtime 和物理 Session，不得替换绑
 
 Workflow Action adapter 或 AgentJob executor 请求的回合按以下顺序执行：
 
-1. 按当前绑定解析或创建进程内 `AgentSession` 实例（见「Session 绑定」）；
-2. 解析可选 model string，在 Session 上应用本次 model 与 thinking level；
-3. 调用并等待 `session.prompt(text)`；
-4. 把收到的事件投影到 AgentSession；
-5. 从 `session.messages` 最后一条 assistant 消息提取最终文本；
-6. 向调用者返回规范化完成事实。
+1. 解析可选 model string；
+2. 无 binding 时创建物理 Session；有 binding 时从缓存或 `SessionManager.open()` 恢复，
+   并按通用缺失恢复规则选择原路径或一个已重新绑定的新路径；
+3. 等待 Session 确认当前 binding 已持久化；
+4. 以确认后的 Runtime Session ID 记录并持久化本次输入；
+5. 在 Session 上应用本次 model 与 thinking level；
+6. 调用并等待 `session.prompt(text)`；
+7. 把收到的事件投影到 AgentSession；
+8. 从 `session.messages` 最后一条 assistant 消息提取最终文本；
+9. 向调用者返回规范化完成事实。
 
 `session.prompt()` resolve 即整个 agent run（含工具循环与自动重试）结束，它就是
 唯一完成判据，不存在第二次 wait；`agent_end` 事件只用于投影，不作为完成权威。
@@ -277,6 +287,8 @@ binding、不轮换 AgentSession ID）与 [`opencode.md`](opencode.md) 的「Ses
   命令失败返回给用户；受理后立即返回，完成过程继续通过 Session 事件呈现。
 - 可选的当前 model / variant 选择在注入前应用到 Session（`setModel()` /
   `setThinkingLevel()`），物理 Session 不轮换。
+- AgentSession idle 时，Follow-up 在受理输入前走通用 binding 准备；绑定路径明确不存在
+  时先创建并持久化 replacement。AgentSession active 或 unknown 时不得替换。
 - Routing 或 admission 失败必须返回给用户，不能自动 retry 或 replay。
 
 ### Compact
@@ -292,7 +304,9 @@ transcript。
 只有逻辑 Session idle 时才允许 Reset。先读取当前 model / thinking level（如果存
 在），再在同一工作目录用 `SessionManager.create(cwd)` 建立新的空 Pi Session。创建
 成功后才替换逻辑 Session 绑定（新 session 文件路径），并把新物理绑定追加到
-lineage。旧 session 文件保留查询和审计能力，但其上下文不进入新 Session。
+lineage。旧 session 文件保留查询和审计能力，但其上下文不进入新 Session。旧路径已经
+不存在时跳过 model / thinking level 继承并继续创建；其它读取失败仍明确失败。Reset 的
+lineage reason 是 `reset`。
 
 ### Cancel
 
@@ -373,11 +387,13 @@ clock。SDK 的全部依赖锁在 `PiRuntime` 模块内，经 factory seam 注�
 - model string 内含多层 `/`，variant 保持独立并映射 thinking level；
 - Workflow 与 AgentJob 拥有的回合共享 Runtime code，但不共享工作 / Session 身份；
 - 物理 Session 复用与 rotation 不变量；model / thinking level 变化不触发 rotation；
-- 绑定恢复：缓存命中、lazy open、session 文件缺失时报 `missing-session` 并提示
-  Reset，不隐式 create；
+- 绑定恢复：缓存命中、lazy open、路径明确不存在时只 create 一次，并在 input / Prompt
+  前持久化 expected binding replacement；
+- 文件损坏、权限失败与无法分类的 open error 不 create，stale binding 不提交 Prompt；
+- 非绑定 Runner 不打开或替换 session 文件，其本地路径不存在不触发 create；
 - prompt 完成、中断、提交状态不确定与 no-replay 行为；
-- `steer` 注入（运行中 Follow-up 与期限警告）、空闲 Follow-up、原生 compact、
-  Reset、stale-binding rejection；
+- `steer` 注入（运行中 Follow-up 与期限警告）、空闲 Follow-up（含 missing recovery）、
+  原生 compact、Reset（含旧路径 missing）、stale-binding rejection；
 - `projectTrusted: false` 装配断言：项目级 `.pi/` 资源不进入执行；
 - provider 错误策略：模式命中即失败、阈值失败、Pi 自判不可恢复的 `turn-failed`
   规范化；
@@ -405,3 +421,6 @@ lineage 展示均已落地。以下设计触及面仍是实现差距：
 
 - AgentJob executor 与 Agent 配置中的 runtime 选择仍未接入，Mohist Agent 固定使用 OpenCode。
 - runtime-aware model catalog API 与 Web 模型选择 UI 仍未接入。
+- 缺失的 Pi session 文件目前仍直接形成 `missing-session`；新 Turn 尚未执行
+  `definitely-missing → create → expected binding replacement`。对应实施 issue 待从本
+  spec 创建。

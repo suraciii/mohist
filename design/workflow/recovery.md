@@ -80,6 +80,17 @@ TaskRun 复用旧 identity。这样默认以 Work ID 命名的 Workflow AgentSes
 逻辑 Session，不会继承已失效 attempt 的 physical binding 或工作目录。显式 `session`
 名称仍由 workflow 定义负责其复用语义。
 
+## Runtime binding 修复不属于 Workflow recovery
+
+AgentSession 在新 Turn 提交前发现当前 Runtime Session 已明确不存在时，按
+[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 修复 physical binding。
+这发生在 Action 形成成功或失败结果之前：修复成功时原 TaskRun attempt 继续，不创建
+recovery task、不递减 `recoveryRemaining`，也不需要人工 Retry；修复失败时 Action 才把
+规范化错误交给本文件定义的 recovery 与人工 retry 语义处理。
+
+Runtime binding 修复不得由 WorkflowRun 决策或实现。Runner 报告 Runtime 事实，Session
+裁决并持久化 binding；Workflow 只解释最终 Action result。
+
 ## Runner executor 流程
 
 ```
