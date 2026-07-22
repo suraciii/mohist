@@ -21,9 +21,9 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         _fixture = fixture;
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         foreach (var runnerId in _registeredRunnerIds)
         {

@@ -27,9 +27,9 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
         _client = fixture.Client;
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         try
         {

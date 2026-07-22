@@ -40,7 +40,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             NullLogger<InMemoryEventBus>.Instance);
     }
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
         var connectionString = _database.ConnectionString;
@@ -61,14 +61,14 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                     SessionPersistence));
         });
         Cluster = builder.Build();
-        return Cluster.DeployAsync();
+        return new ValueTask(Cluster.DeployAsync());
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Cluster?.Dispose();
         _database?.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
 

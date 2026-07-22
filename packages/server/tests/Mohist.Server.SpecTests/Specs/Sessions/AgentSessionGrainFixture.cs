@@ -37,7 +37,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
     private TestSqliteDatabase _database = null!;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
         ConnectionString = _database.ConnectionString;
@@ -57,14 +57,14 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
         });
         Cluster = builder.Build();
-        return Cluster.DeployAsync();
+        return new ValueTask(Cluster.DeployAsync());
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Cluster?.Dispose();
         _database?.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     public sealed class RecordingTranscriptEventPublisher : ITranscriptEventPublisher

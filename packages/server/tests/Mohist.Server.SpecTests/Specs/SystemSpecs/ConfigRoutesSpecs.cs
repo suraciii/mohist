@@ -21,7 +21,7 @@ public class ConfigRoutesSpecs : IAsyncLifetime
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -46,7 +46,7 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         _client = _app.GetTestClient();
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _client?.Dispose();
         if (_app is not null)

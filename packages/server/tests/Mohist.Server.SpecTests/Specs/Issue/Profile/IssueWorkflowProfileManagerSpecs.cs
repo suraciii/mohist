@@ -37,12 +37,12 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         db.SaveChanges();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _database.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     // ===================== Template =====================

@@ -10,9 +10,9 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="TngTech.ArchUnitNET.xUnit" />
+    <PackageReference Include="TngTech.ArchUnitNET.xUnitV3" />
     <PackageReference Include="EnvironmentAbstractions" />
     <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />

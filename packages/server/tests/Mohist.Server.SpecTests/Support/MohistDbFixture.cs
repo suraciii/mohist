@@ -67,7 +67,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         "MohistDbFixture does not host an Orleans silo. " +
         "Use WorkflowGrainFixture for grain-level tests.");
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         var dbName = $"mohist-dbspec-{Guid.NewGuid():N}";
         _connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -155,15 +155,15 @@ public sealed class MohistDbFixture : IAsyncLifetime
         // and computed columns). The migrated-template clone is exactly the
         // Migrate() output without re-running the chain here.
         MigratedSqliteTemplate.CopyTo(_keeper);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _services = null;
         _keeper?.Dispose();
         _otelKeeper?.Dispose();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>

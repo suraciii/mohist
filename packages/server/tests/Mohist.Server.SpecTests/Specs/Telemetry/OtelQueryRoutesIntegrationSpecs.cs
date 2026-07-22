@@ -24,9 +24,9 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         _fixture = fixture;
     }
 
-    public Task InitializeAsync() => _fixture.ResetOtelStateAsync();
+    public ValueTask InitializeAsync() => new(_fixture.ResetOtelStateAsync());
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     [Fact]
     public async Task GetTraces_OnMainApi_ReturnsEnvelopeWithArray()

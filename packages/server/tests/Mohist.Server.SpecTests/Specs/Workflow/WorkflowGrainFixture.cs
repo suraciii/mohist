@@ -34,7 +34,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             NullLogger<InMemoryEventBus>.Instance);
     }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         var dbName = $"mohist-test-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -54,11 +54,11 @@ public class WorkflowGrainFixture : IAsyncLifetime
         await Cluster.DeployAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Cluster?.Dispose();
         _keeper?.DisposeAsync();
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
 }

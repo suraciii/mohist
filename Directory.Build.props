@@ -8,6 +8,14 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!--
+    xUnit v3 的 xUnit1051 建议把 CancellationToken 调用改成 TestContext.Current.CancellationToken。
+    这与"框架升级"是两件事，且会改变测试取消语义，先在测试项目抑制，采纳作为独立后续工作。
+  -->
+  <PropertyGroup Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('Tests'))">
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" GeneratePathProperty="true" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)eng/BannedSymbols.Product.txt" />
