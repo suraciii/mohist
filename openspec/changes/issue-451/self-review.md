@@ -1,91 +1,74 @@
-# Self-Review — Issue 451 (Pi Session Commands), re-review after fixes
+# Self-Review — Issue 451 (Pi Session Commands)
 
-Reviewer verdict: the prior blocking findings (F1, F2) and non-blocking
-observations (N1–N3) are resolved consistently across `design.md`, both specs,
-and `tasks.json`. No new blocking defects were introduced. The plan is ready to
-build.
+Reviewer verdict: the plan is complete, internally consistent, and maps fully to
+the issue. It is ready to build.
 
-## Verification of prior findings
+## Artifacts reviewed
 
-### F1 — Cancel honesty now reaches the user (resolved)
+- `proposal.md` — Why / What Changes / Capabilities (`pi-session-command-routing`,
+  `pi-session-channels`) / Impact.
+- `specs/pi-session-command-routing/spec.md` (6 requirements / 12 scenarios).
+- `specs/pi-session-channels/spec.md` (7 requirements / 14 scenarios).
+- `design.md` — Context, Goals/Non-Goals, Decisions D1–D10, Risks, Migration, Open Questions.
+- `tasks.json` — T-001…T-004.
 
-- `design.md` D6: cancel result facts carry a first-class `stopConfirmed`;
-  `CancelAgentSessionReply` gains optional `interruptUnconfirmed`, set by the
-  handler when `stopConfirmed === false` and mirrored by the Server into the
-  HTTP response. OpenCode cancel is unchanged.
-- `specs/pi-session-channels/spec.md` "Cancel … reports stop confirmation
-  honestly to the user": requires `stopConfirmed` and that an interrupt-
-  unconfirmed indication *reaches the API/user*; scenarios assert
-  `stopConfirmed: true`/`false` and the reply carrying `interruptUnconfirmed`.
-- `tasks.json`: T-002 returns `stopConfirmed`; T-004 criterion "Cancel honesty
-  reaches the user … interruptUnconfirmed=true … OpenCode unchanged".
+## Issue acceptance-criterion coverage
 
-The original defect — diagnostics dropped at `cancel-handler.ts:85-88` because
-`CancelAgentSessionReply` was `{ state }` only — is closed by the first-class
-field end-to-end.
+- Follow-up joins the active turn / starts a new turn when idle and returns
+  immediately → channels "Follow-up uses the Pi steer channel while busy and the
+  prompt channel while idle" + "An idle Follow-up is accepted only after Pi
+  reception is confirmed". Covered.
+- Idle Compact keeps session identity, transcript stays visible → channels
+  "Compact uses Pi native compaction and preserves the session identity". Covered.
+- Idle Reset yields a fresh no-context session with prior session in lineage;
+  busy Reset/Compact rejected → channels "Reset creates a new empty Pi Session
+  and appends lineage without migrating context" + the #407 idle-concurrency
+  boundary applies to `pi` once admitted (routing spec: "Server admits … under
+  the same … idle-concurrency … rules"). Covered.
+- Cancel interrupts the active turn; reports interrupt-unconfirmed (never shows
+  as safely stopped) → channels "Cancel … reports stop confirmation honestly to
+  the user" (`stopConfirmed`, `interruptUnconfirmed` reaching the API/user).
+  Covered.
+- Missing bound Pi session fails explicitly with a Reset hint, no silent new
+  session → channels "A missing Pi session fails explicitly with a Reset hint".
+  Covered.
 
-### F2 — Per-session prompt serialization (resolved)
+## Consistency across artifacts
 
-- `design.md` D10: `PiRuntime` owns a per-physical-session async mutex covering
-  `runTurn`, idle Follow-up, and `compact`; `steer`/`reset` excluded; `runTurn`
-  retrofit is safe (redundant with the external coordinator). D5's idle path
-  acquires it and no longer claims `isStreaming` alone suffices.
-- `specs/pi-session-channels/spec.md` "Prompt-initiating operations are
-  serialized per physical Pi session" (+2 scenarios: concurrent follow-up vs
-  workflow turn; two concurrent follow-ups).
-- `tasks.json`: T-002 introduces the mutex + retrofits `runTurn`; T-003's
-  `compact` acquires it; T-003 now depends on T-002 (graph
-  T-001→T-002→T-003→T-004).
+- Proposal capability names match the spec directories exactly
+  (`pi-session-command-routing`, `pi-session-channels`).
+- The cancel honesty signal (`interruptUnconfirmed`) is consistent end-to-end:
+  proposal Impact, design D6 + Migration Plan, channels spec, and tasks T-002
+  (`stopConfirmed`) / T-004 (reply field + server mirror) all agree.
+- The per-session prompt mutex (design D10) is reflected in the channels
+  serialization requirement and tasks T-002 (introduces it + retrofits `runTurn`)
+  / T-003 (`compact` acquires it); T-003 depends on T-002.
+- Structural validity: both specs have every requirement followed by ≥1 scenario,
+  all scenarios at exactly 4 hashtags, no delta headers; `tasks.json` is valid
+  JSON with a valid DAG (`T-001`→`T-002`→`T-003`→`T-004`), every `dependsOn`
+  pointing to a strictly-lower-priority task, and a test-related criterion per task.
 
-The double-prompt race (queued workflow turn / concurrent follow-up) is closed.
+## Prior fix cycle confirmed resolved
 
-### N1 / N2 / N3 (resolved)
+The earlier review's blocking findings are closed and remain closed:
+- F1 (cancel interrupt-unconfirmed could not reach the user) — resolved via the
+  first-class `stopConfirmed`/`interruptUnconfirmed` field mirrored to the HTTP
+  response.
+- F2 (idle Follow-up double-prompt race) — resolved via D10's per-session prompt
+  mutex.
+- Non-blocking N1/N2/N3 (latency framing, "identically" wording, recovery
+  reconciler) — resolved.
 
-- N1: D4 and Risks corrected — an unhandled `SessionCommand` resolves to null
-  promptly; the 15 s timeout is a backstop. (Context line 9 still names the
-  dispatcher's 15 s timeout, which is an accurate description of the config,
-  not the corrected latency claim.)
-- N2: routing spec softened to "unchanged in outcome" with an explicit
-  semantic-equivalence sentence for OpenCode compact/reset.
-- N3: new routing-spec requirement "Pi compact/reset recovery preserves one
-  operation across interrupted delivery" + T-004 journal-dedup /
-  no-blind-reexecute criterion.
+## Open questions (do not block the build)
 
-## Structural validation
-
-- Specs well-formed: channels 7 requirements / 14 scenarios; routing 6 / 12;
-  every requirement is followed by ≥1 scenario; no 3-hash scenarios.
-- Task graph is a valid DAG; every `dependsOn` points to a strictly-lower-
-  priority task (`T-001`→`T-002`→`T-003`→`T-004`).
-- Issue acceptance criteria all map to spec scenarios (follow-up busy/idle +
-  immediate return; compact identity-preserving; reset new-session + lineage +
-  busy-rejection; cancel interrupt-unconfirmed; missing-session Reset hint).
-- Non-goals respected: no new command types; OpenCode behavior preserved
-  (regression-guarded); the OpenCode compact/reset pre-existing gap is left
-  untouched and flagged as a separate concern (Open Question Q4).
-
-## Non-blocking observations (not required for build readiness)
-
-- **O1 (wording nuance, D6).** D6 says "OpenCode cancel always returns
-  `stopConfirmed: true`," but the existing `RuntimeCancelResult` has no such
-  field — the handler treats its absence as confirmed. Behavior is correct;
-  the sentence could say "OpenCode results carry no `stopConfirmed`, treated as
-  confirmed." Not a defect.
-- **O2 (implementation latitude, D7/D10).** The ordering of mutex-acquire vs
-  the `isStreaming`→conflict guard in compact is unspecified. Either order is
-  safe because the Server's idle gate already rejects compact while a workflow
-  turn is active; the mutex then serializes compact against any in-flight
-  user Follow-up turn. No corruption either way.
-- **O3 (task output list, T-004).** The `interruptUnconfirmed` mirror touches
-  `session-target.ts` (`CancelAgentSessionReply`) and the server cancel route,
-  which T-004's description covers but its `output` file list does not name
-  explicitly. The list is illustrative; intent is clear.
-
-These are within implementation latitude and do not affect build readiness.
+- SDK `preflight` and `compact()` surface on the pinned version — gated behind
+  T-001's smoke (design D9); escalate if absent rather than substitute.
+- Idle user Follow-up turn budget — deferred (leaning on user Cancel).
+- OpenCode compact/reset product ownership — explicitly a non-goal here; tracked
+  as a separate concern (design Open Question Q4).
 
 ## Conclusion
 
-All reported problems are fixed; the artifacts are internally consistent and
-map completely to the issue. The plan is ready to build.
+No blocking problems. The plan is ready to build.
 
 <promise>PASS</promise>
