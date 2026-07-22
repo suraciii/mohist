@@ -26,3 +26,4 @@
 - The focused architecture ratchet, affected Server specs, and Runner typecheck/tests passed after the repair.
 - The subsequent full verify exposed two additional Runner test-only defects: `check-verdict.test.ts` assigned `unknown` Action input to a known object capture, and `executor-raw-with.spec.ts` used a task id in a test title. The capture now explicitly records the validated object shape, and the title names the behavior instead of the historical task id.
 - Runner test typecheck, boundary checks, and all 1,350 Runner tests pass after those fixes.
+- Final `npm run verify` passes: .NET build and tests (1,374 CLI, 1,271 Unit, 30 Architecture, 2,982 Spec), Web checks and 5,151 tests, and Runner checks and 1,350 tests. Verification left no Git-visible generated changes.
