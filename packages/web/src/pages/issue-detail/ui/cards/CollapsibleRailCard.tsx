@@ -56,7 +56,7 @@ export function CollapsibleRailCard({
         ) : (
           <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden="true" />
         )}
-        <span className="flex-1 truncate">{title}</span>
+        <span className="min-w-0 flex-1 break-words text-balance">{title}</span>
         {collapsed && summary && (
           <span
             data-testid={`${testId}-summary`}

@@ -46,6 +46,19 @@ describe('IssueDetailPage reference-rail — desktop right column', () => {
     const grid = screen.getByTestId('issue-detail-content-grid')
     expect(grid.className).toMatch(/lg:grid-cols-3/)
   })
+
+  it('keeps the desktop rail visible with a capped internally scrollable sticky column', async () => {
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.className).toContain('lg:sticky')
+    expect(referenceRail.className).toContain('lg:top-6')
+    expect(referenceRail.className).toContain('lg:self-start')
+    expect(referenceRail.className).toContain('lg:max-h-[calc(100vh-3rem)]')
+    expect(referenceRail.className).toContain('lg:overflow-y-auto')
+  })
 })
 
 describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', () => {

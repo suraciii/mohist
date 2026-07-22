@@ -551,7 +551,7 @@ export function IssueDetailPage({
             </div>
 
             <div
-              className={isNarrowViewport ? 'min-w-0 space-y-4' : 'min-w-0 space-y-6 lg:col-span-1'}
+              className={isNarrowViewport ? 'min-w-0 space-y-4' : 'min-w-0 space-y-6 lg:sticky lg:top-6 lg:col-span-1 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto'}
               data-testid="reference-rail"
               data-tier-weight="reference-rail"
               data-rail-mode={isNarrowViewport ? 'narrow' : 'desktop'}

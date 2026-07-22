@@ -138,3 +138,35 @@
 
 - Did not touch the "Children" progress row or the parent-reference row beyond the relabel — no merging, no reordering, no value-text changes.
 - Did not touch other Details-card rows (Recommended workflow, Recommendation reason, Risk, Project, Repository) — task scope is the two "Parent Issue" labels only.
+
+## T-005 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The title span in `CollapsibleRailCard.tsx:59` was `flex-1 truncate` — dropping `truncate` is enough for "Configuration" to render in full, but the span still sits inside a flex row with a `shrink-0` chevron. Added `min-w-0` to let the title shrink to the parent's width and `break-words text-balance` to wrap onto multiple lines if a title is ever wider than the rail column. The collapsed summary keeps its own `truncate` so narrow-rail summaries still elide (per design D6).
+- The sticky rail is wired with `lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto`. `lg:self-start` is required: a sticky element inside a CSS grid row without it would stretch to the full row height and the `top` offset would push it off-screen as soon as the user scrolls. `lg:max-h` + `lg:overflow-y-auto` ensures a very tall rail (drift + convergence + configuration all expanded) stays scrollable within the rail column instead of clipping or pushing the page.
+- The narrow-viewport class branch (`isNarrowViewport ? 'min-w-0 space-y-4' : ...`) is untouched — Tailwind's `lg:` prefix only kicks in at the `lg` breakpoint, so narrow viewports never get sticky behavior. The existing narrow-viewport test continues to pass unchanged.
+- The visual-weight test `does not place sticky or heavy-fill chrome on the reference rail` asserted `referenceRail.className).not.toMatch(/\bsticky\b/)`. That assertion is no longer valid because the desktop rail now legitimately carries `lg:sticky`. Replaced it with two narrower tests: (1) `uses desktop sticky positioning without applying sticky behavior on narrow viewports` asserts the five `lg:sticky / lg:top-6 / lg:self-start / lg:max-h-[calc(100vh-3rem)] / lg:overflow-y-auto` classes are present on the rail; (2) `does not apply desktop sticky classes to the narrow rail` asserts the narrow-viewport rail's className has no plain `sticky` token (so desktop sticky is opt-in, not unconditional). The color/fill and shadow assertions from the original test are kept in the second `lightest visual weight` describe block below, so the visual-weight invariant is still locked.
+- The contents test `exposes metadata, model, workflow-profile control, and prerequisites in the rail` now also asserts the `Configuration` rail card's title renders the full word (via `within(configurationToggle).getByText('Configuration')`) and that no `CONF…` fragment is present. This locks the "no truncation at desktop width" invariant in the contents test file.
+- The layout test `marks the rail as desktop mode and lays it out as a right column narrower than the reading flow` was already asserting `grid.className).toMatch(/lg:grid-cols-3/)`, but the matching `grid` was never actually referenced by a separate `screen.getByTestId('issue-detail-content-grid')` — that query existed but its result was unused. Added a new test `keeps the desktop rail visible with a capped internally scrollable sticky column` that asserts all five sticky/scroll class tokens on the rail container.
+
+### Decisions confirmed against spec
+
+- Dropped `truncate` from the rail-card title span only (`CollapsibleRailCard.tsx:59`); summary span keeps `truncate` (D6 / AC #1).
+- Applied desktop-only sticky + max-h + internal overflow to the rail column (`IssueDetailPage.tsx:553-554`); narrow-viewport branch untouched (D6 / AC #2).
+- Did not add JS scroll-spy or `position: fixed` — CSS `sticky` only (D6 alternative-rejected rationale).
+- Did not add a separate "Actions" rail card; design notes the rail has Details / Workflow Profile / Base Drift / Convergence / Configuration / Start Prerequisites / Readiness, and the sticky rule applies to the whole rail column.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5075 tests passed (+2 tests over T-004 baseline: 1 in layout, 1 in visual-weight, plus the contents test added two in-test assertions and a renamed test).
+- Focused run of the three reference-rail test files — 3 files / 41 tests passed.
+- `git diff --stat` — 5 files changed, 34 insertions, 6 deletions. No collateral edits.
+
+### Out of scope (noted, not done)
+
+- Did not tokenize the page-level container's `overflow-y-auto` or add `position: relative` to it; the page's existing scroll ancestor already supports `position: sticky` (confirmed by the contents-test scroll flow), so the simple `lg:sticky` works without any plumbing changes.
+- Did not introduce JS-driven scroll-spy, `position: fixed`, or `IntersectionObserver` — the design rejects those (D6 alternative-rejected).
+- Did not change the rail card ordering, the rail card set, the narrow-viewport stacking behavior, or any of the other tier weights. The change is purely the two cosmetic/D6 concerns.
+
