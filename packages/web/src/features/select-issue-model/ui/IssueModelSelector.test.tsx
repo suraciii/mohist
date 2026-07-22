@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { mocks, renderSelector, resetIssueModelSelectorTestState } from './IssueModelSelectorTestSupport'
 
 beforeEach(() => {
@@ -18,18 +19,24 @@ describe('IssueModelSelector default-model variant chips', () => {
       isLoading: false,
       error: null,
     }))
-    mocks.getIssueWorkflowVariables.mockResolvedValue({
-      vars: { agent: { runtime: 'pi', model: 'pi/anthropic/claude' } },
-      stages: {},
+    renderSelector()
+
+    const user = userEvent.setup()
+    const runtimeSelector = await screen.findByTestId('issue-runtime-selector')
+    expect(runtimeSelector.tagName).not.toBe('SELECT')
+    await user.click(runtimeSelector)
+    await user.click(await screen.findByRole('option', { name: 'Pi' }))
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(42, 'agent', { runtime: 'pi' }, 'proj_test')
     })
-    renderSelector({ currentModel: 'pi/anthropic/claude' })
 
     const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
     fireEvent.click(trigger)
 
     expect(await waitFor(() => document.querySelector('[data-model-id="pi/anthropic/claude"]'))).toBeInTheDocument()
     expect(document.querySelector('[data-model-id="openai/gpt-4"]')).not.toBeInTheDocument()
-    expect(screen.getByTestId('issue-runtime-selector')).toHaveValue('pi')
+    expect(runtimeSelector).toHaveTextContent('Pi')
   })
 
   it('renders no variant chips for a model that has no variants', async () => {

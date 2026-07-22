@@ -5,6 +5,7 @@ import { AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, useAvailableModelIds, useMode
 import { getIssueWorkflowVariables, issueDetailKeys, issueListKeys, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../shared/ui/components/select'
 import { variantListFor } from '../../../shared/ui/model-variants'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
@@ -60,6 +61,10 @@ function agentRuntime(vars?: Record<string, unknown> | null): AgentRuntime {
   if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return AGENT_RUNTIME_OPENCODE
   const runtime = (agent as Record<string, unknown>).runtime
   return runtime === AGENT_RUNTIME_PI ? AGENT_RUNTIME_PI : AGENT_RUNTIME_OPENCODE
+}
+
+function runtimeLabel(runtime: AgentRuntime): string {
+  return runtime === AGENT_RUNTIME_PI ? 'Pi' : 'OpenCode'
 }
 
 function stageModelMap(stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null): Record<string, string> {
@@ -448,19 +453,27 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     : null
 
   return (
-      <div className="space-y-1">
-       <label className="block text-sm text-muted-foreground">Execution backend</label>
-       <select
-         aria-label="Execution backend"
-         data-testid="issue-runtime-selector"
-         value={runtime}
-         onChange={(event) => void handleRuntimeChange(event.target.value as AgentRuntime)}
-         className="mb-2 w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-       >
-         <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
-         <option value={AGENT_RUNTIME_PI}>Pi</option>
-       </select>
-       <label className="block text-sm text-muted-foreground">Coder Model</label>
+    <div className="space-y-1">
+      <label className="block text-sm text-muted-foreground">Execution backend</label>
+      <Select
+        value={runtime}
+        onValueChange={(nextRuntime) => {
+          if (nextRuntime !== null) void handleRuntimeChange(nextRuntime as AgentRuntime)
+        }}
+      >
+        <SelectTrigger
+          aria-label="Execution backend"
+          data-testid="issue-runtime-selector"
+          className="mb-2 h-9 w-full"
+        >
+          <SelectValue>{runtimeLabel(runtime)}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={AGENT_RUNTIME_OPENCODE}>OpenCode</SelectItem>
+          <SelectItem value={AGENT_RUNTIME_PI}>Pi</SelectItem>
+        </SelectContent>
+      </Select>
+      <label className="block text-sm text-muted-foreground">Coder Model</label>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger
           render={
@@ -665,16 +678,24 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                 <div key={stage} className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
                   <div className="flex-1">
-                    <select
-                      aria-label={`${stage} execution backend`}
-                      data-testid={`issue-stage-runtime-${stage}`}
+                    <Select
                       value={stageRuntime}
-                      onChange={(event) => void handleStageRuntimeChange(stage, event.target.value as AgentRuntime)}
-                      className="mb-1 w-full h-8 rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm"
+                      onValueChange={(nextRuntime) => {
+                        if (nextRuntime !== null) void handleStageRuntimeChange(stage, nextRuntime as AgentRuntime)
+                      }}
                     >
-                      <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
-                      <option value={AGENT_RUNTIME_PI}>Pi</option>
-                    </select>
+                      <SelectTrigger
+                        aria-label={`${stage} execution backend`}
+                        data-testid={`issue-stage-runtime-${stage}`}
+                        className="mb-1 h-8 w-full text-xs"
+                      >
+                        <SelectValue>{runtimeLabel(stageRuntime)}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={AGENT_RUNTIME_OPENCODE}>OpenCode</SelectItem>
+                        <SelectItem value={AGENT_RUNTIME_PI}>Pi</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <ModelSelect
                       id={`issue-stage-model-${stage}`}
                       value={stageModel}
