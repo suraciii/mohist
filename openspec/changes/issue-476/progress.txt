@@ -139,3 +139,28 @@
 - Full CLI test project: 1473 passed.
 - `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore`:
   0 warnings, 0 errors.
+
+## T-004 (in progress) — issue start binding and legacy path removal
+
+### Implementation notes
+- `IssueDescriptor` now exposes the API field `workflowRunId` (the old
+  `workflowRun` field name was incorrect), and the issue detail table prints a
+  bound run ID when present.
+- Removed the CLI registrations and implementations for Issue WorkflowRun
+  controls and feedback, removed the root `workflow` command tree, and kept
+  issue workflow reads/configuration intact.
+- Deleted obsolete tests for the removed `issue` and `workflow` surfaces;
+  retained focused issue comment coverage and added start/output and removed
+  path coverage.
+- Updated `docs/cli-reference.md` and `docs/issues.md` control examples to
+  use `mo run` with `--issue` targeting.
+
+### Verification
+- Existing legacy command regression tests passed before removal: 105 tests.
+- Focused post-change CLI tests passed: 121 tests.
+- Serial CLI build passed with 0 warnings and 0 errors after the transient
+  parallel-invocation file-lock warning.
+- Full CLI test project passed: 1360 tests.
+- `npm test` passed all .NET solution tests (CLI 1360, server unit 1290,
+  architecture 30, spec 3008), then failed in optional JS workspace checks
+  because this workspace has no installed `tsx`/`tsc` binaries.

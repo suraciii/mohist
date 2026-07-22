@@ -534,6 +534,77 @@ public class IssueCliStartReadinessTests
     }
 
     [Fact]
+    public async Task IssueStart_DefaultOutput_ShowsWorkflowRunId()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": { "number": 42, "title": "Start me", "status": "running", "workflowRunId": "wr_abc123" } }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "start", "42", "--project", "mohist-local"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("workflowRunId: wr_abc123", output.ToString());
+    }
+
+    [Fact]
+    public async Task IssueStart_JsonSelection_ReturnsWorkflowRunId()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": { "number": 42, "workflowRunId": "wr_abc123" } }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "start", "42", "--project", "mohist-local", "--json", "workflowRunId"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var json = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("wr_abc123", json["workflowRunId"]?.GetValue<string>());
+        Assert.Single(json);
+    }
+
+    [Fact]
+    public async Task IssueStart_AlreadyStartedIssue_ReturnsBoundWorkflowRunId()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": { "number": 42, "status": "running", "workflowRunId": "wr_existing" } }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "start", "42", "--project", "mohist-local"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("wr_existing", output.ToString());
+    }
+
+    [Fact]
     public async Task IssueStart_SendsSingleStartRequest()
     {
         var http = new RecordingHttpHandler();

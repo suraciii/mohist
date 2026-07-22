@@ -10,7 +10,7 @@ internal static partial class IssueCommands
 
     private static readonly ResourceDescriptor IssueDescriptor = new(
         ResourceCardinality.Single,
-        ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRun"]);
+        ["number", "title", "status", "stage", "priority", "labels", "body", "repository", "repositoryName", "workflowRunId"]);
 
     private static Command BuildList(MohistCliApi api)
     {

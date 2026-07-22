@@ -56,6 +56,7 @@ internal sealed partial class TableRenderer
             project = StringOf(data, "projectId");
         var updatedAt = StringOf(data, "updatedAt");
         var body = StringOf(data, "body");
+        var workflowRunId = StringOf(data, "workflowRunId");
         var labels = FormatLabels(data["labels"]);
 
         _out.WriteLine($"number:   {number}");
@@ -66,6 +67,8 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"repository: {repository}");
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
+        if (!string.IsNullOrEmpty(workflowRunId))
+            _out.WriteLine($"workflowRunId: {workflowRunId}");
         _out.WriteLine($"labels:   {labels}");
         var workflowProfileId = StringOf(data, "workflowProfileId");
         if (!string.IsNullOrEmpty(workflowProfileId))
