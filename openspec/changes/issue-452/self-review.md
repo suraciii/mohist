@@ -1,105 +1,79 @@
-# Self-Review — Issue 452
+# Self-Review — Issue 452 (second pass)
 
-Reviewer: plan-stage self-review of `openspec/changes/issue-452/` (proposal, specs,
-design, tasks) against issue #452. Review only; no files changed except this one.
+Reviewer: plan-stage self-review of `openspec/changes/issue-452/` (proposal,
+specs, design, tasks) against issue #452, after the first-pass findings were
+fixed. Review only; no files changed except this one.
 
-## What holds up
+## Prior findings — all resolved
 
-- **Capability ↔ spec ↔ decision ↔ task mapping is consistent.** The 3 proposal
-  capabilities each have a spec file; design decisions D1–D7 map onto them; the 4-task
-  DAG covers all of them. Every issue AC traces to at least one task.
-- **Load-bearing technical claims verified against code.** `AgentJobInput` skips
-  `Id(4)` (uses 0,1,2,3,5,6,7,8,9) and `RoutedAgentLaunchPlan` tops out at `Id(18)`,
-  so the design's "next free Id(4)" / "Id(19)" snapshot placement is correct and
-  append-only. `AgentSessionInfo.Runtime` is already returned to the runner
-  (`RunnerRoutes.cs:478,692`), so D5 (generic open/attach derive runtime from the
-  session) is sound.
-- **Spec format is compliant.** Every requirement uses `### Requirement` with ≥1
-  `#### Scenario` (4 hashtags) in WHEN/THEN form and SHALL/MUST language.
-- **Backward compatibility is real** (additive `agentConfig.runtime`; Orleans null
-  defaults), and the task graph is a valid DAG with deps pointing only to
-  strictly-lower-priority tasks.
+The first pass FAILed on five points. Each is now fixed and re-verified against
+the code:
 
-## Problems that must be fixed
+- **P1 (override write path / OQ1 unresolved) — fixed.** OQ1 is resolved (design
+  D2/OQ1): the override is an optional `runtime` field on the manual launch
+  request body, resolved `launchOverride ?? agentConfig.runtime ?? "opencode"`.
+  T-001 owns the write/read path with an end-to-end AC. The `vars.agent.runtime`
+  alternative is documented as rejected (it is the Workflow Inline Agent's options
+  surface, consumed via `uses`, and nothing writes it). This also removed the
+  launch→issue-variable coupling (resolves P5).
+- **P2 (`AgentConfigSchema.Filter` second hardcoded list) — fixed.** Design D1
+  and T-001 now name both surfaces (`AllowedKeys`/`Validate` and `Filter`'s
+  `new[] { "model", "variant" }` at `AgentConfigSchema.cs:88`), with a
+  round-trip-through-`Filter` AC.
+- **P3 (AgentJob output `kind: "opencode"` hardcode) — fixed.** Design D4 and
+  T-002 parameterize `buildAgentJobOutput` (`agent-job-executor.ts:250`) from the
+  selected runtime, with an AC. Verified the server reads `failureCategory`, not
+  `kind`, so this is labeling-correctness, not routing.
+- **P4 (BREAKING vs additive contradiction) — fixed.** Proposal and design D6
+  now consistently describe the `/opencode/models` change as additive (route +
+  `{models, modelVariants}` shape preserved, optional `?runtime=` defaulting to
+  opencode). No stale "BREAKING" remains outside this review file.
+- **P5 (T-001 entanglement) — addressed** via the OQ1 resolution.
 
-### P1 — BLOCKER: the issue-level override (AC #2) has no owned write path, and OQ1 is unresolved
+## Verification (this pass)
 
-AC #2 requires "issue 级覆盖可以改变本次启动使用的后端". The design (D2/OQ1) recommends
-T-001 **read** the override from the issue's `vars.agent.runtime` at launch. But:
+- **Coverage.** All five issue ACs map to tasks: AC#1 (config+launch T-001,
+  execute+project T-002); AC#2 (launch-time override T-001); AC#3 (snapshot
+  T-001); AC#4 (catalog T-003 + selectors T-004); AC#5 (executor surfaces
+  failure T-002).
+- **Consistency.** Override wording is aligned across proposal, spec
+  (`Launch-time override precedence`), design D2, and T-001. OQ1 is marked
+  RESOLVED everywhere; OQ2/OQ3 remain as bounded open questions with clear task
+  directives. No stale "issue override / issue-scoped / BREAKING" references
+  remain (the only "Issue-level … model selection" hits refer to the Web
+  issue/stage model-picker UI, a distinct, legitimate concept).
+- **Mechanics.** `tasks.json` is valid JSON; the 4-task graph is a DAG with
+  dependencies pointing only to strictly-lower-priority tasks. Every spec
+  requirement has ≥1 `#### Scenario` (4 hashtags, WHEN/THEN, SHALL/MUST); no
+  3-hashtag scenarios. Each task has explicit, test-bearing acceptance criteria.
+- **Load-bearing claims** (re-verified in the first pass, unchanged): `Id(4)`
+  free on `AgentJobInput`, `Id(19)` free on `RoutedAgentLaunchPlan`;
+  `AgentSessionInfo.Runtime` already returned to the runner so D5 holds.
 
-- No task is responsible for **writing** a per-issue `vars.agent.runtime`. Today the
-  Web writes only `{model, variant}` into `vars.agent`
-  (`entities/settings/api/client.ts:64,200`), and nothing in T-004's scope or ACs
-  asserts it persists a backend choice into issue/stage variables — T-004 only says
-  the pickers "list models for the selected backend".
-- Consequently the override is always absent, so AC #2 is not demonstrable
-  end-to-end. T-001's resolver-level unit test can prove precedence in isolation,
-  but there is no UI/API path that actually sets the override for a Mohist Agent
-  launch.
-- OQ1 is flagged "primary" and unresolved, yet T-001 is AFK and told to "implement
-  the recommended source". An autonomous builder cannot confidently satisfy AC #2
-  from this plan.
+## Observations (non-blocking)
 
-**Fix direction:** either (a) decide OQ1 and add an explicit owner + AC for writing
-the issue-level backend override (and make the read/write tasks reference each
-other), or (b) re-scope AC #2 to a mechanism the plan actually delivers end-to-end
-(e.g. a launch-request field with a clear writer). As written, the plan is not
-buildable to "done" for AC #2.
+These do not prevent building; listing for transparency.
 
-### P2 — `AgentConfigSchema.Filter` has a second hardcoded key list that T-001 does not update
-
-`AgentConfigSchema` has **two** key surfaces: `AllowedKeys` (used by `Validate`) and
-a separate hardcoded list inside `Filter` — `foreach (var key in new[] { "model",
-"variant" })` (`AgentConfigSchema.cs:88`). `Filter` is the write-side merge path used
-by `IssueVariableBuilder`, `MohistIssueWorkflowProfileBase`, and `ConfigService` (per
-its own docstring). T-001's AC only names `Validate`/`AllowedKeys`, so `runtime`
-would be silently dropped on those merge paths even though it passes validation.
-
-**Fix:** T-001 must update both `AllowedKeys`/`Validate` **and** `Filter` (derive
-`Filter` from `AllowedKeys`, or add `runtime` to its list), with an AC covering a
-round-trip through `Filter`.
-
-### P3 — T-002 does not address the AgentJob output `kind` hardcoded to `"opencode"`
-
-`buildAgentJobOutput` hardcodes `kind: "opencode"` in the terminal AgentJob output
-(`agent-job-executor.ts:250`), consumed by `AgentJobGrain.ReportResultAsync`. A
-Pi-executed AgentJob would report `kind: "opencode"`. T-002's description and ACs
-cover runtime selection, readiness failure, and fact projection, but never touch the
-output `kind`/runtime labeling. At minimum this needs a decision (is `kind`
-runtime-specific, and if so who sets it) and an AC; otherwise Pi runs are
-mislabeled in the terminal result.
-
-**Fix:** T-002 must account for the output labeling on the Pi path (parameterize
-`kind` from the selected runtime, or document why `opencode` is intentional) with a
-verifiable AC.
-
-### P4 — Minor: proposal "BREAKING" contradicts design "preserves legacy behavior"
-
-Proposal (`proposal.md:15`) marks the `/opencode/models` change **BREAKING**, but the
-design (`design.md:64`) says the generalized endpoint "keeps `opencode` as the
-default when `?runtime=` is absent, so any legacy caller behavior is preserved".
-These are contradictory. If the route stays `/opencode/models` with an additive
-`?runtime=` and an unchanged `{models, modelVariants}` shape, it is additive, not
-breaking.
-
-**Fix:** reconcile — either drop the BREAKING claim or specify the actual
-route/shape change that makes it breaking.
-
-### P5 — Minor: T-001 is large and entangles the riskiest seam (OQ1 override-read)
-
-T-001 spans D1–D5 plus reading issue variables for the override. Per the splitting
-rules merging is defensible (one server feature module), but the override-read is
-the single riskiest, least-decided piece (it couples the launch path to
-issue-variable reads) and is bundled with the rest. This is not wrong, but it
-amplifies P1: until OQ1 is resolved, the largest task carries the most uncertainty.
-
-**Fix:** resolve OQ1 first; if the override-read survives, consider isolating it so
-the core backend-routing pipeline can proceed independently.
+1. **The launch-time override is API-only.** No Web task adds a per-launch
+   backend affordance; the primary backend selection surface is the Agent editor
+   (`agentConfig.runtime`, T-004). The literal AC#2 ("can change the backend for
+   a launch; absent → config") is satisfied by the request field, but if product
+   intends a UI-settable per-issue override, a Web affordance would be needed.
+   Worth confirming intent; not a plan defect.
+2. **T-002 has no explicit AC for a dispatch that omits `runtime`.** In practice
+   every post-T-001 dispatch carries it (and the migration ships server+runner
+   together), so an absent field is only a partial-rollout edge. A defensive
+   "absent runtime → opencode" AC would harden it; not required for correctness
+   in the coordinated release.
+3. **Minor cross-reference.** T-001 also implements two `agent-job-runtime-execution`
+   requirements (dispatch carries runtime; runtime-aware generic open/attach) but
+   its `spec` field points to `agent-execution-backend`. Ownership is unambiguous
+   in T-001's description/notes/ACs, so this is cosmetic.
 
 ## Verdict
 
-P1 is a blocker (AC #2 not achievable end-to-end; OQ1 unresolved), and P2/P3 are
-concrete implementation gaps with verified code evidence. The plan is not ready to
-build as-is.
+The plan is internally consistent, buildable, fully covers the issue ACs, and
+every prior finding is resolved with verified code references. Remaining items
+are non-blocking observations. The plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
