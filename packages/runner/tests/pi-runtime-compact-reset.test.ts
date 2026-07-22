@@ -70,7 +70,7 @@ describe("PiRuntime compact channel", () => {
     const events: unknown[] = []
     const result = await runtime.compact(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" } },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace" } })
     expect(session.compactCalls).toBe(1)

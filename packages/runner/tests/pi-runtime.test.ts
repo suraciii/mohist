@@ -157,7 +157,7 @@ describe("PiRuntime", () => {
     await runtime.start()
     const controller = new AbortController()
     const events: unknown[] = []
-    const turn = runtime.runTurn({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "provider" }, controller.signal, { onEvent: (event) => events.push(event) })
+    const turn = runtime.runTurn({ target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "provider" }, controller.signal, { onEvent: (event) => { events.push(event) } })
     await new Promise<void>((resolve) => setImmediate(resolve))
     session.emit({ type: "auto_retry_start", id: "retry", attempt: 1, maxAttempts: 5, delayMs: 0, errorMessage: "sentinel-provider-key quota exhausted" })
     const failed = await turn
@@ -186,7 +186,7 @@ describe("PiRuntime", () => {
     const events: unknown[] = []
     const result = await runtime.followup(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "additional guidance" },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     expect(result).toMatchObject({ ok: true, value: { runtimeSessionId: "/virtual/sessions/one.jsonl", workDir: "/workspace" } })
     expect(session.steerCalls).toEqual(["additional guidance"])
@@ -201,7 +201,7 @@ describe("PiRuntime", () => {
     const events: unknown[] = []
     const followup = runtime.followup(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "follow me" },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     await new Promise<void>((resolve) => setImmediate(resolve))
@@ -222,7 +222,7 @@ describe("PiRuntime", () => {
     const events: unknown[] = []
     const followup = runtime.followup(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "ping" },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     await new Promise<void>((resolve) => setImmediate(resolve))
@@ -267,7 +267,7 @@ describe("PiRuntime", () => {
     const events: unknown[] = []
     const followup = runtime.followup(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "go" },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     await new Promise<void>((resolve) => setImmediate(resolve))
@@ -427,13 +427,13 @@ describe("PiRuntime", () => {
     const workflowTurn = runtime.runTurn(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "workflow" },
       new AbortController().signal,
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(["workflow"])
     const followup = runtime.followup(
       { target: { runtime: "pi", runtimeSessionId: session.sessionFile, workDir: "/workspace" }, prompt: "followup" },
-      { onEvent: (event) => events.push(event) },
+      { onEvent: (event) => { events.push(event) } },
     )
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(session.promptCalls).toEqual(["workflow"])
