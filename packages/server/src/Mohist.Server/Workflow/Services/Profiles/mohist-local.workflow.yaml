@@ -168,7 +168,7 @@ stages:
         uses: core/script
         with:
           run: ${{ vars.ci.verify }}
-          timeout: 600000
+          timeout: 300000
         recovery:
           budget: 2
           handlers:
