@@ -63,7 +63,7 @@ function usageText(session: WorkflowRunSession): string {
     usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '',
     usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '',
   ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : 'No usage yet'
+  return parts.length > 0 ? parts.join(' · ') : 'Usage unavailable'
 }
 
 function contextText(session: WorkflowRunSession): string | null {

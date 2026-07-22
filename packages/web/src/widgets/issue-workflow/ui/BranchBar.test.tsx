@@ -150,7 +150,7 @@ describe('BranchBar', () => {
 
     const rebase = screen.getByRole('button', { name: /rebase onto master/i })
     const reason = screen.getByTestId('branch-bar-rebase-reason')
-    expect(screen.getByText('未能检查上游')).toBeTruthy()
+    expect(screen.getByText('Upstream check unavailable')).toBeTruthy()
     expect(screen.queryByText('up to date')).toBeNull()
     expect(reason).toHaveTextContent('Branch status could not be checked.')
     expect(rebase).toBeDisabled()
@@ -180,7 +180,7 @@ describe('BranchBar', () => {
       baseBranch: 'main',
     }, { issueNumber: 216, stage: WorkflowStage.Check })
 
-    expect(screen.getByText('未能检查上游')).toBeTruthy()
+    expect(screen.getByText('Upstream check unavailable')).toBeTruthy()
     expect(screen.queryByText(/up to date/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /rebase onto main/i })).toBeNull()
     expect(screen.queryByText(/behind/i)).toBeNull()
@@ -198,7 +198,7 @@ describe('BranchBar', () => {
 
     const rebase = screen.getByRole('button', { name: /rebase onto master/i })
     const reason = screen.getByTestId('branch-bar-rebase-reason')
-    expect(screen.getByText('未能检查上游')).toBeTruthy()
+    expect(screen.getByText('Upstream check unavailable')).toBeTruthy()
     expect(reason).toHaveTextContent('Branch status could not be checked.')
     expect(rebase).toBeDisabled()
     expect(rebase).toHaveAttribute('aria-describedby', reason.id)
@@ -238,7 +238,7 @@ describe('BranchBar', () => {
 
     expect(screen.getByText('Rebasing...')).toBeTruthy()
     expect(screen.getByText('packages/runner/src/server/runner-signalr.ts')).toBeTruthy()
-    expect(screen.queryByText('未能检查上游')).toBeNull()
+    expect(screen.queryByText('Upstream check unavailable')).toBeNull()
   })
 
   it('disables repeat rebase after a rebase task is queued', async () => {

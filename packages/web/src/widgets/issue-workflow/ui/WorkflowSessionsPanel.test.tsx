@@ -115,6 +115,27 @@ describe('WorkflowSessionsPanel', () => {
     expect(screen.getByText('probe timed out')).toBeInTheDocument()
   })
 
+  it('renders "Usage unavailable" for a session row with no token figures', () => {
+    setWorkflowRunSessions({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan-no-usage',
+          sessionName: 'proposal-draft',
+          stage: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const row = screen.getByTestId('workflow-session-row')
+    expect(within(row).getByText('Usage unavailable')).toBeInTheDocument()
+    expect(within(row).queryByText('No usage yet')).not.toBeInTheDocument()
+  })
+
   it('does not render without a workflow run id', () => {
     setWorkflowRunSessions({ isLoading: false, sessions: [] })
 

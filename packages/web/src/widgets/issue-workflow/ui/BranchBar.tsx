@@ -126,7 +126,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
             </div>
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:shrink-0">
-              <span className="text-xs font-medium text-muted-foreground">未能检查上游</span>
+              <span className="text-xs font-medium text-muted-foreground">Upstream check unavailable</span>
               {allowRebase && (
                 <RebaseAction
                   baseBranch={baseBranch}

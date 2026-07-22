@@ -1,0 +1,31 @@
+## Codebase Patterns
+
+- BranchBar.tsx, PrDeliveryIndicator.tsx, and WorkflowSessionsPanel.tsx use inline English strings (no i18n layer). The PR indicator prefixes the PR number with `Merged via PR #{prNumber}` (consistent with the rest of the app's copy register).
+- The session panel `usageText(session)` already returns three honest states: a `totalTokens` summary line, an input/output breakdown, or — when no token figures are present — `'Usage unavailable'`. The aggregate header computes its own summary independently and never falls back to usage-placeholder copy.
+
+## T-001 Implementation Notes
+
+### Surprises / things worth knowing
+
+- The BranchBar.test.tsx had four assertions on the Chinese string `未能检查上游` (3 `getByText` and 1 `queryByText`); all four needed swapping to the English copy `Upstream check unavailable`. Confirmed via ripgrep that no other file in the repo references the literal string in any form.
+- The PrDeliveryIndicator.test.tsx had three coupled assertions (`'经由 PR'`, `'#42'`, `'合并'`) in the same `expect(... textContent).toContain(...)` chain. After the copy fix, the indicator's textContent becomes `Merged via PR #42` — kept one `toContain('Merged via PR')` assertion and the PR-number assertion; dropped the standalone `'合并'` assertion since the merged English copy no longer contains a separate substring matching it.
+- WorkflowSessionsPanel.tsx had no test for the `'No usage yet'` placeholder (existing tests all provided `usage` data on each session). Added one new test (`renders "Usage unavailable" for a session row with no token figures`) that constructs a session with `usage: undefined` (the helper's default) and asserts the per-row text via `within(row).getByText('Usage unavailable')`. Also asserts `'No usage yet'` is absent to lock the negative.
+
+### Decisions confirmed against spec
+
+- Used `Merged via PR #{prNumber}` (exact wording from the design D1 proposal).
+- Used `Upstream check unavailable` (exact wording from D1).
+- Replaced `'No usage yet'` with `'Usage unavailable'` per D2 — the design's preferred truthful label.
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 377 files / 5067 tests passed.
+- Focused run of the three affected test files — 3 files / 45 tests passed.
+- `rg "[\p{Han}]" BranchBar.tsx PrDeliveryIndicator.tsx WorkflowSessionsPanel.tsx` — no CJK characters.
+- `rg "[\p{Han}]" BranchBar.test.tsx PrDeliveryIndicator.test.tsx WorkflowSessionsPanel.test.tsx` — no CJK characters.
+
+### Out of scope (noted, not done)
+
+- Other Chinese strings still exist in the repo (e.g., `packages/web/src/widgets/coder-session/ui/SessionTimeline.tsx`) but the AC for T-001 scopes to the three listed files only. These belong to other issues or follow-up.
+- Did not touch BranchBar palette classes (amber/blue/gray/red/green) — that is T-002's scope (theme tokens), not T-001 (copy).
