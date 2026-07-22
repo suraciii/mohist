@@ -1,0 +1,36 @@
+# issue-478 progress
+
+## Codebase Patterns
+
+- CLI commands follow `MohistCliCommands.<Area>.cs` partial-class layout; every command leaves with `--json` output selection via `MohistCliCommands.JsonSelectionOption()` plus a `ResourceDescriptor`.
+- HTTP printing reuses `MohistCliApi.PrintResourceAsync` for reads and `PrintMutationResourceAsync` for writes; both flow through `ResourceOutputCatalog.For(shape)` → `JsonSelection.Project`.
+- `RunCommands.ResolveRunTargetAsync` is the canonical Run-target resolver (positional `<run-id>` + `--issue <number>`, never both). It already enforces the local-only usage error.
+- `--value-json` parsing lives at the command boundary: parse locally with `JsonDocument.Parse`, on failure emit a local usage error (exit 2) and never call HTTP. Positional string vs `--value-json` mutual exclusion is enforced by an `System.CommandLine` `Validator` that runs before the action.
+- `CliExitCode.For(CliExitOutcome.UsageFailure)` is the canonical exit code 2 (`packages/cli/Mohist.Cli/CliExecutionContract.cs`).
+- Server `VariableBundle.GetByKeyPath` splits on `.` with `StringSplitOptions.RemoveEmptyEntries | TrimEntries`; the client mirrors the split so path validation matches the server's read semantics.
+- `--effective` only attaches to Run `list` / `get`; on project / issue / unset / set it surfaces as a System.CommandLine "Unrecognized" or local usage error and never reaches HTTP.
+
+## T-002
+
+- T-001 is the prerequisite. As of starting T-002, T-001 has not yet landed on this branch — the route rename + shape validator are still pending. The CLI emits requests against the clean `/variables` paths so it stays aligned with the post-T-001 server; when T-001 merges the legacy `workflow-profile/variables` paths stop responding and the new paths become the only source of truth.
+- Added `VariableCommands` (`packages/cli/Mohist.Cli/VariableCommands.cs`) exposing `BuildVariableGroup(MohistCliApi, VariableScopeKind)` that returns the four-verb `variable` command tree and emits against a per-scope path scheme (`project`, `issue`, `run`).
+- Added `VariableKeyPath` helper (`packages/cli/Mohist.Cli/VariableKeyPath.cs`):
+  - `BuildSetPatch(segments, stage, leaf)` wraps the leaf under `vars` or `stages.<stage>.vars`.
+  - `BuildUnsetPatch(segments, stage)` emits the same nested path with a JSON `null` leaf via `JsonObject` indexer assignment — `JsonValue.Create((object?)null)` and `JsonNode.Parse("null")` both return a C# null that the runtime cannot encode as the JSON null leaf, so the helper assigns `null` directly to the indexer.
+  - `TryParse(key, …)` splits on `.` and rejects empty / whitespace-only segments (so `a..b`, `.a`, `a.` fail locally). Surrounding whitespace per segment is trimmed.
+- Value typing:
+  - Positional value is always serialized as a JSON string (no inference).
+  - `--value-json <json>` parses with `JsonDocument.Parse` (local parse failure → exit 2).
+  - The two inputs are mutually exclusive and exactly one is required for `set` — enforced by a `System.CommandLine` `Validator` on the command so HTTP is never called on malformed input.
+- `--stage <stage>` selects Stage Variables for reads and writes. Empty / whitespace-only stage is rejected locally.
+- Scope-local `list` / `get` read the addressed scope's own document (`/api/{scope}/variables`, no merge). Run get against `Project → Issue → Run` runs hit `…/variables/effective/{keyPath}[?stage=…]`.
+- Run-only `--effective` reuses the existing clean read routes; `--effective` is only attached to `run variable list/get` and is rejected on `run variable set/unset`. Project / Issue never expose `--effective` as an option (System.CommandLine surfaces "Unrecognized" so HTTP is never reached).
+- Run target resolution reuses `RunCommands.ResolveRunTargetAsync` unchanged for the verb shape (positional Run ID + `--issue <number>`, exactly one). Run list/get also accept the same shape; --issue resolves the bound run before reading Variables.
+- Output: reads use `ResourceDescriptor` over `WorkflowVariables` ([`vars`, `stages`]) rendered through `api.PrintResourceAsync` / `WriteJsonSelectionResult` / `WriteSuccessAsync`. Mutations render through `api.PrintPatchAsync` returning the updated bundle. Diagnostics go to stderr; results to stdout.
+- Scope-local `get` fetches the bundle and traverses the dotted key on the client (matching `VariableBundle.GetByKeyPath`); an absent path prints `(absent)`.
+- Tests: `packages/cli/tests/Mohist.Cli.Tests/VariableCommandsSpecs.cs` covers the shared rules across the three scopes (string value preservation, `--value-json` JSON-type preservation, mutual exclusion, missing-value rejection, key-path validation, scope-local reads, Run-only `--effective`, Run target resolution); `VariableKeyPathTests` covers the helper directly. Command-tree tests assert all three scopes expose the four verbs and that `--effective` is absent from the project/issue `list` options section.
+- Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true` — succeeds with `TreatWarningsAsErrors=true` and 0 warnings / 0 errors. CLI tests: 1399 / 1399 pass. Server ArchTests: 30 / 30 pass. Server SpecTests: 1 pre-existing failure unrelated to this change (verified by stash-pop baseline). The web build target is not reachable in this environment (no `tsc` on PATH), so the full `dotnet build Mohist.sln` is run with `-p:SkipWebBuild=true`.
+
+## T-003
+
+- T-003 (Remove legacy config variable flags and align docs) is downstream of T-002. The current T-002 implementation removes `--var` / `--stage-var` / `--vars-file` only in the sense that the new `variable` verbs replace them; the actual flag removal from `MohistCliCommands.ProjectWorkflow.cs` and `Issue.WorkflowConfigSet.cs` lands in T-003 per the change plan.
