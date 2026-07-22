@@ -95,3 +95,141 @@ T-001 (Standalone validator library: model, Parse, structural and type rules)
   `IsValid` convenience getter; `Definition` is non-null only when there
   are no errors. Consumers must check `Errors` rather than relying on
   nullness.
+
+T-002 (Template-language static validation and single-owner root table)
+
+## Codebase Patterns
+
+- The library's ten public roots live in a single `TemplateRoots` static
+  class in `Mohist.Workflow.Definition`. Expose them as both a named
+  constant set (one const per root) and a single `All`
+  `IReadOnlyCollection<string>` so consumers (the server's
+  `PromptTemplateEngine`) can consume them as one source of truth.
+- The library's template token regex (`\$\{\{\s*(?<path>...)\s*\}\}`)
+  must match the server engine's regex so validation and rendering agree
+  on what counts as a template expression. Both currently use the same
+  identifier grammar `[A-Za-z_][A-Za-z0-9_-]*` separated by `.`.
+
+## Implementation Discoveries
+
+- `Dictionary<string, JsonElement?>` already preserves the YAML scalar
+  shape (T-001), so template extraction recurses over the `JsonElement`
+  tree with no extra parsing: `ValueKind.String` triggers regex extraction;
+  `ValueKind.Object`/`ValueKind.Array` recurse into nested paths.
+- Execution position is built in one pass from the validated `Definition`
+  (stages in document order, tasks within a stage in order, recovery-handler
+  tasks right after their owning task, approval-feedback tasks after all
+  stage tasks). The map is keyed by `id -> position` and stores
+  `position -> path` for diagnostics.
+- Threading `TemplatePositionContext` (`Ordinary` / `RecoveryHandler` /
+  `ApprovalFeedback`) through the walk keeps position rules inline with
+  structural validation and avoids a second pass. The recovery-handler
+  sub-walk carries `RecoveryHandler`; `ValidateApprovalFeedbackTask`
+  carries `ApprovalFeedback`; everything else is `Ordinary`.
+- `failure.*` is rejected unless `context == RecoveryHandler`; the check
+  runs on every `${{ }}` whose root is `failure`, so a recovery-handler
+  task still emitting `failure.*` in its `with` is fine and a regular
+  stage task emitting it is rejected.
+- `work.approvalFeedback.*` requires both the root and the second segment
+  to be `approvalFeedback` (a regular `work.status` reference is allowed
+  in any task).
+- `tasks.<id>` references check strictly-earlier positions: equal position
+  is "self" (rejected), greater position is "forward" (rejected), less is
+  accepted. An undeclared id is reported with `template references
+  undeclared task '<id>'`. Empty task ids fall back to "skip the
+  tasks.<id> check" (referencingPosition = -1) so a structural
+  missing-id error doesn't cascade into a template error.
+- The structural walker emits `expect.markers[].failIf must be a member of
+  oneOf` first; if the same path also has a template error, the
+  `emittedPaths` dedup keeps only the structural message. Tests that
+  exercise template validation inside `expect` use the free-form `path`
+  field instead, so the template error fires first.
+- The server `PromptTemplateEngine` is rewritten to
+  `private static readonly HashSet<string> AllowedRoots = new(TemplateRoots.All, ...)`.
+  An arch test (`PromptTemplateEngine_ShouldNotDeclareLocalAllowedRoots`)
+  greps the engine source for the forbidden hardcoded `"workflow",
+  "stage", "work"` literal sequence and for a missing `TemplateRoots.`
+  reference, so re-introducing a local copy is caught at test time.
+- Tests for the template matrix live in
+  `Mohist.Workflow.Definition.Tests/TemplateStaticValidationTests.cs`:
+  48 new tests cover off-table root (including deeply nested), undeclared
+  task, self reference, forward reference, cross-stage earlier reference,
+  same-stage earlier reference, recovery-handler self/forward/ealier
+  reference, approval-feedback task forward reference (via a second
+  approval-feedback task declared later), failure scoping (ordinary
+  task / check / recovery-handler), approvalFeedback scoping (ordinary
+  task / recovery-handler / approval-feedback task), expression inside
+  an unknown with key, template errors collected alongside structural
+  errors with sorted YAML paths, multi-template-error reporting,
+  empty-expression handling, and `Validate(Definition)` shares the same
+  rules (`Validate_ModelLevelEnforcesSameTemplateRules`,
+  `Validate_ModelLevelEnforcesForwardReference`).
+
+## Acceptance Criteria Mapping
+
+- Single-owner root table:
+  `TemplateRoots.cs` in `Mohist.Workflow.Definition` exposes ten const
+  roots + `All` collection. Server
+  `PromptTemplateEngine.AllowedRoots` is `new(TemplateRoots.All, ...)`;
+  arch test in `ArchitectureRules.cs` blocks a regression.
+- Off-table root → error with location:
+  `Parse_OffTableRoot_ReportedWithLocation`,
+  `Parse_OffTableRootInsideDeeplyNestedWithValue_Reported`.
+- failure scoping:
+  `Parse_FailureInOrdinaryTask_Rejected`,
+  `Parse_FailureInRecoveryHandlerTask_Accepted`,
+  `Parse_FailureInCheck_Rejected`.
+- approvalFeedback scoping:
+  `Parse_ApprovalFeedbackInOrdinaryTask_Rejected`,
+  `Parse_ApprovalFeedbackInRecoveryHandlerTask_Rejected`,
+  `Parse_ApprovalFeedbackInApprovalFeedbackTask_Accepted`,
+  `Parse_WorkNonApprovalFeedbackReference_OrdinaryTask_Accepted`.
+- tasks.<id> strictly-earlier:
+  `Parse_SelfTaskReference_Rejected`,
+  `Parse_ForwardTaskReference_Rejected`,
+  `Parse_CrossStageEarlierReference_Accepted`,
+  `Parse_SameStageEarlierReference_Accepted`,
+  `Parse_RecoveryHandlerTaskCanReferenceOwningTask_Accepted`,
+  `Parse_RecoveryHandlerTaskSelfReference_Rejected`,
+  `Parse_RecoveryHandlerForwardReference_Rejected`,
+  `Parse_ApprovalFeedbackTaskCanReferenceEarlierStageTask_Accepted`,
+  `Parse_ApprovalFeedbackTaskForwardReference_Rejected`.
+- Forward-safe output fields accepted:
+  The acceptance criterion is exercised by
+  `Parse_CrossStageEarlierReference_Accepted` (references
+  `tasks.prepare.outputs.artifact` from a later stage),
+  `Parse_SameStageEarlierReference_Accepted` (references
+  `tasks.prepare.outputs.artifact` from a later task in the same stage),
+  and `Parse_TaskIdWithTaskDeclaration_ForwardSafeOutputsReference_Accepted`
+  (references `tasks.build.outputs.x` from a later task in the same
+  stage). The validator does NOT assert `outputs.x` exists at runtime —
+  it only checks that the referenced task is declared and strictly
+  earlier. The negative case
+  `Parse_TasksOutputsReference_SelfStillRejected` confirms that even
+  with `.outputs.x` after the id, a self-reference is still rejected.
+- Expression-inside-with validation:
+  `Parse_TemplateExpressionInsideWithValue_Validated`,
+  `Parse_UnknownWithKey_StillNotAnErrorWhenExpressionIsValid`,
+  `Parse_TasksReferenceInExpectString_Validated`.
+- Template errors collected with structural errors:
+  `Parse_TemplateErrorsAndStructuralErrors_ReportedTogether`,
+  `Parse_TemplateErrorsCarryYamlPaths_SortedWithStructuralErrors`,
+  `Parse_MultipleTemplateErrorsOnSameTask_AllReported`.
+- Existing server preview behavior unchanged:
+  `PromptTemplateEngineTests.Render_RejectsBareVariablesAndOffTableRoots`
+  in `Mohist.Server.UnitTests` still passes; the arch test catches a
+  re-introduction of the local copy.
+- `npm run build` and `npm test` pass.
+
+## Notes for T-003
+
+- The load-path deserializer (T-003) calls `Validate(Definition)` on the
+  deserialized library model and surfaces the full error list; the
+  template checks now run there too because they're shared with
+  `Parse` via `WorkflowDefinitionRules.Apply`.
+- `WorkflowDefinitionRules.Apply` now builds a `TaskPositionMap` from
+  the model. A definition with an empty `Stages` list short-circuits
+  before the map is built (existing behavior preserved by T-001).
+- If the validator library ever needs to surface `tasks.<id>` errors at
+  a different path (e.g. inside a deeper `with` object), the path is
+  already composed from the `JsonElement` walk — no extra plumbing.

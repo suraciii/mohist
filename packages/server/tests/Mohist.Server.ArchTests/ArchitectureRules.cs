@@ -299,6 +299,49 @@ public class ArchitectureRules
             + string.Join(", ", violations));
     }
 
+    // issue-432 T-002: the ten public template roots must live in exactly one
+    // place — the Mohist.Workflow.Definition library. The server's
+    // PromptTemplateEngine must reference that constant so the validator and
+    // engine cannot drift. This arch test scans the engine source for a
+    // forbidden local-root declaration that would re-introduce a second
+    // source of truth.
+    [Fact]
+    public void PromptTemplateEngine_ShouldNotDeclareLocalAllowedRoots()
+    {
+        var source = EmbeddedSources("ServerSources/")
+            .Single(source => source.Path.EndsWith(
+                "PromptTemplateEngine.cs",
+                StringComparison.Ordinal));
+
+        var violations = new List<string>();
+
+        if (!source.Content.Contains("using Mohist.Workflow.Definition", StringComparison.Ordinal)
+            && !source.Content.Contains("using Mohist.Workflow.Definition;", StringComparison.Ordinal))
+        {
+            violations.Add("missing `using Mohist.Workflow.Definition` import");
+        }
+
+        if (!source.Content.Contains("TemplateRoots.", StringComparison.Ordinal))
+        {
+            violations.Add("missing `TemplateRoots.` reference (engine does not consume the shared root table)");
+        }
+
+        var hardcodedRootBlockPattern = new System.Text.RegularExpressions.Regex(
+            @"\""workflow\""\s*,\s*\""stage\""\s*,\s*\""work\""",
+            System.Text.RegularExpressions.RegexOptions.None);
+        if (hardcodedRootBlockPattern.IsMatch(source.Content))
+        {
+            violations.Add("contains a hardcoded root list (forbidden — must reference TemplateRoots.All)");
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "PromptTemplateEngine must consume the Mohist.Workflow.Definition.TemplateRoots "
+            + "constant as the single source of truth for the ten public template roots. "
+            + "Violations: "
+            + string.Join("; ", violations));
+    }
+
     [Fact]
     public void GrainImplementations_ShouldInheritFromGrain()
     {

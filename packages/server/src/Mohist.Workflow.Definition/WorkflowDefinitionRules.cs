@@ -1,7 +1,45 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
 namespace Mohist.Workflow.Definition;
+
+internal enum TemplatePositionContext
+{
+    Ordinary,
+    RecoveryHandler,
+    ApprovalFeedback,
+}
+
+internal sealed class TaskPositionMap
+{
+    private readonly Dictionary<string, int> _idToPosition = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, string> _positionToPath = new();
+    private int _nextPosition;
+
+    public IReadOnlyDictionary<string, int> IdToPosition => _idToPosition;
+
+    public bool TryGetPosition(string id, out int position) =>
+        _idToPosition.TryGetValue(id, out position);
+
+    public string GetPath(int position) =>
+        _positionToPath.TryGetValue(position, out var path) ? path : string.Empty;
+
+    public void Register(string id, string path)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        if (_idToPosition.ContainsKey(id)) return;
+        _idToPosition[id] = _nextPosition;
+        _positionToPath[_nextPosition] = path;
+        _nextPosition++;
+    }
+}
 
 internal static class WorkflowDefinitionRules
 {
+    private static readonly Regex TemplateTokenRegex = new(
+        @"\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}",
+        RegexOptions.Compiled);
+
     public static void Apply(
         WorkflowDefinition definition,
         List<ValidationError> errors,
@@ -13,11 +51,13 @@ internal static class WorkflowDefinitionRules
             return;
         }
 
+        var positionMap = BuildPositionMap(definition);
+
         var stageIds = new HashSet<string>(StringComparer.Ordinal);
         for (var stageIndex = 0; stageIndex < definition.Stages.Count; stageIndex++)
         {
             var stage = definition.Stages[stageIndex];
-            ValidateStage(stage, stageIndex, stageIds, errors, emittedPaths);
+            ValidateStage(stage, stageIndex, stageIds, positionMap, errors, emittedPaths);
         }
 
         if (definition.Approval?.Feedback is { Tasks: { Count: > 0 } tasks })
@@ -27,16 +67,66 @@ internal static class WorkflowDefinitionRules
                 ValidateApprovalFeedbackTask(
                     tasks[taskIndex],
                     $"approval.feedback.tasks[{taskIndex}]",
+                    positionMap,
                     errors,
                     emittedPaths);
             }
         }
     }
 
+    private static TaskPositionMap BuildPositionMap(WorkflowDefinition definition)
+    {
+        var map = new TaskPositionMap();
+
+        if (definition.Stages is null) return map;
+
+        for (var stageIndex = 0; stageIndex < definition.Stages.Count; stageIndex++)
+        {
+            var stage = definition.Stages[stageIndex];
+            if (stage.Tasks is null) continue;
+
+            for (var taskIndex = 0; taskIndex < stage.Tasks.Count; taskIndex++)
+            {
+                var task = stage.Tasks[taskIndex];
+                var taskPath = $"stages[{stageIndex}].tasks[{taskIndex}]";
+                map.Register(task.Id, taskPath);
+
+                if (task.Recovery is { Handlers: { } handlers })
+                {
+                    for (var handlerIndex = 0; handlerIndex < handlers.Count; handlerIndex++)
+                    {
+                        var handler = handlers[handlerIndex];
+                        if (handler.Tasks is null) continue;
+
+                        for (var innerTaskIndex = 0; innerTaskIndex < handler.Tasks.Count; innerTaskIndex++)
+                        {
+                            var innerTask = handler.Tasks[innerTaskIndex];
+                            var innerPath = $"{taskPath}.recovery.handlers[{handlerIndex}].tasks[{innerTaskIndex}]";
+                            map.Register(innerTask.Id, innerPath);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (definition.Approval?.Feedback is { Tasks: { Count: > 0 } feedbackTasks })
+        {
+            for (var taskIndex = 0; taskIndex < feedbackTasks.Count; taskIndex++)
+            {
+                var task = feedbackTasks[taskIndex];
+                var path = $"approval.feedback.tasks[{taskIndex}]";
+                map.Register(task.Id, path);
+            }
+        }
+
+        return map;
+    }
+
     private static void ValidateStage(
         StageDefinition stage,
         int stageIndex,
         HashSet<string> stageIds,
+        TaskPositionMap positionMap,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -65,6 +155,8 @@ internal static class WorkflowDefinitionRules
                 stage.Tasks[taskIndex],
                 $"{stagePath}.tasks[{taskIndex}]",
                 taskIds,
+                positionMap,
+                TemplatePositionContext.Ordinary,
                 errors,
                 emittedPaths);
         }
@@ -76,6 +168,7 @@ internal static class WorkflowDefinitionRules
                 stage.Checks[checkIndex],
                 $"{stagePath}.checks[{checkIndex}]",
                 checkIds,
+                positionMap,
                 errors,
                 emittedPaths);
         }
@@ -116,6 +209,8 @@ internal static class WorkflowDefinitionRules
         TaskDefinition task,
         string taskPath,
         HashSet<string> taskIds,
+        TaskPositionMap positionMap,
+        TemplatePositionContext context,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -141,12 +236,14 @@ internal static class WorkflowDefinitionRules
         ValidateSetVars(task.SetVars, $"{taskPath}.setVars", errors, emittedPaths);
         ValidateArtifacts(task.Artifacts, taskPath, errors, emittedPaths);
         ValidateExpect(task.Expect, taskPath, errors, emittedPaths);
-        ValidateRecovery(task.Recovery, taskPath, errors, emittedPaths);
+        ValidateRecovery(task.Recovery, taskPath, positionMap, errors, emittedPaths);
+        ValidateTaskTemplates(task, taskPath, context, positionMap, errors, emittedPaths);
     }
 
     private static void ValidateApprovalFeedbackTask(
         TaskDefinition task,
         string taskPath,
+        TaskPositionMap positionMap,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -160,13 +257,15 @@ internal static class WorkflowDefinitionRules
             AddError(errors, emittedPaths, $"{taskPath}.uses", "uses is required");
         }
 
-        ValidateRecovery(task.Recovery, taskPath, errors, emittedPaths);
+        ValidateRecovery(task.Recovery, taskPath, positionMap, errors, emittedPaths);
+        ValidateTaskTemplates(task, taskPath, TemplatePositionContext.ApprovalFeedback, positionMap, errors, emittedPaths);
     }
 
     private static void ValidateCheck(
         CheckDefinition check,
         string checkPath,
         HashSet<string> checkIds,
+        TaskPositionMap positionMap,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -188,6 +287,8 @@ internal static class WorkflowDefinitionRules
         {
             AddError(errors, emittedPaths, $"{checkPath}.uses", "uses is required");
         }
+
+        ValidateCheckTemplates(check, checkPath, positionMap, errors, emittedPaths);
     }
 
     private static void ValidateSetVars(
@@ -342,6 +443,7 @@ internal static class WorkflowDefinitionRules
     private static void ValidateRecovery(
         RecoveryDefinition? recovery,
         string taskPath,
+        TaskPositionMap positionMap,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -407,6 +509,7 @@ internal static class WorkflowDefinitionRules
                         handler.Tasks[taskIndex],
                         $"{handlerPath}.tasks[{taskIndex}]",
                         innerTaskIds,
+                        positionMap,
                         errors,
                         emittedPaths);
                 }
@@ -448,6 +551,7 @@ internal static class WorkflowDefinitionRules
         TaskDefinition task,
         string taskPath,
         HashSet<string> taskIds,
+        TaskPositionMap positionMap,
         List<ValidationError> errors,
         HashSet<string>? emittedPaths)
     {
@@ -468,6 +572,223 @@ internal static class WorkflowDefinitionRules
         if (string.IsNullOrWhiteSpace(task.Uses))
         {
             AddError(errors, emittedPaths, $"{taskPath}.uses", "uses is required");
+        }
+
+        ValidateTaskTemplates(task, taskPath, TemplatePositionContext.RecoveryHandler, positionMap, errors, emittedPaths);
+    }
+
+    private static void ValidateTaskTemplates(
+        TaskDefinition task,
+        string taskPath,
+        TemplatePositionContext context,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        var referencingPosition = positionMap.TryGetPosition(task.Id, out var pos)
+            ? pos
+            : -1;
+        ValidateDictionaryForTemplates(
+            task.With,
+            $"{taskPath}.with",
+            context,
+            referencingPosition,
+            positionMap,
+            errors,
+            emittedPaths);
+        ValidateDictionaryForTemplates(
+            task.Expect,
+            $"{taskPath}.expect",
+            context,
+            referencingPosition,
+            positionMap,
+            errors,
+            emittedPaths);
+    }
+
+    private static void ValidateCheckTemplates(
+        CheckDefinition check,
+        string checkPath,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        ValidateDictionaryForTemplates(
+            check.With,
+            $"{checkPath}.with",
+            TemplatePositionContext.Ordinary,
+            referencingPosition: -1,
+            positionMap,
+            errors,
+            emittedPaths);
+    }
+
+    private static void ValidateDictionaryForTemplates(
+        Dictionary<string, JsonElement?>? values,
+        string path,
+        TemplatePositionContext context,
+        int referencingPosition,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        if (values is null) return;
+
+        foreach (var (key, value) in values)
+        {
+            var keyPath = $"{path}.{key}";
+            if (value is null) continue;
+            ValidateJsonElementForTemplates(
+                value.Value,
+                keyPath,
+                context,
+                referencingPosition,
+                positionMap,
+                errors,
+                emittedPaths);
+        }
+    }
+
+    private static void ValidateJsonElementForTemplates(
+        JsonElement element,
+        string path,
+        TemplatePositionContext context,
+        int referencingPosition,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                var text = element.GetString();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    ValidateTemplateExpressions(
+                        text,
+                        path,
+                        context,
+                        referencingPosition,
+                        positionMap,
+                        errors,
+                        emittedPaths);
+                }
+                break;
+            case JsonValueKind.Object:
+                foreach (var prop in element.EnumerateObject())
+                {
+                    ValidateJsonElementForTemplates(
+                        prop.Value,
+                        $"{path}.{prop.Name}",
+                        context,
+                        referencingPosition,
+                        positionMap,
+                        errors,
+                        emittedPaths);
+                }
+                break;
+            case JsonValueKind.Array:
+                for (var i = 0; i < element.GetArrayLength(); i++)
+                {
+                    ValidateJsonElementForTemplates(
+                        element[i],
+                        $"{path}[{i}]",
+                        context,
+                        referencingPosition,
+                        positionMap,
+                        errors,
+                        emittedPaths);
+                }
+                break;
+        }
+    }
+
+    private static void ValidateTemplateExpressions(
+        string text,
+        string path,
+        TemplatePositionContext context,
+        int referencingPosition,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        var matches = TemplateTokenRegex.Matches(text);
+        if (matches.Count == 0) return;
+
+        foreach (Match match in matches)
+        {
+            var expr = match.Groups["path"].Value;
+            if (string.IsNullOrEmpty(expr)) continue;
+
+            var root = expr.Split('.', 2)[0];
+            if (!TemplateRoots.IsAllowed(root))
+            {
+                AddError(errors, emittedPaths, path,
+                    $"template root '{root}' is not in the public table");
+                continue;
+            }
+
+            if (string.Equals(root, TemplateRoots.Failure, StringComparison.Ordinal)
+                && context != TemplatePositionContext.RecoveryHandler)
+            {
+                AddError(errors, emittedPaths, path,
+                    "template 'failure.*' is allowed only inside recovery-handler tasks");
+            }
+
+            if (string.Equals(root, TemplateRoots.Work, StringComparison.Ordinal)
+                && context != TemplatePositionContext.ApprovalFeedback
+                && IsApprovalFeedbackPath(expr))
+            {
+                AddError(errors, emittedPaths, path,
+                    "template 'work.approvalFeedback.*' is allowed only inside approval-feedback tasks");
+            }
+
+            if (string.Equals(root, TemplateRoots.Tasks, StringComparison.Ordinal))
+            {
+                ValidateTasksReference(expr, path, referencingPosition, positionMap, errors, emittedPaths);
+            }
+        }
+    }
+
+    private static bool IsApprovalFeedbackPath(string expr)
+    {
+        var parts = expr.Split('.');
+        return parts.Length >= 2 && string.Equals(parts[1], "approvalFeedback", StringComparison.Ordinal);
+    }
+
+    private static void ValidateTasksReference(
+        string expr,
+        string path,
+        int referencingPosition,
+        TaskPositionMap positionMap,
+        List<ValidationError> errors,
+        HashSet<string>? emittedPaths)
+    {
+        var parts = expr.Split('.');
+        if (parts.Length < 2 || string.IsNullOrEmpty(parts[1])) return;
+
+        var referencedId = parts[1];
+
+        if (!positionMap.TryGetPosition(referencedId, out var referencedPosition))
+        {
+            AddError(errors, emittedPaths, path,
+                $"template references undeclared task '{referencedId}'");
+            return;
+        }
+
+        if (referencingPosition < 0) return;
+
+        if (referencedPosition == referencingPosition)
+        {
+            AddError(errors, emittedPaths, path,
+                $"template references self task '{referencedId}'");
+            return;
+        }
+
+        if (referencedPosition > referencingPosition)
+        {
+            AddError(errors, emittedPaths, path,
+                $"template references forward task '{referencedId}'");
         }
     }
 
