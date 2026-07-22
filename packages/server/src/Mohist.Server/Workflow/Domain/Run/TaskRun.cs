@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -201,7 +201,7 @@ public static class TaskRunExtensions
                 Id = TaskRunId(input.Id, stageAttempt, attempt),
                 DefinitionId = input.Id,
                 Attempt = attempt,
-                Title = input.Title,
+                Title = input.Title ?? input.Id,
                 Uses = input.Uses,
                 WithInput = input.With,
                 ExpectInput = input.Expect,
@@ -226,7 +226,7 @@ public static class TaskRunExtensions
     public static TaskDefinition ToDefinition(this TaskRun task) => new(
         task.DefinitionId,
         task.Title,
-        task.Uses,
+        task.Uses ?? string.Empty,
         task.WithInput,
         task.ExpectInput,
         task.Artifacts,

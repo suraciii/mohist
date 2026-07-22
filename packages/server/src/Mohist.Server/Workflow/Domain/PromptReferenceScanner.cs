@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Domain;
 

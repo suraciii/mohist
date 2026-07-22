@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -22,14 +22,14 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task", With("""
-                { "path": "${{ artifacts.changeDir }}/proposal.md" }
+                 { "path": "${{ workspace.branch }}/proposal.md" }
                 """))],
                 [])
         ]));
 
         var (work, _) = await PollWorkAnyAsync();
 
-        Assert.Contains("${{ artifacts.changeDir }}", work.With);
+        Assert.Contains("${{ workspace.branch }}", work.With);
     }
 
     [Fact]

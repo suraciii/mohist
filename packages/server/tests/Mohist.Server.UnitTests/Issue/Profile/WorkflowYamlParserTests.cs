@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
@@ -17,7 +17,7 @@ public class WorkflowYamlParserTests
           - stage: build
             tasks: []
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:
@@ -32,8 +32,8 @@ public class WorkflowYamlParserTests
                     prompt: Fix it
         """));
 
-        Assert.Contains("obsolete check-level repair", ex.Message);
-        Assert.Contains("task-level recovery", ex.Message);
+        Assert.Contains("repairLimit", ex.Message);
+        Assert.Contains("unknown field", ex.Message);
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class WorkflowYamlParserTests
           - stage: build
             tasks: []
             checks:
-              - name: health
+              - id: health
                 title: Health
                 uses: core/script
                 with:
@@ -64,7 +64,7 @@ public class WorkflowYamlParserTests
                     run: git diff --check
         """));
 
-        Assert.Contains("obsolete check-level repair", ex.Message);
+        Assert.Contains("repairLimit", ex.Message);
     }
 
     [Fact]
@@ -84,7 +84,8 @@ public class WorkflowYamlParserTests
                     - path: docs/readme.md
                   markers:
                     - path: docs/readme.md
-                      contains: "## Getting Started"
+                      oneOf:
+                        - "## Getting Started"
             checks: []
         """);
 
@@ -119,8 +120,7 @@ public class WorkflowYamlParserTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
         Assert.Contains("verdict marker", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("check definition", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("bad-task", ex.Message);
+        Assert.Contains("markers[0]", ex.Message);
     }
 
     [Fact]
@@ -214,8 +214,9 @@ public class WorkflowYamlParserTests
                   files:
                     - path: docs/expected.md
                   markers:
-                    - path: docs/expected.md
-                      contains: "# Done"
+                     - path: docs/expected.md
+                       oneOf:
+                         - "# Done"
             checks: []
         """);
 
@@ -364,7 +365,7 @@ public class WorkflowYamlParserTests
             checks: []
         """));
 
-        Assert.Contains("default handler must be last", ex.Message);
+        Assert.Contains("default handler (without 'when') must be last", ex.Message);
     }
 
     [Fact]
@@ -454,13 +455,13 @@ public class WorkflowYamlParserTests
             checks: []
         """));
 
-        Assert.Contains("Workflow task requires id", ex.Message);
+        Assert.Contains("task identifier is required", ex.Message);
     }
 
     [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingTitle_Throws()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        var definition = MohistWorkflow.ParseYaml("""
         approval:
           feedback:
             tasks:
@@ -470,9 +471,8 @@ public class WorkflowYamlParserTests
           - stage: build
             tasks: []
             checks: []
-        """));
-
-        Assert.Contains("Workflow task apply-feedback requires title", ex.Message);
+        """);
+        Assert.Null(definition.Approval!.Feedback!.Tasks![0].Title);
     }
 
 }

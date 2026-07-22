@@ -1,5 +1,5 @@
 ---
-status: wip
+status: implemented
 ---
 
 # Workflow Definition
@@ -153,14 +153,6 @@ Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管�
 
 ## Status
 
-实装差距：
-
-- 现行解析器尚未完整实现上表的错误收集：未知 key 仍可能被忽略，部分类型错误仍可能
-  降级为默认值。
-- `title` 现被强制必填（目标可选）；`uses` 现可空（目标必填）；check 现用 `name`
-  （目标 `id`）。
-- 模型仍持有 workflow 级 `Variables` / `Defaults` / `Artifacts` 与 stage 级
-  `Variables` 字段（目标移除：Variables 是独立资源）。
-- 独立类库、`mo workflow validate --file`、docs 示例进 CI 均未实现。
-- Runner 已按 Action manifest 在执行入口校验 `uses` / `with`；catalog 上报与 Profile
-  保存期常量输入校验仍未实现，且不属于 Definition 校验器。
+权威 Definition 校验器已实现并由 Profile 保存入口、`mo workflow validate --file` 和 CI
+黄金用例共同使用。未知字段、字段类型、`check.id`、`uses` 必填及保存期预校验均由
+Definition 校验器负责；Action 是否存在以及 `with` 的契约仍由 Action catalog 负责。

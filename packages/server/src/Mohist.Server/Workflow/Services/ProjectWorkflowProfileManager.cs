@@ -4,7 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Domain.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
@@ -90,7 +90,7 @@ public class ProjectWorkflowProfileManager : IScopedService
 
         return rows.Select(x =>
         {
-            var profile = DeserializeProfile(x.Template);
+            var profile = WorkflowProfilePersistence.Deserialize(x.Template);
             return new ProjectTemplateInfo(x.ProjectId, x.TemplateId, x.CreatedAt, x.UpdatedAt, profile?.Name, profile?.Description);
         }).ToList();
     }
@@ -100,7 +100,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
-        return row is null ? null : DeserializeProfile(row.Template)?.Definition;
+        return row is null ? null : WorkflowProfilePersistence.Deserialize(row.Template).Definition;
     }
 
     public async Task<WorkflowProfile?> GetTemplateProfileAsync(string projectId, string templateId)
@@ -108,7 +108,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
-        return row is null ? null : DeserializeProfile(row.Template);
+        return row is null ? null : WorkflowProfilePersistence.Deserialize(row.Template);
     }
 
     public async Task<ProjectTemplateInfo> CreateTemplateAsync(string projectId, string yaml)
@@ -118,7 +118,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var profile = WorkflowYamlSerializer.FromProfileYaml(yaml, "workflow");
+        var profile = WorkflowProfileYamlParser.Parse(yaml, "workflow");
         var templateId = profile.Id;
         if (string.IsNullOrWhiteSpace(templateId))
             throw new InvalidOperationException("Template id is required");
@@ -134,7 +134,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         {
             ProjectId = projectId,
             TemplateId = templateId,
-            Template = SerializeProfile(profile),
+            Template = WorkflowProfilePersistence.Serialize(profile),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -149,7 +149,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         if (string.IsNullOrWhiteSpace(yaml))
             throw new ArgumentException("yaml is required", nameof(yaml));
 
-        var profile = WorkflowYamlSerializer.FromProfileYaml(yaml, templateId);
+        var profile = WorkflowProfileYamlParser.Parse(yaml, templateId);
         if (!string.Equals(profile.Id, templateId, StringComparison.Ordinal))
             throw new InvalidOperationException($"Template id mismatch: expected '{templateId}' but YAML declares '{profile.Id}'");
 
@@ -158,7 +158,7 @@ public class ProjectWorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        row.Template = SerializeProfile(profile);
+        row.Template = WorkflowProfilePersistence.Serialize(profile);
         row.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
@@ -548,19 +548,4 @@ public class ProjectWorkflowProfileManager : IScopedService
         return await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
     }
 
-    private static string SerializeProfile(WorkflowProfile profile) =>
-        JsonSerializer.Serialize(profile, WorkflowYamlSerializer.JsonOptions);
-
-    private static WorkflowProfile? DeserializeProfile(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try
-        {
-            return WorkflowYamlSerializer.FromProfileJson(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

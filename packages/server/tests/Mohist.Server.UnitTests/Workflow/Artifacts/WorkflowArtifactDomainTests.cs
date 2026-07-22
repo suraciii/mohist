@@ -1,5 +1,5 @@
 using Mohist.Server.Workflow.Domain.Artifacts;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;

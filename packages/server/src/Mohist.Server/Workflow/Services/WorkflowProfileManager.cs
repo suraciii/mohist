@@ -6,7 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -70,7 +70,7 @@ public class WorkflowProfileManager : IScopedService
 
         if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.Template))
         {
-            var issueProfileAsset = DeserializeProfile(issueProfile.Template);
+            var issueProfileAsset = DeserializeForLoad(issueProfile.Template);
             if (issueProfileAsset is not null)
                 return ResolvedTemplate.FromProfile(issueProfileAsset);
         }
@@ -132,7 +132,7 @@ public class WorkflowProfileManager : IScopedService
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
-        var stage = definition.Stages.Find(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+        var stage = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
         return stage;
@@ -531,8 +531,21 @@ public class WorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        var profile = DeserializeProfile(row.Template);
+        var profile = DeserializeForLoad(row.Template);
         return profile is null ? null : ResolvedTemplate.FromProfile(profile);
+    }
+
+    private static WorkflowProfile DeserializeForLoad(string json)
+    {
+        try
+        {
+            return WorkflowProfilePersistence.Deserialize(json);
+        }
+        catch (WorkflowDefinitionValidationException exception)
+        {
+            throw new InvalidOperationException(
+                string.Join("; ", exception.Errors.Select(error => $"{error.Path}: {error.Message}")));
+        }
     }
 
     private static async Task<ResolvedTemplate?> LoadTemplateReferenceAsync(
@@ -546,18 +559,6 @@ public class WorkflowProfileManager : IScopedService
         return systemProfile is null ? null : ResolvedTemplate.FromProfile(systemProfile);
     }
 
-    private static WorkflowProfile? DeserializeProfile(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try
-        {
-            return WorkflowYamlSerializer.FromProfileJson(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     private sealed record RunContext(string? ProjectId, int? IssueNumber, bool RunExists = false);
     private sealed record IssueRunRef(string ProjectId, int Number);

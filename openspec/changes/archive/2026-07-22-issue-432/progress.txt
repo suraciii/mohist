@@ -1,0 +1,302 @@
+T-001 (Standalone validator library: model, Parse, structural and type rules)
+
+## Codebase Patterns
+
+- Mohist.sln is structured with solution folders `packages` > `server` > `src`
+  and `packages` > `server` > `tests`. New server-side projects go under
+  `packages/server/src/<Name>/` and tests under `packages/server/tests/<Name>.Tests/`.
+- The solution file uses manually-assigned GUIDs in the pattern
+  `{A1B2C3D4-NNNN-NNNN-NNNN-000000NNNNNN}` for project type GUIDs and
+  `{FOLDER_GUID} = {PARENT_FOLDER_GUID}` lines in `NestedProjects`. The CLI's
+  `dotnet sln add` writes to a different file (or silently fails on this
+  monorepo's .sln layout) — adding to the .sln must be done by hand.
+- Production csproj are embedded as `ProductionProjects/<Name>.csproj` in
+  `Mohist.Server.ArchTests.csproj` so text-based arch tests can grep them.
+- Arch tests covering library-boundary invariants (e.g. "library has no
+  Orleans/ASP.NET refs") live in `ArchitectureRules.cs` next to other
+  text-inspection tests like `ProductionProjects_ShouldReferenceEnvironmentAnalyzer`.
+- Spec file size ratchet (`spec-file-size-baseline.json`) is checked by
+  `CSharpTestFiles_MustStayWithinSizeRatchet`; adding a substantive rule
+  to `ArchitectureRules.cs` requires bumping the baseline entry for the
+  affected file.
+- `EnvironmentAbstractions.BannedApiAnalyzer` is required for every
+  production csproj by `ProductionProjects_ShouldReferenceEnvironmentAnalyzer`,
+  so the new library csproj also references it.
+- The existing `WorkflowYamlSerializer` lives in `Mohist.Server` and is
+  fused to it; this task creates the standalone replacement
+  `Mohist.Workflow.Definition`. Old serializer is still in place — T-003
+  owns the consumer migration.
+
+## Implementation Discoveries
+
+- YamlDotNet's `YamlNode` is the base class; scalar values come from
+  `YamlScalarNode.Value` (string). Mapping keys are also `YamlNode`s —
+  cast to `YamlScalarNode` to read the string. Trying to read `.Value`
+  directly off `YamlNode` is a compile error.
+- The two-phase tolerant YAML walk produces duplicate error candidates at
+  the same path (walker "type/structure" + rule engine "semantic" emit
+  overlapping messages). Solution: pass a `HashSet<string> emittedPaths`
+  through the walker and rule engine; both call `AddError(errors, emittedPaths, path, message)`
+  which short-circuits on second emit. The walker emits first (owning
+  YAML-level type checks); rule engine emits only for paths the walker did
+  not already flag. This also keeps the parse path and the validate path
+  returning the same message text for the same problem.
+- `Dictionary<string, JsonElement?>` is the right shape for `With`/`Expect`
+  payload: `JsonElement` preserves the original scalar/list/object shape
+  so template validation (T-002) can recurse without re-parsing.
+  `null` JsonElement entries mean "key present with explicit null value"
+  (kept distinct from "key absent").
+- `ValidateExpect` must not early-return on missing `files` because
+  `markers` validation is also reachable; the bug surfaced as a silent
+  pass on `markers[].failIf` not in `oneOf`. Fixed by guarding each
+  branch with `expect.TryGetValue(...)` rather than returning on
+  absence.
+- The runner is `net11.0` preview; running `npm ci` is required before
+  `npm run build` because the JS workspaces aren't pre-installed in the
+  runner image.
+
+## Acceptance Criteria Mapping
+
+- Arch test (no Orleans/ASP.NET) lives in
+  `ArchitectureRules.MohistWorkflowDefinition_ShouldNotReferenceOrleansOrAspNet`.
+- 102 unit tests in `Mohist.Workflow.Definition.Tests` cover: parse entry,
+  top-level closed shape, identifier uniqueness/required, checks identify
+  by `id` (and `name` rejected), lockBehavior, recovery well-formedness,
+  auxiliary declarations (setVars/expect/artifacts), `with` open structure,
+  type errors, multi-error collection, Validate(Definition) shares rules
+  with Parse, approval feedback tasks, and ValidationError shape
+  (YAML path, no stack traces, ValidationSource enum).
+- `Parse(yaml)` and `Validate(Definition)` share one rule implementation
+  via `WorkflowDefinitionRules.Apply(definition, errors, emittedPaths?)`
+  called by both entry points.
+- Tightened model: `TaskDefinition.Uses` non-nullable, `TaskDefinition.Title`
+  optional, `CheckDefinition.Id` (was `Name`), `CheckDefinition.Uses`
+  non-nullable, `CheckDefinition.Title` optional.
+
+## Notes for T-002 / T-003
+
+- `Validate(Definition)` is exposed on `WorkflowDefinitionValidator` and
+  takes a `Mohist.Workflow.Definition.WorkflowDefinition` (not the
+  server-side `Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition`).
+  T-003 must replace server-side model references and update
+  `WorkflowDefinitionSurrogates.cs` to project the library records.
+- T-002 will need to extract `${{ }}` expressions from `With` and `Expect`
+  string values (use `JsonElement.ValueKind == String` then `GetString()`)
+  and call a new `TemplatePositionContext` parameter on the rule engine
+  walk. The current `WorkflowDefinitionRules.Apply` does not yet carry
+  position context — T-002 should thread it through `ValidateTask` and
+  `ValidateRecoveryTask` rather than introduce a separate validator.
+- `ValidationSource` enum is already in place with `Definition` and
+  `Action` values; `Parse` only emits `Definition`. The save path
+  (T-003) can emit `Action` for the transitional inline-agent `with`
+  guard by attaching errors to the same `ValidationError` type.
+- `WorkflowDefinitionParser` accepts a YAML text and returns
+  `WorkflowDefinitionParseResult(Definition?, Errors)`. The result has an
+  `IsValid` convenience getter; `Definition` is non-null only when there
+  are no errors. Consumers must check `Errors` rather than relying on
+  nullness.
+
+T-002 (Template-language static validation and single-owner root table)
+
+## Codebase Patterns
+
+- The library's ten public roots live in a single `TemplateRoots` static
+  class in `Mohist.Workflow.Definition`. Expose them as both a named
+  constant set (one const per root) and a single `All`
+  `IReadOnlyCollection<string>` so consumers (the server's
+  `PromptTemplateEngine`) can consume them as one source of truth.
+- The library's template token regex (`\$\{\{\s*(?<path>...)\s*\}\}`)
+  must match the server engine's regex so validation and rendering agree
+  on what counts as a template expression. Both currently use the same
+  identifier grammar `[A-Za-z_][A-Za-z0-9_-]*` separated by `.`.
+
+## Implementation Discoveries
+
+- `Dictionary<string, JsonElement?>` already preserves the YAML scalar
+  shape (T-001), so template extraction recurses over the `JsonElement`
+  tree with no extra parsing: `ValueKind.String` triggers regex extraction;
+  `ValueKind.Object`/`ValueKind.Array` recurse into nested paths.
+- Execution position is built in one pass from the validated `Definition`
+  (stages in document order, tasks within a stage in order, recovery-handler
+  tasks right after their owning task, approval-feedback tasks after all
+  stage tasks). The map is keyed by `id -> position` and stores
+  `position -> path` for diagnostics.
+- Threading `TemplatePositionContext` (`Ordinary` / `RecoveryHandler` /
+  `ApprovalFeedback`) through the walk keeps position rules inline with
+  structural validation and avoids a second pass. The recovery-handler
+  sub-walk carries `RecoveryHandler`; `ValidateApprovalFeedbackTask`
+  carries `ApprovalFeedback`; everything else is `Ordinary`.
+- `failure.*` is rejected unless `context == RecoveryHandler`; the check
+  runs on every `${{ }}` whose root is `failure`, so a recovery-handler
+  task still emitting `failure.*` in its `with` is fine and a regular
+  stage task emitting it is rejected.
+- `work.approvalFeedback.*` requires both the root and the second segment
+  to be `approvalFeedback` (a regular `work.status` reference is allowed
+  in any task).
+- `tasks.<id>` references check strictly-earlier positions: equal position
+  is "self" (rejected), greater position is "forward" (rejected), less is
+  accepted. An undeclared id is reported with `template references
+  undeclared task '<id>'`. Empty task ids fall back to "skip the
+  tasks.<id> check" (referencingPosition = -1) so a structural
+  missing-id error doesn't cascade into a template error.
+- The structural walker emits `expect.markers[].failIf must be a member of
+  oneOf` first; if the same path also has a template error, the
+  `emittedPaths` dedup keeps only the structural message. Tests that
+  exercise template validation inside `expect` use the free-form `path`
+  field instead, so the template error fires first.
+- The server `PromptTemplateEngine` is rewritten to
+  `private static readonly HashSet<string> AllowedRoots = new(TemplateRoots.All, ...)`.
+  An arch test (`PromptTemplateEngine_ShouldNotDeclareLocalAllowedRoots`)
+  greps the engine source for the forbidden hardcoded `"workflow",
+  "stage", "work"` literal sequence and for a missing `TemplateRoots.`
+  reference, so re-introducing a local copy is caught at test time.
+- Tests for the template matrix live in
+  `Mohist.Workflow.Definition.Tests/TemplateStaticValidationTests.cs`:
+  48 new tests cover off-table root (including deeply nested), undeclared
+  task, self reference, forward reference, cross-stage earlier reference,
+  same-stage earlier reference, recovery-handler self/forward/ealier
+  reference, approval-feedback task forward reference (via a second
+  approval-feedback task declared later), failure scoping (ordinary
+  task / check / recovery-handler), approvalFeedback scoping (ordinary
+  task / recovery-handler / approval-feedback task), expression inside
+  an unknown with key, template errors collected alongside structural
+  errors with sorted YAML paths, multi-template-error reporting,
+  empty-expression handling, and `Validate(Definition)` shares the same
+  rules (`Validate_ModelLevelEnforcesSameTemplateRules`,
+  `Validate_ModelLevelEnforcesForwardReference`).
+
+## Acceptance Criteria Mapping
+
+- Single-owner root table:
+  `TemplateRoots.cs` in `Mohist.Workflow.Definition` exposes ten const
+  roots + `All` collection. Server
+  `PromptTemplateEngine.AllowedRoots` is `new(TemplateRoots.All, ...)`;
+  arch test in `ArchitectureRules.cs` blocks a regression.
+- Off-table root → error with location:
+  `Parse_OffTableRoot_ReportedWithLocation`,
+  `Parse_OffTableRootInsideDeeplyNestedWithValue_Reported`.
+- failure scoping:
+  `Parse_FailureInOrdinaryTask_Rejected`,
+  `Parse_FailureInRecoveryHandlerTask_Accepted`,
+  `Parse_FailureInCheck_Rejected`.
+- approvalFeedback scoping:
+  `Parse_ApprovalFeedbackInOrdinaryTask_Rejected`,
+  `Parse_ApprovalFeedbackInRecoveryHandlerTask_Rejected`,
+  `Parse_ApprovalFeedbackInApprovalFeedbackTask_Accepted`,
+  `Parse_WorkNonApprovalFeedbackReference_OrdinaryTask_Accepted`.
+- tasks.<id> strictly-earlier:
+  `Parse_SelfTaskReference_Rejected`,
+  `Parse_ForwardTaskReference_Rejected`,
+  `Parse_CrossStageEarlierReference_Accepted`,
+  `Parse_SameStageEarlierReference_Accepted`,
+  `Parse_RecoveryHandlerTaskCanReferenceOwningTask_Accepted`,
+  `Parse_RecoveryHandlerTaskSelfReference_Rejected`,
+  `Parse_RecoveryHandlerForwardReference_Rejected`,
+  `Parse_ApprovalFeedbackTaskCanReferenceEarlierStageTask_Accepted`,
+  `Parse_ApprovalFeedbackTaskForwardReference_Rejected`.
+- Forward-safe output fields accepted:
+  The acceptance criterion is exercised by
+  `Parse_CrossStageEarlierReference_Accepted` (references
+  `tasks.prepare.outputs.artifact` from a later stage),
+  `Parse_SameStageEarlierReference_Accepted` (references
+  `tasks.prepare.outputs.artifact` from a later task in the same stage),
+  and `Parse_TaskIdWithTaskDeclaration_ForwardSafeOutputsReference_Accepted`
+  (references `tasks.build.outputs.x` from a later task in the same
+  stage). The validator does NOT assert `outputs.x` exists at runtime —
+  it only checks that the referenced task is declared and strictly
+  earlier. The negative case
+  `Parse_TasksOutputsReference_SelfStillRejected` confirms that even
+  with `.outputs.x` after the id, a self-reference is still rejected.
+- Expression-inside-with validation:
+  `Parse_TemplateExpressionInsideWithValue_Validated`,
+  `Parse_UnknownWithKey_StillNotAnErrorWhenExpressionIsValid`,
+  `Parse_TasksReferenceInExpectString_Validated`.
+- Template errors collected with structural errors:
+  `Parse_TemplateErrorsAndStructuralErrors_ReportedTogether`,
+  `Parse_TemplateErrorsCarryYamlPaths_SortedWithStructuralErrors`,
+  `Parse_MultipleTemplateErrorsOnSameTask_AllReported`.
+- Existing server preview behavior unchanged:
+  `PromptTemplateEngineTests.Render_RejectsBareVariablesAndOffTableRoots`
+  in `Mohist.Server.UnitTests` still passes; the arch test catches a
+  re-introduction of the local copy.
+- `npm run build` and `npm test` pass.
+
+## Notes for T-003
+
+- The load-path deserializer (T-003) calls `Validate(Definition)` on the
+  deserialized library model and surfaces the full error list; the
+  template checks now run there too because they're shared with
+  `Parse` via `WorkflowDefinitionRules.Apply`.
+- `WorkflowDefinitionRules.Apply` now builds a `TaskPositionMap` from
+  the model. A definition with an empty `Stages` list short-circuits
+  before the map is built (existing behavior preserved by T-001).
+- If the validator library ever needs to surface `tasks.<id>` errors at
+  a different path (e.g. inside a deeper `with` object), the path is
+   already composed from the `JsonElement` walk — no extra plumbing.
+
+T-003 (Server consumes the validator, migrates built-ins, separates error sources)
+
+## Codebase Patterns
+
+- Profile metadata remains a carrier concern. `WorkflowProfileYamlParser` removes only `id`, `name`, and `description` before handing the remaining YAML to `WorkflowDefinitionParser.Parse`.
+- Stored custom Profiles use `Mohist.Workflow.Definition.WorkflowProfile` and `JSON.Options`; `WorkflowProfilePersistence.Deserialize` always runs `WorkflowDefinitionValidator.Validate` and throws `WorkflowDefinitionValidationException` instead of returning null.
+- API save routes place the complete sorted `ValidationError` list in `details`, with `ValidationSource` serialized as `definition` or `action` by the shared JSON options.
+
+## Implementation Discoveries
+
+- The server-side duplicate Definition model had to be removed after production imports were moved to the library; keeping it caused ambiguous type resolution and would have preserved two semantic models.
+- Runtime `StageCheck` and wire DTOs still use `Name` as a historical output field, but the library Definition and YAML input use `CheckDefinition.Id`.
+- The existing `WorkflowProfileDataUpgrader` is the startup one-shot migration hook. It now maps legacy check `name` to `id`, deserializes the library model, re-emits YAML through the authoritative parser, and stops startup with Profile/path diagnostics on failure.
+- The inline-agent `with.agent`, `with.kind`, `with.type`, and legacy inline `with.expect` checks remain outside the Definition validator in `WorkflowActionGuards`; they emit `ValidationSource.Action` errors only on save.
+
+## Acceptance Criteria Mapping
+
+- `ProjectWorkflowProfileManager`, `IssueWorkflowProfileManager`, and `WorkflowProfileCatalog` use the authoritative parser for YAML and library JSON persistence for stored Profiles.
+- Tampered stored Definition, action-source guard, and legacy check-name migration regressions are covered in `ProjectWorkflowProfileManagerSpecs`.
+- Both built-in Profiles use `id` for every check; the catalog loads them through `Parse`.
+
+T-004 (Offline mo workflow validate --file <path|-> command)
+
+## Implementation Discoveries
+
+- `WorkflowCommands.Build` is the single registration point for the existing `workflow` group; the offline leaf can use `MohistCliApi.FileSystem` and `StandardInput` directly without project resolution or HTTP services.
+- `Mohist.Workflow.Definition` depends on YamlDotNet at runtime. The CLI declares the existing central YamlDotNet package directly so the parser assembly is copied into the CLI and CLI test outputs.
+
+## Acceptance Criteria Mapping
+
+- `workflow validate --file <path>` reads through the CLI file-system abstraction and `--file -` reads `StandardInput`; both paths call `WorkflowDefinitionParser.Parse` directly.
+- Valid input prints `Workflow Definition is valid.` and returns zero; invalid input prints every `ValidationError` as `<path>: <message>` and returns one.
+- The command never resolves a Project, invokes HTTP, checks action existence, or interprets `with` contracts. `CliWorkflowValidateSpecs` covers file input, stdin input, multi-error path/message output, the open `with` boundary, and zero recorded requests.
+- Focused CLI validation tests pass (4), full CLI tests pass (1403), and `npm run build` plus `npm test` pass.
+
+T-005 (CI golden cases and docs/design gap closure)
+
+## Codebase Patterns
+
+- Golden-case tests live in `Mohist.Workflow.Definition.Tests`, which is already part of
+  `Mohist.sln` and therefore runs under `npm test`.
+- Test fixtures that originate in the repository are embedded resources. This keeps the
+  tests hermetic and avoids reading the checkout or build output at test runtime.
+
+## Implementation Discoveries
+
+- The built-in workflow resources are included from the server source with stable logical
+  names, while `docs/workflow-definition.md` is embedded as one markdown resource.
+- The complete documentation example is the first `yaml` fence after the `## 完整示例`
+  heading. Earlier fences are intentionally syntax fragments and are never sent to
+  `WorkflowDefinitionParser.Parse`.
+- The docs example and both built-ins parse successfully after T-003's model migration.
+  The negative golden case uses `unknownGoldenField` and asserts the canonical
+  `unknown field 'unknownGoldenField'` message at the root path.
+
+## Acceptance Criteria Mapping
+
+- `GoldenCaseTests.EveryBuiltInWorkflowDefinition_ParsesSuccessfully` discovers and parses
+  every embedded `*.workflow.yaml` built-in.
+- `GoldenCaseTests.CompleteDocumentationExample_ParsesSuccessfully` parses only the complete
+  fenced example; `DocumentationExampleExtractor_SelectsOnlyTheCompleteExampleFence` proves
+  the partial fences are excluded.
+- `GoldenCaseTests.UnknownFieldInjectedIntoGoldenCase_UsesCanonicalValidationError` locks the
+  unknown-field path, message, and `definition` source.
+- `docs/workflow-definition.md` and `design/workflow/definition.md` no longer report the
+  resolved Definition-validation, local-command, check-id, or save pre-validation gaps.

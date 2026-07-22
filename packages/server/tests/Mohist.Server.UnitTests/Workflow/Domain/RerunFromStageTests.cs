@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
@@ -30,7 +30,7 @@ public class RerunFromStageTests
         {
             var stage = run.Stages[i];
             var def = ThreeStageDefinition().Stages[i];
-            run.InitializeStage(def.Tasks, def.Checks, DateTimeOffset.UnixEpoch);
+            run.InitializeStage(def.Tasks, def.Checks.ToList(), DateTimeOffset.UnixEpoch);
             if (run.Assignment is null)
                 run.AssignTo("worker-1", TestTime.UtcNow);
             if (i == stageIdx)
