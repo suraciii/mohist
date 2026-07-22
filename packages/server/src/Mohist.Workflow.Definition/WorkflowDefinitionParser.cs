@@ -860,11 +860,13 @@ public static class WorkflowDefinitionParser
             string path,
             string message)
         {
-            if (!emittedPaths.Add(path))
+            if (!emittedPaths.Add(ErrorKey(path, message)))
             {
                 return;
             }
             errors.Add(new ValidationError(path, message));
         }
+
+        private static string ErrorKey(string path, string message) => $"{path}\u001f{message}";
     }
 }

@@ -708,6 +708,29 @@ public class TemplateStaticValidationTests
     }
 
     [Fact]
+    public void Parse_MultipleTemplateErrorsInOneValue_AllReported()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: action
+                    with:
+                      prompt: "${{ bogus.x }} ${{ failure.x }}"
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].with.prompt"
+            && e.Message.Contains("bogus"));
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].with.prompt"
+            && e.Message.Contains("failure.*"));
+    }
+
+    [Fact]
     public void Parse_EmptyTemplateExpression_NotValidating()
     {
         var result = WorkflowDefinitionParser.Parse("""

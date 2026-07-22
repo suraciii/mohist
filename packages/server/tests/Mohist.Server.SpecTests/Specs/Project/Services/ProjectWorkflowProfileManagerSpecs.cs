@@ -171,6 +171,25 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateTemplate_MultipleYamlDocumentsReturnsDefinitionError()
+    {
+        var exception = await Assert.ThrowsAsync<WorkflowDefinitionValidationException>(() =>
+            _manager.CreateTemplateAsync("proj-multi-document", """
+                stages:
+                  - stage: build
+                    tasks: []
+                    checks: []
+                ---
+                unknown: true
+                """));
+
+        var error = Assert.Single(exception.Errors);
+        Assert.Equal("", error.Path);
+        Assert.Equal("yaml must contain exactly one document", error.Message);
+        Assert.Equal(ValidationSource.Definition, error.Source);
+    }
+
+    [Fact]
     public async Task DefinitionMigrationMapsLegacyCheckNameToId()
     {
         await using (var db = new MohistDbContext(_database.Options))

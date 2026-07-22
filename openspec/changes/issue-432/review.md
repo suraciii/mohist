@@ -1,64 +1,61 @@
 # Review Findings
 
-## P1: YAML type errors are accepted for scalar fields
+## P1: Profile save still truncates multi-document YAML
 
-`packages/server/src/Mohist.Workflow.Definition/WorkflowDefinitionParser.cs:662-705`
-checks only whether a value is a `YamlScalarNode`; it does not verify that the
-scalar has string semantics. Consequently numeric and boolean values are
-accepted for `stage`, task/check `id`, `uses`, `title`, recovery `when`, and
-artifact/setVars string values. For example, the CLI currently reports this
-Definition as valid even though all three fields have the wrong types:
+`packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileYamlParser.cs:11-30`
+loads the input into a `YamlStream`, reads only `stream.Documents[0]`, removes
+Profile metadata from that first root, and serializes only that root before
+calling the authoritative parser. The parser now rejects multiple documents,
+but this wrapper prevents that check from seeing them. A Profile payload with a
+valid first document followed by `---` and an invalid/unknown second document
+is therefore accepted by the save path while the same Definition is rejected by
+`mo workflow validate --file`.
+
+The save entry point must reject `stream.Documents.Count > 1` before extracting
+metadata, or otherwise pass the complete input to the shared parser. Otherwise
+the acceptance criterion for rejecting illegal structures and keeping save/CLI
+validation consistent is still unmet.
+
+## P1: A legacy public parser remains an alternate, non-authoritative path
+
+`packages/server/src/Mohist.Server/Workflow/Services/WorkflowYamlSerializer.cs:74-104`
+still exposes `FromYaml` and `FromProfileYaml`, backed by a deserializer created
+with `IgnoreUnmatchedProperties()` at lines 119-122. Its parsing code also
+coerces values such as recovery `budget` through `int.TryParse` and defaults
+invalid values, and it keeps separate structural/Action checks. Although the
+current save managers use `WorkflowProfileYamlParser`, the old public class is
+still product code and is actively exercised by Server tests and helper paths.
+It can therefore accept a Definition that the issue's authoritative parser
+rejects, violating the design requirement to remove the superseded parser
+paths and the single semantic-model/validator boundary.
+
+Remove the old YAML parsing entry points or make them strict adapters over
+`WorkflowDefinitionParser` (and retain only serialization helpers that do not
+parse user-authored Definitions). Update the remaining tests/helpers to use the
+shared parser so no second Definition rule set remains callable.
+
+## P1: Multiple template errors at one YAML path are silently dropped
+
+`packages/server/src/Mohist.Workflow.Definition/WorkflowDefinitionParser.cs:857-867`
+and the corresponding `AddError` in
+`packages/server/src/Mohist.Workflow.Definition/WorkflowDefinitionRules.cs:797-808`
+deduplicate solely by `Path`. The template walk reports every expression using
+the containing scalar's path, so a value such as:
 
 ```yaml
-stages:
-  - stage: 123
-    tasks:
-      - id: 1
-        uses: true
-    checks: []
+prompt: "${{ bogus.x }} ${{ failure.x }}"
 ```
 
-This violates the acceptance criterion that type mismatches must be reported
-instead of being accepted/coerced, and lets an invalid semantic model reach the
-save path. The scalar readers need to distinguish quoted/string scalars from
-numeric and boolean YAML scalars, with errors at each offending YAML path.
+in an ordinary task produces only the `bogus` error; the forbidden
+`failure.*` error is discarded because both use the same
+`...with.prompt` path. The CLI currently demonstrates this by printing one
+line for the two invalid expressions. This contradicts the requirement to
+collect the complete error list and makes the reported result depend on
+expression order.
 
-## P1: Additional YAML documents are silently ignored
-
-`packages/server/src/Mohist.Workflow.Definition/WorkflowDefinitionParser.cs:34-41`
-checks only that at least one document exists, then parses `Documents[0]` and
-ignores every subsequent document. Therefore a valid Definition followed by a
-second document containing arbitrary invalid content is accepted by
-`mo workflow validate` and by Profile parsing. For example:
-
-```yaml
-stages:
-  - stage: build
-    tasks: []
-    checks: []
----
-unknown: true
-```
-
-The Definition language requires one structured YAML document; silently
-discarding the rest violates the illegal-structure/unknown-field acceptance
-criteria and can make the validator disagree with the input the author saved.
-Reject multiple documents with a Definition error (or validate every document
-and report the extra-document path) before accepting the first one.
-
-## P2: Null stored Definitions escape the load-path validation error contract
-
-`packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfilePersistence.cs:12-28`
-deserializes a persisted JSON Profile and passes `profile.Definition` directly
-to `WorkflowDefinitionValidator.Validate`. A stored payload with
-`"definition": null` produces a null record despite the non-nullable annotation;
-`Validate` then calls `ArgumentNullException.ThrowIfNull` instead of returning a
-`ValidationError`/`WorkflowDefinitionValidationException`. The load path thus
-turns a malformed persisted Definition into an unhandled exception (typically a
-500), contrary to the design's requirement that deserialized stored Definitions
-surface a clear Definition validation failure rather than being silently or
-implicitly mishandled. Handle the null Definition before calling `Validate` and
-return the same structured Definition error used for other invalid stored
-Profiles.
+Deduplicate only identical error instances (for example, the same path and
+message emitted by structural and semantic passes), or add expression
+location/identity to the key, while retaining all distinct template reasons at
+the same YAML path.
 
 <promise>FAIL</promise>

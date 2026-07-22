@@ -73,26 +73,26 @@ public static class WorkflowYamlSerializer
 
     public static WorkflowDefinition FromYaml(string yaml)
     {
-        var document = Normalize(CreateDeserializer().Deserialize<Dictionary<object, object?>>(yaml)) as Dictionary<string, object?>
-            ?? throw new InvalidOperationException("Workflow YAML is empty");
-
-        RejectRemovedFields(document);
-        return FromDocument(document);
+        var result = WorkflowDefinitionParser.Parse(yaml);
+        if (!result.IsValid)
+            throw new InvalidOperationException(FormatErrors(result.Errors));
+        return result.Definition!;
     }
 
     public static WorkflowProfile FromProfileYaml(string yaml, string fallbackId)
     {
-        var document = Normalize(CreateDeserializer().Deserialize<Dictionary<object, object?>>(yaml)) as Dictionary<string, object?>
-            ?? throw new InvalidOperationException("Workflow Profile YAML is empty");
-        var id = NullIfEmpty(String(document, "id")) ?? fallbackId;
-        var name = NullIfEmpty(String(document, "name")) ?? id;
-        var description = NullIfEmpty(String(document, "description")) ?? string.Empty;
-        document.Remove("id");
-        document.Remove("name");
-        document.Remove("description");
-        RejectRemovedFields(document);
-        return new WorkflowProfile(id, name, description, FromDocument(document));
+        try
+        {
+            return WorkflowProfileYamlParser.Parse(yaml, fallbackId);
+        }
+        catch (WorkflowDefinitionValidationException exception)
+        {
+            throw new InvalidOperationException(FormatErrors(exception.Errors), exception);
+        }
     }
+
+    private static string FormatErrors(IReadOnlyList<ValidationError> errors) =>
+        string.Join("; ", errors.Select(error => $"{error.Path}: {error.Message}"));
 
     private static WorkflowDefinition FromDocument(Dictionary<string, object?> document)
     {

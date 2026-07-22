@@ -34,7 +34,7 @@ public class WorkflowYamlSerializerTests
             checks: []
         """));
 
-        Assert.Contains("stage field 'variables'", ex.Message);
+        Assert.Contains("unknown field 'variables'", ex.Message);
     }
 
     [Fact]

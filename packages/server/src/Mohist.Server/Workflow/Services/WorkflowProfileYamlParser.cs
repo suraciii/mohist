@@ -15,6 +15,10 @@ internal static class WorkflowProfileYamlParser
             stream.Load(reader);
         }
 
+        if (stream.Documents.Count > 1)
+            throw new WorkflowDefinitionValidationException(
+                [new ValidationError("", "yaml must contain exactly one document")]);
+
         if (stream.Documents.Count == 0 || stream.Documents[0].RootNode is not YamlMappingNode root)
             throw new WorkflowDefinitionValidationException([new ValidationError("", "definition root must be an object")]);
 

@@ -47,7 +47,8 @@ internal static class WorkflowDefinitionRules
     {
         if (definition.Stages is null || definition.Stages.Count == 0)
         {
-            AddError(errors, emittedPaths, "stages", "stages must be non-empty");
+            if (emittedPaths is null || !HasErrorAtPath(emittedPaths, "stages"))
+                AddError(errors, emittedPaths, "stages", "stages must be non-empty");
             return;
         }
 
@@ -800,10 +801,15 @@ internal static class WorkflowDefinitionRules
         string path,
         string message)
     {
-        if (emittedPaths is not null && !emittedPaths.Add(path))
+        if (emittedPaths is not null && !emittedPaths.Add(ErrorKey(path, message)))
         {
             return;
         }
         errors.Add(new ValidationError(path, message));
     }
+
+    private static string ErrorKey(string path, string message) => $"{path}\u001f{message}";
+
+    private static bool HasErrorAtPath(HashSet<string> emittedErrors, string path) =>
+        emittedErrors.Any(key => key.StartsWith($"{path}\u001f", StringComparison.Ordinal));
 }
