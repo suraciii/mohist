@@ -1,0 +1,86 @@
+{
+  "project": "mohist-local",
+  "description": "Migrate the mo CLI to a shared Project reference, selected-field output, and non-interactive execution contract.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Establish the shared CLI execution contract",
+      "spec": "specs/cli-execution-contract/spec.md#exit-codes-classify-every-command-outcome",
+      "description": "Implement the shared invocation, response-reading, result-writing, hint, terminal-state, cancellation, and transport-attempt services. Migrate command execution and prompt paths to the shared contract so all commands consistently classify exits, separate stdout from stderr, preserve structured failures, and never wait for input when non-interactive.",
+      "acceptanceCriteria": [
+        "The root command path returns 0, 1, 2, or 130 according to success, operation failure, local usage failure, or cancellation, and local errors print only nearest-level usage to stderr.",
+        "All migrated command output keeps normal results on stdout and sends diagnostics, hints, confirmations, and progress to stderr; no error envelope is printed as a successful result.",
+        "Non-TTY and MOHIST_PROMPT_DISABLED=1 calls do not read stdin or modify state when confirmation or another prompt would be required.",
+        "Mutating request failures distinguish proven unsubmitted requests from outcome-unknown requests, return 1, and never retry an outcome-unknown request automatically.",
+        "CLI unit/spec coverage uses fake terminal, cancellation, filesystem, and HTTP collaborators for exit classes, error context/hints, prompt suppression, and transport attempt states; npm test -w packages/cli passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Shared CLI execution services used by command handlers, with contract coverage in packages/cli/tests/Mohist.Cli.Tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the Server ApiResponse envelope as an internal transport format; do not add Server routes or automatic retry behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate Project-scoped commands to one resolver",
+      "spec": "specs/cli-project-reference/spec.md#project-references-resolve-in-a-deterministic-local-order",
+      "description": "Implement ProjectReferenceResolver and migrate every Project-scoped command to the sole --project <name-or-id> option. Resolve explicit input, nearest current-directory context, and the locally selected Project in order, with shared actionable local failures for missing or ambiguous context.",
+      "acceptanceCriteria": [
+        "Every Project-scoped command advertises only --project <name-or-id>; --project-id is rejected as a local usage error with exit code 2 and no request.",
+        "Explicit Project input wins over current-directory context, which wins over user-home selected Project state; malformed or conflicting context is not guessed.",
+        "Missing or ambiguous Project selection writes one actionable stderr diagnostic, exits 1, and never invokes the requested domain endpoint.",
+        "Help and local validation work without a Project, Server, or Runner.",
+        "CLI tests cover option-tree completeness, all resolution precedence branches, no-request local failures, and help behavior using FakeFileSystem and RecordingHttpHandler; npm test -w packages/cli passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "A single ProjectReferenceResolver and migrated Project-scoped command registrations in packages/cli/Mohist.Cli.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the existing cli-state record for the selected Project and the nearest directory context; do not list Projects from the Server before a domain command."
+    },
+    {
+      "id": "T-003",
+      "title": "Deliver selected-field output for resource reads and streams",
+      "spec": "specs/cli-resource-output/spec.md#successful-machine-output-has-a-stable-cardinality-shape",
+      "description": "Add declarative ResourceDescriptor and JsonSelection support, then migrate all resource read and continuous stream leaves. Each read exposes local field discovery and selected-field projection, while streams retain NDJSON and all machine results remain free of the Server envelope.",
+      "acceptanceCriteria": [
+        "Every resource read and continuous stream leaf has exactly one descriptor declaring its accepted top-level fields and result cardinality.",
+        "Bare --json lists declared fields with exit 0 and no Project resolution or remote call; invalid, duplicate, or blank selections exit 2 with an actionable stderr diagnostic and no remote call.",
+        "Selected fields produce one object for a single read, one array of projected objects for a collection, and one JSON object per line for streams, without a general success envelope.",
+        "Legacy --output and boolean JSON-output behavior no longer resolve on migrated read and stream leaves.",
+        "CLI tests cover single, collection, and stream cardinality, JSON projection, offline field discovery, invalid selection, stderr separation, and legacy option rejection; npm test -w packages/cli passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "ResourceDescriptor/JsonSelection infrastructure and selected-field output across all read and stream command leaves.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Project fields locally from decoded response data. Do not add a Server fields query parameter, JSONPath, or generic template language."
+    },
+    {
+      "id": "T-004",
+      "title": "Migrate resource mutations to the result contract",
+      "spec": "specs/cli-resource-output/spec.md#field-selection-produces-a-projection",
+      "description": "Migrate resource-returning create, update, delete, lifecycle, and recovery commands to their descriptors and the shared result writer. Remove remaining resource --output paths and direct send-and-print calls so successful mutation results, domain failures, and uncertain writes use the same public contract as reads.",
+      "acceptanceCriteria": [
+        "Every resource-returning mutation leaf declares its result fields and accepts --json [<fields>] with the same local discovery and validation behavior as resource reads.",
+        "Selected mutation results emit only the selected fields as an object or array, while failure diagnostics preserve stable code and available object, state, and reason on stderr.",
+        "No resource-returning mutation leaf retains --output, a boolean full-JSON mode, or a direct envelope-printing path.",
+        "Mutating transport tests prove that completed, unsubmitted, and outcome-unknown requests are rendered distinctly and an outcome-unknown mutation is never retried.",
+        "CLI tests cover representative POST, PATCH, and DELETE command families plus a structural guard for complete descriptor migration; npm test -w packages/cli passes."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "All resource-returning mutation command leaves use ResourceDescriptor and the shared CLI result contract.",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "Do not change Server routes, persistence, or Runner protocols. This completes removal of legacy resource output selectors."
+    }
+  ]
+}
