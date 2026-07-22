@@ -113,3 +113,28 @@
 - The deliberate dark log-console interior (bg-slate-900, text-slate-500/sky-300/violet-200/300/red-300) is preserved by design — tokenizing it would break legibility on the terminal surface.
 - Other on-page literal palette blocks (PrDeliveryIndicator, ReviewSummary, WorkflowSessionsPanel status icons, CompositeParentOverview, ReviewReportModal, ArtifactContentViewer, ArtifactTextContent, composite-parent violet badge, NotFoundState's gray/blue) remain untouched — documented out of scope per design D3 scope reconciliation; tracked as follow-up.
 - The `_taskLogPanelTestUtils.tsx` mock was not changed; the new test file uses the same `renderWithTaskLogProviders`, `fakeConnections`, `makeLine`, `makePage`, `projects`, `newQueryClient` fixtures as the existing TaskLogPanel test suite.
+
+## T-004 Implementation Notes
+
+### Surprises / things worth knowing
+
+- Only one line of production code changed: `IssueDetailsCard.tsx:71` swapped `<dt>Parent Issue</dt>` → `<dt>Parent of</dt>` (the row's `<dd>` content "is a parent (N child issues)" stays exactly as it was). The other Details-card rows (Parent Issue, Parent of, Children, Project, Repository) now each carry their own descriptive label, matching design D5.
+- No cross-file ripple. `IssueDetailPage.relationships.test.tsx` and `IssueDetailPage.status-uniqueness.test.tsx` only assert on the row's `data-testid` and the `<dd>` text ("is a parent (3 child issues)"), both unaffected by the label change, so neither needed editing. Confirmed by the full `npm run test:run -w packages/web` run (378 files / 5073 tests passed).
+- The new test (`labels the parent reference row and the child-issues row distinctly`) locks the invariant in four assertions: the parent row contains "Parent Issue", the child row contains "Parent of", the child row does NOT contain "Parent Issue", and across the whole Details card the string "Parent Issue" appears exactly once. The fourth assertion is the acceptance criterion's "an issue that is a parent no longer renders two rows both labeled 'Parent Issue'."
+
+### Decisions confirmed against spec
+
+- Used `Parent of` (exact wording from design D5 proposal). The label is short, distinct from `Parent Issue`, and reads naturally next to the row value "is a parent (N child issues)" — semantically the row says "this issue is a parent of N child issues", so "Parent of" is the right label.
+- Did not merge or restructure the child-issues row into the children-progress row (out of scope per task notes; belongs to the sibling reading-flow issue).
+
+### Verification
+
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 378 files / 5073 tests passed (+1 test over T-003 baseline).
+- Focused run of `IssueDetailsCard.test.tsx` — 7 tests passed (6 existing + 1 new "labels the parent reference row and the child-issues row distinctly").
+- `rg "Parent Issue" packages/web/src` — only one production-code occurrence remains (the parent-reference row at `IssueDetailsCard.tsx:56`); the other three matches are the test's own positive + negative assertions.
+
+### Out of scope (noted, not done)
+
+- Did not touch the "Children" progress row or the parent-reference row beyond the relabel — no merging, no reordering, no value-text changes.
+- Did not touch other Details-card rows (Recommended workflow, Recommendation reason, Risk, Project, Repository) — task scope is the two "Parent Issue" labels only.

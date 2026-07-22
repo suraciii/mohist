@@ -68,7 +68,7 @@ export function IssueDetailsCard({ issue, bodyMetadata, unframed = false }: Issu
         )}
         {issue.childIssuesSummary?.hasChildren && (
           <div className="flex min-w-0 justify-between gap-3" data-testid="child-issues-metadata-row">
-            <dt className="text-muted-foreground">Parent Issue</dt>
+            <dt className="text-muted-foreground">Parent of</dt>
             <dd className="min-w-0 text-foreground font-medium text-right">
               is a parent ({issue.childIssuesSummary.count} child issue{issue.childIssuesSummary.count === 1 ? '' : 's'})
             </dd>
